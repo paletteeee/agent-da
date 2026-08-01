@@ -31,7 +31,7 @@
 - Consumes: existing `src/txnmem_experiment.py` functions and CLI.
 - Produces: executable baseline checks that prevent accidental changes while modules are extracted.
 
-- [ ] **Step 1: Write the failing contract test**
+- [x] **Step 1: Write the failing contract test**
 
 ```python
 def test_pilot_contract_stays_available():
@@ -41,23 +41,23 @@ def test_pilot_contract_stays_available():
     assert check_invariants(instance, run_instance(instance, "TxnMem")) == []
 ```
 
-- [ ] **Step 2: Run the test and confirm it exercises the existing implementation**
+- [x] **Step 2: Run the test and confirm it exercises the existing implementation**
 
 Run: `python3 -m unittest discover -s tests -v`
 
 Expected: the existing six pilot tests and the new contract test pass before any extraction.
 
-- [ ] **Step 3: Record the baseline CLI outputs**
+- [x] **Step 3: Record the baseline CLI outputs**
 
 Run: `python3 src/txnmem_experiment.py pilot --out-dir /tmp/txnmem-baseline --seeds 2`
 
 Expected: 6 JSONL instances and 30 CSV rows are created under `/tmp/txnmem-baseline`.
 
-- [ ] **Step 4: Document the compatibility boundary**
+- [x] **Step 4: Document the compatibility boundary**
 
 Update `README.md` with the existing public functions, the preserved CLI commands, and the new planned output locations without changing the current pilot command examples.
 
-- [ ] **Step 5: Re-run the baseline test suite**
+- [x] **Step 5: Re-run the baseline test suite**
 
 Run: `python3 -m unittest discover -s tests -v`
 
@@ -78,7 +78,7 @@ Expected: all tests pass with no new warnings.
 - `DEFAULT_CONFIG: dict[str, Any]`
 - `REQUIRED_INSTANCE_KEYS: tuple[str, ...]`
 
-- [ ] **Step 1: Write failing validation tests**
+- [x] **Step 1: Write failing validation tests**
 
 ```python
 def test_validate_instance_rejects_missing_top_level_key():
@@ -97,21 +97,21 @@ def test_load_workload_config_returns_w1_to_w8_definitions():
     self.assertEqual(set(config["workloads"]), set(WORKLOADS))
 ```
 
-- [ ] **Step 2: Run the schema tests to verify the expected failures**
+- [x] **Step 2: Run the schema tests to verify the expected failures**
 
 Run: `python3 -m unittest tests.test_txnmem_schema -v`
 
 Expected: import or missing-function failures for the new module.
 
-- [ ] **Step 3: Implement the schema contract**
+- [x] **Step 3: Implement the schema contract**
 
 Implement top-level key checks, memory ID uniqueness, operation step monotonicity, transaction references, policy fields, and provenance source/derived references. Use `json.loads` when the configuration file is valid JSON-compatible YAML; use `yaml.safe_load` only if the optional module is available.
 
-- [ ] **Step 4: Add the explicit workload configuration**
+- [x] **Step 4: Add the explicit workload configuration**
 
 Create `configs/workload_families.yaml` with eight entries. Each entry must include `workload`, `target_invariant`, `failure_types`, and numeric parameter ranges for `txn_size`, `provenance_depth`, `branch_factor`, `policy_churn`, and `concurrency`. Keep the file JSON-compatible so the standard-library fallback can load it.
 
-- [ ] **Step 5: Run the schema tests and full existing tests**
+- [x] **Step 5: Run the schema tests and full existing tests**
 
 Run: `python3 -m unittest tests.test_txnmem_schema tests.test_txnmem_experiment -v`
 
@@ -131,7 +131,7 @@ Expected: all schema and pilot tests pass.
 - `generate_instance(workload: str, seed: int, config: dict[str, Any] | None = None) -> dict[str, Any]`
 - `generate_suite(workloads: Iterable[str], seeds: Iterable[int], config: dict[str, Any] | None = None) -> list[dict[str, Any]]`
 
-- [ ] **Step 1: Write failing W4-W8 generation tests**
+- [x] **Step 1: Write failing W4-W8 generation tests**
 
 ```python
 def test_scope_bypass_contains_search_and_direct_id_read():
@@ -149,29 +149,29 @@ def test_generation_is_deterministic_for_all_workloads():
         self.assertEqual(generate_instance(workload, 13), generate_instance(workload, 13))
 ```
 
-- [ ] **Step 2: Run the workload tests and verify they fail for missing workload support**
+- [x] **Step 2: Run the workload tests and verify they fail for missing workload support**
 
 Run: `python3 -m unittest tests.test_txnmem_workloads -v`
 
 Expected: failures because W4-W8 are not present in the current pilot.
 
-- [ ] **Step 3: Move shared helpers and add W2**
+- [x] **Step 3: Move shared helpers and add W2**
 
 Move `_memory`, `_merged_config`, and deterministic agent selection into `txnmem_workloads.py`. Add `crash_during_commit` with a commit-boundary crash event and an expected atomic outcome.
 
-- [ ] **Step 4: Implement W4 and W5 instance generation**
+- [x] **Step 4: Implement W4 and W5 instance generation**
 
 Generate scoped memories and policy labels for `scope_bypass`, including one allowed search and one unauthorized direct-id read. Generate old/new memory pairs for `supersession_consistency`, with reciprocal metadata needed by the checker.
 
-- [ ] **Step 5: Implement W7 and W8 instance generation**
+- [x] **Step 5: Implement W7 and W8 instance generation**
 
 Generate a root with `branch_factor` descendants at each requested depth for `provenance_branch_repair`. Generate `mixed_stress` by combining a multi-write transaction, a policy revoke, a crash event, and a root invalidation with deterministic step ordering.
 
-- [ ] **Step 6: Preserve the old generator import path**
+- [x] **Step 6: Preserve the old generator import path**
 
 Make `src/txnmem_experiment.py` import and re-export `WORKLOADS`, `generate_instance`, and the default configuration from `txnmem_workloads.py`.
 
-- [ ] **Step 7: Run workload and pilot tests**
+- [x] **Step 7: Run workload and pilot tests**
 
 Run: `python3 -m unittest tests.test_txnmem_workloads tests.test_txnmem_experiment -v`
 
@@ -191,7 +191,7 @@ Expected: all W1-W8 generation tests and all existing pilot tests pass.
 - `run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]`
 - Result keys: `variant`, `transaction_state`, `final_memories`, `committed_memory_ids`, `trace`, and `metrics`.
 
-- [ ] **Step 1: Write failing replay tests**
+- [x] **Step 1: Write failing replay tests**
 
 ```python
 def test_scope_bypass_denies_direct_id_read_in_txnmem():
@@ -211,29 +211,29 @@ def test_branch_repair_invalidates_every_descendant():
     self.assertTrue(all(memory["status"] == "invalid" for memory in result["final_memories"].values()))
 ```
 
-- [ ] **Step 2: Run simulator tests and confirm missing behavior failures**
+- [x] **Step 2: Run simulator tests and confirm missing behavior failures**
 
 Run: `python3 -m unittest tests.test_txnmem_simulator -v`
 
 Expected: failures for the unimplemented workload types or missing result fields.
 
-- [ ] **Step 3: Move the existing W1/W3/W6 replay logic**
+- [x] **Step 3: Move the existing W1/W3/W6 replay logic**
 
 Move transaction buffering, policy-version revalidation, crash handling, and chain repair into `txnmem_simulator.py` without changing the existing result dictionary.
 
-- [ ] **Step 4: Implement W2 commit-boundary recovery**
+- [x] **Step 4: Implement W2 commit-boundary recovery**
 
 When a crash event targets commit, clear or atomically apply the transaction buffer according to the variant. TxnMem must return either `aborted` with zero committed IDs or `committed` with the full transaction size.
 
-- [ ] **Step 5: Implement scope enforcement and read traces**
+- [x] **Step 5: Implement scope enforcement and read traces**
 
 For `search`, filter by policy scope. For `get_by_id`, require the same scope check and record `denied_read` without adding the memory ID to `exposed_memory_ids`.
 
-- [ ] **Step 6: Implement supersession and mixed replay**
+- [x] **Step 6: Implement supersession and mixed replay**
 
 For `supersede`, mark the old memory `superseded`, set the new memory's `supersedes_id`, and make the ablation that lacks transaction semantics expose an inconsistent intermediate state when the scheduled failure requires it. Replay W8 through the same event loop, preserving trace order.
 
-- [ ] **Step 7: Preserve the old replay import path and run tests**
+- [x] **Step 7: Preserve the old replay import path and run tests**
 
 Run: `python3 -m unittest tests.test_txnmem_simulator tests.test_txnmem_experiment -v`
 
@@ -255,7 +255,7 @@ Expected: simulator and all pilot tests pass.
   `supersession_consistency_violation`, `provenance_closure_violation`, and
   `recovery_consistency_violation`.
 
-- [ ] **Step 1: Write one failing checker test per new invariant**
+- [x] **Step 1: Write one failing checker test per new invariant**
 
 ```python
 def test_scope_leak_is_reported():
@@ -273,17 +273,17 @@ def test_supersession_violation_is_reported_when_old_memory_remains_active():
     self.assertIn("supersession_consistency_violation", check_invariants(instance, result))
 ```
 
-- [ ] **Step 2: Run checker tests to verify the expected failures**
+- [x] **Step 2: Run checker tests to verify the expected failures**
 
 Run: `python3 -m unittest tests.test_txnmem_invariants -v`
 
 Expected: new invariant names are absent or the new workload paths fail.
 
-- [ ] **Step 3: Implement stable invariant checks**
+- [x] **Step 3: Implement stable invariant checks**
 
 Check committed counts against expected transaction sizes, commit authorization against the expected abort state, exposed IDs against policy scope, reciprocal supersession metadata, and active descendants of invalid roots. Deduplicate violations while preserving a stable order.
 
-- [ ] **Step 4: Re-run all unit tests**
+- [x] **Step 4: Re-run all unit tests**
 
 Run: `python3 -m unittest discover -s tests -v`
 
@@ -304,7 +304,7 @@ Expected: every test passes.
 - `write_violation_figure(summary: dict[str, Any], path: Path) -> None`
 - `write_repair_figure(summary: dict[str, Any], path: Path) -> None`
 
-- [ ] **Step 1: Write failing metric tests**
+- [x] **Step 1: Write failing metric tests**
 
 ```python
 def test_summary_contains_mean_and_population_std():
@@ -319,25 +319,25 @@ def test_svg_figure_has_svg_root():
     self.assertTrue(path.read_text().startswith("<svg"))
 ```
 
-- [ ] **Step 2: Run metric tests and confirm they fail**
+- [x] **Step 2: Run metric tests and confirm they fail**
 
 Run: `python3 -m unittest tests.test_txnmem_metrics -v`
 
 Expected: missing-module or missing-function failures.
 
-- [ ] **Step 3: Implement per-result metrics**
+- [x] **Step 3: Implement per-result metrics**
 
 Map invariant names to rates, calculate `repair_recall`, `leak_rate`, `scope_bypass_rate`, `supersession_consistency`, and deterministic operation-count latency. Keep existing CSV field names and append new fields.
 
-- [ ] **Step 4: Implement group summaries**
+- [x] **Step 4: Implement group summaries**
 
 Group rows by workload and variant, calculate count/mean/population standard deviation for every numeric metric, and serialize sorted keys with `json.dump(..., sort_keys=True)`.
 
-- [ ] **Step 5: Implement dependency-free SVG output**
+- [x] **Step 5: Implement dependency-free SVG output**
 
 Write valid SVG bar charts with labels for violation rate and repair recall. Escape labels and create parent directories before writing.
 
-- [ ] **Step 6: Run metrics and full unit tests**
+- [x] **Step 6: Run metrics and full unit tests**
 
 Run: `python3 -m unittest discover -s tests -v`
 
@@ -358,7 +358,7 @@ Expected: all tests pass.
 - Add command `experiment --config configs/workload_families.yaml --out-dir . --seeds N`.
 - `experiment` writes `data/generated_instances.jsonl`, `results/experiment_results.csv`, `results/summary.json`, and `results/figures/*.svg`.
 
-- [ ] **Step 1: Write failing CLI output tests**
+- [x] **Step 1: Write failing CLI output tests**
 
 ```python
 def test_experiment_command_writes_all_artifacts():
@@ -370,25 +370,25 @@ def test_experiment_command_writes_all_artifacts():
         self.assertTrue(list((Path(tmp) / "results/figures").glob("*.svg")))
 ```
 
-- [ ] **Step 2: Run the CLI test and confirm the command is missing**
+- [x] **Step 2: Run the CLI test and confirm the command is missing**
 
 Run: `python3 -m unittest tests.test_cli_outputs -v`
 
 Expected: argparse rejects the new command or expected artifacts are absent.
 
-- [ ] **Step 3: Wire generation, replay, metrics, and output paths**
+- [x] **Step 3: Wire generation, replay, metrics, and output paths**
 
 Add the `experiment` subcommand, load the workload config, generate W1-W8 instances, replay all variants, write JSONL/CSV, summarize rows, and write both SVG figures.
 
-- [ ] **Step 4: Write the schema documentation**
+- [x] **Step 4: Write the schema documentation**
 
 Document every top-level instance field, memory field, operation type, failure event, invariant name, variant name, and CSV/summary field in `docs/dataset_schema.md`.
 
-- [ ] **Step 5: Update README run instructions**
+- [x] **Step 5: Update README run instructions**
 
 Add exact commands for `generate`, `run`, `pilot`, and `experiment`, including the persistent remote path `/data/txnmem` and output artifact list.
 
-- [ ] **Step 6: Run CLI and full tests**
+- [x] **Step 6: Run CLI and full tests**
 
 Run:
 
@@ -407,7 +407,7 @@ Expected: all tests pass; 16 instances, 80 result rows, one summary JSON, and tw
 - Verify: `src/*.py`, `tests/*.py`, `configs/workload_families.yaml`, `docs/dataset_schema.md`
 - Verify: `data/generated_instances.jsonl`, `results/experiment_results.csv`, `results/summary.json`, `results/figures/*.svg`
 
-- [ ] **Step 1: Run the complete verification suite**
+- [x] **Step 1: Run the complete verification suite**
 
 Run:
 
@@ -432,13 +432,13 @@ PY
 
 Expected: exit code 0, all tests pass, 80 instances, 400 rows, non-empty summary groups, and SVG files present.
 
-- [ ] **Step 2: Inspect generated schema and sample outputs**
+- [x] **Step 2: Inspect generated schema and sample outputs**
 
 Run: `sed -n '1,2p' data/generated_instances.jsonl; sed -n '1,3p' results/experiment_results.csv; python3 -m json.tool results/summary.json >/dev/null`
 
 Expected: valid JSONL, CSV headers include the new metrics, and summary JSON parses.
 
-- [ ] **Step 3: Report the remote handoff**
+- [x] **Step 3: Report the remote handoff**
 
 Report the remote project path, test command and result, generated artifact paths, and that the SSH session remains open or must be re-established. Do not claim completion without the fresh command output from Step 1.
 
@@ -452,3 +452,20 @@ Report the remote project path, test command and result, generated artifact path
 - After Task 7: the full experiment command creates all requested artifacts.
 - After Task 8: only verified outputs are reported.
 
+## Completion addendum: correctness-evidence hardening
+
+The following follow-up work was completed in the same project and is covered by
+the fresh full-suite and artifact verification:
+
+- independent serial reference executor with allowed crash outcomes;
+- differential oracle comparison in result rows;
+- generator removal of `expected_outcome` ground truth;
+- causal trigger-based failure schedules and schedule coverage;
+- operation-derived provenance for chain and branch workloads;
+- transitive repair over committed operation-derived edges;
+- minimal counterexample search;
+- seeded random-schedule baseline;
+- mutation campaign and kill-rate report;
+- synthetic/trace-grounded distribution feature comparison;
+- normalized trace adapter for external workflow logs;
+- compatibility API/CLI wrapper and oracle/coverage/mutation/realism artifacts.

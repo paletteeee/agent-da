@@ -13,9 +13,10 @@ JSONL 中的每一行都是一个可复现的、受控的实验实例。
 | initial_memories | 数组 | 回放开始前已经存在的 memory 记录 |
 | operations | 数组 | 按顺序排列的 memory 操作 |
 | policies | 数组 | 带版本的读、写和搜索权限 |
-| failure_schedule | 数组 | 按步骤注入的 crash、revoke、delay、invalidate 或 repair 事件 |
-| provenance_edges | 数组 | source_id 到 derived_id 的来源关系 |
-| expected_outcome | 对象 | 事务状态、应提交的 memory、应修复的 memory 和目标不变量 |
+| failure_schedule | 数组 | 由因果触发器触发的 crash、revoke、delay、invalidate 或 repair 事件 |
+| provenance_edges | 数组 | 初始/旧版图元数据；正式 W1–W8 由 operation 生成边，因此为空 |
+| expected_outcome | 对象 | 可选的旧版兼容字段，不能作为 ground truth |
+| oracle | 对象 | reference executor 生成的 allowed outcomes、安全不变量和 event trace |
 
 ## Memory 对象
 
@@ -40,6 +41,7 @@ JSONL 中的每一行都是一个可复现的、受控的实验实例。
 - get_by_id：按 ID 直接读取，但仍必须执行 scope 检查；
 - supersede：让新 memory 替代旧 memory；
 - propagate：记录派生 memory 或 provenance 更新；
+- derive：读取来源并创建 pending 输出；reference executor 从真实操作创建 `read_derive` 边；
 - invalidate：使源 memory 失效；
 - commit：完成策略重新校验后，提交缓存中的写入。
 
@@ -90,14 +92,20 @@ JSONL 中的每一行都是一个可复现的、受控的实验实例。
 - scope_bypass_rate：scope 绕过率；
 - latency：回放延迟代理指标；
 - any_violation：是否存在任意违规。
+- oracle_version、oracle_match、allowed_outcome_count 和 oracle_mismatches：独立 oracle 差分结果。
 
 ## 输出文件
 
 完整的 experiment 命令会生成：
 
 - data/generated_instances.jsonl：生成的测试实例；
+- data/reference_oracles.jsonl：独立 reference executor 的 ground truth；
 - results/experiment_results.csv：每个实例/变体的详细结果；
 - results/summary.json：按 workload 和 variant 聚合的均值、标准差；
+- results/coverage.json：schedule/invariant coverage 和最小反例；
+- results/mutation_report.json：mutation kill rate；
+- results/schedule_baseline.json：因果 schedule 与随机 schedule 的检测率对比；
+- results/realism.json：synthetic 与 trace-grounded 特征分布对比；没有提供 trace 时明确标记为 `not_supplied`。
 - results/figures/violation_rate.svg：违规率图；
 - results/figures/repair_recall.svg：provenance 修复召回率图。
 
@@ -114,4 +122,3 @@ python3 src/txnmem_experiment.py experiment --out-dir /data/txnmem --seeds 10
 ~~~bash
 python3 -m unittest discover -s tests -v
 ~~~
-

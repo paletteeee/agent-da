@@ -9,6 +9,7 @@ from pathlib import Path
 from statistics import mean, pstdev
 from typing import Any, Iterable
 
+from txnmem_differential import compare_result_to_oracle
 from txnmem_invariants import check_invariants
 
 
@@ -25,12 +26,17 @@ NUMERIC_FIELDS = (
     "committed_count",
     "operation_count",
     "repair_count",
+    "oracle_match",
+    "allowed_outcome_count",
 )
 
 
-def _descendants(instance: dict[str, Any], source_id: str) -> set[str]:
+def _descendants(
+    instance: dict[str, Any], source_id: str, result: dict[str, Any] | None = None
+) -> set[str]:
     children: dict[str, list[str]] = defaultdict(list)
-    for edge in instance.get("provenance_edges", []):
+    edges = (result or {}).get("provenance_edges") or instance.get("provenance_edges", [])
+    for edge in edges:
         children[edge["source_id"]].append(edge["derived_id"])
     found: set[str] = set()
     queue = deque(children.get(source_id, []))
@@ -46,7 +52,15 @@ def _descendants(instance: dict[str, Any], source_id: str) -> set[str]:
 def _repair_recall(instance: dict[str, Any], result: dict[str, Any]) -> float:
     if instance["workload"] not in {"provenance_chain_repair", "provenance_branch_repair"}:
         return 0.0
-    affected = _descendants(instance, instance["expected_outcome"]["root_memory_id"])
+    root_id = next(
+        (
+            operation.get("memory_id")
+            for operation in instance.get("operations", [])
+            if operation.get("type") == "invalidate"
+        ),
+        "m_root",
+    )
+    affected = _descendants(instance, root_id, result)
     if not affected:
         return 1.0
     repaired = sum(
@@ -61,6 +75,7 @@ def result_row(instance: dict[str, Any], result: dict[str, Any]) -> dict[str, An
     workload = instance["workload"]
     scope_violation = "scope_leak_violation" in violations
     supersession_violation = "supersession_consistency_violation" in violations
+    oracle_comparison = compare_result_to_oracle(instance, result)
     return {
         "instance_id": instance["instance_id"],
         "workload": workload,
@@ -82,6 +97,10 @@ def result_row(instance: dict[str, Any], result: dict[str, Any]) -> dict[str, An
         "committed_count": len(result.get("committed_memory_ids", [])),
         "operation_count": result.get("metrics", {}).get("operation_count", len(result.get("trace", []))),
         "repair_count": result.get("metrics", {}).get("repair_count", 0),
+        "oracle_version": oracle_comparison["oracle_version"],
+        "oracle_match": int(oracle_comparison["matches"]),
+        "allowed_outcome_count": oracle_comparison["allowed_outcome_count"],
+        "oracle_mismatches": ";".join(oracle_comparison["mismatches"]),
     }
 
 

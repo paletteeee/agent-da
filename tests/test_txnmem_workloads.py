@@ -24,17 +24,35 @@ class TxnMemWorkloadTests(unittest.TestCase):
         self.assertIn("search", types)
         self.assertIn("get_by_id", types)
 
-    def test_branch_repair_has_all_branch_edges(self):
+    def test_branch_repair_has_all_branch_derive_operations(self):
         instance = generate_instance(
             "provenance_branch_repair",
             seed=11,
             config={"branch_factor": 3, "provenance_depth": 2},
         )
-        self.assertEqual(len(instance["provenance_edges"]), 6)
+        derive_operations = [
+            operation for operation in instance["operations"] if operation["type"] == "derive"
+        ]
+        self.assertEqual(len(derive_operations), 6)
+        self.assertEqual(instance["provenance_edges"], [])
 
     def test_generate_suite_returns_workload_seed_cartesian_product(self):
         suite = generate_suite(["atomic_multi_write", "scope_bypass"], [1, 2])
         self.assertEqual([item["seed"] for item in suite], [1, 2, 1, 2])
+
+    def test_provenance_chain_records_real_derive_operations(self):
+        instance = generate_instance("provenance_chain_repair", seed=14, config={"provenance_depth": 2})
+        types = [operation["type"] for operation in instance["operations"]]
+
+        self.assertIn("read", types)
+        self.assertIn("derive", types)
+        self.assertIn("commit", types)
+        self.assertEqual(instance["provenance_edges"], [])
+
+    def test_generator_does_not_emit_expected_outcome_ground_truth(self):
+        instance = generate_instance("atomic_multi_write", seed=15)
+
+        self.assertNotIn("expected_outcome", instance)
 
 
 if __name__ == "__main__":

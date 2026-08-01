@@ -28,8 +28,13 @@ class TxnMemCliOutputTests(unittest.TestCase):
             )
             self.assertIn("wrote", completed.stdout)
             self.assertTrue((Path(tmp) / "data/generated_instances.jsonl").exists())
+            self.assertTrue((Path(tmp) / "data/reference_oracles.jsonl").exists())
             self.assertTrue((Path(tmp) / "results/experiment_results.csv").exists())
             self.assertTrue((Path(tmp) / "results/summary.json").exists())
+            self.assertTrue((Path(tmp) / "results/coverage.json").exists())
+            self.assertTrue((Path(tmp) / "results/mutation_report.json").exists())
+            self.assertTrue((Path(tmp) / "results/schedule_baseline.json").exists())
+            self.assertTrue((Path(tmp) / "results/realism.json").exists())
             self.assertTrue(list((Path(tmp) / "results/figures").glob("*.svg")))
 
 
