@@ -35,6 +35,11 @@ transaction 内的写入提前暴露给后续读取而出现预期的 `visible_m
 - AppWorld 日志来自官方 train task 的 reference solution 执行，验证了 AppWorld 环境和 API log 入口，但不是独立 LLM Agent 采样；原始 API `data` 中可能包含凭据的字段没有写入仓库产物。
 - 这些 projection 只用于校准 operation count、transaction size 和 temporal update 形态，不能作为 policy/provenance ground truth。
 
+仓库另提供 `examples/native_memory_agent.py` 作为 connector contract 示例：它通过
+`InstrumentedMemoryBackend` 实际调用 write/read/derive，并由 canonical validator
+检查事件。该 fixture 用于证明 provenance 来源可以在产生事件时记录；它与本节的
+公开数据 projection 分开，也不把公开数据改称为 native memory ground truth。
+
 ## 数据来源
 
 - τ-bench historical trajectories：<https://github.com/sierra-research/tau-bench>

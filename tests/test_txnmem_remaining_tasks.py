@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 from txnmem_backend import InstrumentedMemoryBackend, AgentReplayRunner  # noqa: E402
@@ -12,11 +13,13 @@ from txnmem_bench_adapters import adapt_records  # noqa: E402
 from txnmem_concurrency import run_concurrent_action_sequences  # noqa: E402
 from txnmem_distributed import run_process_action_sequences  # noqa: E402
 from txnmem_event_contract import EventContractError, validate_event, validate_events  # noqa: E402
+from examples.native_memory_agent import run_native_example  # noqa: E402
 from txnmem_interleavings import enumerate_interleavings, micro_witness_report  # noqa: E402
 from txnmem_performance import benchmark_replay  # noqa: E402
 from txnmem_repair import incremental_repair, repair_failure_matrix  # noqa: E402
 from txnmem_realism import calibrate_config, split_holdout, trace_evidence_summary  # noqa: E402
 from txnmem_trace_pipeline import load_trace_records, build_trace_instances, trace_inventory  # noqa: E402
+from txnmem_trace import trace_to_instance  # noqa: E402
 from txnmem_workloads import generate_instance  # noqa: E402
 
 
@@ -341,6 +344,19 @@ class TxnMemRemainingTaskTests(unittest.TestCase):
         self.assertEqual(summary["oracle_match_by_variant"]["TxnMem"]["matched"], 1)
         self.assertFalse(summary["trace_ground_truth_native"])
         self.assertFalse(summary["production_latency_claim"])
+
+    def test_native_connector_example_preserves_actual_derive_provenance(self):
+        events = run_native_example()
+        derive = next(event for event in events if event["kind"] == "memory_derive")
+        self.assertEqual(derive["source_ids"], ["native_source"])
+        instance = trace_to_instance(events, "native_example")
+        derive_operations = [
+            operation
+            for operation in instance["operations"]
+            if operation["type"] == "derive"
+        ]
+        self.assertEqual(derive_operations[0]["source_ids"], ["native_source"])
+        self.assertEqual(instance["provenance_edges"], [])
 
 
 if __name__ == "__main__":

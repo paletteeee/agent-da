@@ -90,6 +90,31 @@ pipeline. `src/txnmem_interleavings.py` exhaustively enumerates small
 per-agent sequence linearizations, while `src/txnmem_repair.py` reports every
 incremental-repair crash point and any unsafe active descendants.
 
+Native connector instrumentation is validated at the boundary by
+`src/txnmem_event_contract.py`. The example below calls the instrumented
+backend directly; its `memory_derive.source_ids` is recorded by the call, and
+the terminal output intentionally contains metadata rather than memory
+payloads:
+
+```bash
+python3 examples/native_memory_agent.py
+```
+
+The example is a deterministic connector fixture, not an LLM run, a
+production backend, or native ground truth for τ-bench/AppWorld/LoCoMo. A real
+connector should emit the same canonical fields and call `validated_events()`
+before handing its log to the trace adapter.
+
+For a cross-process linearization smoke test, run:
+
+```bash
+python3 src/txnmem_experiment.py process-smoke --out-dir .
+```
+
+This records aggregate evidence only in `results/process_concurrency.json`.
+It checks owner-assigned linearization indexes and worker completion; it is
+not a distributed transaction implementation or a production latency claim.
+
 For local replay timing (not production latency), run:
 
 ```bash
