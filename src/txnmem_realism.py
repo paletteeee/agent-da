@@ -110,13 +110,17 @@ def split_holdout(
         raise ValueError("holdout_fraction must be in [0, 1)")
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in materialized:
-        key = str(
-            record.get("episode_id")
-            or record.get("task_id")
-            or record.get("conversation_id")
-            or record.get("trajectory_id")
-            or "episode_0001"
-        )
+        if record.get("task_id") is not None and record.get("trial") is not None:
+            key = f"{record['task_id']}:trial:{record['trial']}"
+        else:
+            key = str(
+                record.get("episode_id")
+                or record.get("task_id")
+                or record.get("conversation_id")
+                or record.get("trajectory_id")
+                or record.get("sample_id")
+                or "episode_0001"
+            )
         groups[key].append(record)
     keys = sorted(groups)
     random.Random(seed).shuffle(keys)

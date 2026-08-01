@@ -45,7 +45,16 @@ def load_trace_records(path: Path) -> list[dict[str, Any]]:
 
 
 def _episode_key(record: dict[str, Any]) -> str:
-    for name in ("episode_id", "task_id", "conversation_id", "trajectory_id", "dialogue_id"):
+    if record.get("task_id") is not None and record.get("trial") is not None:
+        return f"{record['task_id']}:trial:{record['trial']}"
+    for name in (
+        "episode_id",
+        "task_id",
+        "conversation_id",
+        "trajectory_id",
+        "dialogue_id",
+        "sample_id",
+    ):
         if record.get(name) is not None:
             return str(record[name])
     return "episode_0001"
@@ -69,17 +78,68 @@ def build_trace_instances(
         if not adapted.events:
             continue
         instance = trace_to_instance(adapted.events, f"{adapter}_{episode_id}", seed=seed + index - 1)
+        if not instance.get("operations"):
+            # A policy-only or dialogue-only episode has no executable memory
+            # history; retain it in skipped-event metadata rather than making
+            # an invalid synthetic trigger for a nonexistent operation.
+            continue
+        _add_replay_transaction_envelope(instance)
         instance["trace_metadata"] = {
             "source": source,
             "adapter": adapter,
             "episode_id": episode_id,
             "skipped_events": adapted.skipped_events,
             "warnings": adapted.warnings,
-            "event_count": len(adapted.events),
+            "event_count": sum(
+                operation.get("type") not in {"begin_txn", "commit"}
+                for operation in instance.get("operations", [])
+            ),
+            "adapted_record_count": len(adapted.events),
+            "transaction_envelope": "episode_projection",
         }
         validate_instance(instance)
         instances.append(instance)
     return instances
+
+
+def _add_replay_transaction_envelope(instance: dict[str, Any]) -> None:
+    """Make a transaction-free external episode executable by the replay engine.
+
+    Public workflow/API logs rarely expose TxnMem transaction boundaries.  The
+    adapter therefore projects one episode into one transaction only when the
+    source did not already provide ``begin_txn``/``commit`` events.  This is an
+    explicit replay assumption, not a claim about the source benchmark.
+    """
+
+    operations = instance.get("operations", [])
+    if any(operation.get("type") in {"begin_txn", "commit"} for operation in operations):
+        return
+    if not operations:
+        return
+    txn_id = next((operation.get("txn_id") for operation in operations if operation.get("txn_id")), "txn_trace")
+    agent_id = operations[0].get("agent_id", "agent_1")
+    for operation in operations:
+        operation["txn_id"] = txn_id
+        operation["step"] = int(operation.get("step", 0)) + 1
+    begin = {
+        "op_id": f"{instance['instance_id']}:begin",
+        "step": 1,
+        "agent_id": agent_id,
+        "txn_id": txn_id,
+        "type": "begin_txn",
+    }
+    commit = {
+        "op_id": f"{instance['instance_id']}:commit",
+        "step": max(int(operation.get("step", 0)) for operation in operations) + 1,
+        "agent_id": agent_id,
+        "txn_id": txn_id,
+        "type": "commit",
+    }
+    instance["operations"] = [begin, *operations, commit]
+    instance.setdefault("config", {})["txn_size"] = max(
+        1,
+        sum(operation.get("type") in {"write", "derive", "propagate", "supersede"} for operation in operations),
+    )
 
 
 def split_holdout(
@@ -118,9 +178,19 @@ def replay_trace_instances(
 
 def trace_inventory(instances: Iterable[dict[str, Any]]) -> dict[str, Any]:
     materialized = list(instances)
+    event_count = 0
+    for instance in materialized:
+        metadata = instance.get("trace_metadata", {})
+        if "event_count" in metadata:
+            event_count += int(metadata["event_count"])
+        else:
+            event_count += sum(
+                operation.get("type") not in {"begin_txn", "commit"}
+                for operation in instance.get("operations", [])
+            )
     return {
         "instance_count": len(materialized),
-        "event_count": sum(len(instance.get("operations", [])) for instance in materialized),
+        "event_count": event_count,
         "sources": sorted({instance.get("trace_metadata", {}).get("source", "unknown") for instance in materialized}),
         "adapters": sorted({instance.get("trace_metadata", {}).get("adapter", "unknown") for instance in materialized}),
         "status": "trace_supplied" if materialized else "not_supplied",

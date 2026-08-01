@@ -1,0 +1,74 @@
+{
+  "calibration": {
+    "agent_count": 1,
+    "branch_factor": 1,
+    "concurrency": 1,
+    "policy_churn": 0,
+    "provenance_depth": 1,
+    "txn_size": 6
+  },
+  "features": {
+    "agent_count": {
+      "mean_abs_diff": 1.0,
+      "synthetic_mean": 0.0,
+      "synthetic_std": 0.0,
+      "trace_mean": 1.0,
+      "trace_std": 0.0
+    },
+    "branch_factor": {
+      "mean_abs_diff": 0.0,
+      "synthetic_mean": 0.0,
+      "synthetic_std": 0.0,
+      "trace_mean": 0.0,
+      "trace_std": 0.0
+    },
+    "operation_count": {
+      "mean_abs_diff": 78.0,
+      "synthetic_mean": 0.0,
+      "synthetic_std": 0.0,
+      "trace_mean": 78.0,
+      "trace_std": 43.30357952871795
+    },
+    "policy_change_rate": {
+      "mean_abs_diff": 0.0,
+      "synthetic_mean": 0.0,
+      "synthetic_std": 0.0,
+      "trace_mean": 0.0,
+      "trace_std": 0.0
+    },
+    "provenance_depth": {
+      "mean_abs_diff": 0.0,
+      "synthetic_mean": 0.0,
+      "synthetic_std": 0.0,
+      "trace_mean": 0.0,
+      "trace_std": 0.0
+    },
+    "transaction_size": {
+      "mean_abs_diff": 5.6,
+      "synthetic_mean": 0.0,
+      "synthetic_std": 0.0,
+      "trace_mean": 5.6,
+      "trace_std": 4.586937976471886
+    }
+  },
+  "split": {
+    "holdout_fraction": 0.2,
+    "holdout_record_count": 145,
+    "seed": 17,
+    "train_record_count": 235
+  },
+  "synthetic_count": 0,
+  "trace_count": 5,
+  "trace_grounded_status": "trace_supplied",
+  "trace_inventory": {
+    "adapters": [
+      "appworld"
+    ],
+    "event_count": 380,
+    "instance_count": 5,
+    "sources": [
+      "appworld-official-train-reference-solution"
+    ],
+    "status": "trace_supplied"
+  }
+}

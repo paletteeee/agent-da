@@ -56,6 +56,13 @@ def normalize_trace(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             "value",
             "query",
             "attribute",
+            "content",
+            "tool_name",
+            "projection",
+            "raw_event_id",
+            "task_id",
+            "sample_id",
+            "session_id",
         ):
             if field in event:
                 operation[field] = event[field]

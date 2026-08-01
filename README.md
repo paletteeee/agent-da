@@ -46,7 +46,7 @@ The command writes:
 - `results/coverage.json`
 - `results/mutation_report.json`
 - `results/schedule_baseline.json`
-- `results/realism.json` (reports `not_supplied` until a trace is provided)
+- `results/realism.json` (the controlled suite remains `not_supplied`; official replay reports are under `results/official_trace_runs/`)
 - `results/figures/violation_rate.svg`
 - `results/figures/repair_recall.svg`
 
@@ -72,8 +72,16 @@ They translate explicit tool/API/memory events only; ordinary dialogue turns
 are skipped. The command writes `data/trace_grounded_instances.jsonl`,
 `results/trace_replay.csv`, and `results/trace_realism.json`, including an
 episode-level holdout split and calibration parameters. Until source logs are
-provided, the repository must report `not_supplied`; the included controlled
-instances are not a substitute for a benchmark run.
+provided, a standalone invocation reports `not_supplied`; the included
+official-source smoke replay is recorded separately and the controlled
+instances are not a substitute for native memory traces.
+
+An official-source smoke replay is recorded under
+`results/official_trace_runs/`: τ-bench historical trajectories (175 usable
+episode instances from 200 trials), LoCoMo (10 conversations), and five
+AppWorld train reference-solution API logs. These are explicitly workflow/API
+projections rather than native
+memory ground truth; see `docs/official_trace_replay_zh.md`.
 
 `src/txnmem_backend.py` provides an instrumented backend and
 `AgentReplayRunner`. A real Agent or storage connector can implement the same
@@ -81,6 +89,12 @@ event-producing calls, then pass the recorded events through the trace
 pipeline. `src/txnmem_interleavings.py` exhaustively enumerates small
 per-agent sequence linearizations, while `src/txnmem_repair.py` reports every
 incremental-repair crash point and any unsafe active descendants.
+
+For local replay timing (not production latency), run:
+
+```bash
+python3 src/txnmem_experiment.py performance --out-dir . --seeds 3 --repetitions 3
+```
 
 ## Public compatibility API
 

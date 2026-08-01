@@ -20,6 +20,7 @@ from txnmem_metrics import (
 from txnmem_coverage import coverage_report
 from txnmem_coverage import schedule_effectiveness
 from txnmem_mutation import run_mutation_campaign
+from txnmem_performance import benchmark_replay
 from txnmem_realism import calibrate_config, compare_distributions, extract_trace_features, split_holdout
 from txnmem_reference import reference_outcome
 from txnmem_schema import DEFAULT_CONFIG, load_workload_config
@@ -81,7 +82,7 @@ def write_csv(rows: Iterable[dict[str, Any]], path: Path) -> None:
     fields = [field for field in preferred if any(field in row for row in materialized)]
     fields.extend(sorted({field for row in materialized for field in row} - set(fields)))
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         writer.writeheader()
         writer.writerows(materialized)
 
@@ -149,6 +150,13 @@ def _build_parser() -> argparse.ArgumentParser:
     trace_replay.add_argument("--out-dir", type=Path, default=Path("."))
     trace_replay.add_argument("--holdout-fraction", type=float, default=0.2)
     trace_replay.add_argument("--seed", type=int, default=0)
+
+    performance = subparsers.add_parser(
+        "performance", help="measure local deterministic replay timing"
+    )
+    performance.add_argument("--out-dir", type=Path, default=Path("."))
+    performance.add_argument("--seeds", type=int, default=3)
+    performance.add_argument("--repetitions", type=int, default=3)
     return parser
 
 
@@ -255,6 +263,12 @@ def main(argv: list[str] | None = None) -> int:
         write_summary(realism, args.out_dir / "results" / "trace_realism.json")
         print(f"adapted {len(records)} records into {len(instances)} trace instances")
         print(f"wrote trace replay artifacts -> {args.out_dir}")
+        return 0
+    if args.command == "performance":
+        instances = generate_suite(WORKLOADS, range(args.seeds))
+        performance = benchmark_replay(instances, VARIANTS, repetitions=args.repetitions)
+        write_summary(performance, args.out_dir / "results" / "performance.json")
+        print(f"wrote local performance benchmark -> {args.out_dir / 'results' / 'performance.json'}")
         return 0
     raise ValueError(f"unsupported command: {args.command}")
 
