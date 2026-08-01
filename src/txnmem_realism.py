@@ -100,6 +100,55 @@ def compare_distributions(
     }
 
 
+def trace_evidence_summary(
+    instances: Iterable[dict[str, Any]], rows: Iterable[dict[str, Any]]
+) -> dict[str, Any]:
+    """Summarize replay evidence without treating projections as ground truth."""
+
+    materialized_instances = list(instances)
+    materialized_rows = list(rows)
+    source_operation_count = 0
+    replay_operation_count = 0
+    envelope_operation_count = 0
+    for instance in materialized_instances:
+        operations = list(instance.get("operations", []))
+        replay_operation_count += len(operations)
+        envelope_operation_count += sum(
+            operation.get("type") in {"begin_txn", "commit"} for operation in operations
+        )
+        metadata = instance.get("trace_metadata", {})
+        source_operation_count += int(
+            metadata.get(
+                "event_count",
+                sum(
+                    operation.get("type") not in {"begin_txn", "commit"}
+                    for operation in operations
+                ),
+            )
+        )
+
+    oracle_match_by_variant: dict[str, dict[str, Any]] = {}
+    for variant in sorted({str(row.get("variant")) for row in materialized_rows}):
+        variant_rows = [row for row in materialized_rows if str(row.get("variant")) == variant]
+        matched = sum(bool(int(row.get("oracle_match", 0))) for row in variant_rows)
+        total = len(variant_rows)
+        oracle_match_by_variant[variant] = {
+            "matched": matched,
+            "total": total,
+            "rate": matched / total if total else 0.0,
+        }
+    return {
+        "instance_count": len(materialized_instances),
+        "source_operation_count": source_operation_count,
+        "replay_operation_count": replay_operation_count,
+        "replay_envelope_operation_count": envelope_operation_count,
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "oracle_match_by_variant": oracle_match_by_variant,
+        "trace_ground_truth_native": False,
+        "production_latency_claim": False,
+    }
+
+
 def split_holdout(
     records: Iterable[dict[str, Any]], holdout_fraction: float = 0.2, seed: int = 0
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

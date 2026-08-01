@@ -15,7 +15,7 @@ from txnmem_event_contract import EventContractError, validate_event, validate_e
 from txnmem_interleavings import enumerate_interleavings, micro_witness_report  # noqa: E402
 from txnmem_performance import benchmark_replay  # noqa: E402
 from txnmem_repair import incremental_repair, repair_failure_matrix  # noqa: E402
-from txnmem_realism import calibrate_config, split_holdout  # noqa: E402
+from txnmem_realism import calibrate_config, split_holdout, trace_evidence_summary  # noqa: E402
 from txnmem_trace_pipeline import load_trace_records, build_trace_instances, trace_inventory  # noqa: E402
 from txnmem_workloads import generate_instance  # noqa: E402
 
@@ -318,6 +318,29 @@ class TxnMemRemainingTaskTests(unittest.TestCase):
         self.assertFalse(report["production_latency_claim"])
         self.assertEqual(report["rows"][0]["repetitions"], 2)
         self.assertGreaterEqual(report["rows"][0]["mean_ms"], 0.0)
+
+    def test_trace_evidence_summary_separates_source_and_envelope_operations(self):
+        instances = [
+            {
+                "operations": [
+                    {"type": "begin_txn"},
+                    {"type": "write"},
+                    {"type": "commit"},
+                ],
+                "trace_metadata": {"event_count": 1},
+            }
+        ]
+        rows = [
+            {"variant": "TxnMem", "oracle_match": 1},
+            {"variant": "Naive", "oracle_match": 0},
+        ]
+        summary = trace_evidence_summary(instances, rows)
+        self.assertEqual(summary["source_operation_count"], 1)
+        self.assertEqual(summary["replay_operation_count"], 3)
+        self.assertEqual(summary["replay_envelope_operation_count"], 2)
+        self.assertEqual(summary["oracle_match_by_variant"]["TxnMem"]["matched"], 1)
+        self.assertFalse(summary["trace_ground_truth_native"])
+        self.assertFalse(summary["production_latency_claim"])
 
 
 if __name__ == "__main__":

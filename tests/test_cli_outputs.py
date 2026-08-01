@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -67,6 +68,35 @@ class TxnMemCliOutputTests(unittest.TestCase):
             self.assertTrue((out_dir / "data/trace_grounded_instances.jsonl").exists())
             self.assertTrue((out_dir / "results/trace_replay.csv").exists())
             self.assertTrue((out_dir / "results/trace_realism.json").exists())
+            realism = json.loads((out_dir / "results/trace_realism.json").read_text(encoding="utf-8"))
+            self.assertIn("evidence", realism)
+            self.assertFalse(realism["evidence"]["trace_ground_truth_native"])
+
+    def test_process_smoke_command_writes_aggregate_only_report(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "src/txnmem_experiment.py",
+                    "process-smoke",
+                    "--out-dir",
+                    str(out_dir),
+                ],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("process concurrency", completed.stdout)
+            report = json.loads(
+                (out_dir / "results/process_concurrency.json").read_text(encoding="utf-8")
+            )
+            self.assertTrue(report["completed"])
+            self.assertEqual(report["event_count"], 3)
+            serialized = json.dumps(report)
+            for sensitive_key in ("value", "arguments", "data", "password", "token"):
+                self.assertNotIn(sensitive_key, serialized.lower())
 
 
 if __name__ == "__main__":

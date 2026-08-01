@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -19,9 +20,16 @@ from txnmem_metrics import (
 )
 from txnmem_coverage import coverage_report
 from txnmem_coverage import schedule_effectiveness
+from txnmem_distributed import run_process_action_sequences
 from txnmem_mutation import run_mutation_campaign
 from txnmem_performance import benchmark_replay
-from txnmem_realism import calibrate_config, compare_distributions, extract_trace_features, split_holdout
+from txnmem_realism import (
+    calibrate_config,
+    compare_distributions,
+    extract_trace_features,
+    split_holdout,
+    trace_evidence_summary,
+)
 from txnmem_reference import reference_outcome
 from txnmem_schema import DEFAULT_CONFIG, load_workload_config
 from txnmem_simulator import VARIANTS, run_instance
@@ -157,6 +165,11 @@ def _build_parser() -> argparse.ArgumentParser:
     performance.add_argument("--out-dir", type=Path, default=Path("."))
     performance.add_argument("--seeds", type=int, default=3)
     performance.add_argument("--repetitions", type=int, default=3)
+
+    process_smoke = subparsers.add_parser(
+        "process-smoke", help="run the dependency-free process linearization smoke test"
+    )
+    process_smoke.add_argument("--out-dir", type=Path, default=Path("."))
     return parser
 
 
@@ -260,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
             "holdout_fraction": args.holdout_fraction,
             "seed": args.seed,
         }
+        realism["evidence"] = trace_evidence_summary(instances, rows)
         write_summary(realism, args.out_dir / "results" / "trace_realism.json")
         print(f"adapted {len(records)} records into {len(instances)} trace instances")
         print(f"wrote trace replay artifacts -> {args.out_dir}")
@@ -269,6 +283,40 @@ def main(argv: list[str] | None = None) -> int:
         performance = benchmark_replay(instances, VARIANTS, repetitions=args.repetitions)
         write_summary(performance, args.out_dir / "results" / "performance.json")
         print(f"wrote local performance benchmark -> {args.out_dir / 'results' / 'performance.json'}")
+        return 0
+    if args.command == "process-smoke":
+        raw_report = run_process_action_sequences(
+            [
+                [
+                    {"type": "write", "memory_id": "process_smoke_a", "value": "a"},
+                    {"type": "write", "memory_id": "process_smoke_a2", "value": "a2"},
+                ],
+                [{"type": "write", "memory_id": "process_smoke_b", "value": "b"}],
+            ]
+        )
+        report = {
+            key: raw_report[key]
+            for key in (
+                "concurrency_model",
+                "worker_count",
+                "submitted_operation_count",
+                "event_count",
+                "unique_event_ids",
+                "completed",
+                "failed_worker_ids",
+                "unacknowledged_operation_ids",
+            )
+        }
+        report["linearization_indexes"] = [
+            event["linearization_index"] for event in raw_report.get("events", [])
+        ]
+        report["worker_event_counts"] = dict(
+            sorted(Counter(event["worker_id"] for event in raw_report.get("events", [])).items())
+        )
+        report["trace_ground_truth_native"] = False
+        report["production_latency_claim"] = False
+        write_summary(report, args.out_dir / "results" / "process_concurrency.json")
+        print(f"wrote process concurrency smoke report -> {args.out_dir / 'results' / 'process_concurrency.json'}")
         return 0
     raise ValueError(f"unsupported command: {args.command}")
 
