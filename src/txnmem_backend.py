@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Callable, Iterable
 
+from txnmem_event_contract import validate_events
 from txnmem_trace import trace_to_instance
 
 
@@ -21,7 +22,12 @@ class InstrumentedMemoryBackend:
         self.events: list[dict[str, Any]] = []
 
     def _event(self, kind: str, **fields: Any) -> dict[str, Any]:
-        event = {"event_id": f"backend_event_{len(self.events) + 1:04d}", "kind": kind}
+        event = {
+            "event_id": f"backend_event_{len(self.events) + 1:04d}",
+            "kind": kind,
+            "step": len(self.events) + 1,
+            "agent_id": fields.get("agent_id", "agent_1"),
+        }
         event.update({key: value for key, value in fields.items() if value is not None})
         self.events.append(event)
         return event
@@ -92,6 +98,11 @@ class InstrumentedMemoryBackend:
     def snapshot(self) -> dict[str, Any]:
         return copy.deepcopy(self.memories)
 
+    def validated_events(self) -> list[dict[str, Any]]:
+        """Validate and return a JSON-safe copy of the native event log."""
+
+        return validate_events(self.events)
+
 
 class AgentReplayRunner:
     """Run explicit Agent actions against an injectable backend."""
@@ -116,4 +127,4 @@ class AgentReplayRunner:
         return self.run(agent(self.backend))
 
     def to_instance(self, instance_id: str, seed: int = 0) -> dict[str, Any]:
-        return trace_to_instance(self.backend.events, instance_id, seed=seed)
+        return trace_to_instance(self.backend.validated_events(), instance_id, seed=seed)

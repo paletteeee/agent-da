@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from txnmem_backend import InstrumentedMemoryBackend, AgentReplayRunner  # noqa: E402
 from txnmem_bench_adapters import adapt_records  # noqa: E402
 from txnmem_concurrency import run_concurrent_action_sequences  # noqa: E402
+from txnmem_event_contract import EventContractError, validate_event, validate_events  # noqa: E402
 from txnmem_interleavings import enumerate_interleavings, micro_witness_report  # noqa: E402
 from txnmem_performance import benchmark_replay  # noqa: E402
 from txnmem_repair import incremental_repair, repair_failure_matrix  # noqa: E402
@@ -19,6 +20,68 @@ from txnmem_workloads import generate_instance  # noqa: E402
 
 
 class TxnMemRemainingTaskTests(unittest.TestCase):
+    def test_native_event_contract_accepts_write_and_preserves_derive_sources(self):
+        write = validate_event(
+            {
+                "event_id": "e1",
+                "kind": "memory_write",
+                "agent_id": "agent_1",
+                "step": 1,
+                "memory_id": "m1",
+                "value": "safe",
+            }
+        )
+        derive = validate_event(
+            {
+                "event_id": "e2",
+                "kind": "memory_derive",
+                "agent_id": "agent_1",
+                "step": 2,
+                "memory_id": "m2",
+                "source_ids": ["m1"],
+            }
+        )
+        self.assertEqual(write["memory_id"], "m1")
+        self.assertEqual(derive["source_ids"], ["m1"])
+
+    def test_native_event_contract_rejects_invalid_shape_with_stable_codes(self):
+        cases = [
+            ({"kind": "memory_write", "agent_id": "a", "step": 1, "memory_id": "m"}, "missing_event_id"),
+            ({"event_id": "e", "kind": "unknown", "agent_id": "a", "step": 1}, "unsupported_kind"),
+            ({"event_id": "e", "kind": "memory_write", "agent_id": "a", "step": 0, "memory_id": "m"}, "invalid_step"),
+            ({"event_id": "e", "kind": "memory_derive", "agent_id": "a", "step": 1, "memory_id": "m"}, "missing_source_ids"),
+        ]
+        for event, code in cases:
+            with self.subTest(code=code):
+                with self.assertRaises(EventContractError) as raised:
+                    validate_event(event)
+                self.assertEqual(raised.exception.code, code)
+
+    def test_native_event_contract_rejects_duplicate_or_non_monotonic_events(self):
+        events = [
+            {"event_id": "e1", "kind": "memory_write", "agent_id": "a", "step": 2, "memory_id": "m1"},
+            {"event_id": "e1", "kind": "memory_write", "agent_id": "a", "step": 1, "memory_id": "m2"},
+        ]
+        with self.assertRaises(EventContractError) as duplicate:
+            validate_events(events)
+        self.assertEqual(duplicate.exception.code, "duplicate_event_id")
+
+        with self.assertRaises(EventContractError) as order:
+            validate_events(
+                [
+                    {**events[0], "event_id": "e2"},
+                    {**events[1], "event_id": "e3"},
+                ]
+            )
+        self.assertEqual(order.exception.code, "non_monotonic_step")
+
+    def test_instrumented_backend_exposes_validated_events(self):
+        backend = InstrumentedMemoryBackend()
+        backend.write("m0", value="v0")
+        validated = backend.validated_events()
+        self.assertEqual(validated[0]["step"], 1)
+        self.assertEqual(validated[0]["agent_id"], "agent_1")
+
     def test_benchmark_adapters_map_native_shapes_without_inventing_events(self):
         tau = adapt_records(
             "tau-bench",
