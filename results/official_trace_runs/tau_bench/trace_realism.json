@@ -7,6 +7,42 @@
     "provenance_depth": 1,
     "txn_size": 1
   },
+  "evidence": {
+    "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+    "instance_count": 175,
+    "oracle_match_by_variant": {
+      "Naive": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      },
+      "TxnMem": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      },
+      "TxnMem-NoPolicyCommit": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      },
+      "TxnMem-NoRepair": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      },
+      "TxnMem-NoTxn": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      }
+    },
+    "production_latency_claim": false,
+    "replay_envelope_operation_count": 350,
+    "replay_operation_count": 1270,
+    "source_operation_count": 920,
+    "trace_ground_truth_native": false
+  },
   "features": {
     "agent_count": {
       "mean_abs_diff": 1.0,
