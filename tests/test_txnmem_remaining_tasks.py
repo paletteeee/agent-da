@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from txnmem_backend import InstrumentedMemoryBackend, AgentReplayRunner  # noqa: E402
 from txnmem_bench_adapters import adapt_records  # noqa: E402
 from txnmem_concurrency import run_concurrent_action_sequences  # noqa: E402
+from txnmem_distributed import run_process_action_sequences  # noqa: E402
 from txnmem_event_contract import EventContractError, validate_event, validate_events  # noqa: E402
 from txnmem_interleavings import enumerate_interleavings, micro_witness_report  # noqa: E402
 from txnmem_performance import benchmark_replay  # noqa: E402
@@ -276,6 +277,41 @@ class TxnMemRemainingTaskTests(unittest.TestCase):
         self.assertEqual(result["event_count"], 2)
         self.assertTrue(result["unique_event_ids"])
         self.assertEqual([event["linearization_index"] for event in result["events"]], [1, 2])
+
+    def test_process_harness_preserves_worker_order_and_reports_linearization(self):
+        result = run_process_action_sequences(
+            [
+                [
+                    {"type": "write", "memory_id": "p_a1", "value": "a1"},
+                    {"type": "write", "memory_id": "p_a2", "value": "a2"},
+                ],
+                [{"type": "write", "memory_id": "p_b1", "value": "b1"}],
+            ]
+        )
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["worker_count"], 2)
+        self.assertEqual(result["submitted_operation_count"], 3)
+        self.assertEqual(result["event_count"], 3)
+        self.assertTrue(result["unique_event_ids"])
+        self.assertEqual(
+            [event["linearization_index"] for event in result["events"]],
+            [1, 2, 3],
+        )
+        for worker_id in ("worker_0", "worker_1"):
+            local_indexes = [
+                event["local_index"]
+                for event in result["events"]
+                if event["worker_id"] == worker_id
+            ]
+            self.assertEqual(local_indexes, sorted(local_indexes))
+
+    def test_process_harness_reports_worker_failure_without_silent_drop(self):
+        result = run_process_action_sequences(
+            [[{"type": "unsupported_action", "op_id": "bad_op"}]],
+        )
+        self.assertFalse(result["completed"])
+        self.assertEqual(result["failed_worker_ids"], ["worker_0"])
+        self.assertEqual(result["unacknowledged_operation_ids"], ["bad_op"])
 
     def test_local_performance_benchmark_reports_timing_without_production_claim(self):
         report = benchmark_replay([generate_instance("atomic_multi_write", 0)], ["TxnMem"], repetitions=2)
