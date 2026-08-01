@@ -20,10 +20,16 @@ from txnmem_metrics import (
 from txnmem_coverage import coverage_report
 from txnmem_coverage import schedule_effectiveness
 from txnmem_mutation import run_mutation_campaign
-from txnmem_realism import compare_distributions, extract_trace_features
+from txnmem_realism import calibrate_config, compare_distributions, extract_trace_features, split_holdout
 from txnmem_reference import reference_outcome
 from txnmem_schema import DEFAULT_CONFIG, load_workload_config
 from txnmem_simulator import VARIANTS, run_instance
+from txnmem_trace_pipeline import (
+    build_trace_instances,
+    load_trace_records,
+    replay_trace_instances,
+    trace_inventory,
+)
 from txnmem_workloads import WORKLOADS, generate_instance, generate_suite
 
 
@@ -131,6 +137,18 @@ def _build_parser() -> argparse.ArgumentParser:
     experiment.add_argument("--out-dir", type=Path, default=Path("."))
     experiment.add_argument("--seeds", type=int, default=10)
     experiment.add_argument("--variants", nargs="+", choices=VARIANTS, default=list(VARIANTS))
+
+    trace_replay = subparsers.add_parser(
+        "trace-replay", help="adapt and replay externally supplied Agent memory traces"
+    )
+    trace_replay.add_argument("--events", type=Path, required=True)
+    trace_replay.add_argument(
+        "--adapter", choices=("normalized", "tau-bench", "appworld", "locomo"), default="normalized"
+    )
+    trace_replay.add_argument("--source", default="external")
+    trace_replay.add_argument("--out-dir", type=Path, default=Path("."))
+    trace_replay.add_argument("--holdout-fraction", type=float, default=0.2)
+    trace_replay.add_argument("--seed", type=int, default=0)
     return parser
 
 
@@ -208,6 +226,36 @@ def main(argv: list[str] | None = None) -> int:
         load_workload_config(args.config)
         instances = generate_suite(WORKLOADS, range(args.seeds))
         return _run_core_experiment(instances, args.variants, args.out_dir)
+    if args.command == "trace-replay":
+        records = load_trace_records(args.events)
+        instances = build_trace_instances(
+            records,
+            args.adapter,
+            source=args.source,
+            seed=args.seed,
+        )
+        train, holdout = split_holdout(records, args.holdout_fraction, seed=args.seed)
+        rows = replay_trace_instances(instances, VARIANTS)
+        write_jsonl(instances, args.out_dir / "data" / "trace_grounded_instances.jsonl")
+        write_csv(rows, args.out_dir / "results" / "trace_replay.csv")
+        trace_features = [
+            extract_trace_features(instance["operations"], instance["failure_schedule"])
+            for instance in instances
+        ]
+        realism = compare_distributions([], trace_features)
+        realism["trace_grounded_status"] = "trace_supplied" if instances else "not_supplied"
+        realism["trace_inventory"] = trace_inventory(instances)
+        realism["calibration"] = calibrate_config(trace_features)
+        realism["split"] = {
+            "train_record_count": len(train),
+            "holdout_record_count": len(holdout),
+            "holdout_fraction": args.holdout_fraction,
+            "seed": args.seed,
+        }
+        write_summary(realism, args.out_dir / "results" / "trace_realism.json")
+        print(f"adapted {len(records)} records into {len(instances)} trace instances")
+        print(f"wrote trace replay artifacts -> {args.out_dir}")
+        return 0
     raise ValueError(f"unsupported command: {args.command}")
 
 

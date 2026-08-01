@@ -1,6 +1,6 @@
 # TxnMem 独立 Reference Semantics（v0.1）
 
-本文档定义 TxnMemBench 的独立 reference semantics。它是后续
+本文档定义 TxnMemBench 的独立 reference semantics。它是当前
 `reference executor` 的唯一语义依据，用来从 workload、policy、failure
 schedule 和实际操作序列计算 ground truth。
 
@@ -352,9 +352,10 @@ repair 必须满足：
   transaction。
 
 为了避免把实现细节混入 ground truth，v0.1 将一次 `invalidate + repair`
-视为 reference-level atomic macro。后续若研究 repair crash，再扩展为显式的
-incremental repair semantics，并把未完成 repair 的状态加入
-`allowed_outcomes`。
+视为 reference-level atomic macro。增量 repair 的 crash-point 分析现在由
+独立的 `src/txnmem_repair.py` 提供：它显式记录每个 repair step、crash-after-k
+状态和 unsafe active descendants；这部分结果作为扩展实验报告，不改变 v0.1
+reference oracle 的 atomic macro 定义。
 
 ## 4. Commit、Abort 与 Failure Semantics
 
@@ -633,8 +634,9 @@ TxnMem 反向修改 oracle。
   implementation 的执行结果；
 - 下一步可以直接据此实现一个不依赖 TxnMem simulator 的 reference executor。
 
-下一项工作是实现 reference executor，并为 W1/W3/W6 编写 differential-oracle
-测试；在此之前不应继续扩大 W7/W8 的 workload 数量。
+`src/txnmem_reference.py` 已实现上述 reference executor，且 W1/W3/W6 等场景
+已有 differential-oracle 测试。后续工作应把真实 Agent trace 和可替换 backend
+接入同一套 oracle，而不是把 generator 的输出重新当作 ground truth。
 
 ## 11. 当前 pilot 与本规范的已知差异
 
@@ -648,11 +650,10 @@ TxnMem 反向修改 oracle。
    `before_linearize/after_linearize` phase。它只能对应一个未精化的 crash
    boundary；reference oracle 应输出允许结果集合，或在 workload 迁移时补充
    phase，而不能沿用旧的单一 abort 标签。
-3. 当前 W6/W7 的 `provenance_edges` 由 generator 预先写入，且 operation 只有
-   `invalidate`。这可以作为 legacy replay 输入，但不满足“由真实
-   read/derive/propagate 操作产生 provenance”的正式要求。正式版本需要记录
-   derive/propagate operations，再由 reference executor 计算 graph 和 repair
-   closure。
+3. 当前 W6/W7 的正式 generator 使用真实 `read`/`derive` operations，
+   `provenance_edges` 保持为空，由 simulator/reference executor 在执行时产生
+   graph；旧 JSONL 中若仍有预置边，只能标记为 `legacy pilot`。真实 trace 入口
+   同样要求从实际 memory event 记录 derive/propagate，再计算 repair closure。
 4. 当前 schema 强制要求 `expected_outcome`，这只是兼容旧数据的结构约束，不是
    语义约束。迁移完成后应将它移出 instance input，并由 oracle output 取代。
 

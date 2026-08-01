@@ -57,6 +57,31 @@ workflow and converts them into TxnMem operations. It is an adapter boundary,
 not a claim that τ-bench, AppWorld, or LoCoMo already provides policy-churn,
 failure-schedule, or provenance ground truth.
 
+The remaining trace pipeline is executable with:
+
+```bash
+python3 src/txnmem_experiment.py trace-replay \
+  --events path/to/events.jsonl \
+  --adapter tau-bench \
+  --source tau-bench-run \
+  --out-dir results/trace_run
+```
+
+Supported adapters are `normalized`, `tau-bench`, `appworld`, and `locomo`.
+They translate explicit tool/API/memory events only; ordinary dialogue turns
+are skipped. The command writes `data/trace_grounded_instances.jsonl`,
+`results/trace_replay.csv`, and `results/trace_realism.json`, including an
+episode-level holdout split and calibration parameters. Until source logs are
+provided, the repository must report `not_supplied`; the included controlled
+instances are not a substitute for a benchmark run.
+
+`src/txnmem_backend.py` provides an instrumented backend and
+`AgentReplayRunner`. A real Agent or storage connector can implement the same
+event-producing calls, then pass the recorded events through the trace
+pipeline. `src/txnmem_interleavings.py` exhaustively enumerates small
+per-agent sequence linearizations, while `src/txnmem_repair.py` reports every
+incremental-repair crash point and any unsafe active descendants.
+
 ## Public compatibility API
 
 `src/txnmem_experiment.py` preserves `generate_instance`, `run_instance`,

@@ -37,6 +37,37 @@ class TxnMemCliOutputTests(unittest.TestCase):
             self.assertTrue((Path(tmp) / "results/realism.json").exists())
             self.assertTrue(list((Path(tmp) / "results/figures").glob("*.svg")))
 
+    def test_trace_replay_command_writes_trace_grounded_artifacts(self):
+        with TemporaryDirectory() as tmp:
+            events = Path(tmp) / "events.jsonl"
+            events.write_text(
+                '{"episode_id":"ep1","event_id":"e1","kind":"memory_write","memory_id":"m1"}\n'
+                '{"episode_id":"ep1","event_id":"e2","kind":"memory_read","memory_id":"m1"}\n',
+                encoding="utf-8",
+            )
+            out_dir = Path(tmp) / "out"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "src/txnmem_experiment.py",
+                    "trace-replay",
+                    "--events",
+                    str(events),
+                    "--adapter",
+                    "normalized",
+                    "--out-dir",
+                    str(out_dir),
+                ],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("adapted 2 records into 1 trace instances", completed.stdout)
+            self.assertTrue((out_dir / "data/trace_grounded_instances.jsonl").exists())
+            self.assertTrue((out_dir / "results/trace_replay.csv").exists())
+            self.assertTrue((out_dir / "results/trace_realism.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
