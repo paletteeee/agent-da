@@ -74,17 +74,17 @@ def micro_witness_report(
         linearized = _linearized_instance(instance, operations)
         oracle = reference_outcome(linearized)
         result = run_instance(linearized, variant)
-        comparison = compare_result_to_oracle(linearized, result)
+        oracle_comparison = compare_result_to_oracle(linearized, result)
         oracle_keys.update(repr(outcome) for outcome in oracle.get("allowed_outcomes", []))
         comparison = {
             "interleaving_id": index,
             "operation_ids": [operation.get("op_id") for operation in operations],
             "oracle_outcome_count": len(oracle.get("allowed_outcomes", [])),
-            "oracle_match": comparison["matches"],
-            "oracle_mismatches": comparison["mismatches"],
+            "oracle_match": oracle_comparison["matches"],
+            "oracle_mismatches": oracle_comparison["mismatches"],
         }
         records.append(comparison)
-        if result.get("oracle_match") is False:
+        if not oracle_comparison["matches"]:
             mismatches += 1
     return {
         "concurrency_model": "exhaustive_serializations",

@@ -91,6 +91,10 @@ class TxnMemRemainingTaskTests(unittest.TestCase):
         self.assertEqual(report["interleaving_count"], 2)
         self.assertIn("oracle_outcome_count", report)
 
+        bypass = generate_instance("scope_bypass", 0)
+        mismatch_report = micro_witness_report(bypass, [bypass["operations"]], variant="Naive")
+        self.assertEqual(mismatch_report["oracle_mismatch_count"], 1)
+
     def test_incremental_repair_exposes_safe_and_unsafe_crash_points(self):
         memories = {memory_id: {"memory_id": memory_id, "status": "active"} for memory_id in ["m0", "m1", "m2"]}
         edges = [
