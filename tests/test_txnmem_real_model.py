@@ -4,9 +4,13 @@ from unittest.mock import patch
 
 from txnmem_model_protocol import (
     ModelProtocolError,
+    ModelResponse,
     OpenAICompatibleClient,
+    ToolCall,
     parse_chat_completion,
 )
+from txnmem_backend import InstrumentedMemoryBackend
+from txnmem_real_agent import NativeMemoryToolGateway, run_real_agent
 
 
 class _FakeHTTPResponse:
@@ -107,6 +111,73 @@ class TxnMemRealModelProtocolTests(unittest.TestCase):
         with self.assertRaises(ModelProtocolError) as raised:
             parse_chat_completion({"choices": []})
         self.assertEqual(raised.exception.code, "missing_choices")
+
+
+class _ScriptedModel:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def complete(self, messages, tools, *, seed=None, temperature=0.0):
+        self.calls.append({"messages": messages, "tools": tools, "seed": seed, "temperature": temperature})
+        return self.responses.pop(0)
+
+
+class TxnMemRealAgentTests(unittest.TestCase):
+    def test_tool_loop_records_actual_derive_sources(self):
+        model = _ScriptedModel(
+            [
+                ModelResponse("", [ToolCall("c1", "memory_write", {"memory_id": "source", "value": "s"})]),
+                ModelResponse(
+                    "",
+                    [
+                        ToolCall(
+                            "c2",
+                            "memory_derive",
+                            {"memory_id": "derived", "source_ids": ["source"], "value": "d"},
+                        )
+                    ],
+                ),
+                ModelResponse("done", []),
+            ]
+        )
+        report = run_real_agent(
+            {"task_id": "task_1", "prompt": "remember and derive", "agent_id": "agent_model"},
+            model,
+            InstrumentedMemoryBackend(),
+            max_steps=5,
+            seed=11,
+        )
+        self.assertEqual(report["status"], "completed")
+        self.assertEqual(report["steps"], 3)
+        derive = next(event for event in report["events"] if event["kind"] == "memory_derive")
+        self.assertEqual(derive["source_ids"], ["source"])
+        self.assertEqual(derive["agent_id"], "agent_model")
+        self.assertEqual(model.calls[0]["seed"], 11)
+        self.assertTrue(NativeMemoryToolGateway.schemas())
+
+    def test_unknown_tool_stops_with_stable_failure_code(self):
+        model = _ScriptedModel([ModelResponse("", [ToolCall("bad", "memory_delete", {})])])
+        report = run_real_agent(
+            {"task_id": "task_2", "prompt": "delete", "agent_id": "agent_model"},
+            model,
+            InstrumentedMemoryBackend(),
+        )
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["failure_code"], "unknown_tool")
+
+    def test_tool_loop_reports_max_steps_without_silent_success(self):
+        model = _ScriptedModel(
+            [ModelResponse("", [ToolCall("c", "memory_read", {"memory_id": "missing"})]) for _ in range(3)]
+        )
+        report = run_real_agent(
+            {"task_id": "task_3", "prompt": "loop", "agent_id": "agent_model"},
+            model,
+            InstrumentedMemoryBackend(),
+            max_steps=2,
+        )
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["failure_code"], "max_steps_exceeded")
 
 
 if __name__ == "__main__":
