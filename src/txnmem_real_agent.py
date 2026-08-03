@@ -8,7 +8,6 @@ from collections.abc import Mapping
 from typing import Any
 
 from txnmem_backend import InstrumentedMemoryBackend
-from txnmem_event_contract import EventContractError
 from txnmem_model_protocol import ModelProtocolError
 
 

@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
@@ -11,6 +13,12 @@ from txnmem_model_protocol import (
 )
 from txnmem_backend import InstrumentedMemoryBackend
 from txnmem_real_agent import NativeMemoryToolGateway, run_real_agent
+from txnmem_real_experiment import (
+    RealExperimentError,
+    evaluate_native_trace,
+    run_experiment_manifest,
+    sanitize_run_report,
+)
 
 
 class _FakeHTTPResponse:
@@ -178,6 +186,67 @@ class TxnMemRealAgentTests(unittest.TestCase):
         )
         self.assertEqual(report["status"], "failed")
         self.assertEqual(report["failure_code"], "max_steps_exceeded")
+
+
+class TxnMemRealExperimentTests(unittest.TestCase):
+    def test_native_trace_is_evaluated_by_all_variants_and_keeps_source_count(self):
+        backend = InstrumentedMemoryBackend()
+        backend.write("source", value="private source", agent_id="agent_model")
+        backend.derive(
+            "derived",
+            source_ids=["source"],
+            value="derived fact",
+            agent_id="agent_model",
+        )
+        report = evaluate_native_trace(backend.validated_events(), "native_task", seed=4)
+        self.assertEqual(report["evidence"]["source_operation_count"], 2)
+        self.assertEqual(len(report["rows"]), 5)
+        self.assertIn("TxnMem", report["evidence"]["oracle_match_by_variant"])
+        self.assertTrue(report["evidence"]["trace_ground_truth_native"])
+
+    def test_sanitized_report_removes_raw_content_and_events(self):
+        report = sanitize_run_report(
+            {
+                "task_id": "task_1",
+                "status": "completed",
+                "steps": 2,
+                "value": "private",
+                "messages": [{"content": "private prompt"}],
+                "events": [{"kind": "memory_write", "value": "private"}],
+                "evidence": {"source_operation_count": 1},
+            }
+        )
+        serialized = json.dumps(report, ensure_ascii=False)
+        self.assertNotIn("private", serialized)
+        self.assertNotIn("messages", report)
+        self.assertNotIn("events", report)
+        self.assertEqual(report["evidence"]["source_operation_count"], 1)
+
+    def test_manifest_requires_a_model_before_creating_results(self):
+        with TemporaryDirectory() as tmp:
+            with self.assertRaises(RealExperimentError) as raised:
+                run_experiment_manifest({"tasks": []}, None, Path(tmp))
+        self.assertEqual(raised.exception.code, "missing_model")
+
+    def test_manifest_writes_local_raw_trace_and_sanitized_summary(self):
+        model = _ScriptedModel(
+            [
+                ModelResponse("", [ToolCall("c1", "memory_write", {"memory_id": "m1", "value": "private"})]),
+                ModelResponse("done", []),
+            ]
+        )
+        with TemporaryDirectory() as tmp:
+            result = run_experiment_manifest(
+                {"tasks": [{"task_id": "task_manifest", "prompt": "write", "agent_id": "agent_model"}]},
+                model,
+                Path(tmp),
+            )
+            raw = (Path(tmp) / "data" / "native_model_traces.jsonl").read_text(encoding="utf-8")
+            summary = (Path(tmp) / "results" / "native_model_summary.json").read_text(encoding="utf-8")
+        self.assertIn("native_event_count", result)
+        self.assertIn("private", raw)
+        self.assertNotIn("private", summary)
+        self.assertNotIn("events", result)
 
 
 if __name__ == "__main__":
