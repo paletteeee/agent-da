@@ -32,7 +32,11 @@ from txnmem_realism import (
     split_holdout,
     trace_evidence_summary,
 )
-from txnmem_real_experiment import RealExperimentError, run_experiment_manifest
+from txnmem_real_experiment import (
+    RealExperimentError,
+    load_task_manifest,
+    run_experiment_manifest,
+)
 from txnmem_reference import reference_outcome
 from txnmem_schema import DEFAULT_CONFIG, load_workload_config
 from txnmem_simulator import VARIANTS, run_instance
@@ -365,9 +369,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "real-model-smoke":
         try:
-            manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-            if not isinstance(manifest, dict):
-                raise RealExperimentError("invalid_manifest", "manifest must be a JSON object")
+            manifest, manifest_sha256 = load_task_manifest(args.manifest)
             if args.offline_fixture:
                 model = _OfflineFixtureModel()
                 execution_mode = "offline_fixture"
@@ -389,6 +391,7 @@ def main(argv: list[str] | None = None) -> int:
             report = run_experiment_manifest(manifest, model, args.out_dir)
             report["model_execution_mode"] = execution_mode
             report["model_id"] = model_id
+            report["manifest_sha256"] = manifest_sha256
             summary_path = args.out_dir / "results" / "native_model_summary.json"
             summary_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         except (OSError, json.JSONDecodeError, RealExperimentError) as exc:

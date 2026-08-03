@@ -16,9 +16,12 @@ from txnmem_real_agent import NativeMemoryToolGateway, run_real_agent
 from txnmem_real_experiment import (
     RealExperimentError,
     evaluate_native_trace,
+    load_task_manifest,
     run_experiment_manifest,
     sanitize_run_report,
+    split_task_manifest,
 )
+from txnmem_failure_controller import FailureController, FailureInjectionError
 
 
 class _FakeHTTPResponse:
@@ -187,6 +190,29 @@ class TxnMemRealAgentTests(unittest.TestCase):
         self.assertEqual(report["status"], "failed")
         self.assertEqual(report["failure_code"], "max_steps_exceeded")
 
+    def test_tool_loop_applies_task_failure_schedule_after_native_write(self):
+        model = _ScriptedModel(
+            [
+                ModelResponse("", [ToolCall("c1", "memory_write", {"memory_id": "m1", "value": "v"})]),
+                ModelResponse("done", []),
+            ]
+        )
+        report = run_real_agent(
+            {
+                "task_id": "task_crash",
+                "prompt": "write then stop",
+                "agent_id": "agent_model",
+                "failure_schedule": [
+                    {"trigger": {"kind": "memory_write", "count": 1}, "action": {"type": "crash"}}
+                ],
+            },
+            model,
+            InstrumentedMemoryBackend(),
+        )
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["failure_code"], "injected_crash")
+        self.assertEqual(report["events"][0]["kind"], "memory_write")
+
 
 class TxnMemRealExperimentTests(unittest.TestCase):
     def test_native_trace_is_evaluated_by_all_variants_and_keeps_source_count(self):
@@ -247,6 +273,51 @@ class TxnMemRealExperimentTests(unittest.TestCase):
         self.assertIn("private", raw)
         self.assertNotIn("private", summary)
         self.assertNotIn("events", result)
+
+    def test_task_manifest_hash_and_episode_holdout_are_deterministic(self):
+        manifest = {
+            "manifest_version": 1,
+            "tasks": [
+                {"task_id": "t1", "prompt": "p1"},
+                {"task_id": "t2", "prompt": "p2"},
+                {"task_id": "t3", "prompt": "p3"},
+                {"task_id": "t4", "prompt": "p4"},
+                {"task_id": "t5", "prompt": "p5"},
+            ],
+        }
+        normalized, digest = load_task_manifest(manifest)
+        train_a, holdout_a = split_task_manifest(normalized, 0.2, seed=17)
+        train_b, holdout_b = split_task_manifest(normalized, 0.2, seed=17)
+        self.assertEqual(digest, load_task_manifest(manifest)[1])
+        self.assertEqual(train_a, train_b)
+        self.assertEqual(holdout_a, holdout_b)
+        self.assertEqual(len(holdout_a), 1)
+
+    def test_failure_controller_crashes_after_first_matching_write(self):
+        controller = FailureController(
+            [{"trigger": {"kind": "memory_write", "count": 1}, "action": {"type": "crash"}}]
+        )
+        with self.assertRaises(FailureInjectionError) as raised:
+            controller.observe({"kind": "memory_write", "step": 1})
+        self.assertEqual(raised.exception.code, "injected_crash")
+
+    def test_failure_controller_revoke_records_policy_event_and_denies_write(self):
+        backend = InstrumentedMemoryBackend()
+        gateway = NativeMemoryToolGateway(
+            backend,
+            agent_id="agent_model",
+            failure_controller=FailureController(
+                [{
+                    "trigger": {"kind": "memory_read", "count": 1},
+                    "action": {"type": "policy_revoke", "target": "write"},
+                }]
+            ),
+        )
+        gateway.call("memory_read", {"memory_id": "source"})
+        self.assertEqual(backend.events[-1]["kind"], "policy_revoke")
+        with self.assertRaises(Exception) as raised:
+            gateway.call("memory_write", {"memory_id": "m1", "value": "v"})
+        self.assertIn("policy", str(raised.exception))
 
 
 if __name__ == "__main__":

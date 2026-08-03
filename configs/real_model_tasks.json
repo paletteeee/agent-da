@@ -1,0 +1,112 @@
+{
+  "manifest_version": 1,
+  "dataset_name": "txnmem-native-real-model-recommended",
+  "tasks": [
+    {
+      "task_id": "native_write_001",
+      "agent_id": "agent_model",
+      "system_prompt": "Use memory tools for every memory operation.",
+      "prompt": "Store one generic user preference as a memory.",
+      "seed": 0,
+      "temperature": 0.0,
+      "max_steps": 8,
+      "failure_schedule": []
+    },
+    {
+      "task_id": "native_derive_001",
+      "agent_id": "agent_model",
+      "system_prompt": "Use memory tools. A derived memory must include the actual source_ids.",
+      "prompt": "Write a generic source fact and derive a concise summary from it.",
+      "seed": 1,
+      "temperature": 0.0,
+      "max_steps": 10,
+      "failure_schedule": []
+    },
+    {
+      "task_id": "native_crash_after_write_001",
+      "agent_id": "agent_model",
+      "system_prompt": "Use memory tools and keep related writes in one logical task.",
+      "prompt": "Write two generic related facts that should be committed together.",
+      "seed": 2,
+      "temperature": 0.0,
+      "max_steps": 10,
+      "failure_schedule": [
+        {"trigger": {"kind": "memory_write", "count": 1}, "action": {"type": "crash"}}
+      ]
+    },
+    {
+      "task_id": "native_revoke_before_write_001",
+      "agent_id": "agent_model",
+      "system_prompt": "Use memory tools and obey the current policy.",
+      "prompt": "Read the current generic profile and then write an updated profile memory.",
+      "seed": 3,
+      "temperature": 0.0,
+      "max_steps": 10,
+      "failure_schedule": [
+        {"trigger": {"kind": "memory_read", "count": 1}, "action": {"type": "policy_revoke", "target": "write"}}
+      ]
+    },
+    {
+      "task_id": "native_invalidate_source_001",
+      "agent_id": "agent_model",
+      "system_prompt": "Use memory tools and preserve explicit provenance.",
+      "prompt": "Write a source fact using memory_id fixture_source, then derive a second memory from it.",
+      "seed": 4,
+      "temperature": 0.0,
+      "max_steps": 10,
+      "failure_schedule": [
+        {"trigger": {"kind": "memory_write", "count": 1}, "action": {"type": "invalidate", "target": "fixture_source"}}
+      ]
+    },
+    {
+      "task_id": "native_supersede_001",
+      "agent_id": "agent_model",
+      "system_prompt": "Use memory tools; when replacing a fact, preserve the supersession relation.",
+      "prompt": "Write an old generic fact and replace it with a corrected fact.",
+      "seed": 5,
+      "temperature": 0.0,
+      "max_steps": 10,
+      "failure_schedule": []
+    },
+    {
+      "task_id": "native_propagate_001",
+      "agent_id": "agent_model",
+      "system_prompt": "Use memory tools and explicitly identify the propagation source.",
+      "prompt": "Write a generic source fact and propagate it to a task-scoped memory.",
+      "seed": 6,
+      "temperature": 0.0,
+      "max_steps": 10,
+      "failure_schedule": []
+    },
+    {
+      "task_id": "native_search_001",
+      "agent_id": "agent_model",
+      "system_prompt": "Use memory search before deciding whether a new memory is needed.",
+      "prompt": "Search for a generic preference and write a memory only if no matching memory is found.",
+      "seed": 7,
+      "temperature": 0.0,
+      "max_steps": 10,
+      "failure_schedule": []
+    },
+    {
+      "task_id": "native_chain_001",
+      "agent_id": "agent_model",
+      "system_prompt": "Use memory tools and record source_ids for every derivation.",
+      "prompt": "Create a three-step generic reasoning memory chain from a source fact.",
+      "seed": 8,
+      "temperature": 0.0,
+      "max_steps": 12,
+      "failure_schedule": []
+    },
+    {
+      "task_id": "native_policy_read_001",
+      "agent_id": "agent_model",
+      "system_prompt": "Use memory tools and obey read permissions.",
+      "prompt": "Read a generic memory and report whether it is available under the current policy.",
+      "seed": 9,
+      "temperature": 0.0,
+      "max_steps": 8,
+      "failure_schedule": []
+    }
+  ]
+}

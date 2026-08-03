@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import random
 from collections import Counter
 from pathlib import Path
 from collections.abc import Mapping
 from typing import Any
 
 from txnmem_event_contract import validate_events
+from txnmem_failure_controller import validate_failure_schedule
 from txnmem_real_agent import run_real_agent
 from txnmem_realism import trace_evidence_summary
 from txnmem_trace_pipeline import build_trace_instances, replay_trace_instances
@@ -20,6 +23,68 @@ class RealExperimentError(ValueError):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
+
+
+def load_task_manifest(source: Mapping[str, Any] | Path) -> tuple[dict[str, Any], str]:
+    """Validate a JSON task manifest and return its canonical SHA-256 digest."""
+
+    if isinstance(source, Path):
+        try:
+            source = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RealExperimentError("invalid_manifest", "task manifest is not valid JSON") from exc
+    if not isinstance(source, Mapping):
+        raise RealExperimentError("invalid_manifest", "task manifest must be a mapping")
+    version = source.get("manifest_version", 1)
+    if version != 1:
+        raise RealExperimentError("unsupported_manifest_version", "only manifest_version=1 is supported")
+    tasks = source.get("tasks")
+    if not isinstance(tasks, list) or not tasks:
+        raise RealExperimentError("missing_tasks", "manifest.tasks must be a non-empty list")
+    normalized_tasks: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for index, task in enumerate(tasks, start=1):
+        if not isinstance(task, Mapping):
+            raise RealExperimentError("invalid_task", f"task {index} must be a mapping")
+        task_id = task.get("task_id")
+        prompt = task.get("prompt")
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise RealExperimentError("missing_task_id", f"task {index} needs task_id")
+        if task_id in seen_ids:
+            raise RealExperimentError("duplicate_task_id", f"duplicate task_id: {task_id}")
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise RealExperimentError("missing_prompt", f"task {task_id} needs prompt")
+        schedule = task.get("failure_schedule", [])
+        validate_failure_schedule(schedule)
+        seen_ids.add(task_id)
+        normalized_tasks.append(dict(task))
+    normalized = {
+        "manifest_version": 1,
+        "dataset_name": str(source.get("dataset_name", "txnmem-real-model")),
+        "tasks": normalized_tasks,
+    }
+    encoded = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return normalized, hashlib.sha256(encoded).hexdigest()
+
+
+def split_task_manifest(
+    manifest: Mapping[str, Any], holdout_fraction: float = 0.2, seed: int = 0
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split complete task episodes deterministically by task_id."""
+
+    if not 0.0 <= holdout_fraction < 1.0:
+        raise ValueError("holdout_fraction must be in [0, 1)")
+    tasks = list(manifest.get("tasks", []))
+    groups = {str(task["task_id"]): task for task in tasks}
+    keys = sorted(groups)
+    random.Random(seed).shuffle(keys)
+    count = int(round(len(keys) * holdout_fraction)) if keys else 0
+    if holdout_fraction > 0 and keys:
+        count = max(1, count)
+    holdout_keys = set(keys[:count])
+    train = [groups[key] for key in sorted(groups) if key not in holdout_keys]
+    holdout = [groups[key] for key in sorted(groups) if key in holdout_keys]
+    return train, holdout
 
 
 _RAW_KEYS = frozenset(

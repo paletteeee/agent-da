@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from txnmem_backend import InstrumentedMemoryBackend
+from txnmem_failure_controller import FailureController, FailureInjectionError
 from txnmem_model_protocol import ModelProtocolError
 
 
@@ -136,9 +137,27 @@ class NativeMemoryToolGateway:
             },
         ]
 
-    def __init__(self, backend: InstrumentedMemoryBackend, agent_id: str = "agent_model"):
+    def __init__(
+        self,
+        backend: InstrumentedMemoryBackend,
+        agent_id: str = "agent_model",
+        failure_controller: FailureController | None = None,
+    ):
         self.backend = backend
         self.agent_id = agent_id
+        self.failure_controller = failure_controller
+        self.revoked_actions: set[str] = set()
+
+    def revoke_policy(self, action: str, *, trigger_event: Mapping[str, Any]) -> None:
+        self.revoked_actions.add(action)
+        self.backend.record_control_event(
+            "policy_revoke",
+            action=action,
+            policy_version=trigger_event.get("step", 1) + 1,
+            trigger_event_id=trigger_event.get("event_id"),
+            agent_id=self.agent_id,
+            projection="failure_injection",
+        )
 
     def call(self, name: str, arguments: Mapping[str, Any]) -> Any:
         if name not in self._METHODS:
@@ -149,10 +168,28 @@ class NativeMemoryToolGateway:
         operation.setdefault("agent_id", self.agent_id)
         operation.setdefault("projection", "real_model_native")
         method_name = self._METHODS[name]
+        required_policy = {
+            "memory_read": "read",
+            "memory_search": "read",
+            "memory_write": "write",
+            "memory_derive": "write",
+            "memory_propagate": "write",
+            "memory_supersede": "write",
+            "memory_invalidate": "write",
+        }[name]
+        if required_policy in self.revoked_actions:
+            raise AgentToolError("policy_denied", f"policy revoked for {required_policy}")
         try:
             result = getattr(self.backend, method_name)(**operation)
         except (KeyError, TypeError, ValueError) as exc:
             raise AgentToolError("invalid_tool_arguments", f"invalid arguments for {name}") from exc
+        if self.failure_controller and self.backend.events:
+            try:
+                self.failure_controller.observe(
+                    self.backend.events[-1], backend=self.backend, gateway=self
+                )
+            except FailureInjectionError as exc:
+                raise AgentToolError(exc.code, str(exc)) from exc
         if name == "memory_invalidate":
             return {"ok": True, "memory_id": operation.get("memory_id")}
         return copy.deepcopy(result)
@@ -211,6 +248,10 @@ def run_real_agent(
         raise ValueError("max_steps must be positive")
 
     gateway = NativeMemoryToolGateway(backend, agent_id=agent_id)
+    failure_controller = task.get("failure_controller", task.get("failure_schedule"))
+    if failure_controller is not None and not isinstance(failure_controller, FailureController):
+        failure_controller = FailureController(failure_controller)
+    gateway.failure_controller = failure_controller
     messages: list[dict[str, Any]] = []
     system_prompt = task.get("system_prompt")
     if system_prompt:

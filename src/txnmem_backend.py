@@ -32,6 +32,11 @@ class InstrumentedMemoryBackend:
         self.events.append(event)
         return event
 
+    def record_control_event(self, kind: str, **fields: Any) -> dict[str, Any]:
+        """Record a policy/failure control event through the same event boundary."""
+
+        return self._event(kind, **fields)
+
     def write(self, memory_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
         memory = {
             "memory_id": memory_id,
