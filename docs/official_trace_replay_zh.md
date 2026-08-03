@@ -40,6 +40,14 @@ transaction 内的写入提前暴露给后续读取而出现预期的 `visible_m
 检查事件。该 fixture 用于证明 provenance 来源可以在产生事件时记录；它与本节的
 公开数据 projection 分开，也不把公开数据改称为 native memory ground truth。
 
+对于真实模型实验，仓库现在提供 `txnmem_model_protocol.py`、
+`txnmem_real_agent.py`、`txnmem_real_experiment.py` 和
+`txnmem_failure_controller.py`：它们可以连接 OpenAI-compatible GPU endpoint，
+运行结构化 memory tool loop，按 event trigger 注入 crash/policy revoke/invalidate，
+再由独立 reference executor 评测。当前已经通过 offline fixture 和单元测试验证
+接口，但尚未在真实 GPU/model endpoint 上产生可报告的 native memory trace；因此
+本节三组公开 replay 的结果仍不能替代真实模型实验结果。
+
 ## 数据来源
 
 - τ-bench historical trajectories：<https://github.com/sierra-research/tau-bench>

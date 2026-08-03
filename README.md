@@ -141,6 +141,13 @@ The remote mode requires an explicitly configured endpoint/model and writes
 raw prompt/event data only to the run directory; commit only its sanitized
 `results/native_model_summary.json` after reviewing privacy and licensing.
 
+The recommended multi-task manifest is
+`configs/real_model_tasks.json`. It contains ten generic task episodes with
+fixed seeds and trigger-based crash, policy-revoke, and invalidation schedules.
+The manifest loader reports a SHA-256 digest and supports deterministic
+episode-level holdout splitting; it is a task scaffold, not a collected model
+dataset.
+
 For local replay timing (not production latency), run:
 
 ```bash
