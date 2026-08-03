@@ -110,7 +110,7 @@
 - [x] **Step 1: Run the full test suite and all aggregate-output assertions.**
 - [x] **Step 2: Update paper/documentation to distinguish harness-ready from real-endpoint evidence.**
 - [x] **Step 3: Regenerate DOCX, run unzip/a11y/heading/section audits, and record renderer limitations.**
-- [ ] **Step 4: Commit local code and docs.**
+- [x] **Step 4: Commit local code and docs.** (`d5c943b`)
 
 ### Task 7: Remote GPU execution handoff
 
