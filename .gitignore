@@ -6,4 +6,6 @@ __pycache__/
 htmlcov/
 external_data/
 results/real_model_*/
+results/*_download.log
+results/vllm_server.log
 data/native_model_traces.jsonl
