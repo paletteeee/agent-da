@@ -7,7 +7,12 @@
       "prompt": "Store a generic source fact in memory, then derive a second memory from that source.",
       "seed": 0,
       "temperature": 0.0,
-      "max_steps": 8
+      "max_steps": 8,
+      "acceptance": {
+        "required_event_kinds": ["memory_write", "memory_derive"],
+        "required_memory_ids": ["fixture_source", "fixture_derived"],
+        "required_provenance": [{"derived_id": "fixture_derived", "source_id": "fixture_source"}]
+      }
     }
   ]
 }

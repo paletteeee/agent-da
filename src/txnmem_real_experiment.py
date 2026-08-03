@@ -87,6 +87,49 @@ def split_task_manifest(
     return train, holdout
 
 
+def evaluate_task_contract(task: Mapping[str, Any], run_report: Mapping[str, Any]) -> dict[str, Any]:
+    """Evaluate deterministic event-level acceptance criteria without an LLM judge."""
+
+    acceptance = task.get("acceptance", {})
+    if not isinstance(acceptance, Mapping):
+        return {"success": False, "reasons": ["invalid_acceptance"]}
+    events = [event for event in run_report.get("events", []) if isinstance(event, Mapping)]
+    reasons: list[str] = []
+    if run_report.get("status") != "completed":
+        reasons.append("run_not_completed")
+    kinds = {str(event.get("kind")) for event in events}
+    for required_kind in acceptance.get("required_event_kinds", []):
+        if required_kind not in kinds:
+            reasons.append(f"missing_event_kind:{required_kind}")
+    memory_ids: set[str] = set()
+    for event in events:
+        for field in ("memory_id", "old_memory_id", "new_memory_id", "output_id"):
+            value = event.get(field)
+            if isinstance(value, str):
+                memory_ids.add(value)
+    for required_id in acceptance.get("required_memory_ids", []):
+        if required_id not in memory_ids:
+            reasons.append(f"missing_memory_id:{required_id}")
+    for required_edge in acceptance.get("required_provenance", []):
+        if not isinstance(required_edge, Mapping):
+            reasons.append("invalid_required_provenance")
+            continue
+        source_id = required_edge.get("source_id")
+        derived_id = required_edge.get("derived_id")
+        matched = False
+        for event in events:
+            output_id = event.get("memory_id") or event.get("output_id")
+            source_ids = list(event.get("source_ids", []))
+            if event.get("source_id"):
+                source_ids.append(event.get("source_id"))
+            if output_id == derived_id and source_id in source_ids:
+                matched = True
+                break
+        if not matched:
+            reasons.append(f"missing_provenance:{source_id}->{derived_id}")
+    return {"success": not reasons, "reasons": reasons}
+
+
 _RAW_KEYS = frozenset(
     {
         "events",
@@ -230,6 +273,7 @@ def run_experiment_manifest(
                 "status": run_report.get("status"),
                 "steps": run_report.get("steps", 0),
             }
+            task_summary["task_evaluator"] = evaluate_task_contract(task_record, run_report)
             events = run_report.get("events", [])
             if events:
                 evaluation = evaluate_native_trace(events, task_id, seed=int(task_record.get("seed", index - 1)))

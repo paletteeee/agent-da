@@ -123,6 +123,7 @@ class TxnMemCliOutputTests(unittest.TestCase):
             self.assertTrue(summary_path.exists())
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             self.assertTrue(summary["trace_ground_truth_native"])
+            self.assertTrue(summary["task_summaries"][0]["task_evaluator"]["success"])
             serialized = json.dumps(summary, ensure_ascii=False).lower()
             for sensitive_key in ("value", "content", "arguments", "messages", "events"):
                 self.assertNotIn(sensitive_key, serialized)

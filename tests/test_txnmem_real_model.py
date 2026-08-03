@@ -16,6 +16,7 @@ from txnmem_real_agent import NativeMemoryToolGateway, run_real_agent
 from txnmem_real_experiment import (
     RealExperimentError,
     evaluate_native_trace,
+    evaluate_task_contract,
     load_task_manifest,
     run_experiment_manifest,
     sanitize_run_report,
@@ -273,6 +274,24 @@ class TxnMemRealExperimentTests(unittest.TestCase):
         self.assertIn("private", raw)
         self.assertNotIn("private", summary)
         self.assertNotIn("events", result)
+
+    def test_task_contract_evaluator_checks_actual_native_events(self):
+        backend = InstrumentedMemoryBackend()
+        backend.write("source", value="s", agent_id="agent_model")
+        backend.derive("derived", source_ids=["source"], value="d", agent_id="agent_model")
+        task = {
+            "task_id": "task_eval",
+            "acceptance": {
+                "required_event_kinds": ["memory_write", "memory_derive"],
+                "required_memory_ids": ["source", "derived"],
+                "required_provenance": [{"derived_id": "derived", "source_id": "source"}],
+            },
+        }
+        result = evaluate_task_contract(task, {"status": "completed", "events": backend.validated_events()})
+        self.assertTrue(result["success"])
+        failed = evaluate_task_contract(task, {"status": "failed", "events": backend.validated_events()})
+        self.assertFalse(failed["success"])
+        self.assertIn("run_not_completed", failed["reasons"])
 
     def test_task_manifest_hash_and_episode_holdout_are_deterministic(self):
         manifest = {
