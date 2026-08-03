@@ -4,7 +4,7 @@
       "task_id": "real_model_smoke_001",
       "agent_id": "agent_model",
       "system_prompt": "Use the memory tools for every memory operation. When deriving a memory, provide the actual source_ids.",
-      "prompt": "Store a generic source fact in memory, then derive a second memory from that source.",
+      "prompt": "Store a generic source fact using memory_id fixture_source, then derive memory_id fixture_derived from fixture_source.",
       "seed": 0,
       "temperature": 0.0,
       "max_steps": 8,
