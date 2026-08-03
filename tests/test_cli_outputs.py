@@ -98,6 +98,35 @@ class TxnMemCliOutputTests(unittest.TestCase):
             for sensitive_key in ("value", "arguments", "data", "password", "token"):
                 self.assertNotIn(sensitive_key, serialized.lower())
 
+    def test_real_model_smoke_fixture_writes_native_trace_and_sanitized_summary(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "src/txnmem_experiment.py",
+                    "real-model-smoke",
+                    "--manifest",
+                    "configs/real_model_smoke.json",
+                    "--offline-fixture",
+                    "--out-dir",
+                    str(out_dir),
+                ],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("native model", completed.stdout)
+            self.assertTrue((out_dir / "data/native_model_traces.jsonl").exists())
+            summary_path = out_dir / "results/native_model_summary.json"
+            self.assertTrue(summary_path.exists())
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            self.assertTrue(summary["trace_ground_truth_native"])
+            serialized = json.dumps(summary, ensure_ascii=False).lower()
+            for sensitive_key in ("value", "content", "arguments", "messages", "events"):
+                self.assertNotIn(sensitive_key, serialized)
+
 
 if __name__ == "__main__":
     unittest.main()

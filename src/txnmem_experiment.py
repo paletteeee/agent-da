@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
@@ -22,6 +23,7 @@ from txnmem_coverage import coverage_report
 from txnmem_coverage import schedule_effectiveness
 from txnmem_distributed import run_process_action_sequences
 from txnmem_mutation import run_mutation_campaign
+from txnmem_model_protocol import ModelResponse, OpenAICompatibleClient, ToolCall
 from txnmem_performance import benchmark_replay
 from txnmem_realism import (
     calibrate_config,
@@ -30,6 +32,7 @@ from txnmem_realism import (
     split_holdout,
     trace_evidence_summary,
 )
+from txnmem_real_experiment import RealExperimentError, run_experiment_manifest
 from txnmem_reference import reference_outcome
 from txnmem_schema import DEFAULT_CONFIG, load_workload_config
 from txnmem_simulator import VARIANTS, run_instance
@@ -170,7 +173,49 @@ def _build_parser() -> argparse.ArgumentParser:
         "process-smoke", help="run the dependency-free process linearization smoke test"
     )
     process_smoke.add_argument("--out-dir", type=Path, default=Path("."))
+
+    real_model = subparsers.add_parser(
+        "real-model-smoke", help="run a native memory trace against a model endpoint or offline fixture"
+    )
+    real_model.add_argument("--manifest", type=Path, required=True)
+    real_model.add_argument("--out-dir", type=Path, default=Path("."))
+    real_model.add_argument("--endpoint", default=None, help="OpenAI-compatible base or completion endpoint")
+    real_model.add_argument("--model", default=None, help="model id served by the endpoint")
+    real_model.add_argument("--api-key-env", default="OPENAI_API_KEY")
+    real_model.add_argument("--timeout", type=float, default=60.0)
+    real_model.add_argument("--offline-fixture", action="store_true")
     return parser
+
+
+class _OfflineFixtureModel:
+    """Deterministic protocol fixture; never reported as a real model run."""
+
+    def __init__(self):
+        self.step = 0
+
+    def complete(self, _messages, _tools, *, seed=None, temperature=0.0):
+        self.step += 1
+        if self.step == 1:
+            return ModelResponse(
+                "",
+                [ToolCall("fixture_write", "memory_write", {"memory_id": "fixture_source", "value": "generic source"})],
+            )
+        if self.step == 2:
+            return ModelResponse(
+                "",
+                [
+                    ToolCall(
+                        "fixture_derive",
+                        "memory_derive",
+                        {
+                            "memory_id": "fixture_derived",
+                            "source_ids": ["fixture_source"],
+                            "value": "generic derived",
+                        },
+                    )
+                ],
+            )
+        return ModelResponse("offline fixture completed", [])
 
 
 def _run_core_experiment(
@@ -317,6 +362,39 @@ def main(argv: list[str] | None = None) -> int:
         report["production_latency_claim"] = False
         write_summary(report, args.out_dir / "results" / "process_concurrency.json")
         print(f"wrote process concurrency smoke report -> {args.out_dir / 'results' / 'process_concurrency.json'}")
+        return 0
+    if args.command == "real-model-smoke":
+        try:
+            manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+            if not isinstance(manifest, dict):
+                raise RealExperimentError("invalid_manifest", "manifest must be a JSON object")
+            if args.offline_fixture:
+                model = _OfflineFixtureModel()
+                execution_mode = "offline_fixture"
+                model_id = "offline-fixture"
+            else:
+                if not args.endpoint or not args.model:
+                    raise RealExperimentError(
+                        "missing_endpoint_or_model",
+                        "real endpoint mode requires --endpoint and --model",
+                    )
+                model = OpenAICompatibleClient(
+                    args.endpoint,
+                    args.model,
+                    api_key=os.environ.get(args.api_key_env),
+                    timeout_s=args.timeout,
+                )
+                execution_mode = "remote_endpoint"
+                model_id = args.model
+            report = run_experiment_manifest(manifest, model, args.out_dir)
+            report["model_execution_mode"] = execution_mode
+            report["model_id"] = model_id
+            summary_path = args.out_dir / "results" / "native_model_summary.json"
+            summary_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        except (OSError, json.JSONDecodeError, RealExperimentError) as exc:
+            print(f"real model experiment configuration error: {exc}")
+            return 2
+        print(f"wrote native model trace and summary -> {args.out_dir}")
         return 0
     raise ValueError(f"unsupported command: {args.command}")
 

@@ -115,6 +115,32 @@ This records aggregate evidence only in `results/process_concurrency.json`.
 It checks owner-assigned linearization indexes and worker completion; it is
 not a distributed transaction implementation or a production latency claim.
 
+For the real-model memory trace smoke test, first run the dependency-free
+protocol fixture:
+
+```bash
+python3 examples/real_model_smoke.py \
+  --manifest configs/real_model_smoke.json \
+  --offline-fixture \
+  --out-dir results/real_model_fixture
+```
+
+This produces a local raw trace and a sanitized aggregate summary, but it is
+explicitly marked `offline_fixture`, not a model result. With a remote
+OpenAI-compatible server on GPU, use the same manifest and replace the fixture:
+
+```bash
+python3 examples/real_model_smoke.py \
+  --manifest configs/real_model_smoke.json \
+  --endpoint http://GPU_HOST:8000/v1 \
+  --model MODEL_ID \
+  --out-dir results/real_model_run
+```
+
+The remote mode requires an explicitly configured endpoint/model and writes
+raw prompt/event data only to the run directory; commit only its sanitized
+`results/native_model_summary.json` after reviewing privacy and licensing.
+
 For local replay timing (not production latency), run:
 
 ```bash

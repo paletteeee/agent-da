@@ -5,3 +5,5 @@ __pycache__/
 .coverage
 htmlcov/
 external_data/
+results/real_model_*/
+data/native_model_traces.jsonl
