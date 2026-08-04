@@ -22,6 +22,7 @@ from txnmem_metrics import (
 from txnmem_coverage import coverage_report
 from txnmem_coverage import schedule_effectiveness
 from txnmem_distributed import run_process_action_sequences
+from txnmem_distributed_protocol import run_protocol_matrix
 from txnmem_mutation import run_mutation_campaign
 from txnmem_model_protocol import ModelResponse, OpenAICompatibleClient, ToolCall
 from txnmem_performance import benchmark_replay
@@ -37,6 +38,7 @@ from txnmem_real_experiment import (
     load_task_manifest,
     run_experiment_manifest,
 )
+from txnmem_public_native import run_public_native_manifest
 from txnmem_reference import reference_outcome
 from txnmem_schema import DEFAULT_CONFIG, load_workload_config
 from txnmem_simulator import VARIANTS, run_instance
@@ -177,6 +179,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "process-smoke", help="run the dependency-free process linearization smoke test"
     )
     process_smoke.add_argument("--out-dir", type=Path, default=Path("."))
+    protocol_smoke = subparsers.add_parser(
+        "process-protocol-smoke", help="run deterministic distributed protocol fault schedules"
+    )
+    protocol_smoke.add_argument("--out-dir", type=Path, default=Path("."))
 
     real_model = subparsers.add_parser(
         "real-model-smoke", help="run a native memory trace against a model endpoint or offline fixture"
@@ -188,6 +194,17 @@ def _build_parser() -> argparse.ArgumentParser:
     real_model.add_argument("--api-key-env", default="OPENAI_API_KEY")
     real_model.add_argument("--timeout", type=float, default=60.0)
     real_model.add_argument("--offline-fixture", action="store_true")
+    public_native = subparsers.add_parser(
+        "public-native-smoke", help="run a public workflow through the native-agent boundary"
+    )
+    public_native.add_argument("--dataset", choices=("tau-bench", "appworld", "locomo"), required=True)
+    public_native.add_argument("--source", type=Path, required=True)
+    public_native.add_argument("--limit", type=int, default=1)
+    public_native.add_argument("--out-dir", type=Path, default=Path("."))
+    public_native.add_argument("--endpoint", default=None)
+    public_native.add_argument("--model", default=None)
+    public_native.add_argument("--api-key-env", default="OPENAI_API_KEY")
+    public_native.add_argument("--timeout", type=float, default=60.0)
     return parser
 
 
@@ -367,6 +384,23 @@ def main(argv: list[str] | None = None) -> int:
         write_summary(report, args.out_dir / "results" / "process_concurrency.json")
         print(f"wrote process concurrency smoke report -> {args.out_dir / 'results' / 'process_concurrency.json'}")
         return 0
+    if args.command == "process-protocol-smoke":
+        schedules = [
+            [{"type": "prepare"}, {"type": "commit"}],
+            [{"type": "prepare"}, {"type": "abort"}],
+            [{"type": "prepare"}, {"type": "crash_after_prepare", "participant": "p2"}],
+            [
+                {"type": "prepare"},
+                {"type": "network_drop", "participant": "p2", "phase": "commit"},
+                {"type": "commit"},
+                {"type": "retry_commit"},
+                {"type": "retry_commit"},
+            ],
+        ]
+        report = run_protocol_matrix(schedules)
+        write_summary(report, args.out_dir / "results" / "process_protocol.json")
+        print(f"wrote distributed protocol smoke report -> {args.out_dir / 'results' / 'process_protocol.json'}")
+        return 0
     if args.command == "real-model-smoke":
         try:
             manifest, manifest_sha256 = load_task_manifest(args.manifest)
@@ -398,6 +432,29 @@ def main(argv: list[str] | None = None) -> int:
             print(f"real model experiment configuration error: {exc}")
             return 2
         print(f"wrote native model trace and summary -> {args.out_dir}")
+        return 0
+    if args.command == "public-native-smoke":
+        model = None
+        if args.endpoint and args.model:
+            model = OpenAICompatibleClient(
+                args.endpoint,
+                args.model,
+                api_key=os.environ.get(args.api_key_env),
+                timeout_s=args.timeout,
+            )
+        report = run_public_native_manifest(
+            {
+                "dataset": args.dataset,
+                "source": str(args.source),
+                "limit": args.limit,
+            },
+            model,
+            args.out_dir,
+        )
+        if report.get("status") == "blocked":
+            print(f"public native run blocked: {report.get('reason')}")
+        else:
+            print(f"wrote public native summary -> {args.out_dir}")
         return 0
     raise ValueError(f"unsupported command: {args.command}")
 

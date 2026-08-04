@@ -124,3 +124,5 @@
 - [x] Copy only aggregate evidence back to the local repository and commit it. Local sanitized aggregate path: `results/real_model_qwen2.5_7b_aggregate_final/`; raw prompts, arguments, and event traces remain outside Git.
 
 Remote native-model evidence: train has 8/8 task contracts, 17 native events, 0 replay errors, and 8/8 TxnMem oracle matches; holdout has 2/2 task contracts, 5 native events, 0 replay errors, and 2/2 TxnMem oracle matches. The two train failures are expected schedule outcomes (`injected_crash` and `policy_denied`).
+
+Remaining-task extension: the Qwen2.5-7B manifest was repeated five times on the remote endpoint, producing 50 task episodes, 110 native events, 0 evaluation errors, 50/50 task contracts, and 50/50 TxnMem oracle matches. The sanitized report is copied locally under `results/remaining_tasks/native_repetitions5/`. Public native checks for τ-bench, AppWorld, and LoCoMo are explicitly blocked because the executable runtimes/environment are unavailable on the server; existing projection replay remains a separate evidence layer.

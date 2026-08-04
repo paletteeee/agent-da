@@ -1,0 +1,79 @@
+{
+  "contract_success_count": 50,
+  "contract_success_interval": {
+    "confidence": 0.95,
+    "estimate": 1.0,
+    "lower": 0.9286524008666414,
+    "successes": 50,
+    "trials": 50,
+    "upper": 1.0
+  },
+  "contract_success_rate": 1.0,
+  "evaluation_error_count": 0,
+  "expected_failure_counts": {
+    "injected_crash": 5,
+    "policy_denied": 5
+  },
+  "manifest_sha256": "500086121b0faa140060880bc40fbddac8aa9388e2599da5250c3649ef19b92b",
+  "model_id": "qwen2.5-7b-instruct",
+  "native_event_count": 110,
+  "per_replication": [
+    {
+      "contract_success_count": 10,
+      "evaluation_error_count": 0,
+      "replication": 1,
+      "task_count": 10,
+      "txnmem_oracle_match_count": 10
+    },
+    {
+      "contract_success_count": 10,
+      "evaluation_error_count": 0,
+      "replication": 2,
+      "task_count": 10,
+      "txnmem_oracle_match_count": 10
+    },
+    {
+      "contract_success_count": 10,
+      "evaluation_error_count": 0,
+      "replication": 3,
+      "task_count": 10,
+      "txnmem_oracle_match_count": 10
+    },
+    {
+      "contract_success_count": 10,
+      "evaluation_error_count": 0,
+      "replication": 4,
+      "task_count": 10,
+      "txnmem_oracle_match_count": 10
+    },
+    {
+      "contract_success_count": 10,
+      "evaluation_error_count": 0,
+      "replication": 5,
+      "task_count": 10,
+      "txnmem_oracle_match_count": 10
+    }
+  ],
+  "production_claim": false,
+  "raw_reports_committed": false,
+  "raw_reports_location": "rep_*/results/native_model_summary.json",
+  "repetitions": 5,
+  "seed_offsets": [
+    0,
+    100,
+    200,
+    300,
+    400
+  ],
+  "total_tasks": 50,
+  "txnmem_oracle_match_count": 50,
+  "txnmem_oracle_match_interval": {
+    "confidence": 0.95,
+    "estimate": 1.0,
+    "lower": 0.9286524008666414,
+    "successes": 50,
+    "trials": 50,
+    "upper": 1.0
+  },
+  "txnmem_oracle_match_rate": 1.0
+}

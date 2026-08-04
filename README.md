@@ -115,6 +115,29 @@ This records aggregate evidence only in `results/process_concurrency.json`.
 It checks owner-assigned linearization indexes and worker completion; it is
 not a distributed transaction implementation or a production latency claim.
 
+For the deterministic distributed protocol fault smoke, run:
+
+```bash
+python3 src/txnmem_experiment.py process-protocol-smoke \
+  --out-dir results/remaining_tasks/distributed_protocol
+```
+
+This covers prepare/commit, abort, crash-after-prepare, network-drop retry,
+and idempotent commit retry with an independent protocol invariant checker.
+
+Public workflow native execution has a separate explicit boundary:
+
+```bash
+python3 src/txnmem_experiment.py public-native-smoke \
+  --dataset locomo \
+  --source external_data/raw/locomo10.json \
+  --out-dir results/remaining_tasks/public_native/locomo
+```
+
+If the executable benchmark environment is unavailable, the command writes a
+`blocked_report.json` and does not fall back to projection replay. Existing
+projection replay remains under `results/official_trace_runs/`.
+
 For the real-model memory trace smoke test, first run the dependency-free
 protocol fixture:
 
@@ -147,6 +170,10 @@ fixed seeds and trigger-based crash, policy-revoke, and invalidation schedules.
 The manifest loader reports a SHA-256 digest and supports deterministic
 episode-level holdout splitting; it is a task scaffold, not a collected model
 dataset.
+
+For repeated native evaluation on a configured endpoint, use
+`examples/run_native_repetitions.py`; it writes contract/oracle rates and
+95% Wilson intervals while keeping raw episode reports outside the aggregate.
 
 For local replay timing (not production latency), run:
 

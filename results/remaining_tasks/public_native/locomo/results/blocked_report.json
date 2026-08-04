@@ -1,0 +1,14 @@
+{
+  "checks": {
+    "available": false,
+    "execution_mode": "native_contextual_agent_run",
+    "module_available": false,
+    "reason": "no_executable_agent_environment",
+    "source_exists": true
+  },
+  "dataset": "locomo",
+  "native_ground_truth": false,
+  "projection_fallback": false,
+  "reason": "blocked_external_dependency",
+  "status": "blocked"
+}

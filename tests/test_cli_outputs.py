@@ -128,6 +128,54 @@ class TxnMemCliOutputTests(unittest.TestCase):
             for sensitive_key in ("value", "content", "arguments", "messages", "events"):
                 self.assertNotIn(sensitive_key, serialized)
 
+    def test_public_native_smoke_reports_blocked_runtime_without_projection_fallback(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "src/txnmem_experiment.py",
+                    "public-native-smoke",
+                    "--dataset",
+                    "locomo",
+                    "--source",
+                    "external_data/raw/locomo10.json",
+                    "--out-dir",
+                    str(out_dir),
+                ],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("blocked", completed.stdout)
+            report = json.loads((out_dir / "results/blocked_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(report["status"], "blocked")
+            self.assertFalse(report["projection_fallback"])
+
+    def test_process_protocol_smoke_writes_independent_fault_coverage(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "src/txnmem_experiment.py",
+                    "process-protocol-smoke",
+                    "--out-dir",
+                    str(out_dir),
+                ],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("protocol", completed.stdout)
+            report = json.loads(
+                (out_dir / "results/process_protocol.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(report["invariant_coverage"]["coverage_rate"], 1.0)
+            self.assertEqual(report["minimal_counterexamples"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

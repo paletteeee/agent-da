@@ -1,0 +1,15 @@
+{
+  "checks": {
+    "available": false,
+    "execution_mode": "native_workflow_agent_run",
+    "module_available": false,
+    "reason": "missing_public_source",
+    "required_module": "appworld",
+    "source_exists": false
+  },
+  "dataset": "appworld",
+  "native_ground_truth": false,
+  "projection_fallback": false,
+  "reason": "blocked_external_dependency",
+  "status": "blocked"
+}
