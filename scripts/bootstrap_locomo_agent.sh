@@ -6,7 +6,7 @@ LOCOMO_ROOT="${LOCOMO_ROOT:-/data/locomo}"
 LOCOMO_VENV="${LOCOMO_VENV:-/data/venvs/locomo-agent}"
 
 if [[ ! -d "${LOCOMO_ROOT}/.git" ]]; then
-  git clone https://github.com/snap-research/locomo.git "${LOCOMO_ROOT}"
+  git clone --depth 1 https://github.com/snap-research/locomo.git "${LOCOMO_ROOT}"
 fi
 
 if [[ ! -x "${LOCOMO_VENV}/bin/python" ]]; then
