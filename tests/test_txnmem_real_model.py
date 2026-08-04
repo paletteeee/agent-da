@@ -333,6 +333,25 @@ class TxnMemRealExperimentTests(unittest.TestCase):
         self.assertFalse(failed["success"])
         self.assertIn("run_not_completed", failed["reasons"])
 
+    def test_task_contract_accepts_declared_expected_failure(self):
+        task = {
+            "task_id": "task_expected_crash",
+            "acceptance": {
+                "expected_status": "failed",
+                "required_failure_code": "injected_crash",
+                "required_event_kinds": ["memory_write"],
+            },
+        }
+        result = evaluate_task_contract(
+            task,
+            {
+                "status": "failed",
+                "failure_code": "injected_crash",
+                "events": [{"kind": "memory_write", "memory_id": "m1"}],
+            },
+        )
+        self.assertTrue(result["success"])
+
     def test_task_manifest_hash_and_episode_holdout_are_deterministic(self):
         manifest = {
             "manifest_version": 1,

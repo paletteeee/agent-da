@@ -10,7 +10,8 @@
       "seed": 0,
       "temperature": 0.0,
       "max_steps": 8,
-      "failure_schedule": []
+      "failure_schedule": [],
+      "acceptance": {"expected_status": "completed", "required_event_kinds": ["memory_write"]}
     },
     {
       "task_id": "native_derive_001",
@@ -20,7 +21,8 @@
       "seed": 1,
       "temperature": 0.0,
       "max_steps": 10,
-      "failure_schedule": []
+      "failure_schedule": [],
+      "acceptance": {"expected_status": "completed", "required_event_kinds": ["memory_write", "memory_derive"]}
     },
     {
       "task_id": "native_crash_after_write_001",
@@ -32,7 +34,8 @@
       "max_steps": 10,
       "failure_schedule": [
         {"trigger": {"kind": "memory_write", "count": 1}, "action": {"type": "crash"}}
-      ]
+      ],
+      "acceptance": {"expected_status": "failed", "required_failure_code": "injected_crash", "required_event_kinds": ["memory_write"]}
     },
     {
       "task_id": "native_revoke_before_write_001",
@@ -44,7 +47,8 @@
       "max_steps": 10,
       "failure_schedule": [
         {"trigger": {"kind": "memory_read", "count": 1}, "action": {"type": "policy_revoke", "target": "write"}}
-      ]
+      ],
+      "acceptance": {"expected_status": "failed", "required_failure_code": "policy_denied", "required_event_kinds": ["memory_read", "policy_revoke"]}
     },
     {
       "task_id": "native_invalidate_source_001",
@@ -56,7 +60,8 @@
       "max_steps": 10,
       "failure_schedule": [
         {"trigger": {"kind": "memory_write", "count": 1}, "action": {"type": "invalidate", "target": "fixture_source"}}
-      ]
+      ],
+      "acceptance": {"expected_status": "completed", "required_event_kinds": ["memory_write", "memory_derive"]}
     },
     {
       "task_id": "native_supersede_001",
@@ -66,7 +71,8 @@
       "seed": 5,
       "temperature": 0.0,
       "max_steps": 10,
-      "failure_schedule": []
+      "failure_schedule": [],
+      "acceptance": {"expected_status": "completed", "required_event_kinds": ["memory_write", "memory_supersede"]}
     },
     {
       "task_id": "native_propagate_001",
@@ -76,7 +82,8 @@
       "seed": 6,
       "temperature": 0.0,
       "max_steps": 10,
-      "failure_schedule": []
+      "failure_schedule": [],
+      "acceptance": {"expected_status": "completed", "required_event_kinds": ["memory_write", "memory_propagate"]}
     },
     {
       "task_id": "native_search_001",
@@ -86,7 +93,8 @@
       "seed": 7,
       "temperature": 0.0,
       "max_steps": 10,
-      "failure_schedule": []
+      "failure_schedule": [],
+      "acceptance": {"expected_status": "completed", "required_event_kinds": ["memory_search"]}
     },
     {
       "task_id": "native_chain_001",
@@ -96,7 +104,8 @@
       "seed": 8,
       "temperature": 0.0,
       "max_steps": 12,
-      "failure_schedule": []
+      "failure_schedule": [],
+      "acceptance": {"expected_status": "completed", "required_event_kinds": ["memory_write", "memory_derive"]}
     },
     {
       "task_id": "native_policy_read_001",
@@ -106,7 +115,8 @@
       "seed": 9,
       "temperature": 0.0,
       "max_steps": 8,
-      "failure_schedule": []
+      "failure_schedule": [],
+      "acceptance": {"expected_status": "completed", "required_event_kinds": ["memory_read"]}
     }
   ]
 }

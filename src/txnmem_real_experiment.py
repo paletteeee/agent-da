@@ -95,8 +95,17 @@ def evaluate_task_contract(task: Mapping[str, Any], run_report: Mapping[str, Any
         return {"success": False, "reasons": ["invalid_acceptance"]}
     events = [event for event in run_report.get("events", []) if isinstance(event, Mapping)]
     reasons: list[str] = []
-    if run_report.get("status") != "completed":
-        reasons.append("run_not_completed")
+    expected_status = acceptance.get("expected_status", "completed")
+    if run_report.get("status") != expected_status:
+        if expected_status == "completed":
+            reasons.append("run_not_completed")
+        else:
+            reasons.append(f"unexpected_status:{run_report.get('status')}!=expected:{expected_status}")
+    required_failure_code = acceptance.get("required_failure_code")
+    if required_failure_code is not None and run_report.get("failure_code") != required_failure_code:
+        reasons.append(
+            f"unexpected_failure_code:{run_report.get('failure_code')}!=expected:{required_failure_code}"
+        )
     kinds = {str(event.get("kind")) for event in events}
     for required_kind in acceptance.get("required_event_kinds", []):
         if required_kind not in kinds:
@@ -274,6 +283,8 @@ def run_experiment_manifest(
                 "status": run_report.get("status"),
                 "steps": run_report.get("steps", 0),
             }
+            if run_report.get("failure_code") is not None:
+                task_summary["failure_code"] = run_report.get("failure_code")
             task_summary["task_evaluator"] = evaluate_task_contract(task_record, run_report)
             events = run_report.get("events", [])
             if events:
