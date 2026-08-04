@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from txnmem_public_native import (
     LoCoMoPublicAdapter,
@@ -99,3 +100,17 @@ class PublicNativeRunnerTests(unittest.TestCase):
             self.assertEqual(checks["required_module"], "locomo_agent_runtime")
             self.assertTrue(checks["module_available"])
             self.assertTrue(checks["available"])
+
+    def test_locomo_context_budget_preserves_temporal_endpoints(self):
+        conversation = {
+            "session_1": [{"speaker": "A", "text": "first"}],
+            "session_2": [{"speaker": "B", "text": "middle session fact " * 8}],
+            "session_3": [{"speaker": "A", "text": "last"}],
+        }
+        with patch.dict("os.environ", {"TXNMEM_LOCOMO_CONTEXT_MAX_CHARS": "96"}):
+            context = LoCoMoPublicAdapter._conversation_context(conversation)
+
+        self.assertIn("first", context)
+        self.assertIn("last", context)
+        self.assertIn("[middle sessions omitted for context budget]", context)
+        self.assertLessEqual(len(context), 96)

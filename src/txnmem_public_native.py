@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Mapping
@@ -214,7 +215,21 @@ class LoCoMoPublicAdapter(PublicWorkflowAdapter):
                 text = turn.get("text") or turn.get("content")
                 if text:
                     lines.append(f"{speaker}: {text}")
-        return "\n".join(lines)
+        context = "\n".join(lines)
+        raw_limit = os.environ.get("TXNMEM_LOCOMO_CONTEXT_MAX_CHARS")
+        if not raw_limit:
+            return context
+        try:
+            limit = int(raw_limit)
+        except ValueError:
+            return context
+        marker = "\n[middle sessions omitted for context budget]\n"
+        if limit <= len(marker) or len(context) <= limit:
+            return context
+        content_budget = limit - len(marker)
+        head_budget = content_budget // 2
+        tail_budget = content_budget - head_budget
+        return context[:head_budget] + marker + context[-tail_budget:]
 
     def _records_to_tasks(self, records: list[dict[str, Any]]) -> list[PublicWorkflowTask]:
         tasks: list[PublicWorkflowTask] = []
