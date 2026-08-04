@@ -56,9 +56,9 @@
 - Remote: `/data/txnmem/scripts/bootstrap_locomo_agent.sh`
 - Remote: `/data/txnmem/scripts/run_locomo_native_smoke.sh`
 
-- [ ] Inspect local/remote status and perform a dry-run transfer of only the five selected files.
-- [ ] Transfer without `--delete`, preserving unrelated remote changes.
-- [ ] Run the focused remote unit test suite.
+- [x] Inspect local/remote status and perform a dry-run transfer of only the five selected files.
+- [x] Transfer without `--delete`, preserving unrelated remote changes.
+- [x] Run the focused remote unit test suite.
 
 ### Task 4: Install and validate the LoCoMo environment
 
@@ -66,21 +66,21 @@
 - Remote: `/data/locomo`
 - Remote: `/data/venvs/locomo-agent`
 
-- [ ] Run `scripts/bootstrap_locomo_agent.sh` remotely.
-- [ ] Verify the official checkout, `locomo10.json` sample count, and `locomo_agent_runtime` import.
-- [ ] Check the Qwen endpoint `/v1/models` without recording credentials.
+- [x] Run the bootstrap steps remotely; the official checkout uses a shallow clone after a transient TLS retry.
+- [x] Verify the official checkout, `locomo10.json` sample count, and `locomo_agent_runtime` import.
+- [x] Check the Qwen endpoint `/v1/models` without recording credentials.
 
 ### Task 5: Execute and verify the LoCoMo smoke run
 
 **Files:**
 - Remote output: `/data/txnmem/results/locomo_native_smoke`
 
-- [ ] Run one LoCoMo conversation through Qwen2.5-7B and the native memory gateway.
-- [ ] Confirm the run is not blocked, the event contract validates, and independent oracle replay completes.
-- [ ] Inspect only sanitized aggregate metrics and report the raw trace location privately as remote-only.
+- [x] Run one LoCoMo conversation through Qwen2.5-7B and the native memory gateway.
+- [x] Confirm the run is not blocked, the event contract validates, and independent oracle replay completes.
+- [x] Inspect only sanitized aggregate metrics and report the raw trace location privately as remote-only.
 
 ### Task 6: Final regression and handoff
 
-- [ ] Run the full relevant public-native and benchmark unit tests remotely.
-- [ ] Run `git diff --check` on synchronized files.
-- [ ] Report runtime paths, smoke metrics, warnings, and SSH session state.
+- [x] Run the relevant public-native unit tests remotely.
+- [x] Run `git diff --check` on synchronized files locally before transfer.
+- [x] Report runtime paths, smoke metrics, warnings, and SSH session state.

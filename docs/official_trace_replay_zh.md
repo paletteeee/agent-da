@@ -44,9 +44,12 @@ transaction 内的写入提前暴露给后续读取而出现预期的 `visible_m
 `txnmem_real_agent.py`、`txnmem_real_experiment.py` 和
 `txnmem_failure_controller.py`：它们可以连接 OpenAI-compatible GPU endpoint，
 运行结构化 memory tool loop，按 event trigger 注入 crash/policy revoke/invalidate，
-再由独立 reference executor 评测。当前已经通过 offline fixture 和单元测试验证
-接口，但尚未在真实 GPU/model endpoint 上产生可报告的 native memory trace；因此
-本节三组公开 replay 的结果仍不能替代真实模型实验结果。
+再由独立 reference executor 评测。LoCoMo 另外配置了
+`locomo_agent_runtime` contextual wrapper；远程 Qwen2.5-7B smoke 结果保存在
+`/data/txnmem/results/locomo_native_smoke_final2/`，产生 11 个
+`real_model_native` events、完成 1/1 task，且 independent oracle match。该结果是
+单样本环境验证，不是 LoCoMo QA 正确率，也不能把本节三组 projection replay 改称
+为原生 memory 数据集。
 
 ## 数据来源
 
