@@ -275,6 +275,46 @@ class TxnMemRealExperimentTests(unittest.TestCase):
         self.assertNotIn("private", summary)
         self.assertNotIn("events", result)
 
+    def test_manifest_records_replay_errors_without_aborting_later_tasks(self):
+        model = _ScriptedModel(
+            [
+                ModelResponse("", [ToolCall("c1", "memory_write", {"memory_id": "old_fact", "value": "old"})]),
+                ModelResponse("", [ToolCall("c2", "memory_write", {"memory_id": "new_fact", "value": "new"})]),
+                ModelResponse(
+                    "",
+                    [
+                        ToolCall(
+                            "c3",
+                            "memory_supersede",
+                            {
+                                "old_memory_id": "old_fact",
+                                "new_memory_id": "new_fact",
+                                "value": "new",
+                            },
+                        )
+                    ],
+                ),
+                ModelResponse("done", []),
+                ModelResponse("", [ToolCall("c4", "memory_write", {"memory_id": "after_error", "value": "ok"})]),
+                ModelResponse("done", []),
+            ]
+        )
+        with TemporaryDirectory() as tmp:
+            result = run_experiment_manifest(
+                {
+                    "tasks": [
+                        {"task_id": "task_replay_error", "prompt": "supersede", "agent_id": "agent_model"},
+                        {"task_id": "task_after_error", "prompt": "supersede", "agent_id": "agent_model"},
+                    ]
+                },
+                model,
+                Path(tmp),
+            )
+        self.assertEqual(result["evaluation_error_count"], 1)
+        self.assertEqual(len(result["task_summaries"]), 2)
+        self.assertEqual(result["task_summaries"][0]["evaluation_status"], "error")
+        self.assertEqual(result["task_summaries"][1]["status"], "completed")
+
     def test_task_contract_evaluator_checks_actual_native_events(self):
         backend = InstrumentedMemoryBackend()
         backend.write("source", value="s", agent_id="agent_model")

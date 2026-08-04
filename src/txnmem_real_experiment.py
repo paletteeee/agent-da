@@ -245,6 +245,7 @@ def run_experiment_manifest(
     variant_matches: Counter[str] = Counter()
     variant_violations: Counter[str] = Counter()
     native_event_count = 0
+    evaluation_error_count = 0
     with raw_path.open("w", encoding="utf-8") as raw_handle:
         for index, task in enumerate(tasks, start=1):
             if not isinstance(task, Mapping):
@@ -276,13 +277,24 @@ def run_experiment_manifest(
             task_summary["task_evaluator"] = evaluate_task_contract(task_record, run_report)
             events = run_report.get("events", [])
             if events:
-                evaluation = evaluate_native_trace(events, task_id, seed=int(task_record.get("seed", index - 1)))
-                task_summary["evidence"] = evaluation["evidence"]
-                task_summary["variant_summary"] = evaluation["variant_summary"]
-                for variant, values in evaluation["variant_summary"].items():
-                    variant_totals[variant] += int(values["count"])
-                    variant_matches[variant] += int(values["oracle_matched"])
-                    variant_violations[variant] += int(values["violating"])
+                try:
+                    evaluation = evaluate_native_trace(
+                        events, task_id, seed=int(task_record.get("seed", index - 1))
+                    )
+                except (KeyError, RealExperimentError, ValueError) as exc:
+                    evaluation_error_count += 1
+                    task_summary["evaluation_status"] = "error"
+                    task_summary["evaluation_error"] = {
+                        "type": type(exc).__name__,
+                        "message": str(exc),
+                    }
+                else:
+                    task_summary["evidence"] = evaluation["evidence"]
+                    task_summary["variant_summary"] = evaluation["variant_summary"]
+                    for variant, values in evaluation["variant_summary"].items():
+                        variant_totals[variant] += int(values["count"])
+                        variant_matches[variant] += int(values["oracle_matched"])
+                        variant_violations[variant] += int(values["violating"])
             else:
                 task_summary["failure_code"] = run_report.get("failure_code", "no_events")
             aggregate_tasks.append(task_summary)
@@ -302,6 +314,7 @@ def run_experiment_manifest(
         "task_count": len(tasks),
         "completed_task_count": sum(task["status"] == "completed" for task in aggregate_tasks),
         "native_event_count": native_event_count,
+        "evaluation_error_count": evaluation_error_count,
         "task_summaries": aggregate_tasks,
         "variants": variants,
         "trace_ground_truth_native": True,
