@@ -36,6 +36,7 @@ from txnmem_realism import (
 from txnmem_real_experiment import (
     RealExperimentError,
     load_task_manifest,
+    run_benchmark_experiment_manifest,
     run_experiment_manifest,
 )
 from txnmem_public_native import run_public_native_manifest
@@ -194,6 +195,31 @@ def _build_parser() -> argparse.ArgumentParser:
     real_model.add_argument("--api-key-env", default="OPENAI_API_KEY")
     real_model.add_argument("--timeout", type=float, default=60.0)
     real_model.add_argument("--offline-fixture", action="store_true")
+    benchmark_native = subparsers.add_parser(
+        "benchmark-native-smoke", help="run a benchmark task through merged benchmark+memory tools"
+    )
+    benchmark_native.add_argument("--benchmark", choices=("tau-bench", "appworld", "locomo"), required=True)
+    benchmark_native.add_argument("--manifest", type=Path, required=True)
+    benchmark_native.add_argument("--tau-domain", default="airline", choices=("airline", "retail"))
+    benchmark_native.add_argument("--tau-split", default="test", choices=("test", "train", "dev"))
+    benchmark_native.add_argument(
+        "--tau-user-strategy",
+        default="scripted",
+        choices=("scripted", "human"),
+        help="tau-bench user boundary; scripted is reproducible and non-interactive",
+    )
+    benchmark_native.add_argument("--appworld-root", type=Path, default=Path("external_data/deps/appworld-data"))
+    benchmark_native.add_argument(
+        "--appworld-apps",
+        default=None,
+        help="comma-separated AppWorld apps to expose; use a task-specific list to bound tool context",
+    )
+    benchmark_native.add_argument("--out-dir", type=Path, default=Path("."))
+    benchmark_native.add_argument("--endpoint", default=None, help="OpenAI-compatible base or completion endpoint")
+    benchmark_native.add_argument("--model", default=None, help="model id served by the endpoint")
+    benchmark_native.add_argument("--api-key-env", default="OPENAI_API_KEY")
+    benchmark_native.add_argument("--timeout", type=float, default=60.0)
+    benchmark_native.add_argument("--offline-fixture", action="store_true")
     public_native = subparsers.add_parser(
         "public-native-smoke", help="run a public workflow through the native-agent boundary"
     )
@@ -432,6 +458,85 @@ def main(argv: list[str] | None = None) -> int:
             print(f"real model experiment configuration error: {exc}")
             return 2
         print(f"wrote native model trace and summary -> {args.out_dir}")
+        return 0
+    if args.command == "benchmark-native-smoke":
+        try:
+            manifest, manifest_sha256 = load_task_manifest(args.manifest)
+            if args.offline_fixture:
+                model = _OfflineFixtureModel()
+                execution_mode = "offline_fixture"
+                model_id = "offline-fixture"
+            else:
+                if not args.endpoint or not args.model:
+                    raise RealExperimentError(
+                        "missing_endpoint_or_model",
+                        "real endpoint mode requires --endpoint and --model",
+                    )
+                model = OpenAICompatibleClient(
+                    args.endpoint,
+                    args.model,
+                    api_key=os.environ.get(args.api_key_env),
+                    timeout_s=args.timeout,
+                )
+                execution_mode = "remote_endpoint"
+                model_id = args.model
+            from txnmem_benchmark_bridge import (
+                AppWorldAdapter,
+                LoCoMoAdapter,
+                TauBenchAdapter,
+                _official_tau_user_strategy,
+            )
+
+            if args.benchmark == "tau-bench":
+                if args.offline_fixture:
+                    from unittest import mock as _mock
+
+                    _mock.patch(
+                        "builtins.input",
+                        side_effect=lambda *a, **k: "I want to book a flight. ###STOP###",
+                    ).start()
+
+                def adapter_factory():
+                    from tau_bench.envs.airline.env import MockAirlineDomainEnv
+                    from tau_bench.envs.retail.env import MockRetailDomainEnv
+
+                    if args.tau_domain == "airline":
+                        env_cls = MockAirlineDomainEnv
+                    else:
+                        env_cls = MockRetailDomainEnv
+                    env = env_cls(
+                        user_strategy=_official_tau_user_strategy(args.tau_user_strategy),
+                        task_split=args.tau_split,
+                        task_index=None,
+                    )
+                    return TauBenchAdapter(
+                        lambda: env,
+                        task_split=args.tau_split,
+                        user_strategy=args.tau_user_strategy,
+                    )
+            elif args.benchmark == "appworld":
+                def adapter_factory():
+                    app_names = (
+                        [name.strip() for name in args.appworld_apps.split(",") if name.strip()]
+                        if args.appworld_apps
+                        else None
+                    )
+                    return AppWorldAdapter(appworld_root=args.appworld_root, app_names=app_names)
+            else:
+                def adapter_factory():
+                    return LoCoMoAdapter()
+
+            report = run_benchmark_experiment_manifest(manifest, model, adapter_factory, args.out_dir)
+            report["model_execution_mode"] = execution_mode
+            report["model_id"] = model_id
+            report["manifest_sha256"] = manifest_sha256
+            report["benchmark"] = args.benchmark
+            summary_path = args.out_dir / "results" / "native_model_summary.json"
+            summary_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        except (OSError, json.JSONDecodeError, RealExperimentError) as exc:
+            print(f"benchmark native experiment configuration error: {exc}")
+            return 2
+        print(f"wrote benchmark native trace and summary -> {args.out_dir}")
         return 0
     if args.command == "public-native-smoke":
         model = None

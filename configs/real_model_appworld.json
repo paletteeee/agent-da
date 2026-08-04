@@ -1,0 +1,48 @@
+{
+  "manifest_version": 1,
+  "dataset_name": "appworld",
+  "tasks": [
+    {
+      "task_id": "appworld-024c982_1",
+      "instruction": "Request $13 publicly on Venmo from my friend, Stacy, with a note, \"For yesterday's meal\".",
+      "prompt": "Request $13 publicly on Venmo from my friend, Stacy, with a note, \"For yesterday's meal\".",
+      "agent_id": "agent_1",
+      "seed": 0,
+      "temperature": 0.0,
+      "max_steps": 30,
+      "failure_schedule": [],
+      "acceptance": {
+        "expected_status": "completed"
+      },
+      "task_dir": "024c982_1",
+      "supervisor": {
+        "first_name": "Joyce",
+        "last_name": "Weaver",
+        "email": "joyce-weav@gmail.com",
+        "phone_number": "3155673041"
+      },
+      "datetime": "2023-05-18T12:00:00"
+    },
+    {
+      "task_id": "appworld-024c982_2",
+      "instruction": "Request $28 privately on Venmo from my roommate, Melissa, with a note, \"For the movie tickets\".",
+      "prompt": "Request $28 privately on Venmo from my roommate, Melissa, with a note, \"For the movie tickets\".",
+      "agent_id": "agent_1",
+      "seed": 0,
+      "temperature": 0.0,
+      "max_steps": 30,
+      "failure_schedule": [],
+      "acceptance": {
+        "expected_status": "completed"
+      },
+      "task_dir": "024c982_2",
+      "supervisor": {
+        "first_name": "Nicholas",
+        "last_name": "Weber",
+        "email": "nicholas.weber@gmail.com",
+        "phone_number": "9503658964"
+      },
+      "datetime": "2023-05-18T12:00:00"
+    }
+  ]
+}

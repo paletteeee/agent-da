@@ -10,6 +10,7 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import Any
 
+from txnmem_backend import InstrumentedMemoryBackend
 from txnmem_event_contract import validate_events
 from txnmem_failure_controller import validate_failure_schedule
 from txnmem_real_agent import run_real_agent
@@ -234,6 +235,126 @@ def evaluate_native_trace(
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _empty_manifest_report(raw_path: str, task_count: int = 0) -> dict[str, Any]:
+    return {
+        "task_count": task_count,
+        "completed_task_count": 0,
+        "native_event_count": 0,
+        "evaluation_error_count": 0,
+        "task_summaries": [],
+        "variants": {},
+        "trace_ground_truth_native": True,
+        "production_latency_claim": False,
+        "raw_trace_path": raw_path,
+    }
+
+
+def run_benchmark_experiment_manifest(
+    manifest: Mapping[str, Any],
+    model: Any | None,
+    adapter_factory: Any,
+    out_dir: Path,
+) -> dict[str, Any]:
+    """Run task manifest entries through a benchmark adapter and write
+    raw-local plus aggregate outputs."""
+
+    if model is None or not callable(getattr(model, "complete", None)):
+        raise RealExperimentError("missing_model", "a configured model client is required")
+    tasks = manifest.get("tasks") if isinstance(manifest, Mapping) else None
+    if not isinstance(tasks, list) or not tasks:
+        raise RealExperimentError("missing_tasks", "manifest.tasks must be a non-empty list")
+    if not callable(adapter_factory):
+        raise RealExperimentError("missing_adapter", "a benchmark adapter factory is required")
+
+    from txnmem_benchmark_bridge import run_benchmark_agent
+
+    raw_path = out_dir / "data" / "native_model_traces.jsonl"
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    aggregate_tasks: list[dict[str, Any]] = []
+    variant_totals: Counter[str] = Counter()
+    variant_matches: Counter[str] = Counter()
+    variant_violations: Counter[str] = Counter()
+    native_event_count = 0
+    evaluation_error_count = 0
+    with raw_path.open("w", encoding="utf-8") as raw_handle:
+        for index, task in enumerate(tasks, start=1):
+            if not isinstance(task, Mapping):
+                raise RealExperimentError("invalid_task", f"manifest task {index} must be a mapping")
+            backend = InstrumentedMemoryBackend()
+            adapter = adapter_factory()
+            task_record = dict(task)
+            task_id = str(task_record.get("task_id") or f"native_task_{index:04d}")
+            run_report = run_benchmark_agent(
+                task_record,
+                model,
+                backend,
+                adapter,
+                max_steps=int(task_record.get("max_steps", 30)),
+                seed=int(task_record.get("seed", index - 1)),
+                temperature=float(task_record.get("temperature", 0.0)),
+            )
+            native_event_count += len(run_report.get("events", []))
+            raw_handle.write(json.dumps({"task_id": task_id, "run": run_report}, ensure_ascii=False) + "\n")
+            task_summary: dict[str, Any] = {
+                "task_id": task_id,
+                "status": run_report.get("status"),
+                "steps": run_report.get("steps", 0),
+                "official": run_report.get("official"),
+            }
+            if run_report.get("failure_code") is not None:
+                task_summary["failure_code"] = run_report.get("failure_code")
+            task_summary["task_evaluator"] = evaluate_task_contract(task_record, run_report)
+            events = run_report.get("events", [])
+            if events:
+                try:
+                    evaluation = evaluate_native_trace(
+                        events, task_id, seed=int(task_record.get("seed", index - 1))
+                    )
+                except (KeyError, RealExperimentError, ValueError) as exc:
+                    evaluation_error_count += 1
+                    task_summary["evaluation_status"] = "error"
+                    task_summary["evaluation_error"] = {
+                        "type": type(exc).__name__,
+                        "message": str(exc),
+                    }
+                else:
+                    task_summary["evidence"] = evaluation["evidence"]
+                    task_summary["variant_summary"] = evaluation["variant_summary"]
+                    for variant, values in evaluation["variant_summary"].items():
+                        variant_totals[variant] += int(values["count"])
+                        variant_matches[variant] += int(values["oracle_matched"])
+                        variant_violations[variant] += int(values["violating"])
+            else:
+                task_summary["failure_code"] = run_report.get("failure_code", "no_events")
+            aggregate_tasks.append(task_summary)
+
+    variants = {
+        variant: {
+            "count": variant_totals[variant],
+            "oracle_matched": variant_matches[variant],
+            "oracle_match_rate": variant_matches[variant] / variant_totals[variant]
+            if variant_totals[variant]
+            else 0.0,
+            "violating": variant_violations[variant],
+        }
+        for variant in sorted(variant_totals)
+    }
+    report = {
+        "task_count": len(tasks),
+        "completed_task_count": sum(task["status"] == "completed" for task in aggregate_tasks),
+        "native_event_count": native_event_count,
+        "evaluation_error_count": evaluation_error_count,
+        "task_summaries": aggregate_tasks,
+        "variants": variants,
+        "trace_ground_truth_native": True,
+        "production_latency_claim": False,
+        "raw_trace_path": str(raw_path),
+    }
+    sanitized = sanitize_run_report(report)
+    _write_json(out_dir / "results" / "native_model_summary.json", sanitized)
+    return sanitized
 
 
 def run_experiment_manifest(
