@@ -24,6 +24,13 @@ SCOPE_ENFORCEMENT_VARIANTS = {"TxnMem", "TxnMem-NoTxn", "TxnMem-NoPolicyCommit",
 SUPERSESSION_VARIANTS = {"TxnMem", "TxnMem-NoPolicyCommit", "TxnMem-NoRepair"}
 
 
+def _record_committed(committed_memory_ids: list[str], memory_id: str) -> None:
+    """Record each final memory id once even when a tool call is retried."""
+
+    if memory_id not in committed_memory_ids:
+        committed_memory_ids.append(memory_id)
+
+
 def _operation_edges(instance: dict[str, Any]) -> list[dict[str, Any]]:
     edges: list[dict[str, Any]] = []
     for operation in instance.get("operations", []):
@@ -160,7 +167,7 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
             memory = _memory_from_operation(operation)
             if not uses_transaction:
                 memories[memory["memory_id"]] = memory
-                committed_memory_ids.append(memory["memory_id"])
+                _record_committed(committed_memory_ids, memory["memory_id"])
             else:
                 buffered_writes.append(memory)
 
@@ -187,19 +194,31 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
         elif op_type == "supersede":
             old_id = operation["old_memory_id"]
             new_id = operation["new_memory_id"]
-            if old_id not in memories:
+            def visible_memory(memory_id: str) -> dict[str, Any] | None:
+                for pending in reversed(buffered_writes):
+                    if pending["memory_id"] == memory_id:
+                        return pending
+                return memories.get(memory_id)
+
+            old_memory = visible_memory(old_id)
+            if old_memory is None:
                 raise KeyError(f"unknown memory_id: {old_id}")
-            if new_id in memories:
-                new_memory = memories[new_id]
-            else:
-                pending = next((item for item in buffered_writes if item["memory_id"] == new_id), None)
-                new_memory = pending
+            new_memory = visible_memory(new_id)
             if new_memory is None:
                 raise KeyError(f"unknown memory_id: {new_id}")
             if variant in SUPERSESSION_VARIANTS:
-                memories[old_id]["status"] = "superseded"
+                old_memory["status"] = "superseded"
                 new_memory["status"] = "active"
                 new_memory["supersedes_id"] = old_id
+                # A native Agent may emit a write followed by a supersede and
+                # may repeat the write while retrying the tool call.  Keep the
+                # final visible write consistent with the supersession edge.
+                for pending in buffered_writes:
+                    if pending["memory_id"] == old_id:
+                        pending["status"] = "superseded"
+                    elif pending["memory_id"] == new_id:
+                        pending["status"] = "active"
+                        pending["supersedes_id"] = old_id
                 supersession_updates += 1
 
         elif op_type == "commit":
@@ -224,7 +243,7 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
             else:
                 for memory in buffered_writes:
                     memories[memory["memory_id"]] = memory
-                    committed_memory_ids.append(memory["memory_id"])
+                    _record_committed(committed_memory_ids, memory["memory_id"])
                 buffered_writes.clear()
                 provenance_edges.extend(buffered_edges)
                 buffered_edges.clear()
@@ -252,7 +271,7 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                 buffered_edges.extend(operation_edges)
             else:
                 memories[memory["memory_id"]] = memory
-                committed_memory_ids.append(memory["memory_id"])
+                _record_committed(committed_memory_ids, memory["memory_id"])
                 provenance_edges.extend(operation_edges)
 
         elif op_type == "invalidate":

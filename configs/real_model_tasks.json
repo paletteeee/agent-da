@@ -5,8 +5,8 @@
     {
       "task_id": "native_write_001",
       "agent_id": "agent_model",
-      "system_prompt": "Use memory tools for every memory operation.",
-      "prompt": "Store one generic user preference as a memory.",
+      "system_prompt": "You must call the memory_write tool before replying. Use exactly one memory_write call for the requested fact; do not answer with prose first. Use memory tools for every memory operation.",
+      "prompt": "Store one generic user preference as a memory. First call memory_write with a new memory_id and a concise generic value, then briefly confirm completion.",
       "seed": 0,
       "temperature": 0.0,
       "max_steps": 8,
@@ -77,13 +77,13 @@
     {
       "task_id": "native_propagate_001",
       "agent_id": "agent_model",
-      "system_prompt": "Use memory tools and explicitly identify the propagation source.",
-      "prompt": "Write a generic source fact and propagate it to a task-scoped memory.",
+      "system_prompt": "Use memory tools and preserve explicit provenance. Use source_fact as the source memory id and task_memory as the target memory id; these two ids must be different.",
+      "prompt": "Call memory_write with memory_id=source_fact for a generic source fact, then call memory_propagate with source_id=source_fact and memory_id=task_memory for a task-scoped copy. Do not use the same id for source and target.",
       "seed": 6,
       "temperature": 0.0,
       "max_steps": 10,
       "failure_schedule": [],
-      "acceptance": {"expected_status": "completed", "required_event_kinds": ["memory_write", "memory_propagate"]}
+      "acceptance": {"expected_status": "completed", "required_event_kinds": ["memory_write", "memory_propagate"], "required_memory_ids": ["source_fact", "task_memory"], "required_provenance": [{"source_id": "source_fact", "derived_id": "task_memory"}]}
     },
     {
       "task_id": "native_search_001",

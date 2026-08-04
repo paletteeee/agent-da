@@ -229,7 +229,41 @@ class TxnMemRealExperimentTests(unittest.TestCase):
         self.assertEqual(report["evidence"]["source_operation_count"], 2)
         self.assertEqual(len(report["rows"]), 5)
         self.assertIn("TxnMem", report["evidence"]["oracle_match_by_variant"])
+        self.assertEqual(report["evidence"]["oracle_match_by_variant"]["TxnMem"]["matched"], 1)
         self.assertTrue(report["evidence"]["trace_ground_truth_native"])
+
+    def test_native_supersede_trace_matches_oracle_when_writes_are_buffered(self):
+        events = [
+            {"event_id": "e1", "kind": "memory_write", "agent_id": "agent_model", "step": 1, "memory_id": "old_fact"},
+            {"event_id": "e2", "kind": "memory_write", "agent_id": "agent_model", "step": 2, "memory_id": "corrected_fact"},
+            {
+                "event_id": "e3",
+                "kind": "memory_supersede",
+                "agent_id": "agent_model",
+                "step": 3,
+                "old_memory_id": "old_fact",
+                "new_memory_id": "corrected_fact",
+            },
+        ]
+        report = evaluate_native_trace(events, "native_supersede", seed=5)
+
+        self.assertEqual(report["evidence"]["oracle_match_by_variant"]["TxnMem"]["matched"], 1)
+
+    def test_native_propagate_trace_matches_oracle_with_explicit_source_id(self):
+        events = [
+            {"event_id": "e1", "kind": "memory_write", "agent_id": "agent_model", "step": 1, "memory_id": "source_fact"},
+            {
+                "event_id": "e2",
+                "kind": "memory_propagate",
+                "agent_id": "agent_model",
+                "step": 2,
+                "memory_id": "task_memory",
+                "source_id": "source_fact",
+            },
+        ]
+        report = evaluate_native_trace(events, "native_propagate", seed=6)
+
+        self.assertEqual(report["evidence"]["oracle_match_by_variant"]["TxnMem"]["matched"], 1)
 
     def test_sanitized_report_removes_raw_content_and_events(self):
         report = sanitize_run_report(
@@ -300,16 +334,20 @@ class TxnMemRealExperimentTests(unittest.TestCase):
             ]
         )
         with TemporaryDirectory() as tmp:
-            result = run_experiment_manifest(
-                {
-                    "tasks": [
-                        {"task_id": "task_replay_error", "prompt": "supersede", "agent_id": "agent_model"},
-                        {"task_id": "task_after_error", "prompt": "supersede", "agent_id": "agent_model"},
-                    ]
-                },
-                model,
-                Path(tmp),
-            )
+            with patch(
+                "txnmem_real_experiment.evaluate_native_trace",
+                side_effect=[KeyError("replay"), {"evidence": {}, "variant_summary": {}}],
+            ):
+                result = run_experiment_manifest(
+                    {
+                        "tasks": [
+                            {"task_id": "task_replay_error", "prompt": "supersede", "agent_id": "agent_model"},
+                            {"task_id": "task_after_error", "prompt": "supersede", "agent_id": "agent_model"},
+                        ]
+                    },
+                    model,
+                    Path(tmp),
+                )
         self.assertEqual(result["evaluation_error_count"], 1)
         self.assertEqual(len(result["task_summaries"]), 2)
         self.assertEqual(result["task_summaries"][0]["evaluation_status"], "error")

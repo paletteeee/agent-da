@@ -1,0 +1,7 @@
+{
+  "causal_case_count": 400,
+  "causal_detection_rate": 0.875,
+  "random_case_count": 4000,
+  "random_detection_rate": 0.75,
+  "random_runs": 10
+}

@@ -20,6 +20,7 @@ from txnmem_repair import incremental_repair, repair_failure_matrix  # noqa: E40
 from txnmem_realism import calibrate_config, split_holdout, trace_evidence_summary  # noqa: E402
 from txnmem_trace_pipeline import load_trace_records, build_trace_instances, trace_inventory  # noqa: E402
 from txnmem_trace import trace_to_instance  # noqa: E402
+from txnmem_simulator import run_instance  # noqa: E402
 from txnmem_workloads import generate_instance  # noqa: E402
 
 
@@ -191,6 +192,27 @@ class TxnMemRemainingTaskTests(unittest.TestCase):
         self.assertEqual(instance["operations"][1]["step"], 2)
         self.assertEqual(instance["operations"][-1]["txn_id"], "txn_trace")
         self.assertEqual(trace_inventory([instance])["event_count"], 2)
+
+    def test_trace_replay_applies_supersede_between_buffered_writes(self):
+        records = [
+            {"event_id": "e1", "kind": "memory_write", "memory_id": "old_fact"},
+            {"event_id": "e2", "kind": "memory_write", "memory_id": "corrected_fact"},
+            {"event_id": "e3", "kind": "memory_write", "memory_id": "corrected_fact"},
+            {
+                "event_id": "e4",
+                "kind": "memory_supersede",
+                "old_memory_id": "old_fact",
+                "new_memory_id": "corrected_fact",
+            },
+        ]
+        instance = build_trace_instances(records, "normalized", source="fixture")[0]
+        result = run_instance(instance, "TxnMem")
+
+        self.assertEqual(result["transaction_state"], "committed")
+        self.assertEqual(result["committed_memory_ids"], ["old_fact", "corrected_fact"])
+        self.assertEqual(result["final_memories"]["old_fact"]["status"], "superseded")
+        self.assertEqual(result["final_memories"]["corrected_fact"]["status"], "active")
+        self.assertEqual(result["final_memories"]["corrected_fact"]["supersedes_id"], "old_fact")
 
     def test_trace_pipeline_keeps_tau_trials_separate(self):
         records = [

@@ -266,7 +266,15 @@ def _execute_derive(state: dict[str, Any], operation: dict[str, Any], txn_id: st
     if not _policy_allows(state, operation, "derive", operation.get("scope")):
         _append_trace(state, operation, decision="denied", reason_codes=["POLICY_DENIED"])
         return
-    missing = [source_id for source_id in source_ids if source_id not in txn["read_set"]]
+    # A native memory_derive call names and reads its source_ids directly; the
+    # event trace does not need a separate memory_read event to establish that
+    # dependency.  Treat existing committed memories and read-your-writes as
+    # visible source reads, while still rejecting unknown sources.
+    missing = [
+        source_id
+        for source_id in source_ids
+        if source_id not in txn["write_set"] and source_id not in state["memories"]
+    ]
     invalid = []
     for source_id in source_ids:
         source_memory = state["memories"].get(source_id) or txn["write_set"].get(source_id)
@@ -277,6 +285,9 @@ def _execute_derive(state: dict[str, Any], operation: dict[str, Any], txn_id: st
     if missing or invalid:
         _append_trace(state, operation, decision="denied", reason_codes=["SOURCE_NOT_READ"] if missing else ["SOURCE_INVALID"])
         return
+    for source_id in source_ids:
+        if source_id not in txn["read_set"]:
+            txn["read_set"].append(source_id)
     _stage_write(state, operation, txn_id)
     output_id = operation.get("memory_id") or operation.get("output_id")
     for source_id in source_ids:
@@ -296,12 +307,21 @@ def _execute_propagate(state: dict[str, Any], operation: dict[str, Any], txn_id:
     txn = _txn(state, txn_id)
     source_id = operation.get("source_id") or (operation.get("source_ids") or [None])[0]
     output_id = operation.get("output_id") or operation.get("memory_id")
-    if source_id is None or output_id is None or source_id not in txn["read_set"]:
+    source_memory = state["memories"].get(source_id) or txn["write_set"].get(source_id)
+    source_visible = source_memory is not None and (
+        source_memory.get("status") == "active" or source_id in txn["write_set"]
+    )
+    if source_id is None or output_id is None or not source_visible:
         _append_trace(state, operation, decision="denied", reason_codes=["SOURCE_NOT_READ"])
+        return
+    if source_id == output_id:
+        _append_trace(state, operation, decision="denied", reason_codes=["PROVENANCE_CYCLE"])
         return
     if not _policy_allows(state, operation, "propagate", operation.get("target_scope")):
         _append_trace(state, operation, decision="denied", reason_codes=["POLICY_DENIED"])
         return
+    if source_id not in txn["read_set"]:
+        txn["read_set"].append(source_id)
     _stage_write(state, {**operation, "memory_id": output_id, "scope": operation.get("target_scope", operation.get("scope"))}, txn_id)
     txn["pending_edges"].append(
         {
@@ -323,7 +343,15 @@ def _execute_supersede(state: dict[str, Any], operation: dict[str, Any], txn_id:
     if isinstance(new_memory, dict):
         new_id = new_memory.get("memory_id", new_id)
         _stage_write(state, {**new_memory, "memory_id": new_id, "supersedes_id": old_id}, txn_id)
-    if not old_id or not new_id or old_id not in state["memories"]:
+    if not old_id or not new_id:
+        _append_trace(state, operation, decision="denied", reason_codes=["SUPERSESSION_TARGET_MISSING"])
+        return
+    # A native trace can emit write(old), write(new), supersede(old, new)
+    # before commit.  The independent oracle must resolve both targets from
+    # the transaction write set, not require them to be committed already.
+    old_visible = old_id in state["memories"] or old_id in txn["write_set"]
+    new_visible = new_id in state["memories"] or new_id in txn["write_set"]
+    if not old_visible or not new_visible:
         _append_trace(state, operation, decision="denied", reason_codes=["SUPERSESSION_TARGET_MISSING"])
         return
     txn["supersessions"].append((old_id, new_id))

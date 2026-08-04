@@ -116,9 +116,11 @@
 
 **External prerequisite:** remote SSH password/approved credential, accessible GPU server, model endpoint or model weights, and task/data licenses.
 
-- [ ] Verify remote `hostname`, `pwd`, `whoami`, `nvidia-smi`, and project path.
-- [ ] Sync the committed harness to `/data/txnmem` or another persistent remote path.
-- [ ] Start the selected OpenAI-compatible model server with a durable `tmux`/`nohup` command.
-- [ ] Run a 10-task smoke matrix and inspect raw event contract plus sanitized report.
-- [ ] Run the recommended pilot matrix, then holdout evaluation.
-- [ ] Copy only aggregate evidence back to the local repository and commit it.
+- [x] Verify remote `hostname`, `pwd`, `whoami`, `nvidia-smi`, and project path. Remote project: `/data/txnmem`; GPU: RTX 4090; model server: vLLM on `127.0.0.1:8000`.
+- [x] Sync the committed harness to `/data/txnmem` or another persistent remote path.
+- [x] Start the selected OpenAI-compatible model server with a durable `tmux` command. Model id: `qwen2.5-7b-instruct`; weights remain under `/data/models/Qwen/Qwen2___5-7B-Instruct`.
+- [x] Run the one-task endpoint smoke matrix and inspect native event contract plus sanitized report. Final smoke output: `/data/txnmem/results/real_model_qwen2.5_7b_smoke_final/`.
+- [x] Run the recommended train matrix and holdout evaluation. Final train output: `/data/txnmem/results/real_model_qwen2.5_7b_splits_rerun/train/`; final holdout output: `/data/txnmem/results/real_model_qwen2.5_7b_splits_rerun/holdout/`.
+- [x] Copy only aggregate evidence back to the local repository and commit it. Local sanitized aggregate path: `results/real_model_qwen2.5_7b_aggregate_final/`; raw prompts, arguments, and event traces remain outside Git.
+
+Remote native-model evidence: train has 8/8 task contracts, 17 native events, 0 replay errors, and 8/8 TxnMem oracle matches; holdout has 2/2 task contracts, 5 native events, 0 replay errors, and 2/2 TxnMem oracle matches. The two train failures are expected schedule outcomes (`injected_crash` and `policy_denied`).

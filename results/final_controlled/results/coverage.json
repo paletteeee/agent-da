@@ -1,0 +1,32 @@
+{
+  "instance_count": 400,
+  "invariant_coverage": {
+    "coverage_rate": 1.0,
+    "covered": [
+      "atomicity",
+      "commit_authorization",
+      "provenance_closure",
+      "recovery_consistency",
+      "scope_safety",
+      "supersession_consistency"
+    ],
+    "target_count": 6
+  },
+  "minimal_counterexamples": [],
+  "schedule_coverage": {
+    "actions": {
+      "crash": 150,
+      "revoke": 100
+    },
+    "event_count": 250,
+    "phases": {
+      "after_operation": 50,
+      "before_validate": 100,
+      "unspecified": 100
+    },
+    "trigger_kinds": {
+      "after_operation": 50,
+      "before_operation": 200
+    }
+  }
+}
