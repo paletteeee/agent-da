@@ -44,6 +44,8 @@ class PublicNativeRunnerTests(unittest.TestCase):
                         {
                             "sample_id": "conv-1",
                             "conversation": {
+                                "session_10": [{"speaker": "B", "text": "Later session."}],
+                                "session_2": [{"speaker": "A", "text": "Earlier session."}],
                                 "session_1": [{"speaker": "A", "text": "I moved to Boston."}],
                                 "session_1_date_time": "2024-01-01",
                             },
@@ -56,6 +58,7 @@ class PublicNativeRunnerTests(unittest.TestCase):
 
         self.assertEqual(tasks[0].episode_id, "locomo:conv-1")
         self.assertIn("I moved to Boston.", tasks[0].prompt)
+        self.assertLess(tasks[0].prompt.index("Earlier session."), tasks[0].prompt.index("Later session."))
         self.assertEqual(tasks[0].metadata["execution_mode"], "native_contextual_agent_run")
         self.assertNotEqual(tasks[0].metadata.get("projection"), "locomo_session_summary")
 
@@ -74,7 +77,7 @@ class PublicNativeRunnerTests(unittest.TestCase):
         self.assertNotIn("private value", json.dumps(report))
         self.assertNotIn("raw_context", report["checks"])
 
-    def test_unavailable_public_manifest_returns_blocked_without_model(self):
+    def test_available_locomo_manifest_reports_missing_model_without_running(self):
         with TemporaryDirectory() as tmp:
             source = Path(tmp) / "locomo.json"
             source.write_text("[]", encoding="utf-8")
@@ -85,13 +88,14 @@ class PublicNativeRunnerTests(unittest.TestCase):
             )
 
         self.assertEqual(report["status"], "blocked")
-        self.assertEqual(report["reason"], "blocked_external_dependency")
+        self.assertEqual(report["reason"], "missing_model")
 
-    def test_environment_checks_are_explicitly_non_native_for_missing_runtime(self):
+    def test_locomo_environment_requires_the_executable_agent_runtime(self):
         with TemporaryDirectory() as tmp:
-            source = Path(tmp) / "tau.json"
+            source = Path(tmp) / "locomo.json"
             source.write_text("[]", encoding="utf-8")
-            tau = TauBenchPublicAdapter()
             locomo = LoCoMoPublicAdapter()
-            self.assertIn("available", tau.check_environment(source))
-            self.assertFalse(locomo.check_environment(source)["available"])
+            checks = locomo.check_environment(source)
+            self.assertEqual(checks["required_module"], "locomo_agent_runtime")
+            self.assertTrue(checks["module_available"])
+            self.assertTrue(checks["available"])

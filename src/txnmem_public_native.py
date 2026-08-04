@@ -181,22 +181,30 @@ class AppWorldPublicAdapter(PublicWorkflowAdapter):
 
 class LoCoMoPublicAdapter(PublicWorkflowAdapter):
     dataset = "locomo"
-    required_module = None
+    required_module = "locomo_agent_runtime"
     execution_mode = "native_contextual_agent_run"
 
-    def check_environment(self, source: Path) -> dict[str, Any]:
-        checks = super().check_environment(source)
-        checks["available"] = False
-        checks["reason"] = "no_executable_agent_environment"
-        checks["execution_mode"] = self.execution_mode
-        return checks
+    @staticmethod
+    def _session_order(key: str) -> tuple[int, str]:
+        suffix = key.removeprefix("session_")
+        try:
+            return int(suffix), key
+        except ValueError:
+            return 10**9, key
 
     @staticmethod
     def _conversation_context(conversation: Mapping[str, Any]) -> str:
         lines: list[str] = []
-        for key, turns in sorted(conversation.items()):
-            if str(key).endswith("_date_time") or not str(key).startswith("session_"):
-                continue
+        session_keys = sorted(
+            (
+                str(key)
+                for key in conversation
+                if str(key).startswith("session_") and not str(key).endswith("_date_time")
+            ),
+            key=LoCoMoPublicAdapter._session_order,
+        )
+        for key in session_keys:
+            turns = conversation[key]
             if not isinstance(turns, list):
                 continue
             for turn in turns:
