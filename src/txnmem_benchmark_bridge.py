@@ -174,11 +174,17 @@ class AppWorldAdapter(BenchmarkEnvAdapter):
         requester_factory: Callable[[], Any] | None = None,
         appworld_root: Path | None = None,
         app_names: Sequence[str] | None = None,
+        api_name_allowlist: Sequence[str] | None = None,
         experiment_name: str = "txnmem_native",
     ):
         self.requester_factory = requester_factory
         self.appworld_root = _normalize_appworld_root(appworld_root) if appworld_root else None
         self.app_names = tuple(str(name) for name in app_names) if app_names is not None else None
+        self.api_name_allowlist = (
+            tuple(str(name) for name in api_name_allowlist)
+            if api_name_allowlist is not None
+            else None
+        )
         self.experiment_name = experiment_name
         self.requester = None
         self.environment = None
@@ -209,6 +215,8 @@ class AppWorldAdapter(BenchmarkEnvAdapter):
             if not isinstance(tool_name, str) or not tool_name:
                 continue
             method_name = tool_name.split("__")[-1] if "__" in tool_name else tool_name
+            if self.api_name_allowlist is not None and tool_name not in self.api_name_allowlist:
+                continue
             self._tool_kinds[tool_name] = _classify_tool_name(
                 method_name, self._READ_PREFIXES, self._WRITE_PREFIXES
             ) or "memory_read"

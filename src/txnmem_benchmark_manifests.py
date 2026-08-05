@@ -130,6 +130,17 @@ def generate_appworld_manifest(
                     has_data = False
                 if has_data and db_path.stem != "admin":
                     app_names.append(db_path.stem)
+        api_name_allowlist = None
+        if "amazon" in app_names:
+            api_name_allowlist = [
+                "amazon__search_products",
+                "amazon__show_product",
+                "amazon__show_cart",
+                "amazon__show_wish_list",
+                "amazon__show_product_rating_distribution",
+                "amazon__move_product_from_cart_to_wish_list",
+                "amazon__move_product_from_wish_list_to_cart",
+            ]
         tasks.append(
             _task(
                 task_id,
@@ -139,6 +150,7 @@ def generate_appworld_manifest(
                 extra={
                     "task_dir": task_dir.name,
                     "app_names": app_names,
+                    "api_name_allowlist": api_name_allowlist,
                     "supervisor": specs.get("supervisor"),
                     "datetime": specs.get("datetime"),
                 },

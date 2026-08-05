@@ -630,8 +630,13 @@ def main(argv: list[str] | None = None) -> int:
 
                 def adapter_factory(task=None):
                     task_app_names = task.get("app_names") if isinstance(task, dict) else None
+                    task_api_allowlist = task.get("api_name_allowlist") if isinstance(task, dict) else None
                     effective_app_names = task_app_names or default_app_names
-                    return AppWorldAdapter(appworld_root=args.appworld_root, app_names=effective_app_names)
+                    return AppWorldAdapter(
+                        appworld_root=args.appworld_root,
+                        app_names=effective_app_names,
+                        api_name_allowlist=task_api_allowlist,
+                    )
             else:
                 def adapter_factory():
                     return LoCoMoAdapter()
@@ -715,8 +720,13 @@ def main(argv: list[str] | None = None) -> int:
 
                 def adapter_factory(task=None):
                     task_app_names = task.get("app_names") if isinstance(task, dict) else None
+                    task_api_allowlist = task.get("api_name_allowlist") if isinstance(task, dict) else None
                     effective_app_names = task_app_names or default_app_names
-                    return AppWorldAdapter(appworld_root=args.appworld_root, app_names=effective_app_names)
+                    return AppWorldAdapter(
+                        appworld_root=args.appworld_root,
+                        app_names=effective_app_names,
+                        api_name_allowlist=task_api_allowlist,
+                    )
             else:
                 evaluator_command = None
                 if args.locomo_evaluator_command:

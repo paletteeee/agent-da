@@ -231,6 +231,10 @@ class AppWorldAdapterTest(unittest.TestCase):
         adapter = AppWorldAdapter(app_names=["venmo", "supervisor"])
         self.assertEqual(adapter.app_names, ("venmo", "supervisor"))
 
+    def test_appworld_adapter_accepts_task_specific_api_allowlist(self):
+        adapter = AppWorldAdapter(api_name_allowlist=["amazon__show_cart"])
+        self.assertEqual(adapter.api_name_allowlist, ("amazon__show_cart",))
+
     def test_classify_api_tools(self):
         adapter = AppWorldAdapter(requester_factory=lambda: None)
         adapter.tool_schemas()
