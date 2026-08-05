@@ -603,7 +603,7 @@ def main(argv: list[str] | None = None) -> int:
                         side_effect=lambda *a, **k: "I want to book a flight. ###STOP###",
                     ).start()
 
-                def adapter_factory():
+                def adapter_factory(task=None):
                     from tau_bench.envs.airline.env import MockAirlineDomainEnv
                     from tau_bench.envs.retail.env import MockRetailDomainEnv
 
@@ -614,7 +614,7 @@ def main(argv: list[str] | None = None) -> int:
                     env = env_cls(
                         user_strategy=_official_tau_user_strategy(args.tau_user_strategy),
                         task_split=args.tau_split,
-                        task_index=None,
+                        task_index=(task.get("task_index") if isinstance(task, dict) else None),
                     )
                     return TauBenchAdapter(
                         lambda: env,
@@ -696,7 +696,7 @@ def main(argv: list[str] | None = None) -> int:
             )
 
             if args.benchmark == "tau-bench":
-                def adapter_factory():
+                def adapter_factory(task=None):
                     from tau_bench.envs.airline.env import MockAirlineDomainEnv
                     from tau_bench.envs.retail.env import MockRetailDomainEnv
 
@@ -704,7 +704,7 @@ def main(argv: list[str] | None = None) -> int:
                     env = env_cls(
                         user_strategy=_official_tau_user_strategy(args.tau_user_strategy),
                         task_split=args.tau_split,
-                        task_index=None,
+                        task_index=(task.get("task_index") if isinstance(task, dict) else None),
                     )
                     return TauBenchAdapter(
                         lambda: env,
