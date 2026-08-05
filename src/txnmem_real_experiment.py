@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import inspect
 import random
 from collections import Counter
 from pathlib import Path
@@ -247,6 +248,28 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _make_task_adapter(adapter_factory: Any, task: Mapping[str, Any]) -> Any:
+    """Create an adapter, optionally passing the current task metadata.
+
+    Public benchmark adapters normally need no arguments.  AppWorld can
+    reduce its official API schema to the apps present in a task's official
+    DB snapshot, so the factory may opt into the task-aware form.
+    """
+
+    try:
+        signature = inspect.signature(adapter_factory)
+    except (TypeError, ValueError):
+        return adapter_factory()
+    parameters = list(signature.parameters.values())
+    accepts_positional = any(
+        parameter.kind
+        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        for parameter in parameters
+    )
+    accepts_varargs = any(parameter.kind == inspect.Parameter.VAR_POSITIONAL for parameter in parameters)
+    return adapter_factory(task) if accepts_positional or accepts_varargs else adapter_factory()
+
+
 def _empty_manifest_report(raw_path: str, task_count: int = 0) -> dict[str, Any]:
     return {
         "task_count": task_count,
@@ -298,8 +321,8 @@ def run_benchmark_experiment_manifest(
                 if callable(backend_factory)
                 else InstrumentedMemoryBackend()
             )
-            adapter = adapter_factory()
             task_record = dict(task)
+            adapter = _make_task_adapter(adapter_factory, task_record)
             task_id = str(task_record.get("task_id") or f"native_task_{index:04d}")
             run_report = run_benchmark_agent(
                 task_record,

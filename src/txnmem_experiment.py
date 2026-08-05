@@ -622,13 +622,16 @@ def main(argv: list[str] | None = None) -> int:
                         user_strategy=args.tau_user_strategy,
                     )
             elif args.benchmark == "appworld":
-                def adapter_factory():
-                    app_names = (
+                default_app_names = (
                         [name.strip() for name in args.appworld_apps.split(",") if name.strip()]
                         if args.appworld_apps
                         else None
                     )
-                    return AppWorldAdapter(appworld_root=args.appworld_root, app_names=app_names)
+
+                def adapter_factory(task=None):
+                    task_app_names = task.get("app_names") if isinstance(task, dict) else None
+                    effective_app_names = task_app_names or default_app_names
+                    return AppWorldAdapter(appworld_root=args.appworld_root, app_names=effective_app_names)
             else:
                 def adapter_factory():
                     return LoCoMoAdapter()
@@ -704,14 +707,16 @@ def main(argv: list[str] | None = None) -> int:
                         user_strategy=args.tau_user_strategy,
                     )
             elif args.benchmark == "appworld":
-                app_names = (
+                default_app_names = (
                     [name.strip() for name in args.appworld_apps.split(",") if name.strip()]
                     if args.appworld_apps
                     else None
                 )
 
-                def adapter_factory():
-                    return AppWorldAdapter(appworld_root=args.appworld_root, app_names=app_names)
+                def adapter_factory(task=None):
+                    task_app_names = task.get("app_names") if isinstance(task, dict) else None
+                    effective_app_names = task_app_names or default_app_names
+                    return AppWorldAdapter(appworld_root=args.appworld_root, app_names=effective_app_names)
             else:
                 evaluator_command = None
                 if args.locomo_evaluator_command:

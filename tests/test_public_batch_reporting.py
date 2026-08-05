@@ -92,6 +92,22 @@ class PublicBatchReportingTests(unittest.TestCase):
             self.assertNotIn("events", raw)
             self.assertTrue(raw["raw_reports_committed"] is False)
 
+    def test_task_aware_adapter_factory_receives_manifest_metadata(self):
+        manifest = {
+            "manifest_version": 1,
+            "dataset_name": "fixture",
+            "tasks": [{"task_id": "task-a", "prompt": "a", "app_names": ["mail"]}],
+        }
+        seen = []
+
+        def factory(task):
+            seen.append(task["app_names"])
+            return _BatchAdapter()
+
+        with TemporaryDirectory() as tmp:
+            run_benchmark_batch(manifest, _BatchModel(), Path(tmp), adapter_factory=factory)
+        self.assertEqual(seen, [["mail"]])
+
 
 if __name__ == "__main__":
     unittest.main()

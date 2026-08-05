@@ -120,6 +120,16 @@ def generate_appworld_manifest(
             continue
         instruction = specs.get("instruction", "")
         task_id = f"appworld-{task_dir.name}"
+        app_names = []
+        dbs_dir = task_dir / "dbs"
+        if dbs_dir.is_dir():
+            for db_path in sorted(dbs_dir.glob("*.jsonl")):
+                try:
+                    has_data = db_path.stat().st_size > 0
+                except OSError:
+                    has_data = False
+                if has_data and db_path.stem != "admin":
+                    app_names.append(db_path.stem)
         tasks.append(
             _task(
                 task_id,
@@ -128,6 +138,7 @@ def generate_appworld_manifest(
                 max_steps=max_steps,
                 extra={
                     "task_dir": task_dir.name,
+                    "app_names": app_names,
                     "supervisor": specs.get("supervisor"),
                     "datetime": specs.get("datetime"),
                 },
