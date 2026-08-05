@@ -23,9 +23,9 @@
 - Modify: remote `configs/native_appworld_smoke*.json` only if a manifest needs a larger task count.
 - Create: local `results/remaining_tasks/public_native/native_smoke_summary.json` aggregate update.
 
-- [ ] Run τ-bench and AppWorld with bounded multi-task manifests and task-specific schemas.
-- [ ] Run LoCoMo with a bounded multi-conversation manifest and fixed context limit.
-- [ ] Read only sanitized summaries and record task counts, events, evaluator errors, and endpoint failures.
+- [x] Run τ-bench and AppWorld with bounded multi-task manifests and task-specific schemas.
+- [x] Run LoCoMo with a bounded multi-conversation manifest and fixed context limit.
+- [x] Read only sanitized summaries and record task counts, events, evaluator errors, and endpoint failures.
 
 ### Task 2: Verify native-memory event boundary
 
@@ -33,9 +33,9 @@
 - Inspect: `src/txnmem_benchmark_bridge.py` and `tests/test_benchmark_bridge.py`.
 - Modify only if a failing regression test identifies missing provenance or native-event labeling.
 
-- [ ] Add a failing test only for a concrete missing event-contract behavior.
-- [ ] Implement the minimal behavior and rerun the focused test.
-- [ ] Confirm benchmark-tool projection events and model-issued memory events remain separately labeled.
+- [x] Add a failing test only for a concrete missing event-contract behavior.
+- [x] Implement the minimal behavior and rerun the focused test.
+- [x] Confirm benchmark-tool projection events and model-issued memory events remain separately labeled.
 
 ### Task 3: Reconcile formal artifacts
 
@@ -44,15 +44,20 @@
 - Modify: `docs/official_trace_replay_zh.md`.
 - Modify: `outputs/TxnMem_论文初稿.docx` through `build_txnmem_paper_draft.py`.
 
-- [ ] Update only sanitized aggregate counts and caveats.
-- [ ] Run structural and accessibility checks.
-- [ ] Attempt visual render and record the exact environment blocker if the renderer cannot start.
+- [x] Update only sanitized aggregate counts and caveats.
+- [x] Run structural and accessibility checks.
+- [x] Attempt visual render and record the exact environment blocker if the renderer cannot start.
 
 ### Task 4: Final verification and local Git backup
 
 **Files:**
 - Modify: `results/remaining_tasks/final_status.json` if evidence changes.
 
-- [ ] Run all unit tests, compileall, shell syntax checks, JSON validation, and `git diff --check`.
-- [ ] Commit repository changes with a focused message.
-- [ ] Inspect `git remote -v`; do not push without an explicit configured remote URL.
+- [x] Run all unit tests, compileall, shell syntax checks, JSON validation, and `git diff --check`.
+- [x] Commit repository changes with focused commits `0ff4fe4` and `e6f689d`.
+- [x] Inspect `git remote -v`; no remote is configured, so no push was attempted.
+
+## Residual blockers after execution
+
+- DOCX visual PNG QA remains blocked by the bundled LibreOffice dependency on `/opt/homebrew/opt/little-cms2/lib/liblcms2.2.dylib`; structural and accessibility checks pass.
+- Public benchmark native memory backend instrumentation and official accuracy remain future work; the expanded results are native workflow/runtime smoke with benchmark-tool projection events.
