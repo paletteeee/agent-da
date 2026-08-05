@@ -4,7 +4,7 @@
 
 | 项目 | 当前实现 | 证据/边界 |
 |---|---|---|
-| 1. τ-bench/AppWorld/LoCoMo trace-grounded replay | `txnmem_trace_pipeline.py` 保留 projection replay；`txnmem_public_native.py` 与 `benchmark-native-smoke` 明确区分 native workflow runtime 和 projection | 三类 runtime 均已安装/核验并在远程 Qwen2.5-7B 上完成 native smoke：τ-bench 1/1 task、2 events；AppWorld 1/1 task、2 events、官方 evaluator 0/7；LoCoMo 3 conversations、34 events、2/3 完成且 1 次模型网络错误。它们证明可执行边界已打通，不是公开 benchmark accuracy，也不把 QA/API 结果当作 memory ground truth；projection replay 仍为 τ-bench 175/920、LoCoMo 10/272、AppWorld 5/380 |
+| 1. τ-bench/AppWorld/LoCoMo trace-grounded replay | `txnmem_trace_pipeline.py` 保留 projection replay；`txnmem_public_native.py` 与 `benchmark-native-smoke` 明确区分 native workflow runtime 和 projection | 三类 runtime 均已安装/核验并在远程 Qwen2.5-7B 上完成扩样 native smoke：τ-bench 3/3 task、20 events；AppWorld 2/2 task、4 events、官方 evaluator 0/14；LoCoMo 5 conversations、40 events、4/5 完成且 1 次模型网络错误。它们证明可执行边界已打通，不是公开 benchmark accuracy，也不把 QA/API 结果当作 memory ground truth；projection replay 仍为 τ-bench 175/920、LoCoMo 10/272、AppWorld 5/380 |
 | 2. benchmark-specific adapter | `txnmem_bench_adapters.py`：`tau-bench`、`appworld`、`locomo`、`normalized` | 只转换显式 tool/API/memory event；普通对话会被跳过 |
 | 3. 真实 Agent memory trace 采集 | `txnmem_model_protocol.py` 的 OpenAI-compatible client、`txnmem_real_agent.py` 的 structured tool loop、`txnmem_public_native.py` 的 public boundary、`txnmem_event_contract.py` validator | 已在远程 RTX 4090 上运行 Qwen2.5-7B-Instruct；完成通用 native smoke、8 train、2 holdout、5×10 repetition，以及 LoCoMo contextual Agent smoke；raw trace 仅保存在远端结果目录，仓库只保留脱敏 aggregate |
 | 4. trace 校准与 holdout | `txnmem_realism.py` 的 `calibrate_config`、`calibrated_suite`、`split_holdout` | 按完整 episode 划分，校准只影响 synthetic config，不改变 oracle |

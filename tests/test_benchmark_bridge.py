@@ -112,7 +112,8 @@ class BenchmarkBridgeTest(unittest.TestCase):
         self.assertEqual(kinds, ["memory_write"])
         write_event = backend.events[0]
         self.assertEqual(write_event["projection"], "benchmark_tool_call")
-        self.assertEqual(write_event["step"], 2)
+        self.assertEqual(write_event["step"], 1)
+        self.assertEqual(write_event["model_step"], 2)
         self.assertEqual(adapter.executed, [("book_item", {"item_id": "a1"})])
 
     def test_gateway_records_read_tool_as_memory_read(self):
@@ -120,6 +121,14 @@ class BenchmarkBridgeTest(unittest.TestCase):
         gateway = BenchmarkToolGateway(backend, _StubAdapter())
         gateway.call_benchmark("get_item", {"item_id": "a1"}, step=1)
         self.assertEqual(backend.events[0]["kind"], "memory_read")
+
+    def test_gateway_keeps_event_steps_strict_for_multiple_calls_in_one_model_step(self):
+        backend = InstrumentedMemoryBackend()
+        gateway = BenchmarkToolGateway(backend, _StubAdapter())
+        gateway.call_benchmark("book_item", {"item_id": "a1"}, step=2)
+        gateway.call_benchmark("book_item", {"item_id": "a2"}, step=2)
+        self.assertEqual([event["step"] for event in backend.events], [1, 2])
+        self.assertEqual([event["model_step"] for event in backend.events], [2, 2])
 
     def test_run_benchmark_agent_full_loop(self):
         backend = InstrumentedMemoryBackend()

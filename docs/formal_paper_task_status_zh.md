@@ -11,9 +11,9 @@
 | 5 | synthetic 与公开 trace 的 realism/holdout 分析 | 已完成（projection 层） | τ-bench、LoCoMo、AppWorld projection replay、trace realism、episode-level holdout | 完成公开 runtime 的大规模 native memory trace，并比较联合分布 |
 | 6 | Qwen2.5-7B 真实模型实验 | 已完成（机制层） | GPU endpoint；5×10 repetition，50 task、110 native events、0 evaluation error、50/50 contract、50/50 oracle match，Wilson 95% 下界 0.929 | 换成真实 memory backend，并报告端到端任务质量/成本 |
 | 7 | 并发、跨进程、协议故障 | 已完成（smoke 层） | 4 类确定性 protocol schedule、5/5 invariant coverage、0 minimal counterexample；线程/owner-linearization harness | 生产级多进程/网络/存储 interleaving 与性能 |
-| 8 | τ-bench native runtime | 已完成（smoke 层） | official runtime 安装；1 task、2 events、0 evaluator error、official reward 0.0、oracle 1/1 | 扩大 task/sample；接入真实 memory read/write/derive instrumentation；报告官方 accuracy |
-| 9 | AppWorld native runtime | 已完成（smoke 层） | official runtime/data/evaluator 安装；1 task、2 events、official evaluator 0/7、oracle 1/1 | 扩大 task/sample；降低 schema/context 限制；报告官方 success rate |
-| 10 | LoCoMo executable Agent | 已完成（contextual smoke 层） | 3 conversations、34 events、2/3 complete、1 network error、0 evaluator error | 稳定 endpoint，扩大 conversation，并报告 LoCoMo QA/long-memory 指标 |
+| 8 | τ-bench native runtime | 已完成（扩样 smoke 层） | official runtime 安装；3/3 tasks、20 events、0 evaluator error、official reward 均 0.0、oracle 3/3 | 接入真实 memory read/write/derive instrumentation；报告官方 accuracy |
+| 9 | AppWorld native runtime | 已完成（扩样 smoke 层） | official runtime/data/evaluator 安装；2/2 tasks、4 events、official evaluator 0/14、oracle 2/2 | 降低 schema/context 限制；报告官方 success rate |
+| 10 | LoCoMo executable Agent | 已完成（扩样 contextual smoke 层） | 5 conversations、40 events、4/5 complete、1 network error、0 evaluator error、TxnMem oracle 4/5 | 稳定 endpoint，接入真实 memory backend，并报告 LoCoMo QA/long-memory 指标 |
 | 11 | 论文初稿与结果同步 | 已完成（内容/结构层） | `outputs/TxnMem_论文初稿.docx`、结构审计、a11y 审计 | 本机 LibreOffice 缺少 `liblcms2`，视觉 PNG render 尚未通过 |
 | 12 | Git 备份与远端推送 | 本地备份已完成；远端推送阻塞 | 当前新增代码已有 Git commit；`git remote -v` 为空 | 用户提供远端 URL 后才能 `git remote add origin` / push |
 

@@ -46,9 +46,9 @@ transaction 内的写入提前暴露给后续读取而出现预期的 `visible_m
 
 | Runtime | Smoke 输入 | 运行结果 | 解释边界 |
 |---|---:|---|---|
-| τ-bench official airline | 1 task，scripted user，3 steps | 1/1 task 完成，2 native events，0 evaluation error，official reward 0.0，TxnMem oracle 1/1 | tool/user workflow 已打通；不是 τ-bench accuracy |
-| AppWorld official | 1 task，task-specific app schema filter，3 steps | 1/1 task 完成，2 native events，0 evaluation error，official evaluator 0/7，TxnMem oracle 1/1 | AppWorld evaluator 已真实执行；不是 AppWorld success rate |
-| LoCoMo contextual runtime | 3 conversations | 2/3 完成，34 native events，0 evaluator error；1 个 episode 为 model network error；3/3 differential replay match | 是 contextual Agent smoke；不是 LoCoMo QA accuracy |
+| τ-bench official airline | 3 tasks，scripted user | 3/3 task 完成，20 native events，0 evaluation error，official reward 均为 0.0，TxnMem oracle 3/3 | tool/user workflow 已打通；不是 τ-bench accuracy |
+| AppWorld official | 2 tasks，task-specific app schema filter | 2/2 task 完成，4 native events，0 evaluation error，official evaluator 0/14，TxnMem oracle 2/2 | AppWorld evaluator 已真实执行；不是 AppWorld success rate |
+| LoCoMo contextual runtime | 5 conversations | 4/5 完成，40 native events，0 evaluator error；1 个 episode 为 model network error；TxnMem differential replay 4/5 | 是 contextual Agent smoke；不是 LoCoMo QA accuracy |
 
 三组 raw native trace 均只保留在远程运行目录；仓库提交脱敏计数和状态，不提交 prompt、tool arguments、凭据或原始对话内容。由于这三个 runtime 本身并不自动提供 TxnMem memory transaction/provenance ground truth，论文中应使用 “native workflow/runtime smoke” 或 “trace-grounded adaptation/replay”，不能写成“真实公开 benchmark memory 数据集已完成”。
 
@@ -61,7 +61,8 @@ transaction 内的写入提前暴露给后续读取而出现预期的 `visible_m
 远端 `results/native_tau_airline_smoke3/`、
 `results/native_appworld_smoke3_filtered/` 和
 `results/native_locomo_3conv/`。这些结果分别产生 2、2、34 个 native workflow
-events，且完成了独立 replay/oracle 检查；它们是环境验证，不是公开 benchmark
+events，且完成了独立 replay/oracle 检查；扩样后的计数为 τ-bench 20、AppWorld 4、LoCoMo 40
+events；它们是环境验证，不是公开 benchmark
 QA 正确率，也不能把本节三组 projection replay 改称为原生 memory 数据集。
 
 ## 数据来源

@@ -319,7 +319,7 @@ class BenchmarkToolGateway(NativeMemoryToolGateway):
                 "agent_id": self.agent_id,
                 "projection": "benchmark_tool_call",
                 "tool_name": name,
-                "step": step,
+                "model_step": step,
             }
             if kind == "memory_write":
                 self.backend.write(memory_id, value={"tool_name": name, "arguments": dict(arguments)}, **event_fields)

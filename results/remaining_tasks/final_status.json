@@ -10,30 +10,37 @@
     "formal_claim": "native_workflow_runtime_smoke_only_not_public_benchmark_accuracy",
     "smoke_summary": {
       "tau-bench": {
-        "task_count": 1,
-        "completed_task_count": 1,
-        "native_event_count": 2,
+        "task_count": 3,
+        "completed_task_count": 3,
+        "native_event_count": 20,
         "evaluation_error_count": 0,
-        "official_reward": 0.0,
-        "task_evaluator_success": true,
-        "txnmem_oracle_match": "1/1"
+        "official_rewards": [0.0, 0.0, 0.0],
+        "task_evaluator_success": "3/3",
+        "txnmem_oracle_match": "3/3"
       },
       "appworld": {
-        "task_count": 1,
-        "completed_task_count": 1,
-        "native_event_count": 2,
+        "task_count": 2,
+        "completed_task_count": 2,
+        "native_event_count": 4,
         "evaluation_error_count": 0,
-        "official_pass_count": "0/7",
-        "task_evaluator_success": true,
-        "txnmem_oracle_match": "1/1"
+        "official_pass_count": "0/14",
+        "task_evaluator_success": "2/2",
+        "txnmem_oracle_match": "2/2"
       },
       "locomo": {
-        "conversation_count": 3,
-        "completed_conversation_count": 2,
-        "native_event_count": 34,
+        "conversation_count": 5,
+        "completed_conversation_count": 4,
+        "native_event_count": 40,
         "evaluation_error_count": 0,
         "model_network_error_count": 1,
-        "txnmem_oracle_match": "3/3"
+        "txnmem_oracle_match": "4/5",
+        "variant_oracle_match_counts": {
+          "Naive": "5/5",
+          "TxnMem": "4/5",
+          "TxnMem-NoPolicyCommit": "4/5",
+          "TxnMem-NoRepair": "4/5",
+          "TxnMem-NoTxn": "5/5"
+        }
       }
     }
   },
