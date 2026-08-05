@@ -14,7 +14,7 @@
 | 8 | τ-bench native runtime | 已完成（runtime + SQLite backend smoke） | official runtime；历史扩样 3/3 tasks、20 events；新增 Qwen2.5-7B/SQLite 1 task、4 events、0 evaluator error、official reward 0.0、oracle 1/1 | 扩大任务数并报告官方 accuracy |
 | 9 | AppWorld native runtime | 已完成（runtime + SQLite backend smoke） | official runtime/data/evaluator；Venmo-only schema 1 task、1 event、0 evaluator error、official evaluator 0/7、oracle 1/1；默认全 schema 仅作为失败诊断记录 | 扩大 schema/task 样本并提升官方 success rate；当前 smoke 不足以支持准确率结论 |
 | 10 | LoCoMo executable Agent | 已完成（memory-only runtime + SQLite smoke） | 5 conversations contextual smoke 之外，新增 Qwen2.5-7B/SQLite ordered contract：1 conversation、2 events、0 evaluation error、oracle 1/1；LoCoMo QA evaluator 当前边界不可用 | 扩大 conversation 样本并接入可审计 QA evaluator |
-| 11 | 论文初稿与结果同步 | 已完成（内容/结构层） | `outputs/TxnMem_论文初稿.docx`、结构审计、a11y 审计 | 本机 LibreOffice 缺少 `liblcms2`，视觉 PNG render 尚未通过 |
+| 11 | 论文初稿与结果同步 | 已完成（含视觉 QA） | `outputs/TxnMem_论文初稿.docx`、结构审计、a11y 审计；通过 `scripts/render_docx_with_bundled_libs.sh` 生成并逐页检查 18 页 PNG/PDF | 无；后续只需按内容更新重新渲染 |
 | 12 | Git 备份与远端推送 | 本地备份已完成；远端推送阻塞 | 当前新增代码已有 Git commit；`git remote -v` 为空 | 用户提供远端 URL 后才能 `git remote add origin` / push |
 
 ## 论文目前可以正式声称的内容
@@ -28,5 +28,5 @@
 - 公开 benchmark 的大规模 native Agent memory trace：已完成小规模 SQLite-backed smoke，但尚未形成可支撑统计结论的样本量；AppWorld 当前 official 0/7，LoCoMo QA evaluator 不可用。
 - 真实向量/图 memory backend、真实网络故障、端到端吞吐/尾延迟/成本与生产级多 Agent 长流程。
 - LoCoMo 的稳定大规模 QA 评测，以及 τ-bench/AppWorld 的正式官方 success/accuracy 统计。
-- DOCX 的视觉 render：结构与可访问性已通过，但本机 LibreOffice 动态库缺失导致 PNG QA 阻塞。
+- DOCX 视觉 render 已通过；使用工作区已有的 Poppler `liblcms2.2.dylib` 由 wrapper 注入 LibreOffice，生成 18 页 PNG/PDF 并完成逐页检查。
 - 远程 Git 推送：仓库没有配置 remote，无法在没有 URL 的情况下安全推送。

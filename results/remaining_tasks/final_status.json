@@ -98,7 +98,10 @@
   "docx_visual_qa": {
     "structural_audit": "passed",
     "accessibility_audit": "passed",
-    "visual_render": "blocked_missing_liblcms2_path"
+    "visual_render": "passed_with_bundled_lcms_wrapper",
+    "rendered_pages": 18,
+    "wrapper": "scripts/render_docx_with_bundled_libs.sh",
+    "page_review": "completed"
   },
   "git_remote": {
     "status": "blocked",

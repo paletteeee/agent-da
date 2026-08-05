@@ -61,6 +61,6 @@
 
 ## Residual blockers after execution
 
-- DOCX visual PNG QA remains blocked by the bundled LibreOffice dependency on `/opt/homebrew/opt/little-cms2/lib/liblcms2.2.dylib`; structural and accessibility checks pass.
+- DOCX visual PNG QA is complete: the repository-local `scripts/soffice` wrapper injects the bundled Poppler `liblcms2.2.dylib`, and the 18 rendered pages were visually checked.
 - Public benchmark native memory backend instrumentation is now complete at small smoke scale; large-scale native memory sampling, production vector/graph storage, and official accuracy remain future work. The committed results are native workflow/runtime smoke with explicit benchmark-tool projection boundaries, not public benchmark memory ground truth.
 - AppWorld's SQLite smoke uses a Venmo-only schema and produced official 0/7; LoCoMo's current boundary has no official QA evaluator. These are recorded limitations, not hidden failures.

@@ -11,7 +11,7 @@
 | 5. 并发/micro-witness | `txnmem_interleavings.py` 穷举保持各 agent 局部顺序的所有 linearization；`txnmem_concurrency.py` 提供线程锁 harness；`txnmem_distributed.py` 提供跨进程 owner-linearization；新增 `txnmem_distributed_protocol.py` 和 `process-protocol-smoke` | 已完成 4 类确定性 fault schedule、5/5 invariant coverage、无最小反例；仍不等同于生产级跨进程/分布式事务 |
 | 6. incremental repair failure | `txnmem_repair.py` 的 `incremental_repair` 和 `repair_failure_matrix` | 明确定义 crash-after-k repair steps，并报告 unsafe active descendants |
 | 7. backend/Agent workflow | `AgentReplayRunner`、`run_real_agent`、`run_repetitions` 接受可替换 model/backend；固定 task、seed、temperature、failure schedule 和 acceptance contract | Qwen2.5-7B 真实 endpoint 已完成 5×10 repetition：50/50 contract、50/50 TxnMem oracle match，0 evaluation error；仍不是生产 backend 或真实多 Agent 长流程 |
-| 8. 论文同步 | 根目录脚本/初稿同步 controlled suite、三类官方 replay、protocol smoke、native repetition 和边界 | 初稿已重新生成；结构化/a11y 审计通过；视觉 QA report 已记录，但渲染仍受本机 LibreOffice `liblcms2` 动态库路径和权限阻塞 |
+| 8. 论文同步 | 根目录脚本/初稿同步 controlled suite、三类官方 replay、protocol smoke、native repetition 和边界；`scripts/render_docx_with_bundled_libs.sh` 提供稳定渲染入口 | 初稿已重新生成；结构化/a11y 审计通过；已生成并逐页检查 18 页 PNG/PDF，解决本机 LibreOffice `liblcms2` 动态库路径问题 |
 
 ## 当前状态与下一步
 
