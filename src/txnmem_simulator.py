@@ -110,7 +110,9 @@ def _matches(memory: dict[str, Any], operation: dict[str, Any]) -> bool:
     query = operation.get("query")
     if query is None:
         return True
-    return query in {memory.get("value"), memory.get("memory_id"), memory.get("attribute")}
+    # Tool-generated memory values may be structured dictionaries/lists, so
+    # membership in a set would fail before equality is even evaluated.
+    return any(query == candidate for candidate in (memory.get("value"), memory.get("memory_id"), memory.get("attribute")))
 
 
 def _scope_allowed(memory: dict[str, Any], operation: dict[str, Any]) -> bool:
