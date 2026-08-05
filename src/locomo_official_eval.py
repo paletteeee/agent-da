@@ -67,6 +67,15 @@ def aggregate_scores(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+def normalize_qa_for_evaluator(qa: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize the released category-5 schema for the official evaluator."""
+
+    row = dict(qa)
+    if "answer" not in row:
+        row["answer"] = row.get("adversarial_answer", "")
+    return row
+
+
 def _conversation_context(conversation: Mapping[str, Any], max_chars: int) -> str:
     lines: list[str] = []
     session_keys = sorted(
@@ -146,7 +155,7 @@ def run_official_eval(
     raw_predictions: list[dict[str, Any]] = []
     score_rows: list[dict[str, Any]] = []
     for sample_index, sample in enumerate(selected):
-        qas = [dict(qa) for qa in sample.get("qa", [])]
+        qas = [normalize_qa_for_evaluator(qa) for qa in sample.get("qa", [])]
         context = _conversation_context(sample.get("conversation", {}), max_context_chars)
         for batch_start in range(0, len(qas), batch_size):
             batch = qas[batch_start : batch_start + batch_size]

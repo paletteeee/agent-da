@@ -4,7 +4,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from locomo_official_eval import aggregate_scores, parse_batch_answers  # noqa: E402
+from locomo_official_eval import (  # noqa: E402
+    aggregate_scores,
+    normalize_qa_for_evaluator,
+    parse_batch_answers,
+)
 
 
 class LoCoMoOfficialEvalTests(unittest.TestCase):
@@ -32,6 +36,14 @@ class LoCoMoOfficialEvalTests(unittest.TestCase):
         self.assertEqual(result["question_count"], 3)
         self.assertAlmostEqual(result["mean_f1"], 0.5)
         self.assertEqual(result["category_counts"], {"1": 2, "5": 1})
+
+    def test_normalize_qa_uses_locomo_adversarial_answer_when_answer_is_absent(self):
+        self.assertEqual(
+            normalize_qa_for_evaluator(
+                {"question": "q", "category": 5, "adversarial_answer": "known"}
+            )["answer"],
+            "known",
+        )
 
 
 if __name__ == "__main__":
