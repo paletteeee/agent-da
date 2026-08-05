@@ -6,15 +6,15 @@
 |---:|---|---|---|---|
 | 1 | 独立 reference semantics / ground truth | 已完成 | `src/txnmem_reference.py`、differential evaluator、相关单元测试；oracle 不由 TxnMem 生成 | 增加更大规模独立实现交叉核对 |
 | 2 | 因果 failure schedule、coverage、最小反例 | 已完成 | trigger-based schedule、schedule baseline、coverage JSON、minimal counterexample 报告 | 在真实多 Agent workflow 上扩大 schedule 组合 |
-| 3 | 语义生成 provenance graph | 已完成（含持久化 smoke） | derive/read/write/propagate 事件 contract、chain/branch/merge/supersession workload 与 repair matrix；新增 `SQLiteInstrumentedMemoryBackend`，真实 tool loop 的事件与状态可跨 reopen 恢复 | 接入真实向量/图 backend 的生产事件日志 |
+| 3 | 语义生成 provenance graph | 已完成（含持久化 smoke；真实 backend 代码已补齐） | derive/read/write/propagate 事件 contract、chain/branch/merge/supersession workload 与 repair matrix；新增 SQLite 与 `VectorGraphMemoryBackend`，fake Qdrant/Neo4j 测试覆盖 graph failure compensation、幂等和 reopen | 远端 Qdrant/Neo4j 服务 smoke 与正式生产事件日志尚未运行 |
 | 4 | mutation testing 与 differential oracle | 已完成 | NoTxn、NoPolicyCommit、NoRepair 等 mutant/ablation 及 kill/evaluation 报告 | 对真实 backend 注入更丰富实现缺陷 |
-| 5 | synthetic 与公开 trace 的 realism/holdout 分析 | 已完成（projection + 小规模 native backend 层） | τ-bench、LoCoMo、AppWorld projection replay、trace realism、episode-level holdout；新增 SQLite-backed native replay aggregate | 扩大 native memory 样本，并比较 synthetic 与原生 memory trace 的联合分布 |
+| 5 | synthetic 与公开 trace 的 realism/holdout 分析 | 已完成（projection + 小规模 native backend 层；批量接口已补齐） | τ-bench、LoCoMo、AppWorld projection replay、trace realism、episode-level holdout；新增固定 50/20/10 manifest、task-level split/hash 与 `benchmark-native-batch` | 远端大规模 native memory batch 尚未运行，联合分布统计仍缺真实样本 |
 | 6 | Qwen2.5-7B 真实模型实验 | 已完成（机制层；backend smoke） | GPU endpoint；5×10 repetition，50 task、110 native events、0 evaluation error、50/50 contract、50/50 oracle match；另完成三类官方 runtime 的 SQLite backend smoke | 扩大真实 backend 样本，并报告端到端任务质量/成本 |
-| 7 | 并发、跨进程、协议故障 | 已完成（smoke 层） | 4 类确定性 protocol schedule、5/5 invariant coverage、0 minimal counterexample；线程/owner-linearization harness | 生产级多进程/网络/存储 interleaving 与性能 |
+| 7 | 并发、跨进程、协议故障 | 已完成（smoke 层；真实故障/性能 runner 已补齐） | 4 类确定性 protocol schedule、5/5 invariant coverage、0 minimal counterexample；线程/owner-linearization harness；`ToxiproxyFaultController`、fault matrix 和 p50/p95/p99 runner 已通过 fake backend 测试 | 真实 Qdrant/Neo4j/Toxiproxy 网络故障与端到端性能尚未运行 |
 | 8 | τ-bench native runtime | 已完成（runtime + SQLite backend smoke） | official runtime；历史扩样 3/3 tasks、20 events；新增 Qwen2.5-7B/SQLite 1 task、4 events、0 evaluator error、official reward 0.0、oracle 1/1 | 扩大任务数并报告官方 accuracy |
 | 9 | AppWorld native runtime | 已完成（runtime + SQLite backend smoke） | official runtime/data/evaluator；Venmo-only schema 1 task、1 event、0 evaluator error、official evaluator 0/7、oracle 1/1；默认全 schema 仅作为失败诊断记录 | 扩大 schema/task 样本并提升官方 success rate；当前 smoke 不足以支持准确率结论 |
 | 10 | LoCoMo executable Agent | 已完成（memory-only runtime + SQLite smoke） | 5 conversations contextual smoke 之外，新增 Qwen2.5-7B/SQLite ordered contract：1 conversation、2 events、0 evaluation error、oracle 1/1；LoCoMo QA evaluator 当前边界不可用 | 扩大 conversation 样本并接入可审计 QA evaluator |
-| 11 | 论文初稿与结果同步 | 已完成（含视觉 QA） | `outputs/TxnMem_论文初稿.docx`、结构审计、a11y 审计；通过 `scripts/render_docx_with_bundled_libs.sh` 生成并逐页检查 18 页 PNG/PDF | 无；后续只需按内容更新重新渲染 |
+| 11 | 论文初稿与结果同步 | 已完成（含视觉 QA） | `outputs/TxnMem_论文初稿.docx`、结构审计、a11y 审计；通过 `scripts/render_docx_with_bundled_libs.sh` 生成并逐页检查 20 页 PNG/PDF；已加入多层 native/backend 结果与边界 | 真实服务/大规模 batch 完成后仍需重新填入正式结果 |
 | 12 | Git 备份与远端推送 | 本地备份已完成；远端推送阻塞 | 当前新增代码已有 Git commit；`git remote -v` 为空 | 用户提供远端 URL 后才能 `git remote add origin` / push |
 
 ## 论文目前可以正式声称的内容
@@ -28,5 +28,6 @@
 - 公开 benchmark 的大规模 native Agent memory trace：已完成小规模 SQLite-backed smoke，但尚未形成可支撑统计结论的样本量；AppWorld 当前 official 0/7，LoCoMo QA evaluator 不可用。
 - 真实向量/图 memory backend、真实网络故障、端到端吞吐/尾延迟/成本与生产级多 Agent 长流程。
 - LoCoMo 的稳定大规模 QA 评测，以及 τ-bench/AppWorld 的正式官方 success/accuracy 统计。
+- 上述两项的执行入口已经实现并由 fake backend/CLI 测试验证，但本轮远程 GPU 主机 SSH 检查被远端关闭，本地又没有 Docker 与完整 official runtime，因此不能把“实现完成”写成“实验完成”。详细状态见 `docs/remaining_tasks/native_scale_report_zh.md` 和 `docs/remaining_tasks/real_backend_performance_zh.md`。
 - DOCX 视觉 render 已通过；使用工作区已有的 Poppler `liblcms2.2.dylib` 由 wrapper 注入 LibreOffice，生成 18 页 PNG/PDF 并完成逐页检查。
 - 远程 Git 推送：仓库没有配置 remote，无法在没有 URL 的情况下安全推送。

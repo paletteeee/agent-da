@@ -32,7 +32,11 @@ source "$VENV/bin/activate"
 
 echo "==> installing txnmem code"
 pip install -e "$ROOT" 2>/dev/null || true
-python -m pip install cryptography --quiet
+if [ -f "$ROOT/requirements-remote.txt" ]; then
+  python -m pip install -r "$ROOT/requirements-remote.txt" --quiet
+else
+  python -m pip install cryptography --quiet
+fi
 
 echo "==> installing tau-bench (official)"
 if [ ! -d "$BENCH_ROOT/tau-bench" ]; then

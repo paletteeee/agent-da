@@ -15,6 +15,17 @@
 
 ## 当前状态与下一步
 
+### 2026-08-05 production evidence extension
+
+本轮新增了 production evidence 的可审计执行层：
+
+- `build_native_scale_manifest()` 固定 τ-bench 50、AppWorld 20、LoCoMo 10 的推荐 primary limit、seed=17、task-level split、source hash 和 manifest hash。
+- `benchmark-native-batch` 按 task/conversation 统计官方 evaluator，保留 official status、native event contract、TxnMem oracle 和 95% 区间；blocked evaluator 不会被替换成 oracle 成功。
+- `VectorGraphMemoryBackend`、Qdrant/Neo4j/Toxiproxy compose 配置、幂等/补偿回滚和 `backend-performance` fault/timing runner 已加入；本地 fake-client 与 CLI 测试通过。
+- `scripts/run_native_scale.sh`、`scripts/run_real_backend_smoke.sh`、`scripts/run_remote_evidence.sh` 已加入远端 preflight 和脱敏 aggregate 入口。
+
+代码接口已完成，但正式远端执行仍 blocked：本地缺少 Docker、tau-bench/appworld/LoCoMo QA evaluator，远程 GPU 主机本轮 SSH 检查被远端关闭。因此 `results/remaining_tasks/production_evidence_status.json` 明确记录为 `implementation_complete_execution_blocked`，既有 smoke/replay 结果不升级为正式 benchmark accuracy 或生产性能。
+
 1. 已完成三类官方输入的 workflow/API projection replay，并新增 canonical public-native boundary；τ-bench、AppWorld 和 LoCoMo 的 executable/native workflow smoke 已完成，没有静默 fallback；Qwen2.5-7B GPU native trace 采集、train/holdout differential evaluation 已完成，并新增 per-task SQLite memory backend smoke。公开 benchmark 的大规模 native memory 采样仍未完成。
 2. 已保留非敏感的 `trace_replay.csv`、`trace_realism.json` 和 calibration/performance JSON；原始输入及含内容的 instance 文件不提交仓库。
 3. 已按 task/trial/sample episode 做 holdout；native Qwen task 已按 seed=17、holdout=0.2 划分 8/2，并报告 task contract、replay error 和 oracle match。LoCoMo 已接入 contextual Agent runtime；τ-bench/AppWorld 也已接入官方 runtime，并用 SQLite backend 完成小规模 memory instrumentation。下一步若要形成正式公开 benchmark 结果，仍需扩大 task/sample 数、稳定模型服务并接入真实向量/图 memory backend。

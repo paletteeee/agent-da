@@ -103,6 +103,22 @@
     "wrapper": "scripts/render_docx_with_bundled_libs.sh",
     "page_review": "completed"
   },
+  "production_evidence_extension": {
+    "implementation": "completed_and_locally_tested",
+    "native_scale_runner": "implemented",
+    "native_scale_execution": "blocked",
+    "native_scale_block_reason": "remote_ssh_connection_closed_and_local_official_runtimes_unavailable",
+    "required_primary_task_counts": {
+      "tau-bench": 50,
+      "appworld": 20,
+      "locomo": 10
+    },
+    "real_vector_graph_backend": "implemented_and_fake_client_tested",
+    "real_service_execution": "blocked_docker_unavailable_and_remote_host_unreachable",
+    "fault_performance_runner": "implemented_and_fake_backend_tested",
+    "production_latency_claim": false,
+    "raw_reports_committed": false
+  },
   "git_remote": {
     "status": "blocked",
     "reason": "missing_git_remote",

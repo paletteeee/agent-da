@@ -12,6 +12,9 @@ real_model_native events.  The two sources together form the native trace.
 from __future__ import annotations
 
 import copy
+import json
+import shutil
+import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Callable
@@ -26,6 +29,7 @@ class BenchmarkEnvAdapter:
     """Uniform interface over an official benchmark environment."""
 
     dataset = "benchmark"
+    official_evaluator_status = "available"
 
     def tool_schemas(self) -> list[dict[str, Any]]:
         raise NotImplementedError
@@ -127,8 +131,13 @@ class TauBenchAdapter(BenchmarkEnvAdapter):
                 result = self.env.calculate_reward()
                 reward = result.reward
             except Exception as exc:
-                return {"official_evaluator_error": f"{type(exc).__name__}: {exc}"}
-        return {"reward": float(reward)}
+                self.official_evaluator_status = "error"
+                return {
+                    "status": "error",
+                    "official_evaluator_error": f"{type(exc).__name__}: {exc}",
+                }
+        self.official_evaluator_status = "available"
+        return {"status": "available", "reward": float(reward)}
 
     def tool_event_kind(self, name: str) -> str | None:
         if name == "respond":
@@ -249,18 +258,27 @@ class AppWorldAdapter(BenchmarkEnvAdapter):
     def evaluate(self, run_report: Mapping[str, Any]) -> dict[str, Any]:
         if self.environment is not None:
             try:
+                task_completed = bool(self.environment.task_completed())
                 tracker = self.environment.evaluate(suppress_errors=True)
                 result = {
-                    "official_evaluator": "appworld",
-                    "success": bool(tracker.success),
+                    "status": "available",
+                    "official_evaluator": "appworld.task_completed",
+                    "success": task_completed,
+                    "task_completed": task_completed,
                     "pass_count": int(tracker.pass_count),
                     "total_count": int(tracker.num_tests),
                 }
             finally:
                 self.environment.close()
                 self.environment = None
+            self.official_evaluator_status = "available"
             return result
-        return {"official_evaluator": "appworld_task_completed_not_available_offline"}
+        self.official_evaluator_status = "blocked"
+        return {
+            "status": "blocked",
+            "official_evaluator": "appworld_task_completed_not_available_offline",
+            "error": "official AppWorld environment is not initialized",
+        }
 
     def tool_event_kind(self, name: str) -> str | None:
         if name in self._tool_kinds:
@@ -276,17 +294,74 @@ class LoCoMoAdapter(BenchmarkEnvAdapter):
 
     dataset = "locomo"
 
+    def __init__(self, evaluator_command: Sequence[str] | None = None, evaluator_timeout: float = 60.0):
+        self.evaluator_command = tuple(str(part) for part in (evaluator_command or ()))
+        self.evaluator_timeout = float(evaluator_timeout)
+        self.current_task: Mapping[str, Any] = {}
+
     def tool_schemas(self) -> list[dict[str, Any]]:
         return []
 
     def reset(self, task: Mapping[str, Any]) -> str:
+        self.current_task = task
         return str(task.get("instruction", task.get("prompt", "")))
 
     def execute(self, name: str, arguments: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
         raise AgentToolError("no_tools", "locomo adapter exposes no benchmark tools")
 
     def evaluate(self, run_report: Mapping[str, Any]) -> dict[str, Any]:
-        return {"official_evaluator": "locomo_qa_not_available_offline"}
+        if not self.evaluator_command:
+            self.official_evaluator_status = "blocked"
+            return {
+                "status": "blocked",
+                "official_evaluator": "locomo_qa_not_available_offline",
+                "error": "official LoCoMo QA evaluator is not configured",
+            }
+        executable = shutil.which(self.evaluator_command[0])
+        if executable is None and not Path(self.evaluator_command[0]).is_file():
+            self.official_evaluator_status = "blocked"
+            return {
+                "status": "blocked",
+                "official_evaluator": "locomo_qa_command_missing",
+                "error": f"evaluator executable not found: {self.evaluator_command[0]}",
+            }
+        payload = {
+            "task_id": self.current_task.get("task_id"),
+            "prediction": run_report.get("final_text", ""),
+            "annotation": self.current_task.get("qa_annotation"),
+        }
+        try:
+            completed = subprocess.run(
+                list(self.evaluator_command),
+                input=json.dumps(payload, ensure_ascii=False),
+                text=True,
+                capture_output=True,
+                timeout=self.evaluator_timeout,
+                check=False,
+            )
+            if completed.returncode != 0:
+                raise RuntimeError(f"evaluator exited {completed.returncode}")
+            result = json.loads(completed.stdout)
+            if not isinstance(result, Mapping):
+                raise ValueError("evaluator output must be a JSON object")
+            required = ("question_count", "correct_count", "score")
+            if any(key not in result for key in required):
+                raise ValueError("evaluator output must contain question_count, correct_count, score")
+        except Exception as exc:
+            self.official_evaluator_status = "error"
+            return {
+                "status": "error",
+                "official_evaluator": "locomo_qa_command",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        self.official_evaluator_status = "available"
+        return {
+            "status": "available",
+            "official_evaluator": "locomo_qa_command",
+            "question_count": int(result["question_count"]),
+            "correct_count": int(result["correct_count"]),
+            "score": float(result["score"]),
+        }
 
     def tool_event_kind(self, name: str) -> str | None:
         return None

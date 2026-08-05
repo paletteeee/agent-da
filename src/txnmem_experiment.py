@@ -23,6 +23,8 @@ from txnmem_coverage import coverage_report
 from txnmem_coverage import schedule_effectiveness
 from txnmem_distributed import run_process_action_sequences
 from txnmem_distributed_protocol import run_protocol_matrix
+from txnmem_backend_performance import FaultScenario, benchmark_backend, run_fault_matrix
+from txnmem_service_faults import deterministic_fault_matrix
 from txnmem_mutation import run_mutation_campaign
 from txnmem_model_protocol import ModelResponse, OpenAICompatibleClient, ToolCall
 from txnmem_performance import benchmark_replay
@@ -36,6 +38,7 @@ from txnmem_realism import (
 from txnmem_real_experiment import (
     RealExperimentError,
     load_task_manifest,
+    run_benchmark_batch,
     run_benchmark_experiment_manifest,
     run_experiment_manifest,
 )
@@ -176,6 +179,16 @@ def _build_parser() -> argparse.ArgumentParser:
     performance.add_argument("--seeds", type=int, default=3)
     performance.add_argument("--repetitions", type=int, default=3)
 
+    backend_performance = subparsers.add_parser(
+        "backend-performance", help="run backend-only timing and deterministic fault matrix"
+    )
+    backend_performance.add_argument("--backend", choices=("memory", "sqlite", "vector-graph"), default="sqlite")
+    backend_performance.add_argument("--service-url", default="http://127.0.0.1:6333")
+    backend_performance.add_argument("--fault-matrix", type=Path, default=None)
+    backend_performance.add_argument("--events", type=int, nargs="+", default=[50, 200, 1000])
+    backend_performance.add_argument("--repetitions", type=int, default=30)
+    backend_performance.add_argument("--out-dir", type=Path, default=Path("."))
+
     process_smoke = subparsers.add_parser(
         "process-smoke", help="run the dependency-free process linearization smoke test"
     )
@@ -226,6 +239,25 @@ def _build_parser() -> argparse.ArgumentParser:
     benchmark_native.add_argument("--api-key-env", default="OPENAI_API_KEY")
     benchmark_native.add_argument("--timeout", type=float, default=60.0)
     benchmark_native.add_argument("--offline-fixture", action="store_true")
+    benchmark_batch = subparsers.add_parser(
+        "benchmark-native-batch", help="run a fixed public benchmark manifest with task-level aggregation"
+    )
+    benchmark_batch.add_argument("--benchmark", choices=("tau-bench", "appworld", "locomo"), required=True)
+    benchmark_batch.add_argument("--manifest", type=Path, required=True)
+    benchmark_batch.add_argument("--tau-domain", default="airline", choices=("airline", "retail"))
+    benchmark_batch.add_argument("--tau-split", default="test", choices=("test", "train", "dev"))
+    benchmark_batch.add_argument("--tau-user-strategy", default="scripted", choices=("scripted", "human"))
+    benchmark_batch.add_argument("--appworld-root", type=Path, default=Path("external_data/deps/appworld-data"))
+    benchmark_batch.add_argument("--appworld-apps", default=None)
+    benchmark_batch.add_argument("--locomo-evaluator-command", default=None, help="JSON argv array for official QA evaluator")
+    benchmark_batch.add_argument("--out-dir", type=Path, default=Path("."))
+    benchmark_batch.add_argument("--memory-backend", choices=("memory", "sqlite"), default="sqlite")
+    benchmark_batch.add_argument("--repetitions", type=int, default=1)
+    benchmark_batch.add_argument("--endpoint", default=None)
+    benchmark_batch.add_argument("--model", default=None)
+    benchmark_batch.add_argument("--api-key-env", default="OPENAI_API_KEY")
+    benchmark_batch.add_argument("--timeout", type=float, default=60.0)
+    benchmark_batch.add_argument("--offline-fixture", action="store_true")
     public_native = subparsers.add_parser(
         "public-native-smoke", help="run a public workflow through the native-agent boundary"
     )
@@ -381,6 +413,75 @@ def main(argv: list[str] | None = None) -> int:
         performance = benchmark_replay(instances, VARIANTS, repetitions=args.repetitions)
         write_summary(performance, args.out_dir / "results" / "performance.json")
         print(f"wrote local performance benchmark -> {args.out_dir / 'results' / 'performance.json'}")
+        return 0
+    if args.command == "backend-performance":
+        try:
+            from txnmem_backend import InstrumentedMemoryBackend, SQLiteInstrumentedMemoryBackend
+
+            backend_counter = {"value": 0}
+
+            def backend_factory(size=None, scenario=None):
+                backend_counter["value"] += 1
+                if args.backend == "memory":
+                    return InstrumentedMemoryBackend()
+                if args.backend == "sqlite":
+                    path = args.out_dir / "data" / f"backend_perf_{backend_counter['value']:05d}.sqlite"
+                    return SQLiteInstrumentedMemoryBackend(path)
+                from txnmem_vector_graph_backend import VectorGraphMemoryBackend
+
+                neo4j_uri = os.environ.get("TXNMEM_NEO4J_URI", "bolt://127.0.0.1:7687")
+                neo4j_user = os.environ.get("TXNMEM_NEO4J_USER", "neo4j")
+                neo4j_password = os.environ.get("TXNMEM_NEO4J_PASSWORD", "txnmem-local-only")
+                return VectorGraphMemoryBackend(
+                    f"perf-{backend_counter['value']:05d}",
+                    args.service_url,
+                    neo4j_uri,
+                    (neo4j_user, neo4j_password),
+                )
+
+            performance = benchmark_backend(
+                backend_factory,
+                workload_sizes=args.events,
+                repetitions=args.repetitions,
+            )
+            if args.fault_matrix is None:
+                raw_scenarios = deterministic_fault_matrix(seed=17)
+            else:
+                raw_scenarios = json.loads(args.fault_matrix.read_text(encoding="utf-8"))
+            scenarios = [
+                FaultScenario(
+                    name=str(item["name"]),
+                    service=str(item["service"]),
+                    trigger_operation=str(item["trigger_operation"]),
+                    action=str(item["action"]),
+                    seed=int(item.get("seed", 17)),
+                )
+                for item in raw_scenarios
+            ]
+            workload = [
+                {"type": "write", "memory_id": "fault_m0", "value": "fault_v0"},
+                {"type": "write", "memory_id": "fault_m1", "value": "fault_v1"},
+            ]
+            faults = run_fault_matrix(backend_factory, scenarios, workload, repetitions=args.repetitions)
+            report = {
+                "backend": args.backend,
+                "service_url": args.service_url if args.backend == "vector-graph" else None,
+                "performance": performance,
+                "fault_matrix": faults,
+                "production_latency_claim": False,
+            }
+            write_summary(report, args.out_dir / "results" / "backend_performance.json")
+        except (OSError, ValueError, ImportError, RuntimeError) as exc:
+            blocked = {
+                "status": "blocked",
+                "backend": args.backend,
+                "reason": f"{type(exc).__name__}: {exc}",
+                "production_latency_claim": False,
+            }
+            write_summary(blocked, args.out_dir / "results" / "backend_performance_blocked.json")
+            print(f"backend performance blocked: {exc}")
+            return 2
+        print(f"wrote backend performance report -> {args.out_dir / 'results' / 'backend_performance.json'}")
         return 0
     if args.command == "process-smoke":
         raw_report = run_process_action_sequences(
@@ -557,6 +658,103 @@ def main(argv: list[str] | None = None) -> int:
             print(f"benchmark native experiment configuration error: {exc}")
             return 2
         print(f"wrote benchmark native trace and summary -> {args.out_dir}")
+        return 0
+    if args.command == "benchmark-native-batch":
+        try:
+            manifest, manifest_sha256 = load_task_manifest(args.manifest)
+            if args.offline_fixture:
+                model = _OfflineFixtureModel()
+                execution_mode = "offline_fixture"
+                model_id = "offline-fixture"
+            else:
+                if not args.endpoint or not args.model:
+                    raise RealExperimentError(
+                        "missing_endpoint_or_model",
+                        "real endpoint mode requires --endpoint and --model",
+                    )
+                model = OpenAICompatibleClient(
+                    args.endpoint,
+                    args.model,
+                    api_key=os.environ.get(args.api_key_env),
+                    timeout_s=args.timeout,
+                )
+                execution_mode = "remote_endpoint"
+                model_id = args.model
+            from txnmem_benchmark_bridge import (
+                AppWorldAdapter,
+                LoCoMoAdapter,
+                TauBenchAdapter,
+                _official_tau_user_strategy,
+            )
+
+            if args.benchmark == "tau-bench":
+                def adapter_factory():
+                    from tau_bench.envs.airline.env import MockAirlineDomainEnv
+                    from tau_bench.envs.retail.env import MockRetailDomainEnv
+
+                    env_cls = MockAirlineDomainEnv if args.tau_domain == "airline" else MockRetailDomainEnv
+                    env = env_cls(
+                        user_strategy=_official_tau_user_strategy(args.tau_user_strategy),
+                        task_split=args.tau_split,
+                        task_index=None,
+                    )
+                    return TauBenchAdapter(
+                        lambda: env,
+                        task_split=args.tau_split,
+                        user_strategy=args.tau_user_strategy,
+                    )
+            elif args.benchmark == "appworld":
+                app_names = (
+                    [name.strip() for name in args.appworld_apps.split(",") if name.strip()]
+                    if args.appworld_apps
+                    else None
+                )
+
+                def adapter_factory():
+                    return AppWorldAdapter(appworld_root=args.appworld_root, app_names=app_names)
+            else:
+                evaluator_command = None
+                if args.locomo_evaluator_command:
+                    parsed = json.loads(args.locomo_evaluator_command)
+                    if not isinstance(parsed, list) or not parsed or not all(isinstance(item, str) for item in parsed):
+                        raise RealExperimentError(
+                            "invalid_locomo_evaluator_command",
+                            "--locomo-evaluator-command must be a JSON argv array",
+                        )
+                    evaluator_command = parsed
+
+                def adapter_factory():
+                    return LoCoMoAdapter(evaluator_command=evaluator_command, evaluator_timeout=args.timeout)
+
+            backend_factory = None
+            if args.memory_backend == "sqlite":
+                from txnmem_backend import SQLiteInstrumentedMemoryBackend
+
+                def backend_factory(index: int, root: Path) -> SQLiteInstrumentedMemoryBackend:
+                    return SQLiteInstrumentedMemoryBackend(root / "data" / f"memory_{index:04d}.sqlite")
+
+            report = run_benchmark_batch(
+                manifest,
+                model,
+                args.out_dir,
+                backend_factory=backend_factory,
+                adapter_factory=adapter_factory,
+                repetitions=args.repetitions,
+            )
+            report["model_execution_mode"] = execution_mode
+            report["model_id"] = model_id
+            report["manifest_sha256"] = manifest_sha256
+            report["benchmark"] = args.benchmark
+            report["memory_backend"] = args.memory_backend
+            summary_path = args.out_dir / "results" / "native_batch_summary.json"
+            summary_path.write_text(
+                json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        except (OSError, json.JSONDecodeError, RealExperimentError, ImportError) as exc:
+            print(f"benchmark native batch configuration error: {exc}")
+            return 2
+        print(f"wrote benchmark native batch summary -> {args.out_dir / 'results' / 'native_batch_summary.json'}")
         return 0
     if args.command == "public-native-smoke":
         model = None

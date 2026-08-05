@@ -252,6 +252,31 @@ class AppWorldAdapterTest(unittest.TestCase):
         adapter = AppWorldAdapter(requester_factory=lambda: None)
         self.assertTrue(adapter.memory_id_for("venmo__create", {}, 3).startswith("appworld:"))
 
+    def test_official_result_uses_task_completed_and_preserves_tracker_counts(self):
+        class _Tracker:
+            success = False
+            pass_count = 2
+            num_tests = 3
+
+        class _Environment:
+            task = type("Task", (), {"instruction": "fixture"})()
+
+            def task_completed(self):
+                return True
+
+            def evaluate(self, suppress_errors=True):
+                return _Tracker()
+
+            def close(self):
+                return None
+
+        adapter = AppWorldAdapter(requester_factory=lambda: None)
+        adapter.environment = _Environment()
+        result = adapter.evaluate({})
+        self.assertTrue(result["success"])
+        self.assertTrue(result["task_completed"])
+        self.assertEqual(result["pass_count"], 2)
+
 
 class ManifestGeneratorTest(unittest.TestCase):
     def test_locomo_manifest_from_sample(self):

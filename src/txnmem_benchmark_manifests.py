@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import random
 from pathlib import Path
 from typing import Any
 
@@ -178,6 +179,77 @@ def generate_locomo_manifest(
             )
         )
     return _canonical_manifest("locomo", tasks)
+
+
+def build_native_scale_manifest(
+    benchmark: str,
+    source: str | Path | None,
+    limit: int,
+    seed: int = 17,
+    split: str = "test",
+) -> dict[str, Any]:
+    """Build a fixed, hashed task-level manifest for a public batch run.
+
+    ``source`` is a benchmark-specific source: tau-bench domain name,
+    AppWorld data root, or LoCoMo JSON path.  The raw task text remains an
+    input to the remote run; the returned hash and split metadata are the
+    reproducibility boundary used by aggregate reports.
+    """
+
+    if not isinstance(benchmark, str) or benchmark not in {"tau-bench", "appworld", "locomo"}:
+        raise ValueError("benchmark must be tau-bench, appworld, or locomo")
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+        raise ValueError("limit must be a positive integer")
+    if not isinstance(split, str) or not split.strip():
+        raise ValueError("split must be a non-empty string")
+
+    if benchmark == "tau-bench":
+        domain = str(source or "airline")
+        manifest = generate_tau_bench_manifest(
+            domain=domain, task_split=split, max_tasks=limit, seed=seed
+        )
+    elif benchmark == "appworld":
+        data_root = Path(source or "external_data/deps/appworld-data/data")
+        if data_root.name != "data" and (data_root / "data" / "tasks").is_dir():
+            data_root = data_root / "data"
+        manifest = generate_appworld_manifest(data_root=data_root, max_tasks=limit, seed=seed)
+    else:
+        locomo_source = Path(source or "external_data/raw/locomo10.json")
+        manifest = generate_locomo_manifest(source=locomo_source, max_tasks=limit, seed=seed)
+
+    tasks = list(manifest.get("tasks", []))
+    if len(tasks) != limit:
+        raise ValueError(f"{benchmark} source provided {len(tasks)} tasks, expected {limit}")
+    task_ids = [str(task.get("task_id")) for task in tasks]
+    if any(not task_id or task_id == "None" for task_id in task_ids):
+        raise ValueError("every task must have a non-empty task_id")
+    if len(set(task_ids)) != len(task_ids):
+        raise ValueError("duplicate task IDs are not allowed")
+
+    shuffled = list(task_ids)
+    random.Random(seed).shuffle(shuffled)
+    holdout_count = max(1, round(len(shuffled) * 0.2))
+    holdout_ids = sorted(shuffled[:holdout_count])
+    holdout_set = set(holdout_ids)
+    train_ids = sorted(task_id for task_id in task_ids if task_id not in holdout_set)
+    normalized = dict(manifest)
+    normalized["seed"] = int(seed)
+    normalized["split"] = split
+    normalized["task_count"] = len(tasks)
+    normalized["task_level_split"] = {
+        "seed": int(seed),
+        "source_split": split,
+        "train_task_ids": train_ids,
+        "holdout_task_ids": holdout_ids,
+    }
+    if isinstance(source, (str, Path)) and Path(str(source)).is_file():
+        source_bytes = Path(str(source)).read_bytes()
+        normalized["source_sha256"] = hashlib.sha256(source_bytes).hexdigest()
+    else:
+        normalized["source_sha256"] = hashlib.sha256(str(source or benchmark).encode("utf-8")).hexdigest()
+    encoded = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    normalized["manifest_hash"] = hashlib.sha256(encoded).hexdigest()
+    return normalized
 
 
 def write_manifest(manifest: dict[str, Any], out_path: str | Path) -> str:

@@ -175,6 +175,37 @@ For repeated native evaluation on a configured endpoint, use
 `examples/run_native_repetitions.py`; it writes contract/oracle rates and
 95% Wilson intervals while keeping raw episode reports outside the aggregate.
 
+For the recommended fixed-size public native batch, generate deterministic
+manifests and run the three benchmark adapters with:
+
+```bash
+TXNMEM_PYTHON=/path/to/python \
+TXNMEM_LOCOMO_EVALUATOR_COMMAND='python /path/to/evaluator.py' \
+scripts/run_native_scale.sh \
+  --endpoint http://GPU_HOST:8000/v1 \
+  --model Qwen/Qwen2.5-7B-Instruct
+```
+
+The default batch size is τ-bench 50, AppWorld 20, and LoCoMo 10. The
+official benchmark score is kept separate from TxnMem contract/oracle rates;
+when an official runtime or evaluator is unavailable, the batch writes an
+explicit blocked status instead of manufacturing a score.
+
+For real vector/graph service and fault-injection evidence, start the pinned
+Qdrant, Neo4j, and Toxiproxy stack with
+`infra/real_backend/docker-compose.yml`, then run:
+
+```bash
+scripts/run_real_backend_smoke.sh
+python3 src/txnmem_experiment.py backend-performance \
+  --backend vector-graph --service-url http://localhost:8474 \
+  --fault-matrix --out-dir results/real_backend_performance
+```
+
+The performance report labels itself as a production claim only after real
+services and network faults are observed; fake-client and in-memory runs are
+validation evidence, not production latency results.
+
 For local replay timing (not production latency), run:
 
 ```bash

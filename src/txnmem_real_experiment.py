@@ -15,6 +15,7 @@ from txnmem_event_contract import validate_events
 from txnmem_failure_controller import validate_failure_schedule
 from txnmem_real_agent import run_real_agent
 from txnmem_realism import trace_evidence_summary
+from txnmem_statistics import aggregate_official_results
 from txnmem_trace_pipeline import build_trace_instances, replay_trace_instances
 
 
@@ -64,8 +65,17 @@ def load_task_manifest(source: Mapping[str, Any] | Path) -> tuple[dict[str, Any]
         "dataset_name": str(source.get("dataset_name", "txnmem-real-model")),
         "tasks": normalized_tasks,
     }
+    for field in ("seed", "split", "task_count", "task_level_split", "source_sha256"):
+        if field in source:
+            normalized[field] = source[field]
     encoded = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return normalized, hashlib.sha256(encoded).hexdigest()
+    computed_digest = hashlib.sha256(encoded).hexdigest()
+    provided_digest = source.get("manifest_hash")
+    if provided_digest is not None:
+        if provided_digest != computed_digest:
+            raise RealExperimentError("manifest_hash_mismatch", "manifest_hash does not match canonical manifest")
+        normalized["manifest_hash"] = provided_digest
+    return normalized, computed_digest
 
 
 def split_task_manifest(
@@ -307,6 +317,7 @@ def run_benchmark_experiment_manifest(
                 "status": run_report.get("status"),
                 "steps": run_report.get("steps", 0),
                 "official": run_report.get("official"),
+                "native_event_count": len(run_report.get("events", [])),
             }
             if run_report.get("failure_code") is not None:
                 task_summary["failure_code"] = run_report.get("failure_code")
@@ -362,6 +373,108 @@ def run_benchmark_experiment_manifest(
     }
     sanitized = sanitize_run_report(report)
     _write_json(out_dir / "results" / "native_model_summary.json", sanitized)
+    return sanitized
+
+
+def run_benchmark_batch(
+    manifest: Mapping[str, Any],
+    model: Any,
+    out_dir: Path,
+    backend_factory: Any | None = None,
+    adapter_factory: Any | None = None,
+    repetitions: int = 1,
+) -> dict[str, Any]:
+    """Run fixed benchmark tasks and aggregate official results by task.
+
+    Each repetition gets an isolated output directory.  Raw model traces stay
+    there; the returned report contains only sanitized task summaries and
+    aggregate counters.  Official evaluator output is intentionally kept
+    separate from TxnMem's independent oracle/contract summary.
+    """
+
+    if repetitions < 1:
+        raise RealExperimentError("invalid_repetitions", "repetitions must be positive")
+    if not isinstance(manifest, Mapping):
+        raise RealExperimentError("invalid_manifest", "manifest must be a mapping")
+    tasks = manifest.get("tasks")
+    if not isinstance(tasks, list) or not tasks:
+        raise RealExperimentError("missing_tasks", "manifest.tasks must be a non-empty list")
+    if not callable(adapter_factory):
+        raise RealExperimentError("missing_adapter", "adapter_factory is required")
+    if model is None or not callable(getattr(model, "complete", None)):
+        raise RealExperimentError("missing_model", "a configured model client is required")
+
+    all_task_summaries: list[dict[str, Any]] = []
+    reports: list[dict[str, Any]] = []
+    for repetition in range(repetitions):
+        repetition_tasks: list[dict[str, Any]] = []
+        for task in tasks:
+            item = dict(task)
+            item["seed"] = int(item.get("seed", 0)) + repetition * 100
+            repetition_tasks.append(item)
+        repetition_manifest = {
+            "manifest_version": int(manifest.get("manifest_version", 1)),
+            "dataset_name": str(manifest.get("dataset_name", "benchmark")),
+            "tasks": repetition_tasks,
+        }
+        repetition_dir = out_dir if repetitions == 1 else out_dir / f"rep_{repetition + 1:02d}"
+        report = run_benchmark_experiment_manifest(
+            repetition_manifest,
+            model,
+            adapter_factory,
+            repetition_dir,
+            backend_factory=backend_factory,
+        )
+        reports.append(report)
+        for task_summary in report.get("task_summaries", []):
+            if isinstance(task_summary, Mapping):
+                all_task_summaries.append(dict(task_summary))
+
+    official = aggregate_official_results(
+        all_task_summaries, str(manifest.get("dataset_name", "benchmark"))
+    )
+    variant_totals: Counter[str] = Counter()
+    variant_matches: Counter[str] = Counter()
+    variant_violations: Counter[str] = Counter()
+    for report in reports:
+        for variant, values in report.get("variants", {}).items():
+            if not isinstance(values, Mapping):
+                continue
+            variant_totals[str(variant)] += int(values.get("count", 0) or 0)
+            variant_matches[str(variant)] += int(values.get("oracle_matched", 0) or 0)
+            variant_violations[str(variant)] += int(values.get("violating", 0) or 0)
+    variants = {
+        variant: {
+            "count": variant_totals[variant],
+            "oracle_matched": variant_matches[variant],
+            "oracle_match_rate": (
+                variant_matches[variant] / variant_totals[variant]
+                if variant_totals[variant]
+                else 0.0
+            ),
+            "violating": variant_violations[variant],
+        }
+        for variant in sorted(variant_totals)
+    }
+    result: dict[str, Any] = {
+        "dataset": str(manifest.get("dataset_name", "benchmark")),
+        "task_count": len(all_task_summaries),
+        "unique_task_count": len(tasks),
+        "repetitions": repetitions,
+        "native_event_count": sum(int(report.get("native_event_count", 0) or 0) for report in reports),
+        "evaluation_error_count": sum(
+            int(report.get("evaluation_error_count", 0) or 0) for report in reports
+        ),
+        "task_summaries": all_task_summaries,
+        "official": official,
+        "variants": variants,
+        "trace_ground_truth_native": True,
+        "raw_reports_location": "rep_*/results/native_model_summary.json" if repetitions > 1 else "results/native_model_summary.json",
+        "raw_reports_committed": False,
+        "production_latency_claim": False,
+    }
+    sanitized = sanitize_run_report(result)
+    _write_json(out_dir / "results" / "native_batch_summary.json", sanitized)
     return sanitized
 
 

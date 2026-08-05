@@ -1,0 +1,22 @@
+{
+  "status": "implementation_complete_execution_blocked",
+  "updated": "2026-08-05",
+  "native_scale": {
+    "runner": "implemented",
+    "primary_batches": "blocked",
+    "reason": "remote_ssh_connection_closed_and_local_official_runtimes_unavailable",
+    "required_limits": {
+      "tau-bench": 50,
+      "appworld": 20,
+      "locomo": 10
+    },
+    "official_accuracy_claim": false
+  },
+  "real_backend": {
+    "adapter": "implemented_and_fake_client_tested",
+    "services": "not_started",
+    "reason": "docker_unavailable_locally_and_remote_host_unreachable",
+    "production_latency_claim": false
+  },
+  "raw_reports_committed": false
+}

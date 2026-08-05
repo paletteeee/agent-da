@@ -133,6 +133,105 @@ def aggregate_native_repetitions(reports: Iterable[Mapping[str, Any]]) -> dict[s
     }
 
 
+def _official_status(result: Mapping[str, Any] | None) -> str:
+    """Normalize an adapter result without treating TxnMem oracle as official."""
+
+    if not isinstance(result, Mapping):
+        return "blocked"
+    explicit = result.get("status", result.get("official_evaluator_status"))
+    if explicit in {"available", "blocked", "error"}:
+        return str(explicit)
+    if result.get("official_evaluator_error") or result.get("error"):
+        return "error"
+    marker = str(result.get("official_evaluator", "")).lower()
+    if any(token in marker for token in ("not_available", "unavailable", "offline", "blocked")):
+        return "blocked"
+    if any(key in result for key in ("success", "reward", "score", "pass_count", "total_count")):
+        return "available"
+    return "blocked"
+
+
+def aggregate_official_results(
+    task_summaries: Iterable[Mapping[str, Any]], dataset: str
+) -> dict[str, Any]:
+    """Aggregate official benchmark results using task-level denominators.
+
+    ``TxnMem`` contract/oracle fields are deliberately ignored here.  A task
+    contributes to ``trials`` only when its official evaluator reports a
+    boolean success or a numeric reward/score; blocked evaluator rows stay in
+    the failure classification but cannot become synthetic failures or
+    successes.
+    """
+
+    rows = [row for row in task_summaries if isinstance(row, Mapping)]
+    statuses = Counter(_official_status(row.get("official")) for row in rows)
+    successes = 0
+    trials = 0
+    event_count = 0
+    rewards: list[float] = []
+    scores: list[float] = []
+    pass_count = 0
+    total_count = 0
+    for row in rows:
+        event_count += int(row.get("native_event_count", 0) or 0)
+        official = row.get("official")
+        if not isinstance(official, Mapping) or _official_status(official) != "available":
+            continue
+        success = official.get("success")
+        reward = official.get("reward")
+        score = official.get("score")
+        if isinstance(success, bool):
+            trials += 1
+            successes += int(success)
+        elif isinstance(reward, (int, float)) and not isinstance(reward, bool):
+            trials += 1
+            rewards.append(float(reward))
+        elif isinstance(score, (int, float)) and not isinstance(score, bool):
+            trials += 1
+            scores.append(float(score))
+        if isinstance(success, bool):
+            if isinstance(reward, (int, float)) and not isinstance(reward, bool):
+                rewards.append(float(reward))
+            if isinstance(score, (int, float)) and not isinstance(score, bool):
+                scores.append(float(score))
+        pass_count += int(official.get("pass_count", 0) or 0)
+        total_count += int(official.get("total_count", 0) or 0)
+
+    available = statuses.get("available", 0)
+    blocked = statuses.get("blocked", 0)
+    errors = statuses.get("error", 0)
+    if available and errors == 0 and blocked == 0:
+        status = "available"
+    elif available:
+        status = "error" if errors else "blocked"
+    elif errors:
+        status = "error"
+    else:
+        status = "blocked"
+    result: dict[str, Any] = {
+        "dataset": str(dataset),
+        "official_evaluator_status": status,
+        "task_count": len(rows),
+        "evaluator_available_task_count": available,
+        "blocked_task_count": blocked,
+        "error_task_count": errors,
+        "successes": successes,
+        "trials": trials,
+        "event_count": event_count,
+        "success_interval": binomial_interval(successes, trials),
+    }
+    if rewards:
+        result["reward_sum"] = sum(rewards)
+        result["reward_mean"] = sum(rewards) / len(rewards)
+    if scores:
+        result["score_sum"] = sum(scores)
+        result["score_mean"] = sum(scores) / len(scores)
+    if total_count:
+        result["pass_count"] = pass_count
+        result["total_count"] = total_count
+    return result
+
+
 def run_repetitions(
     manifest: Mapping[str, Any], model: Any, out_dir: Path, repetitions: int = 5
 ) -> dict[str, Any]:
