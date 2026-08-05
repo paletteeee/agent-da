@@ -8,7 +8,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
-from txnmem_backend import InstrumentedMemoryBackend, AgentReplayRunner  # noqa: E402
+from txnmem_backend import (  # noqa: E402
+    AgentReplayRunner,
+    InstrumentedMemoryBackend,
+    SQLiteInstrumentedMemoryBackend,
+)
 from txnmem_bench_adapters import adapt_records  # noqa: E402
 from txnmem_concurrency import run_concurrent_action_sequences  # noqa: E402
 from txnmem_distributed import run_process_action_sequences  # noqa: E402
@@ -86,6 +90,20 @@ class TxnMemRemainingTaskTests(unittest.TestCase):
         validated = backend.validated_events()
         self.assertEqual(validated[0]["step"], 1)
         self.assertEqual(validated[0]["agent_id"], "agent_1")
+
+    def test_sqlite_backend_persists_and_reloads_memory_state(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "memory.sqlite"
+            backend = SQLiteInstrumentedMemoryBackend(path)
+            backend.write("m0", value="v0", agent_id="agent_1")
+            backend.derive("m1", source_ids=["m0"], value="v1", agent_id="agent_1")
+            backend.close()
+
+            reopened = SQLiteInstrumentedMemoryBackend(path)
+            self.assertEqual(reopened.read("m0")["value"], "v0")
+            self.assertEqual(reopened.search("v1")[0]["memory_id"], "m1")
+            self.assertEqual([event["kind"] for event in reopened.validated_events()], ["memory_read", "memory_search"])
+            reopened.close()
 
     def test_benchmark_adapters_map_native_shapes_without_inventing_events(self):
         tau = adapt_records(

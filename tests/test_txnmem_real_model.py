@@ -11,7 +11,8 @@ from txnmem_model_protocol import (
     ToolCall,
     parse_chat_completion,
 )
-from txnmem_backend import InstrumentedMemoryBackend
+from txnmem_backend import InstrumentedMemoryBackend, SQLiteInstrumentedMemoryBackend
+from txnmem_benchmark_bridge import BenchmarkEnvAdapter
 from txnmem_real_agent import NativeMemoryToolGateway, run_real_agent
 from txnmem_real_experiment import (
     RealExperimentError,
@@ -19,6 +20,7 @@ from txnmem_real_experiment import (
     evaluate_task_contract,
     load_task_manifest,
     run_experiment_manifest,
+    run_benchmark_experiment_manifest,
     sanitize_run_report,
     split_task_manifest,
 )
@@ -70,6 +72,22 @@ class _FakeURLopener:
             "timeout": timeout,
         }
         return _FakeHTTPResponse(self.response_payload)
+
+
+class _NoopBenchmarkAdapter(BenchmarkEnvAdapter):
+    dataset = "fixture"
+
+    def tool_schemas(self):
+        return []
+
+    def reset(self, task):
+        return str(task["instruction"])
+
+    def execute(self, name, arguments):
+        raise AssertionError("fixture should not call benchmark tools")
+
+    def evaluate(self, run_report):
+        return {"success": True}
 
 
 class TxnMemRealModelProtocolTests(unittest.TestCase):
@@ -308,6 +326,40 @@ class TxnMemRealExperimentTests(unittest.TestCase):
         self.assertIn("private", raw)
         self.assertNotIn("private", summary)
         self.assertNotIn("events", result)
+
+    def test_benchmark_manifest_can_use_persistent_memory_backend_factory(self):
+        model = _ScriptedModel(
+            [
+                ModelResponse("", [ToolCall("c1", "memory_write", {"memory_id": "m1", "value": "private"})]),
+                ModelResponse("done", []),
+            ]
+        )
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            result = run_benchmark_experiment_manifest(
+                {
+                    "tasks": [
+                        {
+                            "task_id": "persistent_task",
+                            "instruction": "write",
+                            "prompt": "write",
+                            "agent_id": "agent_model",
+                        }
+                    ]
+                },
+                model,
+                lambda: _NoopBenchmarkAdapter(),
+                out_dir,
+                backend_factory=lambda index, root: SQLiteInstrumentedMemoryBackend(
+                    root / "data" / f"memory_{index:04d}.sqlite"
+                ),
+            )
+            self.assertEqual(result["native_event_count"], 1)
+            database = out_dir / "data" / "memory_0001.sqlite"
+            self.assertTrue(database.exists())
+            reopened = SQLiteInstrumentedMemoryBackend(database)
+            self.assertEqual(reopened.read("m1")["value"], "private")
+            reopened.close()
 
     def test_manifest_records_replay_errors_without_aborting_later_tasks(self):
         model = _ScriptedModel(

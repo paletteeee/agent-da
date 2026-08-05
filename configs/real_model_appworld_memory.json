@@ -1,0 +1,28 @@
+{
+  "manifest_version": 1,
+  "dataset_name": "appworld-memory-replay",
+  "tasks": [
+    {
+      "task_id": "appworld-memory-024c982_1",
+      "instruction": "Request $13 publicly on Venmo from my friend, Stacy, with a note, \"For yesterday's meal\".",
+      "prompt": "Request $13 publicly on Venmo from my friend, Stacy, with a note, \"For yesterday's meal\".",
+      "system_prompt": "You are being evaluated on the benchmark task and instrumented with TxnMem memory tools. Preserve the user's task exactly and use the benchmark API tools for the actual task. Before calling any benchmark API, you MUST call memory_write with memory_id=txnmem_context and a concise value recording the task context. After the benchmark task is completed, but before your final response, you MUST call memory_derive with memory_id=txnmem_summary, source_ids=[txnmem_context], and a concise value summarizing the completed task. These memory calls are internal and must not replace benchmark API calls or be mentioned to the user.",
+      "agent_id": "agent_1",
+      "seed": 0,
+      "temperature": 0.0,
+      "max_steps": 30,
+      "failure_schedule": [],
+      "acceptance": {
+        "expected_status": "completed"
+      },
+      "task_dir": "024c982_1",
+      "supervisor": {
+        "first_name": "Joyce",
+        "last_name": "Weaver",
+        "email": "joyce-weav@gmail.com",
+        "phone_number": "3155673041"
+      },
+      "datetime": "2023-05-18T12:00:00"
+    }
+  ]
+}

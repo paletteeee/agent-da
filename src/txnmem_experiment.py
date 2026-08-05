@@ -215,6 +215,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="comma-separated AppWorld apps to expose; use a task-specific list to bound tool context",
     )
     benchmark_native.add_argument("--out-dir", type=Path, default=Path("."))
+    benchmark_native.add_argument(
+        "--memory-backend",
+        choices=("memory", "sqlite"),
+        default="memory",
+        help="memory backend for the merged benchmark+memory loop; sqlite persists state per task",
+    )
     benchmark_native.add_argument("--endpoint", default=None, help="OpenAI-compatible base or completion endpoint")
     benchmark_native.add_argument("--model", default=None, help="model id served by the endpoint")
     benchmark_native.add_argument("--api-key-env", default="OPENAI_API_KEY")
@@ -526,11 +532,25 @@ def main(argv: list[str] | None = None) -> int:
                 def adapter_factory():
                     return LoCoMoAdapter()
 
-            report = run_benchmark_experiment_manifest(manifest, model, adapter_factory, args.out_dir)
+            backend_factory = None
+            if args.memory_backend == "sqlite":
+                from txnmem_backend import SQLiteInstrumentedMemoryBackend
+
+                def backend_factory(index: int, root: Path) -> SQLiteInstrumentedMemoryBackend:
+                    return SQLiteInstrumentedMemoryBackend(root / "data" / f"memory_{index:04d}.sqlite")
+
+            report = run_benchmark_experiment_manifest(
+                manifest,
+                model,
+                adapter_factory,
+                args.out_dir,
+                backend_factory=backend_factory,
+            )
             report["model_execution_mode"] = execution_mode
             report["model_id"] = model_id
             report["manifest_sha256"] = manifest_sha256
             report["benchmark"] = args.benchmark
+            report["memory_backend"] = args.memory_backend
             summary_path = args.out_dir / "results" / "native_model_summary.json"
             summary_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         except (OSError, json.JSONDecodeError, RealExperimentError) as exc:

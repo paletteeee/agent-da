@@ -36,6 +36,8 @@
 - [x] Add a failing test only for a concrete missing event-contract behavior.
 - [x] Implement the minimal behavior and rerun the focused test.
 - [x] Confirm benchmark-tool projection events and model-issued memory events remain separately labeled.
+- [x] Add and test `SQLiteInstrumentedMemoryBackend` plus a backend factory path in the benchmark manifest runner.
+- [x] Run Qwen2.5-7B against τ-bench, AppWorld and LoCoMo with per-task SQLite state; keep raw traces remote-only.
 
 ### Task 3: Reconcile formal artifacts
 
@@ -60,4 +62,5 @@
 ## Residual blockers after execution
 
 - DOCX visual PNG QA remains blocked by the bundled LibreOffice dependency on `/opt/homebrew/opt/little-cms2/lib/liblcms2.2.dylib`; structural and accessibility checks pass.
-- Public benchmark native memory backend instrumentation and official accuracy remain future work; the expanded results are native workflow/runtime smoke with benchmark-tool projection events.
+- Public benchmark native memory backend instrumentation is now complete at small smoke scale; large-scale native memory sampling, production vector/graph storage, and official accuracy remain future work. The committed results are native workflow/runtime smoke with explicit benchmark-tool projection boundaries, not public benchmark memory ground truth.
+- AppWorld's SQLite smoke uses a Venmo-only schema and produced official 0/7; LoCoMo's current boundary has no official QA evaluator. These are recorded limitations, not hidden failures.

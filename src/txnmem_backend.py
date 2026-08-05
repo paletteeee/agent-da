@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import copy
+import json
+import sqlite3
+from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from txnmem_event_contract import validate_events
@@ -107,6 +110,98 @@ class InstrumentedMemoryBackend:
         """Validate and return a JSON-safe copy of the native event log."""
 
         return validate_events(self.events)
+
+
+class SQLiteInstrumentedMemoryBackend(InstrumentedMemoryBackend):
+    """Persist memory state in SQLite while retaining the native event contract.
+
+    The database is intentionally per-run and stores raw memory payloads only on
+    the execution host. Aggregate reports still contain event counts and oracle
+    summaries, never the SQLite payloads.
+    """
+
+    def __init__(self, db_path: str | Path, memories: dict[str, dict[str, Any]] | None = None):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._connection = sqlite3.connect(str(self.db_path))
+        self._connection.execute(
+            "CREATE TABLE IF NOT EXISTS memories ("
+            "memory_id TEXT PRIMARY KEY, payload TEXT NOT NULL, status TEXT NOT NULL)"
+        )
+        self._connection.commit()
+        super().__init__(memories)
+        rows = self._connection.execute("SELECT payload FROM memories ORDER BY memory_id").fetchall()
+        if rows:
+            self.memories = {str(json.loads(row[0])["memory_id"]): json.loads(row[0]) for row in rows}
+        else:
+            for memory in self.memories.values():
+                self._persist_memory(memory)
+            self._connection.commit()
+
+    def _persist_memory(self, memory: dict[str, Any]) -> None:
+        payload = json.dumps(memory, ensure_ascii=False, sort_keys=True)
+        self._connection.execute(
+            "INSERT INTO memories(memory_id, payload, status) VALUES (?, ?, ?) "
+            "ON CONFLICT(memory_id) DO UPDATE SET payload=excluded.payload, status=excluded.status",
+            (str(memory["memory_id"]), payload, str(memory.get("status", "active"))),
+        )
+
+    def write(self, memory_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
+        memory = super().write(memory_id, value=value, **fields)
+        self._persist_memory(memory)
+        self._connection.commit()
+        return memory
+
+    def read(self, memory_id: str | None = None, **fields: Any) -> dict[str, Any] | None:
+        memory = None
+        if memory_id is not None:
+            row = self._connection.execute(
+                "SELECT payload FROM memories WHERE memory_id = ?", (memory_id,)
+            ).fetchone()
+            if row is not None:
+                memory = json.loads(row[0])
+                self.memories[memory_id] = memory
+        self._event("memory_read", memory_id=memory_id, **fields)
+        return copy.deepcopy(memory) if memory and memory.get("status") == "active" else None
+
+    def search(self, query: str | None = None, **fields: Any) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            "SELECT payload FROM memories WHERE status = 'active' ORDER BY memory_id"
+        ).fetchall()
+        memories = [json.loads(row[0]) for row in rows]
+        for memory in memories:
+            self.memories[str(memory["memory_id"])] = memory
+        matches = [
+            copy.deepcopy(memory)
+            for memory in memories
+            if query is None
+            or any(query == candidate for candidate in (memory.get("memory_id"), memory.get("value"), memory.get("attribute")))
+        ]
+        self._event("memory_search", query=query, **fields)
+        return matches
+
+    def supersede(self, old_memory_id: str, new_memory_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
+        memory = super().supersede(old_memory_id, new_memory_id, value=value, **fields)
+        self._persist_memory(self.memories[old_memory_id])
+        self._persist_memory(memory)
+        self._connection.commit()
+        return memory
+
+    def invalidate(self, memory_id: str, **fields: Any) -> None:
+        super().invalidate(memory_id, **fields)
+        if memory_id in self.memories:
+            self._persist_memory(self.memories[memory_id])
+            self._connection.commit()
+
+    def close(self) -> None:
+        self._connection.commit()
+        self._connection.close()
+
+    def __enter__(self) -> "SQLiteInstrumentedMemoryBackend":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        self.close()
 
 
 class AgentReplayRunner:

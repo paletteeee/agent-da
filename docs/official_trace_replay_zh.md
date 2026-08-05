@@ -52,6 +52,18 @@ transaction 内的写入提前暴露给后续读取而出现预期的 `visible_m
 
 三组 raw native trace 均只保留在远程运行目录；仓库提交脱敏计数和状态，不提交 prompt、tool arguments、凭据或原始对话内容。由于这三个 runtime 本身并不自动提供 TxnMem memory transaction/provenance ground truth，论文中应使用 “native workflow/runtime smoke” 或 “trace-grounded adaptation/replay”，不能写成“真实公开 benchmark memory 数据集已完成”。
 
+## Qwen2.5-7B + 持久化 memory backend smoke
+
+随后将同一 merged benchmark+memory loop 接入 `SQLiteInstrumentedMemoryBackend`。backend 为每个 task 建立独立 SQLite 文件，实际持久化 memory state，并在 reopen 后恢复 read/search/supersession/invalidation 状态；canonical event 仍由统一 validator 记录。该层证明的是“真实模型 tool call → 可持久化 backend → 独立 oracle”的连接闭环，不是生产数据库性能，也不是 benchmark 原生 memory ground truth。
+
+| Runtime | 配置 | 结果 | 官方结果/边界 |
+|---|---|---|---|
+| τ-bench airline | Qwen2.5-7B，1 task，SQLite backend | 1/1 completed，4 native events，0 evaluation error，TxnMem oracle 1/1 | official reward 0.0；不是 τ-bench accuracy |
+| AppWorld | Qwen2.5-7B，1 task，Venmo-only API schema，SQLite backend | 1/1 completed，1 native event，0 evaluation error，TxnMem oracle 1/1 | official evaluator 0/7；该 smoke 未形成任务成功率结论 |
+| LoCoMo | Qwen2.5-7B，conv-26，memory-only adapter，SQLite backend | 1/1 completed，2 native events，0 evaluation error，TxnMem oracle 1/1 | 当前 adapter 不提供官方 LoCoMo QA evaluator |
+
+这三份脱敏 summary 保存在 `results/remaining_tasks/native_memory_replay/`；raw trace、prompt、tool arguments 和 SQLite memory payload 仍只保留在远端 GPU 目录。LoCoMo 首次 replay 暴露了模型先读后写导致 reference oracle 拒绝的顺序反例，修正为首个 tool call 必须 write 后，ordered replay 通过；该过程也作为独立 oracle 的有效性证据保留在远端诊断中。
+
 对于真实模型实验，仓库现在提供 `txnmem_model_protocol.py`、
 `txnmem_real_agent.py`、`txnmem_real_experiment.py` 和
 `txnmem_failure_controller.py`：它们可以连接 OpenAI-compatible GPU endpoint，

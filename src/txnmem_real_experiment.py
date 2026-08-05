@@ -256,6 +256,7 @@ def run_benchmark_experiment_manifest(
     model: Any | None,
     adapter_factory: Any,
     out_dir: Path,
+    backend_factory: Any | None = None,
 ) -> dict[str, Any]:
     """Run task manifest entries through a benchmark adapter and write
     raw-local plus aggregate outputs."""
@@ -282,7 +283,11 @@ def run_benchmark_experiment_manifest(
         for index, task in enumerate(tasks, start=1):
             if not isinstance(task, Mapping):
                 raise RealExperimentError("invalid_task", f"manifest task {index} must be a mapping")
-            backend = InstrumentedMemoryBackend()
+            backend = (
+                backend_factory(index, out_dir)
+                if callable(backend_factory)
+                else InstrumentedMemoryBackend()
+            )
             adapter = adapter_factory()
             task_record = dict(task)
             task_id = str(task_record.get("task_id") or f"native_task_{index:04d}")
@@ -329,6 +334,9 @@ def run_benchmark_experiment_manifest(
             else:
                 task_summary["failure_code"] = run_report.get("failure_code", "no_events")
             aggregate_tasks.append(task_summary)
+            close = getattr(backend, "close", None)
+            if callable(close):
+                close()
 
     variants = {
         variant: {

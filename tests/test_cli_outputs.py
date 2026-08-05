@@ -10,6 +10,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TxnMemCliOutputTests(unittest.TestCase):
+    def test_benchmark_native_parser_accepts_persistent_memory_backend(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import _build_parser
+
+        args = _build_parser().parse_args(
+            [
+                "benchmark-native-smoke",
+                "--benchmark",
+                "locomo",
+                "--manifest",
+                "configs/real_model_locomo.json",
+                "--memory-backend",
+                "sqlite",
+            ]
+        )
+        self.assertEqual(args.memory_backend, "sqlite")
+
     def test_experiment_command_writes_all_artifacts(self):
         with TemporaryDirectory() as tmp:
             completed = subprocess.run(
