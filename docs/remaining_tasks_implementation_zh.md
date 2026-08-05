@@ -4,7 +4,7 @@
 
 | 项目 | 当前实现 | 证据/边界 |
 |---|---|---|
-| 1. τ-bench/AppWorld/LoCoMo trace-grounded replay | `txnmem_trace_pipeline.py` 保留 projection replay；`txnmem_public_native.py` 与 `public-native-smoke` 明确区分 native boundary 和 projection | τ-bench/AppWorld 仍保留 blocked boundary；LoCoMo 已配置 contextual Agent runtime，并在远程 Qwen2.5-7B 上完成 1 个 conversation smoke（11 native events、0 evaluation error、oracle match），不把 QA 标注当作 memory ground truth；已有 projection replay 仍为 τ-bench 175/920、LoCoMo 10/272、AppWorld 5/380 |
+| 1. τ-bench/AppWorld/LoCoMo trace-grounded replay | `txnmem_trace_pipeline.py` 保留 projection replay；`txnmem_public_native.py` 与 `benchmark-native-smoke` 明确区分 native workflow runtime 和 projection | 三类 runtime 均已安装/核验并在远程 Qwen2.5-7B 上完成 native smoke：τ-bench 1/1 task、2 events；AppWorld 1/1 task、2 events、官方 evaluator 0/7；LoCoMo 3 conversations、34 events、2/3 完成且 1 次模型网络错误。它们证明可执行边界已打通，不是公开 benchmark accuracy，也不把 QA/API 结果当作 memory ground truth；projection replay 仍为 τ-bench 175/920、LoCoMo 10/272、AppWorld 5/380 |
 | 2. benchmark-specific adapter | `txnmem_bench_adapters.py`：`tau-bench`、`appworld`、`locomo`、`normalized` | 只转换显式 tool/API/memory event；普通对话会被跳过 |
 | 3. 真实 Agent memory trace 采集 | `txnmem_model_protocol.py` 的 OpenAI-compatible client、`txnmem_real_agent.py` 的 structured tool loop、`txnmem_public_native.py` 的 public boundary、`txnmem_event_contract.py` validator | 已在远程 RTX 4090 上运行 Qwen2.5-7B-Instruct；完成通用 native smoke、8 train、2 holdout、5×10 repetition，以及 LoCoMo contextual Agent smoke；raw trace 仅保存在远端结果目录，仓库只保留脱敏 aggregate |
 | 4. trace 校准与 holdout | `txnmem_realism.py` 的 `calibrate_config`、`calibrated_suite`、`split_holdout` | 按完整 episode 划分，校准只影响 synthetic config，不改变 oracle |
@@ -15,10 +15,10 @@
 
 ## 当前状态与下一步
 
-1. 已完成三类官方输入的 workflow/API projection replay，并新增 canonical public-native boundary；三类 native run 当前均以机器可读 blocked report 结束，没有静默 fallback；Qwen2.5-7B GPU native trace 采集、train/holdout differential evaluation 已完成。
+1. 已完成三类官方输入的 workflow/API projection replay，并新增 canonical public-native boundary；τ-bench、AppWorld 和 LoCoMo 的 executable/native workflow smoke 已完成，没有静默 fallback；Qwen2.5-7B GPU native trace 采集、train/holdout differential evaluation 已完成。公开 benchmark 的大规模 native memory 采样仍未完成。
 2. 已保留非敏感的 `trace_replay.csv`、`trace_realism.json` 和 calibration/performance JSON；原始输入及含内容的 instance 文件不提交仓库。
-3. 已按 task/trial/sample episode 做 holdout；native Qwen task 已按 seed=17、holdout=0.2 划分 8/2，并报告 task contract、replay error 和 oracle match。LoCoMo 已接入 contextual Agent runtime；τ-bench/AppWorld 仍需真实 Agent workflow instrumentation。
-4. 已完成小规模 interleaving、线程锁、跨进程 owner-linearization smoke harness 和 trigger-based controller；下一步是从真实 trace 生成每个 agent 的局部 operation sequence，并运行完整 linearization 检查。
+3. 已按 task/trial/sample episode 做 holdout；native Qwen task 已按 seed=17、holdout=0.2 划分 8/2，并报告 task contract、replay error 和 oracle match。LoCoMo 已接入 contextual Agent runtime；τ-bench/AppWorld 也已接入官方 runtime 并完成单任务 smoke。下一步若要形成正式公开 benchmark 结果，仍需扩大 task/sample 数、稳定模型服务并对 native memory backend 做真实 instrumentation。
+4. 已完成小规模 interleaving、线程锁、跨进程 owner-linearization smoke harness、trigger-based controller 和 4 类 distributed protocol schedule；下一步是从真实多 Agent trace 生成每个 agent 的局部 operation sequence，并运行完整 linearization 检查。
 5. 远程 GPU endpoint、smoke/train/holdout、native event log 与 reference differential comparison 已完成；Qwen2.5-7B 五次重复（50 个 task）保持 50/50 contract 与 50/50 oracle match；最小 distributed protocol smoke 也已完成。仍需真实公开 workflow 原生 Agent trace、生产级 backend/网络故障和端到端性能。
 
 ## 当前真实模型实验入口

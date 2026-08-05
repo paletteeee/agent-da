@@ -40,16 +40,29 @@ transaction 内的写入提前暴露给后续读取而出现预期的 `visible_m
 检查事件。该 fixture 用于证明 provenance 来源可以在产生事件时记录；它与本节的
 公开数据 projection 分开，也不把公开数据改称为 native memory ground truth。
 
+## 公开 runtime 的 native workflow smoke
+
+在 projection replay 之外，本轮还在远程 RTX 4090/Qwen2.5-7B-Instruct 上实际调用了三个公开 runtime。以下结果只证明 runtime、任务加载、工具/API 边界、事件记录和独立 replay evaluator 可以闭环，不等同于公开 benchmark 的任务成功率，也不等同于原生 memory backend trace：
+
+| Runtime | Smoke 输入 | 运行结果 | 解释边界 |
+|---|---:|---|---|
+| τ-bench official airline | 1 task，scripted user，3 steps | 1/1 task 完成，2 native events，0 evaluation error，official reward 0.0，TxnMem oracle 1/1 | tool/user workflow 已打通；不是 τ-bench accuracy |
+| AppWorld official | 1 task，task-specific app schema filter，3 steps | 1/1 task 完成，2 native events，0 evaluation error，official evaluator 0/7，TxnMem oracle 1/1 | AppWorld evaluator 已真实执行；不是 AppWorld success rate |
+| LoCoMo contextual runtime | 3 conversations | 2/3 完成，34 native events，0 evaluator error；1 个 episode 为 model network error；3/3 differential replay match | 是 contextual Agent smoke；不是 LoCoMo QA accuracy |
+
+三组 raw native trace 均只保留在远程运行目录；仓库提交脱敏计数和状态，不提交 prompt、tool arguments、凭据或原始对话内容。由于这三个 runtime 本身并不自动提供 TxnMem memory transaction/provenance ground truth，论文中应使用 “native workflow/runtime smoke” 或 “trace-grounded adaptation/replay”，不能写成“真实公开 benchmark memory 数据集已完成”。
+
 对于真实模型实验，仓库现在提供 `txnmem_model_protocol.py`、
 `txnmem_real_agent.py`、`txnmem_real_experiment.py` 和
 `txnmem_failure_controller.py`：它们可以连接 OpenAI-compatible GPU endpoint，
 运行结构化 memory tool loop，按 event trigger 注入 crash/policy revoke/invalidate，
 再由独立 reference executor 评测。LoCoMo 另外配置了
 `locomo_agent_runtime` contextual wrapper；远程 Qwen2.5-7B smoke 结果保存在
-`/data/txnmem/results/locomo_native_smoke_final2/`，产生 11 个
-`real_model_native` events、完成 1/1 task，且 independent oracle match。该结果是
-单样本环境验证，不是 LoCoMo QA 正确率，也不能把本节三组 projection replay 改称
-为原生 memory 数据集。
+远端 `results/native_tau_airline_smoke3/`、
+`results/native_appworld_smoke3_filtered/` 和
+`results/native_locomo_3conv/`。这些结果分别产生 2、2、34 个 native workflow
+events，且完成了独立 replay/oracle 检查；它们是环境验证，不是公开 benchmark
+QA 正确率，也不能把本节三组 projection replay 改称为原生 memory 数据集。
 
 ## 数据来源
 

@@ -10,5 +10,7 @@
   "native_ground_truth": false,
   "projection_fallback": false,
   "reason": "blocked_external_dependency",
-  "status": "blocked"
+  "status": "superseded_historical_baseline",
+  "superseded_by": "../../native_smoke_summary.json",
+  "current_runtime_status": "contextual_agent_runtime_native_smoke_completed"
 }

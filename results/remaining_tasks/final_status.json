@@ -2,10 +2,40 @@
   "status": "completed_with_external_blockers",
   "public_native_boundary": {
     "implementation": "completed",
-    "tau-bench": "blocked_external_dependency",
-    "appworld": "blocked_external_dependency",
-    "locomo": "blocked_external_dependency",
-    "projection_fallback": false
+    "tau-bench": "runtime_installed_and_native_smoke_completed",
+    "appworld": "runtime_installed_and_native_smoke_completed",
+    "locomo": "native_contextual_smoke_completed",
+    "projection_fallback": false,
+    "raw_traces_remote_only": true,
+    "formal_claim": "native_workflow_runtime_smoke_only_not_public_benchmark_accuracy",
+    "smoke_summary": {
+      "tau-bench": {
+        "task_count": 1,
+        "completed_task_count": 1,
+        "native_event_count": 2,
+        "evaluation_error_count": 0,
+        "official_reward": 0.0,
+        "task_evaluator_success": true,
+        "txnmem_oracle_match": "1/1"
+      },
+      "appworld": {
+        "task_count": 1,
+        "completed_task_count": 1,
+        "native_event_count": 2,
+        "evaluation_error_count": 0,
+        "official_pass_count": "0/7",
+        "task_evaluator_success": true,
+        "txnmem_oracle_match": "1/1"
+      },
+      "locomo": {
+        "conversation_count": 3,
+        "completed_conversation_count": 2,
+        "native_event_count": 34,
+        "evaluation_error_count": 0,
+        "model_network_error_count": 1,
+        "txnmem_oracle_match": "3/3"
+      }
+    }
   },
   "distributed_protocol_smoke": {
     "schedule_count": 4,

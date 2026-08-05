@@ -11,5 +11,7 @@
   "native_ground_truth": false,
   "projection_fallback": false,
   "reason": "blocked_external_dependency",
-  "status": "blocked"
+  "status": "superseded_historical_baseline",
+  "superseded_by": "../../native_smoke_summary.json",
+  "current_runtime_status": "official_runtime_and_data_installed_native_smoke_completed"
 }
