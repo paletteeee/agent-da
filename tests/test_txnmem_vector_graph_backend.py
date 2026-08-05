@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from txnmem_vector_graph_backend import VectorGraphMemoryBackend
+from txnmem_vector_graph_backend import VectorGraphMemoryBackend, _qdrant_point_id
 
 
 class _FakeQdrant:
@@ -65,6 +65,12 @@ class _FakeNeo4j:
 
 
 class VectorGraphMemoryBackendTests(unittest.TestCase):
+    def test_qdrant_point_id_is_stable_uuid_for_arbitrary_memory_ids(self):
+        first = _qdrant_point_id("tenant", "real_a")
+        self.assertEqual(first, _qdrant_point_id("tenant", "real_a"))
+        self.assertNotEqual(first, _qdrant_point_id("tenant", "real_b"))
+        self.assertRegex(first, r"^[0-9a-f-]{36}$")
+
     def setUp(self):
         self.qdrant = _FakeQdrant()
         self.neo4j = _FakeNeo4j()

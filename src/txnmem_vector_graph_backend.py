@@ -12,6 +12,7 @@ import copy
 import hashlib
 import json
 import time
+from uuid import NAMESPACE_URL, uuid5
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Callable
@@ -22,6 +23,12 @@ from txnmem_backend import InstrumentedMemoryBackend
 
 class VectorGraphBackendError(RuntimeError):
     """A storage or compensation failure with aggregate-safe metadata."""
+
+
+def _qdrant_point_id(namespace: str, memory_id: str) -> str:
+    """Map arbitrary application IDs to Qdrant's UUID-compatible point IDs."""
+
+    return str(uuid5(NAMESPACE_URL, f"txnmem:{namespace}:{memory_id}"))
 
 
 def _embedding(value: Any, dimension: int = 32) -> list[float]:
@@ -65,11 +72,11 @@ class _QdrantHTTPClient:
         self._request(
             "PUT",
             f"/collections/{self.collection}/points",
-            {"points": [{"id": point_id, "vector": vector, "payload": {**payload, "namespace": namespace}}]},
+            {"points": [{"id": _qdrant_point_id(namespace, point_id), "vector": vector, "payload": {**payload, "namespace": namespace}}]},
         )
 
     def retrieve(self, namespace, point_id):
-        result = self._request("POST", f"/collections/{self.collection}/points", {"ids": [point_id], "with_payload": True})
+        result = self._request("POST", f"/collections/{self.collection}/points", {"ids": [_qdrant_point_id(namespace, point_id)], "with_payload": True})
         rows = result.get("result", []) if isinstance(result, Mapping) else []
         for row in rows:
             payload = row.get("payload", {})
@@ -87,7 +94,7 @@ class _QdrantHTTPClient:
         return [dict(row.get("payload", {})) for row in rows]
 
     def delete(self, namespace, point_id, idempotency_key):
-        self._request("POST", f"/collections/{self.collection}/points/delete", {"points": [point_id]})
+        self._request("POST", f"/collections/{self.collection}/points/delete", {"points": [_qdrant_point_id(namespace, point_id)]})
 
     def healthcheck(self):
         result = self._request("GET", "/")
