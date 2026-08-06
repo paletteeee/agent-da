@@ -9,6 +9,11 @@ from locomo_official_eval import (  # noqa: E402
     normalize_qa_for_evaluator,
     parse_batch_answers,
 )
+from locomo_paired_eval import (  # noqa: E402
+    aggregate_paired_scores,
+    build_paired_question_prompt,
+    format_memory_context,
+)
 
 
 class LoCoMoOfficialEvalTests(unittest.TestCase):
@@ -44,6 +49,39 @@ class LoCoMoOfficialEvalTests(unittest.TestCase):
             )["answer"],
             "known",
         )
+
+    def test_paired_question_prompt_requires_memory_and_has_stable_question_ids(self):
+        prompt, _choice_maps = build_paired_question_prompt(
+            [
+                {"question": "Where did Alice move?", "category": 1},
+                {"question": "When did that happen?", "category": 2},
+            ]
+        )
+        self.assertIn("Use the memory tools", prompt)
+        self.assertIn("0: Where did Alice move?", prompt)
+        self.assertIn("1: When did that happen?", prompt)
+        self.assertIn("JSON object", prompt)
+
+    def test_aggregate_paired_scores_keeps_native_and_qa_evidence_separate(self):
+        report = aggregate_paired_scores(
+            [{"sample_id": "conv-1", "category": 1, "score": 0.5}],
+            native_event_count=7,
+            sample_count=1,
+            ingestion_completed=1,
+        )
+        self.assertEqual(report["question_count"], 1)
+        self.assertAlmostEqual(report["mean_f1"], 0.5)
+        self.assertEqual(report["native_event_count"], 7)
+        self.assertEqual(report["ingestion_completed"], 1)
+        self.assertNotIn("oracle_match", report)
+
+    def test_format_memory_context_is_backend_output_not_original_conversation(self):
+        context = format_memory_context(
+            [{"memory_id": "m1", "value": "Alice moved to Boston", "status": "active"}]
+        )
+        self.assertIn("m1", context)
+        self.assertIn("Alice moved to Boston", context)
+        self.assertNotIn("conversation", context.lower())
 
 
 if __name__ == "__main__":
