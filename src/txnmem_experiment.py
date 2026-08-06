@@ -165,6 +165,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     trace_replay.add_argument("--events", type=Path, required=True)
     trace_replay.add_argument(
+        "--synthetic-instances",
+        type=Path,
+        default=None,
+        help="optional generated-instance JSONL for feature-distribution comparison",
+    )
+    trace_replay.add_argument(
         "--adapter", choices=("normalized", "tau-bench", "appworld", "locomo"), default="normalized"
     )
     trace_replay.add_argument("--source", default="external")
@@ -393,8 +399,19 @@ def main(argv: list[str] | None = None) -> int:
             extract_trace_features(instance["operations"], instance["failure_schedule"])
             for instance in instances
         ]
-        realism = compare_distributions([], trace_features)
+        synthetic_features = []
+        if args.synthetic_instances is not None:
+            synthetic_instances = _read_jsonl(args.synthetic_instances)
+            synthetic_features = [
+                extract_trace_features(
+                    instance.get("operations", []), instance.get("failure_schedule", [])
+                )
+                for instance in synthetic_instances
+            ]
+        realism = compare_distributions(synthetic_features, trace_features)
         realism["trace_grounded_status"] = "trace_supplied" if instances else "not_supplied"
+        realism["synthetic_source"] = str(args.synthetic_instances) if args.synthetic_instances else None
+        realism["joint_feature_comparison"] = args.synthetic_instances is not None
         realism["trace_inventory"] = trace_inventory(instances)
         realism["calibration"] = calibrate_config(trace_features)
         realism["split"] = {

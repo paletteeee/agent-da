@@ -8,7 +8,7 @@
 | 2 | 因果 failure schedule、coverage、最小反例 | 已完成 | trigger-based schedule、schedule baseline、coverage JSON、minimal counterexample 报告 | 在真实多 Agent workflow 上扩大 schedule 组合 |
 | 3 | 语义生成 provenance graph | 已完成（含真实服务 smoke） | derive/read/write/propagate 事件 contract、chain/branch/merge/supersession workload 与 repair matrix；SQLite 与 `VectorGraphMemoryBackend`；真实 Qdrant 1.11.5/Neo4j 5.22.0 direct service smoke | 尚非生产级跨主机部署；需要扩大真实多 Agent 事件日志 |
 | 4 | mutation testing 与 differential oracle | 已完成 | NoTxn、NoPolicyCommit、NoRepair 等 mutant/ablation 及 kill/evaluation 报告 | 对真实 backend 注入更丰富实现缺陷 |
-| 5 | synthetic 与公开 trace 的 realism/holdout 分析 | 已完成（含 native batch） | τ-bench、LoCoMo、AppWorld projection replay、trace realism、episode-level holdout；固定 50/20/10 manifest、task-level split/hash 与 `benchmark-native-batch`；native batch 已产生 τ 497、AppWorld 49、LoCoMo 44 events | 需要把 native trace 与 synthetic 联合分布做正式显著性/置信区间分析 |
+| 5 | synthetic 与公开 trace 的 realism/holdout 分析 | 已完成（feature-wise bootstrap） | 400 synthetic instances；τ-bench 175、LoCoMo 10 个 trace-grounded episode；新增 2,000 次 bootstrap 的 feature mean/mean-difference 区间；固定 50/20/10 manifest、task-level split/hash 与 native batch | AppWorld projection 的原始事件文件未在本地重新生成；当前比较是 feature-wise bootstrap，不是高维 joint-test |
 | 6 | Qwen2.5-7B 真实模型实验 | 已完成（机制层 + 真实 backend E2E smoke） | GPU endpoint；5×10 repetition；官方 runtime native batch；5 个 τ-bench + Qdrant/Neo4j E2E，5/5 completed，mean 17,879.4 ms、P50 15,351.6 ms | 扩大真实 backend 样本并报告成本、跨主机并发与更高任务质量 |
 | 7 | 并发、跨进程、协议故障 | 已完成（真实服务 fault/performance smoke） | 4 类确定性 protocol schedule、5/5 invariant coverage、0 minimal counterexample；真实 Toxiproxy normal/delay/timeout/connection-drop/retry-success；backend p50/p95/p99 | 尚非生产级 2PC；需要多主机、多 Agent 并发和更长故障序列 |
 | 8 | τ-bench native runtime | 已完成（50-task batch + retry 合并） | official runtime；50 task manifest；最终合并 497 events、0 replay evaluation error、50/50 evaluator available、reward sum 15、mean 0.3000；2 max-step、1 no-events、1 retry 后 no-events | 官方 reward 非 accuracy，需避免将 0 success 当成 memory 结论 |
@@ -26,7 +26,7 @@
 ## 仍未完成且不能用措辞掩盖的任务
 
 - τ-bench 50-task 主 batch + 2 个网络错误 task retry 已完成最终合并：50/50 evaluator available，497 native events；2 max-step、1 no-events、1 retry 后 no-events，不能把这些 episode 写成任务成功。
-- 真实 backend 当前是单机 Qdrant/Neo4j/Toxiproxy 和 5-task E2E smoke，不是生产级跨主机多 Agent 部署；尚需扩大并发、长流程、成本和跨主机网络实验。
+- 真实 backend 当前是单机 Qdrant/Neo4j/Toxiproxy 和 5-task E2E smoke，不是生产级跨主机多 Agent 部署；30-repetition 真实服务性能扩展本轮因远端 SSH 认证后被关闭而未产生结果，仍需扩大并发、长流程、成本和跨主机网络实验。
 - LoCoMo paired native-memory QA 已完成：10/10 ingestion、331 events、1,986 questions、official mean F1=0.1642；直接全文上下文 QA 的 0.3222 F1 仍不能直接归因于 TxnMem，二者不是同一条件下的 ablation。
 - Git 远端推送仍阻塞：仓库没有配置 remote URL，无法在没有用户提供 URL 的情况下安全 push。
 - DOCX 视觉 render 已通过；使用工作区已有的 Poppler `liblcms2.2.dylib` 由 wrapper 注入 LibreOffice，生成 20 页 PNG/PDF 并完成逐页检查；accessibility audit 无 high/medium/low findings。

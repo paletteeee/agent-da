@@ -89,6 +89,52 @@ class TxnMemCliOutputTests(unittest.TestCase):
             self.assertIn("evidence", realism)
             self.assertFalse(realism["evidence"]["trace_ground_truth_native"])
 
+    def test_trace_replay_can_compare_saved_synthetic_instances_with_trace_features(self):
+        with TemporaryDirectory() as tmp:
+            events = Path(tmp) / "events.jsonl"
+            events.write_text(
+                '{"episode_id":"ep1","event_id":"e1","kind":"memory_write","memory_id":"m1"}\n',
+                encoding="utf-8",
+            )
+            synthetic = Path(tmp) / "synthetic.jsonl"
+            synthetic.write_text(
+                json.dumps(
+                    {
+                        "operations": [
+                            {"type": "write", "memory_id": "m1", "agent_id": "agent_1"}
+                        ],
+                        "failure_schedule": [],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            out_dir = Path(tmp) / "out"
+            subprocess.run(
+                [
+                    sys.executable,
+                    "src/txnmem_experiment.py",
+                    "trace-replay",
+                    "--events",
+                    str(events),
+                    "--adapter",
+                    "normalized",
+                    "--synthetic-instances",
+                    str(synthetic),
+                    "--out-dir",
+                    str(out_dir),
+                ],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            realism = json.loads((out_dir / "results/trace_realism.json").read_text(encoding="utf-8"))
+            self.assertEqual(realism["synthetic_count"], 1)
+            self.assertEqual(realism["trace_count"], 1)
+            self.assertIn("synthetic_source", realism)
+            self.assertIn("mean_abs_diff_interval", realism["features"]["operation_count"])
+
     def test_process_smoke_command_writes_aggregate_only_report(self):
         with TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "out"

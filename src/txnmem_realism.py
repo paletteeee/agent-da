@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import random
+import math
 from statistics import mean, pstdev
 from typing import Any, Iterable
 
@@ -76,8 +77,14 @@ def extract_trace_features(
 
 
 def compare_distributions(
-    synthetic: Iterable[dict[str, Any]], trace_grounded: Iterable[dict[str, Any]]
+    synthetic: Iterable[dict[str, Any]],
+    trace_grounded: Iterable[dict[str, Any]],
+    *,
+    bootstrap_repetitions: int = 2000,
+    seed: int = 17,
 ) -> dict[str, Any]:
+    if bootstrap_repetitions < 1:
+        raise ValueError("bootstrap_repetitions must be positive")
     left = list(synthetic)
     right = list(trace_grounded)
     features: dict[str, Any] = {}
@@ -86,17 +93,134 @@ def compare_distributions(
         right_values = [float(item.get(name, 0.0)) for item in right]
         left_mean = mean(left_values) if left_values else 0.0
         right_mean = mean(right_values) if right_values else 0.0
+        feature_seed = seed + FEATURES.index(name) * 1009
         features[name] = {
             "synthetic_mean": left_mean,
             "synthetic_std": pstdev(left_values) if left_values else 0.0,
             "trace_mean": right_mean,
             "trace_std": pstdev(right_values) if right_values else 0.0,
             "mean_abs_diff": abs(left_mean - right_mean),
+            "relative_mean_abs_diff": abs(left_mean - right_mean)
+            / max(1.0, abs(left_mean), abs(right_mean)),
+            "synthetic_mean_interval": bootstrap_mean_interval(
+                left_values, repetitions=bootstrap_repetitions, seed=feature_seed
+            ),
+            "trace_mean_interval": bootstrap_mean_interval(
+                right_values, repetitions=bootstrap_repetitions, seed=feature_seed + 1
+            ),
+            "mean_abs_diff_interval": bootstrap_mean_abs_diff_interval(
+                left_values,
+                right_values,
+                repetitions=bootstrap_repetitions,
+                seed=feature_seed + 2,
+            ),
         }
+    relative_diffs = [float(features[name]["relative_mean_abs_diff"]) for name in FEATURES]
     return {
         "synthetic_count": len(left),
         "trace_count": len(right),
+        "bootstrap_repetitions": bootstrap_repetitions,
+        "bootstrap_seed": seed,
+        "comparison_method": "feature-wise bootstrap mean intervals; no high-dimensional joint-test claim",
+        "mean_feature_relative_abs_diff": mean(relative_diffs) if relative_diffs else 0.0,
         "features": features,
+    }
+
+
+def _percentile(values: list[float], probability: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = max(0, min(len(ordered) - 1, math.ceil(probability * len(ordered)) - 1))
+    return ordered[index]
+
+
+def bootstrap_mean_interval(
+    values: Iterable[float],
+    *,
+    repetitions: int = 2000,
+    confidence: float = 0.95,
+    seed: int = 17,
+) -> dict[str, Any]:
+    """Return a deterministic percentile bootstrap interval for a sample mean."""
+
+    if repetitions < 1:
+        raise ValueError("repetitions must be positive")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be in (0, 1)")
+    sample = [float(value) for value in values]
+    estimate = mean(sample) if sample else 0.0
+    if not sample:
+        return {
+            "confidence": float(confidence),
+            "estimate": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "sample_count": 0,
+            "bootstrap_repetitions": int(repetitions),
+            "seed": int(seed),
+        }
+    rng = random.Random(seed)
+    bootstrap_means = [
+        mean(sample[rng.randrange(len(sample))] for _ in range(len(sample)))
+        for _ in range(repetitions)
+    ]
+    alpha = (1.0 - confidence) / 2.0
+    return {
+        "confidence": float(confidence),
+        "estimate": estimate,
+        "lower": _percentile(bootstrap_means, alpha),
+        "upper": _percentile(bootstrap_means, 1.0 - alpha),
+        "sample_count": len(sample),
+        "bootstrap_repetitions": int(repetitions),
+        "seed": int(seed),
+    }
+
+
+def bootstrap_mean_abs_diff_interval(
+    left: Iterable[float],
+    right: Iterable[float],
+    *,
+    repetitions: int = 2000,
+    confidence: float = 0.95,
+    seed: int = 17,
+) -> dict[str, Any]:
+    """Bootstrap the absolute difference between two independent sample means."""
+
+    left_sample = [float(value) for value in left]
+    right_sample = [float(value) for value in right]
+    estimate = abs((mean(left_sample) if left_sample else 0.0) - (mean(right_sample) if right_sample else 0.0))
+    if not left_sample or not right_sample:
+        return {
+            "confidence": float(confidence),
+            "estimate": estimate,
+            "lower": estimate,
+            "upper": estimate,
+            "sample_count_left": len(left_sample),
+            "sample_count_right": len(right_sample),
+            "bootstrap_repetitions": int(repetitions),
+            "seed": int(seed),
+        }
+    if repetitions < 1:
+        raise ValueError("repetitions must be positive")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be in (0, 1)")
+    rng = random.Random(seed)
+    diffs = []
+    for _ in range(repetitions):
+        left_mean = mean(left_sample[rng.randrange(len(left_sample))] for _ in range(len(left_sample)))
+        right_mean = mean(right_sample[rng.randrange(len(right_sample))] for _ in range(len(right_sample)))
+        diffs.append(abs(left_mean - right_mean))
+    alpha = (1.0 - confidence) / 2.0
+    return {
+        "confidence": float(confidence),
+        "estimate": estimate,
+        "lower": _percentile(diffs, alpha),
+        "upper": _percentile(diffs, 1.0 - alpha),
+        "sample_count_left": len(left_sample),
+        "sample_count_right": len(right_sample),
+        "bootstrap_repetitions": int(repetitions),
+        "seed": int(seed),
     }
 
 
