@@ -1,6 +1,6 @@
 {
-  "status": "implementation_complete_execution_blocked",
-  "updated": "2026-08-05",
+  "status": "implementation_complete_with_remote_aggregate_execution",
+  "updated": "2026-08-06",
   "native_scale": {
     "runner": "implemented",
     "primary_batches": "blocked",
@@ -14,8 +14,14 @@
   },
   "real_backend": {
     "adapter": "implemented_and_fake_client_tested",
-    "services": "not_started",
-    "reason": "docker_unavailable_locally_and_remote_host_unreachable",
+    "services": "remote_qdrant_neo4j_toxiproxy_started_and_verified",
+    "performance": {
+      "repetitions": 30,
+      "workload_events": [50, 200, 1000],
+      "aggregate_report": "results/real_backend_performance_reps30_v2/results/backend_performance.json",
+      "error_count": 0,
+      "partial_commit_count": 0
+    },
     "production_latency_claim": false
   },
   "raw_reports_committed": false

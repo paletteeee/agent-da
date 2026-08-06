@@ -114,7 +114,15 @@
       "locomo": 10
     },
     "real_vector_graph_backend": "implemented_and_fake_client_tested",
-    "real_service_execution": "blocked_docker_unavailable_and_remote_host_unreachable",
+    "real_service_execution": "completed_single_host_aggregate_not_production_deployment",
+    "real_service_performance_30_repetitions": {
+      "status": "completed",
+      "aggregate_report": "results/real_backend_performance_reps30_v2/results/backend_performance.json",
+      "workload_events": [50, 200, 1000],
+      "repetitions_per_condition": 30,
+      "error_count": 0,
+      "partial_commit_count": 0
+    },
     "fault_performance_runner": "implemented_and_fake_backend_tested",
     "production_latency_claim": false,
     "raw_reports_committed": false
