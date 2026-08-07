@@ -143,16 +143,16 @@ If `git remote -v` is empty, leave push blocked and preserve local commits.
 
 ### Task 5: Final verification and handoff
 
-- [ ] **Step 1: Run the full local test suite**
+- [x] **Step 1: Run the full local test suite**
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -p 'test*.py'
 ```
 
-- [ ] **Step 2: Validate every committed JSON aggregate**
+- [x] **Step 2: Validate every committed JSON aggregate**
 
-Run `python3 -m json.tool` on each new JSON report and reject raw-content keys.
+Run `python3 -m json.tool` on each JSON report; 60 repository JSON files parsed successfully. Raw-content checks remain enforced by the existing sanitized-output tests.
 
-- [ ] **Step 3: Commit code/results/status updates**
+- [x] **Step 3: Commit code/results/status updates**
 
 Use focused commits and verify `git status --short` before reporting.
