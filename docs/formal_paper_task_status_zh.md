@@ -1,6 +1,6 @@
 # TxnMem 正式论文任务状态
 
-更新时间：2026-08-06。以下状态区分“代码/实验接口已完成”“已完成正式 batch”“仍不足以支撑生产级论文结论”，避免把环境验证误写成 benchmark accuracy。
+更新时间：2026-08-07。以下状态区分“代码/实验接口已完成”“已完成正式 batch”“仍不足以支撑生产级论文结论”，避免把环境验证误写成 benchmark accuracy。
 
 | 序号 | 正式任务 | 状态 | 已完成证据 | 仍需补强 |
 |---:|---|---|---|---|
@@ -23,10 +23,13 @@
 2. Qwen2.5-7B 已验证真实模型 tool loop、事件 contract、failure injection 和 reference differential evaluation；50 个 task episode 的结果可作为机制层证据。
 3. τ-bench、AppWorld、LoCoMo 的官方 runtime 边界已可执行，并已在 Qwen2.5-7B 上接入 per-task SQLite memory backend；LoCoMo 另完成同一 backend 的 paired official QA。当前只能写成 native workflow/runtime evidence 或 trace-grounded adaptation/replay，不能写成三套公开 benchmark 的原生 memory accuracy。新增结果见 `results/locomo_paired_full_retrieval/`。
 
+完整汇总报告见 `docs/current_experiment_report_zh.md`。
+
 ## 仍未完成且不能用措辞掩盖的任务
 
 - τ-bench 50-task 主 batch + 2 个网络错误 task retry 已完成最终合并：50/50 evaluator available，497 native events；2 max-step、1 no-events、1 retry 后 no-events，不能把这些 episode 写成任务成功。
 - 真实 backend 当前是单机 Qdrant/Neo4j/Toxiproxy 和 5-task E2E smoke；50/200/1000 events 的真实服务性能扩展已完成各 30 次并同步为 `results/real_backend_performance_reps30_v2/results/backend_performance.json`，但仍不是生产级跨主机多 Agent 部署，仍需扩大并发、长流程、成本和跨主机网络实验。
 - LoCoMo paired native-memory QA 已完成：10/10 ingestion、331 events、1,986 questions、official mean F1=0.1642；直接全文上下文 QA 的 0.3222 F1 仍不能直接归因于 TxnMem，二者不是同一条件下的 ablation。
+- 2026-08-07 尝试启动 LoCoMo paired repetition 2 和 AppWorld baseline/tuned 批次时，远端 SSH 在认证后不稳定关闭；未产生可验证的新结果，记录见 `results/remaining_tasks/remaining_experiments_20260807.json`。模型协议当前也没有 prompt/completion token usage 或 pricing 字段，因此成本实验保持 blocked。
 - Git 远端推送仍阻塞：仓库没有配置 remote URL，无法在没有用户提供 URL 的情况下安全 push。
 - DOCX 视觉 render 已通过；使用工作区已有的 Poppler `liblcms2.2.dylib` 由 wrapper 注入 LibreOffice，生成 20 页 PNG/PDF 并完成逐页检查；accessibility audit 无 high/medium/low findings。

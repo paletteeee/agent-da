@@ -109,4 +109,6 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 4. 高维 joint realism test，以及 AppWorld projection 原始事件的重新生成。
 5. Git 远端推送。当前仓库没有 remote URL，不能安全执行 push。
 
+2026-08-07 已尝试启动 LoCoMo paired repetition 2 和 AppWorld baseline/tuned 批次；远端 SSH 在认证后不稳定关闭，未产生可验证的新 aggregate。模型协议中也未发现 prompt/completion token usage 或 pricing 字段，因此没有用 wall-clock 时间估算模型成本。详细 blocked 记录见 `results/remaining_tasks/remaining_experiments_20260807.json`。
+
 继续实验时必须保持以下顺序：先固定 manifest 和 evaluator，再运行 baseline/tuned 对比；先保留 raw trace 在远端，只同步脱敏 aggregate；最后按 task/conversation 统计，而不是按 event 行数扩大样本量。

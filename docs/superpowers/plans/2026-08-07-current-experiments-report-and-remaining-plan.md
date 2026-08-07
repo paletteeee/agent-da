@@ -34,7 +34,7 @@
 - The report must cite repository-relative evidence paths and list sample unit, denominator, model, service versions, and claim boundary for every result family.
 - The report must distinguish completed, partially completed, and blocked work.
 
-- [ ] **Step 1: Extract sanitized aggregate values**
+- [x] **Step 1: Extract sanitized aggregate values**
 
 Run:
 
@@ -43,11 +43,11 @@ python3 -m json.tool results/real_backend_performance_reps30_v2/results/backend_
 python3 -m json.tool results/locomo_paired_full_retrieval/locomo_paired_summary.json >/dev/null
 ```
 
-- [ ] **Step 2: Write the report sections**
+- [x] **Step 2: Write the report sections**
 
 Include controlled correctness, independent oracle, failure schedules, mutation/differential evaluation, Qwen native repetitions, τ-bench/AppWorld/LoCoMo runtime evidence, LoCoMo QA, real backend/fault/performance, realism bootstrap, document QA, limitations, and remaining experiments.
 
-- [ ] **Step 3: Validate report paths and claims**
+- [x] **Step 3: Validate report paths and claims**
 
 Run:
 
@@ -56,7 +56,7 @@ rg -n "0\.3222|0\.1642|30|production_latency_claim|blocked|remote" docs/current_
 git diff --check
 ```
 
-- [ ] **Step 4: Commit the report**
+- [x] **Step 4: Commit the report**
 
 ```bash
 git add docs/current_experiment_report_zh.md
@@ -76,9 +76,13 @@ git commit -m "docs: add completed experiment report"
 
 - [ ] **Step 1: Verify remote runner help and service health**
 
+Only the short remote identity command succeeded; the composite service/evaluator check was closed by the server after authentication.
+
 Check the remote vLLM endpoint, LoCoMo evaluator import, and runner arguments before launching.
 
 - [ ] **Step 2: Launch three repetitions in a durable remote session**
+
+Blocked on 2026-08-07: the remote SSH connection closed after authentication before a verifiable repetition output was created.
 
 Use a distinct tmux session and output directory under `/data/txnmem_run_20260806/results/locomo_paired_repetitions`; do not overwrite the existing full paired result.
 
@@ -105,6 +109,8 @@ Require 3 repetitions × 10 conversations × 1,986 questions, evaluator status `
 
 - [ ] **Step 1: Verify manifest and command-line boundary**
 
+Blocked before execution because the remote SSH session was unstable after authentication.
+
 Run the remote batch help and compare baseline/tuned manifest hashes before launching.
 
 - [ ] **Step 2: Launch baseline and tuned runs**
@@ -123,13 +129,15 @@ Compare official task success and assertion pass rates using task-level denomina
 
 - [ ] **Step 1: Check remote host and running sessions**
 
+The host identity was reachable, but service/session status could not be verified reliably in the same remote turn.
+
 Record whether the remote connection, Qdrant, Neo4j, Toxiproxy, and vLLM remain available.
 
-- [ ] **Step 2: Check cost instrumentation**
+- [x] **Step 2: Check cost instrumentation**
 
 If model usage/token accounting is absent, write a blocked report stating the missing measurement rather than estimating cost from wall-clock time.
 
-- [ ] **Step 3: Check Git remote configuration**
+- [x] **Step 3: Check Git remote configuration**
 
 If `git remote -v` is empty, leave push blocked and preserve local commits.
 

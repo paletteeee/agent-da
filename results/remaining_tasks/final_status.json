@@ -132,5 +132,13 @@
     "reason": "missing_git_remote",
     "branch": "main",
     "required_user_action": "git remote add origin <URL>"
+  },
+  "remaining_experiments_20260807": {
+    "status": "partially_blocked",
+    "aggregate_report": "results/remaining_tasks/remaining_experiments_20260807.json",
+    "locomo_paired_repetition_2": "blocked_before_verifiable_start",
+    "appworld_baseline_tuned": "not_started_remote_ssh_unstable",
+    "model_token_cost": "blocked_missing_instrumentation",
+    "cross_host_multi_agent": "blocked_missing_second_host"
   }
 }
