@@ -431,7 +431,7 @@ Expected: 20 task attempts, 20 official evaluator outcomes, and no configuration
 
 - [ ] **Step 6: Pull summaries only and compare**
 
-Run: `PYTHONPATH=src python3 src/txnmem_prompt_comparison.py --kind appworld --baseline results/prompt_profile_formal_v4/appworld_baseline/native_batch_summary.json --tuned results/prompt_profile_formal_v4/appworld_tuned/native_batch_summary.json --output results/prompt_profile_formal_v4/appworld_prompt_comparison.json`
+Run: `PYTHONPATH=src python3 src/txnmem_prompt_comparison.py --kind appworld --baseline results/prompt_profile_formal_v4/appworld_baseline/native_batch_summary.json --tuned results/prompt_profile_formal_v4/appworld_tuned/native_batch_summary.json --out results/prompt_profile_formal_v4/appworld_prompt_comparison.json`
 
 Expected: matching nonempty condition fingerprints, identical task IDs and evaluator denominators, paired official success delta, error categories, and exact-or-lower-bound token comparison.
 
