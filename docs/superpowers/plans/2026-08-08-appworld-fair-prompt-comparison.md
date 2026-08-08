@@ -87,6 +87,8 @@ git commit -m "feat: resolve shared AppWorld tool strategy"
 ### Task 2: Expose the Strategy in Both Native CLI Paths
 
 **Files:**
+- Modify: `src/txnmem_benchmark_bridge.py:430-510`
+- Modify: `src/txnmem_benchmark_bridge.py:799-825`
 - Modify: `src/txnmem_experiment.py:332-391`
 - Modify: `src/txnmem_experiment.py:813-875`
 - Modify: `src/txnmem_experiment.py:929-980`
@@ -171,7 +173,7 @@ Expected: all tests pass; AppWorld runtime-security skips remain skips when the 
 - [ ] **Step 5: Commit the CLI integration**
 
 ```bash
-git add src/txnmem_experiment.py tests/test_cli_outputs.py tests/test_txnmem_real_model.py
+git add src/txnmem_benchmark_bridge.py src/txnmem_experiment.py tests/test_cli_outputs.py tests/test_txnmem_real_model.py
 git commit -m "feat: expose AppWorld tool strategy"
 ```
 
