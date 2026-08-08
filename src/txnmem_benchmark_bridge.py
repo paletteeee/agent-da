@@ -446,13 +446,21 @@ class AppWorldAdapter(BenchmarkEnvAdapter):
         requester_factory: Callable[[], Any] | None = None,
         appworld_root: Path | None = None,
         app_names: Sequence[str] | None = None,
+        tool_strategy: str = "manifest_scoped",
+        supplied_app_names: Sequence[str] | None = None,
         api_name_allowlist: Sequence[str] | None = None,
         experiment_name: str = "txnmem_native",
         always_allow_supervisor: bool = False,
     ):
         self.requester_factory = requester_factory
         self.appworld_root = _normalize_appworld_root(appworld_root) if appworld_root else None
-        self.app_names = tuple(str(name) for name in app_names) if app_names is not None else None
+        self.tool_strategy = str(tool_strategy)
+        self.supplied_app_names = (
+            tuple(str(name) for name in supplied_app_names)
+            if supplied_app_names is not None
+            else (tuple(str(name) for name in app_names) if app_names is not None else None)
+        )
+        self.app_names = self.supplied_app_names
         self.api_name_allowlist = (
             tuple(str(name) for name in api_name_allowlist)
             if api_name_allowlist is not None
@@ -466,6 +474,7 @@ class AppWorldAdapter(BenchmarkEnvAdapter):
         self._tool_kinds: dict[str, str] = {}
         self._authorized_tool_names: set[str] = set()
         self.unauthorized_tool_attempt_count = 0
+        self._instruction = ""
 
     def tool_schemas(self) -> list[dict[str, Any]]:
         if self.requester is None and self.requester_factory is not None:
@@ -474,7 +483,16 @@ class AppWorldAdapter(BenchmarkEnvAdapter):
             from appworld.api_docs import prepare_api_docs
             from appworld.apps import get_all_apps
 
-            apps = list(self.app_names) if self.app_names is not None else [app for app in get_all_apps() if app != "admin"]
+            resolved_app_names = resolve_appworld_app_names(
+                self.tool_strategy,
+                self._instruction,
+                self.supplied_app_names,
+            )
+            apps = (
+                list(resolved_app_names)
+                if resolved_app_names is not None
+                else [app for app in get_all_apps() if app != "admin"]
+            )
             self.api_docs = []
             for app_name in apps:
                 docs = prepare_api_docs(
@@ -531,8 +549,10 @@ class AppWorldAdapter(BenchmarkEnvAdapter):
                 )
                 self.requester = self.environment.requester
         if self.environment is not None:
-            return str(self.environment.task.instruction)
-        return str(task.get("instruction", ""))
+            self._instruction = str(self.environment.task.instruction)
+        else:
+            self._instruction = str(task.get("instruction", ""))
+        return self._instruction
 
     def execute(self, name: str, arguments: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
         if self.requester is None:
@@ -816,7 +836,7 @@ def run_benchmark_agent(
     prompt_profile = str(task.get("prompt_profile", "baseline"))
     if prompt_profile not in PROMPT_PROFILES:
         raise ValueError(f"unsupported prompt profile: {prompt_profile}")
-    if prompt_profile == "tuned":
+    if adapter.dataset == "appworld" or prompt_profile == "tuned":
         instruction = adapter.reset(task)
         all_benchmark_schemas = adapter.tool_schemas()
     else:

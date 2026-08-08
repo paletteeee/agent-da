@@ -273,6 +273,16 @@ class TxnMemRealAgentTests(unittest.TestCase):
             expected,
         )
 
+    def test_appworld_strategy_does_not_depend_on_prompt_profile(self):
+        baseline = resolve_appworld_app_names(
+            "instruction_inferred", "Use Venmo.", ["supervisor"]
+        )
+        tuned = resolve_appworld_app_names(
+            "instruction_inferred", "Use Venmo.", ["supervisor"]
+        )
+
+        self.assertEqual(baseline, tuned)
+
     def test_manifest_scoped_tool_strategy_preserves_manifest_apps(self):
         self.assertEqual(
             resolve_appworld_app_names("manifest_scoped", "Use Venmo.", ["supervisor"]),
@@ -309,33 +319,34 @@ class TxnMemRealAgentTests(unittest.TestCase):
             )
         )
 
-    def test_tuned_profile_resets_appworld_before_loading_tool_schemas(self):
-        order = []
+    def test_appworld_baseline_and_tuned_reset_before_schema_loading(self):
+        for profile in ("baseline", "tuned"):
+            order = []
 
-        class _OrderingAdapter(_NoopBenchmarkAdapter):
-            dataset = "appworld"
+            class _OrderingAdapter(_NoopBenchmarkAdapter):
+                dataset = "appworld"
 
-            def tool_schemas(self):
-                order.append("schemas")
-                return []
+                def reset(self, task):
+                    order.append("reset")
+                    return str(task["instruction"])
 
-            def reset(self, task):
-                order.append("reset")
-                return str(task["instruction"])
+                def tool_schemas(self):
+                    order.append("schemas")
+                    return []
 
-        report = run_benchmark_agent(
-            {
-                "task_id": "appworld-order",
-                "instruction": "complete the workflow",
-                "prompt_profile": "tuned",
-            },
-            _ScriptedModel([ModelResponse("done", [])]),
-            InstrumentedMemoryBackend(),
-            _OrderingAdapter(),
-        )
+            report = run_benchmark_agent(
+                {
+                    "task_id": profile,
+                    "instruction": "Use Venmo.",
+                    "prompt_profile": profile,
+                },
+                _ScriptedModel([ModelResponse("done", [])]),
+                InstrumentedMemoryBackend(),
+                _OrderingAdapter(),
+            )
 
-        self.assertEqual(order[:2], ["reset", "schemas"])
-        self.assertEqual(report["prompt_profile"], "tuned")
+            self.assertEqual(order[:2], ["reset", "schemas"])
+            self.assertEqual(report["prompt_profile"], profile)
 
     def test_tuned_appworld_strategy_prefetches_supervisor_identity_and_credentials(self):
         calls = []

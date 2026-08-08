@@ -25,6 +25,7 @@ from txnmem_coverage import schedule_effectiveness
 from txnmem_distributed import run_process_action_sequences
 from txnmem_distributed_protocol import run_protocol_matrix
 from txnmem_backend_performance import FaultScenario, benchmark_backend, run_fault_matrix
+from txnmem_benchmark_bridge import APPWORLD_TOOL_STRATEGIES
 from txnmem_conditions import canonical_fingerprint, source_identity
 from txnmem_service_faults import deterministic_fault_matrix
 from txnmem_mutation import run_mutation_campaign
@@ -345,6 +346,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="comma-separated AppWorld apps to expose; use a task-specific list to bound tool context",
     )
+    benchmark_native.add_argument(
+        "--appworld-tool-strategy",
+        choices=APPWORLD_TOOL_STRATEGIES,
+        default="manifest_scoped",
+    )
     benchmark_native.add_argument("--out-dir", type=Path, default=Path("."))
     benchmark_native.add_argument(
         "--memory-backend",
@@ -373,6 +379,11 @@ def _build_parser() -> argparse.ArgumentParser:
     benchmark_batch.add_argument("--tau-user-strategy", default="scripted", choices=("scripted", "human"))
     benchmark_batch.add_argument("--appworld-root", type=Path, default=Path("external_data/deps/appworld-data"))
     benchmark_batch.add_argument("--appworld-apps", default=None)
+    benchmark_batch.add_argument(
+        "--appworld-tool-strategy",
+        choices=APPWORLD_TOOL_STRATEGIES,
+        default="manifest_scoped",
+    )
     benchmark_batch.add_argument("--locomo-evaluator-command", default=None, help="JSON argv array for official QA evaluator")
     benchmark_batch.add_argument("--out-dir", type=Path, default=Path("."))
     benchmark_batch.add_argument("--memory-backend", choices=("memory", "sqlite"), default="sqlite")
@@ -816,7 +827,6 @@ def main(argv: list[str] | None = None) -> int:
                 LoCoMoAdapter,
                 TauBenchAdapter,
                 _official_tau_user_strategy,
-                infer_appworld_app_names,
             )
 
             if args.benchmark == "tau-bench":
@@ -856,17 +866,11 @@ def main(argv: list[str] | None = None) -> int:
                 def adapter_factory(task=None):
                     task_app_names = task.get("app_names") if isinstance(task, dict) else None
                     task_api_allowlist = task.get("api_name_allowlist") if isinstance(task, dict) else None
-                    effective_app_names = task_app_names or default_app_names
-                    if args.prompt_profile == "tuned":
-                        effective_app_names = infer_appworld_app_names(
-                            str(task.get("instruction", "")) if isinstance(task, dict) else "",
-                            effective_app_names,
-                        )
                     return AppWorldAdapter(
                         appworld_root=args.appworld_root,
-                        app_names=effective_app_names,
+                        tool_strategy=args.appworld_tool_strategy,
+                        supplied_app_names=task_app_names or default_app_names,
                         api_name_allowlist=task_api_allowlist,
-                        always_allow_supervisor=args.prompt_profile == "tuned",
                     )
             else:
                 def adapter_factory():
@@ -932,7 +936,6 @@ def main(argv: list[str] | None = None) -> int:
                 LoCoMoAdapter,
                 TauBenchAdapter,
                 _official_tau_user_strategy,
-                infer_appworld_app_names,
             )
 
             if args.benchmark == "tau-bench":
@@ -961,17 +964,11 @@ def main(argv: list[str] | None = None) -> int:
                 def adapter_factory(task=None):
                     task_app_names = task.get("app_names") if isinstance(task, dict) else None
                     task_api_allowlist = task.get("api_name_allowlist") if isinstance(task, dict) else None
-                    effective_app_names = task_app_names or default_app_names
-                    if args.prompt_profile == "tuned":
-                        effective_app_names = infer_appworld_app_names(
-                            str(task.get("instruction", "")) if isinstance(task, dict) else "",
-                            effective_app_names,
-                        )
                     return AppWorldAdapter(
                         appworld_root=args.appworld_root,
-                        app_names=effective_app_names,
+                        tool_strategy=args.appworld_tool_strategy,
+                        supplied_app_names=task_app_names or default_app_names,
                         api_name_allowlist=task_api_allowlist,
-                        always_allow_supervisor=args.prompt_profile == "tuned",
                     )
             else:
                 evaluator_command = None

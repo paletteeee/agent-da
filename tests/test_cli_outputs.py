@@ -27,6 +27,24 @@ class TxnMemCliOutputTests(unittest.TestCase):
         )
         self.assertEqual(args.memory_backend, "sqlite")
 
+    def test_appworld_batch_accepts_instruction_inferred_tool_strategy(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import _build_parser
+
+        args = _build_parser().parse_args(
+            [
+                "benchmark-native-batch",
+                "--benchmark",
+                "appworld",
+                "--manifest",
+                "manifest.json",
+                "--appworld-tool-strategy",
+                "instruction_inferred",
+            ]
+        )
+
+        self.assertEqual(args.appworld_tool_strategy, "instruction_inferred")
+
     def test_experiment_command_writes_all_artifacts(self):
         with TemporaryDirectory() as tmp:
             completed = subprocess.run(
