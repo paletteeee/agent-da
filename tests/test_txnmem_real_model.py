@@ -279,6 +279,12 @@ class TxnMemRealAgentTests(unittest.TestCase):
             ["supervisor"],
         )
 
+    def test_instruction_inferred_tool_strategy_allows_omitted_manifest_apps(self):
+        self.assertEqual(
+            resolve_appworld_app_names("instruction_inferred", "Use Venmo."),
+            ["venmo", "supervisor"],
+        )
+
     def test_tuned_appworld_allowlist_never_removes_supervisor_tools(self):
         allowlist = ["amazon__search_products"]
         self.assertTrue(

@@ -117,7 +117,7 @@ def infer_appworld_app_names(
 def resolve_appworld_app_names(
     strategy: str,
     instruction: str,
-    supplied_app_names: Sequence[str] | None,
+    supplied_app_names: Sequence[str] | None = None,
 ) -> list[str] | None:
     """Resolve one shared AppWorld tool-exposure strategy."""
 
