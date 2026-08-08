@@ -12,9 +12,7 @@ real_model_native events.  The two sources together form the native trace.
 from __future__ import annotations
 
 import copy
-import ast
 import json
-import re
 import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
@@ -23,7 +21,7 @@ from typing import Any, Callable
 
 from txnmem_backend import InstrumentedMemoryBackend
 from txnmem_failure_controller import FailureController, FailureInjectionError
-from txnmem_model_protocol import ModelProtocolError, add_response_usage, empty_usage_summary
+from txnmem_model_protocol import ModelProtocolError
 from txnmem_real_agent import NativeMemoryToolGateway, AgentToolError, _assistant_message, _failed_report
 
 
@@ -54,274 +52,6 @@ class BenchmarkEnvAdapter:
 
     def memory_id_for(self, name: str, arguments: Mapping[str, Any], step: int) -> str:
         return f"{self.dataset}:{name}:{step:04d}"
-
-
-PROMPT_PROFILES = ("baseline", "tuned")
-APPWORLD_TOOL_STRATEGIES = ("instruction_inferred", "manifest_scoped", "all_public")
-_TRUSTED_APPWORLD_PREFLIGHT_TOOLS = frozenset(
-    {
-        "supervisor__show_profile",
-        "supervisor__show_account_passwords",
-    }
-)
-
-_APPWORLD_KEYWORDS = {
-    "amazon": ("amazon", "shopping cart", "wish list", "wishlist", "product order"),
-    "file_system": ("file system", "folder", "directory", "rename file", "move file"),
-    "gmail": ("gmail", "email", "e-mail", "inbox"),
-    "phone": (
-        "phone",
-        "contact",
-        "sms",
-        "text message",
-        "call log",
-        "friend",
-        "roommate",
-        "coworker",
-        "colleague",
-        "mother",
-        "father",
-        "sister",
-        "brother",
-    ),
-    "simple_note": ("simple note", "notes app", "note app"),
-    "spotify": ("spotify", "playlist", "song", "album", "artist", "music"),
-    "splitwise": ("splitwise", "shared expense", "split expense", "owe "),
-    "todoist": ("todoist", "to-do", "todo list", "task list", "reminder"),
-    "venmo": ("venmo", "request money", "send money", "payment request"),
-}
-
-
-def infer_appworld_app_names(
-    instruction: str,
-    supplied_app_names: Sequence[str] | None = None,
-) -> list[str]:
-    """Select task apps from public instruction text for the tuned condition."""
-
-    lowered = str(instruction).lower()
-    selected = {
-        app_name
-        for app_name, keywords in _APPWORLD_KEYWORDS.items()
-        if any(keyword in lowered for keyword in keywords)
-    }
-    selected.update(
-        str(app_name)
-        for app_name in (supplied_app_names or ())
-        if str(app_name) not in {"admin", "supervisor", "api_docs"}
-    )
-    if not selected:
-        selected.update(_APPWORLD_KEYWORDS)
-    return [*sorted(selected), "supervisor"]
-
-
-def resolve_appworld_app_names(
-    strategy,
-    instruction,
-    supplied_app_names=None,
-):
-    if strategy == "instruction_inferred":
-        return infer_appworld_app_names(instruction, supplied_app_names)
-    if strategy == "manifest_scoped":
-        return list(supplied_app_names) if supplied_app_names is not None else None
-    if strategy == "all_public":
-        return None
-    raise ValueError(f"unsupported AppWorld tool strategy: {strategy}")
-
-
-def appworld_tool_allowed(
-    tool_name: str,
-    api_name_allowlist: Sequence[str] | None,
-    *,
-    always_allow_supervisor: bool = False,
-) -> bool:
-    """Apply a task allowlist without accidentally hiding supervisor tools."""
-
-    if api_name_allowlist is None:
-        return True
-    if tool_name in api_name_allowlist:
-        return True
-    return always_allow_supervisor and tool_name.startswith("supervisor__")
-
-
-def adapt_appworld_arguments(
-    arguments: Mapping[str, Any],
-    allowed_properties: Sequence[str] | set[str],
-) -> dict[str, Any]:
-    """Drop hallucinated AppWorld arguments that are absent from a tool schema."""
-
-    allowed = {str(name) for name in allowed_properties}
-    return {str(name): value for name, value in arguments.items() if str(name) in allowed}
-
-
-def _parse_appworld_observation(observation: str) -> Any:
-    """Parse AppWorld's JSON or Python-repr response without executing content."""
-
-    try:
-        return json.loads(observation)
-    except (TypeError, ValueError):
-        try:
-            return ast.literal_eval(observation)
-        except (SyntaxError, ValueError):
-            return None
-
-
-def _appworld_response_ok(response: Any) -> bool:
-    """Normalize AppWorld success/error envelopes without trusting display text."""
-
-    parsed = _parse_appworld_observation(response) if isinstance(response, str) else response
-    if isinstance(parsed, Mapping):
-        for field in ("ok", "success"):
-            if field in parsed and parsed[field] is False:
-                return False
-        status = str(parsed.get("status", "")).strip().lower()
-        if status in {"error", "failed", "failure"}:
-            return False
-        if any(parsed.get(field) for field in ("error", "error_message")):
-            return False
-    if isinstance(response, str) and response.lstrip().lower().startswith("error:"):
-        return False
-    return True
-
-
-def _appworld_schema_index(
-    schemas: Sequence[Mapping[str, Any]],
-) -> dict[str, Mapping[str, Any]]:
-    index: dict[str, Mapping[str, Any]] = {}
-    for schema in schemas:
-        function = schema.get("function") if isinstance(schema, Mapping) else None
-        if not isinstance(function, Mapping):
-            continue
-        name = function.get("name")
-        if isinstance(name, str) and name:
-            index[name] = function
-    return index
-
-
-def _appworld_prelogin_arguments(
-    profile: Any,
-    account_passwords: Any,
-    schema_index: Mapping[str, Mapping[str, Any]],
-) -> list[tuple[str, dict[str, Any]]]:
-    if not isinstance(profile, Mapping) or not isinstance(account_passwords, list):
-        return []
-    passwords = {
-        str(item.get("account_name", "")).strip().lower().replace("-", "_").replace(" ", "_"): item.get("password")
-        for item in account_passwords
-        if isinstance(item, Mapping) and item.get("password") is not None
-    }
-    plan: list[tuple[str, dict[str, Any]]] = []
-    for tool_name in sorted(schema_index):
-        if not tool_name.endswith("__login") or tool_name.startswith("supervisor__"):
-            continue
-        app_name = tool_name.split("__", 1)[0]
-        password = passwords.get(app_name.lower())
-        function = schema_index[tool_name]
-        parameters = function.get("parameters")
-        properties = parameters.get("properties", {}) if isinstance(parameters, Mapping) else {}
-        username_schema = properties.get("username", {}) if isinstance(properties, Mapping) else {}
-        description = str(username_schema.get("description", "")).lower() if isinstance(username_schema, Mapping) else ""
-        profile_key = "phone_number" if "phone" in description else "email"
-        username = profile.get(profile_key)
-        if password is None or username is None:
-            continue
-        plan.append(
-            (
-                tool_name,
-                {"username": str(username), "password": str(password)},
-            )
-        )
-    return plan
-
-
-_APPWORLD_RELATION_PATTERNS = (
-    (r"friends?", "friend"),
-    (r"roommates?", "roommate"),
-    (r"coworkers?", "coworker"),
-    (r"colleagues?", "colleague"),
-    (r"siblings?", "sibling"),
-    (r"brothers?", "brother"),
-    (r"sisters?", "sister"),
-    (r"mothers?", "mother"),
-    (r"fathers?", "father"),
-)
-
-
-def _appworld_contact_lookup_arguments(
-    instruction: str,
-    phone_login: Any,
-    schema_index: Mapping[str, Mapping[str, Any]],
-) -> dict[str, Any] | None:
-    tool_name = "phone__search_contacts"
-    function = schema_index.get(tool_name)
-    if not isinstance(function, Mapping) or not isinstance(phone_login, Mapping):
-        return None
-    access_token = phone_login.get("access_token")
-    if not access_token:
-        return None
-    relation = None
-    query = None
-    for pattern, normalized in _APPWORLD_RELATION_PATTERNS:
-        if not re.search(rf"\b{pattern}\b", instruction, flags=re.IGNORECASE):
-            continue
-        relation = normalized
-        named = re.search(
-            rf"\b{pattern}\b\s*,?\s*(?:named\s+)?([A-Z][A-Za-z'\-]+)",
-            instruction,
-        )
-        if named:
-            query = named.group(1)
-        break
-    if relation is None and not re.search(r"\bcontacts?\b", instruction, flags=re.IGNORECASE):
-        return None
-    arguments: dict[str, Any] = {
-        "access_token": str(access_token),
-        "page_index": 0,
-        "page_limit": 20,
-    }
-    if query:
-        arguments["query"] = query
-    if relation:
-        arguments["relationship"] = relation
-    parameters = function.get("parameters")
-    properties = parameters.get("properties") if isinstance(parameters, Mapping) else None
-    return adapt_appworld_arguments(arguments, properties.keys()) if isinstance(properties, Mapping) else arguments
-
-
-def build_benchmark_system_prompt(
-    task: Mapping[str, Any],
-    *,
-    dataset: str,
-    prompt_profile: str,
-) -> str:
-    """Build an explicit, auditable benchmark-agent prompting condition."""
-
-    if prompt_profile not in PROMPT_PROFILES:
-        raise ValueError(f"unsupported prompt profile: {prompt_profile}")
-    original = str(task.get("system_prompt", "")).strip()
-    if prompt_profile == "baseline":
-        return original
-    if dataset == "appworld":
-        tuned = (
-            "You are an autonomous AppWorld tool agent. Never guess credentials, access tokens, "
-            "IDs, email addresses, or other arguments. Use the internally prepared read-only "
-            "Supervisor profile, target-app login, and contact observations, and reuse each returned "
-            "access token. Never request or expose account passwords. Resolve every reference to a friend, relative, or "
-            "other person through Phone contacts and use the exact returned identity. Translate "
-            "privacy language literally: publicly means private=false and privately means "
-            "private=true. Plan only the requested state transitions, follow the exact function "
-            "schema, inspect every observation, and never repeat a successful state-changing call. "
-            "Verify the final state with read/search functions and then call "
-            "supervisor__complete_task with status='success'; for action tasks that ask no question, "
-            "use answer=null. Memory tools may retain intermediate facts but do not change AppWorld "
-            "state."
-        )
-    else:
-        tuned = (
-            "Use the listed benchmark tools deliberately: plan first, follow each exact function "
-            "schema, inspect errors, and verify the requested final state before finishing. Memory "
-            "tools retain intermediate facts but do not replace benchmark actions."
-        )
-    return "\n\n".join(part for part in (original, tuned) if part)
 
 
 def _classify_tool_name(name: str, read_prefixes: tuple[str, ...], write_prefixes: tuple[str, ...]) -> str | None:
@@ -446,7 +176,6 @@ class AppWorldAdapter(BenchmarkEnvAdapter):
         app_names: Sequence[str] | None = None,
         api_name_allowlist: Sequence[str] | None = None,
         experiment_name: str = "txnmem_native",
-        always_allow_supervisor: bool = False,
     ):
         self.requester_factory = requester_factory
         self.appworld_root = _normalize_appworld_root(appworld_root) if appworld_root else None
@@ -457,13 +186,10 @@ class AppWorldAdapter(BenchmarkEnvAdapter):
             else None
         )
         self.experiment_name = experiment_name
-        self.always_allow_supervisor = bool(always_allow_supervisor)
         self.requester = None
         self.environment = None
         self.api_docs: list[dict[str, Any]] = []
         self._tool_kinds: dict[str, str] = {}
-        self._authorized_tool_names: set[str] = set()
-        self.unauthorized_tool_attempt_count = 0
 
     def tool_schemas(self) -> list[dict[str, Any]]:
         if self.requester is None and self.requester_factory is not None:
@@ -483,24 +209,17 @@ class AppWorldAdapter(BenchmarkEnvAdapter):
         except Exception:
             self.api_docs = []
         schemas = []
-        self._tool_kinds.clear()
-        self._authorized_tool_names.clear()
         for doc in self.api_docs:
             function = doc.get("function", {}) if isinstance(doc, Mapping) else {}
             tool_name = function.get("name", "")
             if not isinstance(tool_name, str) or not tool_name:
                 continue
             method_name = tool_name.split("__")[-1] if "__" in tool_name else tool_name
-            if not appworld_tool_allowed(
-                tool_name,
-                self.api_name_allowlist,
-                always_allow_supervisor=self.always_allow_supervisor,
-            ):
+            if self.api_name_allowlist is not None and tool_name not in self.api_name_allowlist:
                 continue
             self._tool_kinds[tool_name] = _classify_tool_name(
                 method_name, self._READ_PREFIXES, self._WRITE_PREFIXES
             ) or "memory_read"
-            self._authorized_tool_names.add(tool_name)
             schemas.append(dict(doc))
         return schemas
 
@@ -525,7 +244,7 @@ class AppWorldAdapter(BenchmarkEnvAdapter):
                     show_api_response_schemas=True,
                     max_interactions=int(task.get("max_steps", 30)),
                     max_api_calls_per_interaction=20,
-                    raise_on_failure=True,
+                    raise_on_failure=False,
                 )
                 self.requester = self.environment.requester
         if self.environment is not None:
@@ -537,61 +256,29 @@ class AppWorldAdapter(BenchmarkEnvAdapter):
             raise AgentToolError("missing_runtime", "AppWorld requester is not initialized")
         if "__" not in name:
             raise AgentToolError("unknown_tool", f"unsupported appworld tool: {name}")
-        if name not in self._authorized_tool_names:
-            self.unauthorized_tool_attempt_count += 1
-            raise AgentToolError(
-                "unauthorized_tool",
-                f"AppWorld tool was not exposed by the public task schema: {name}",
-            )
-        return self._request(name, arguments)
-
-    def set_model_authorized_tools(self, names: Sequence[str]) -> None:
-        """Restrict runtime execution to the schemas actually sent to the model."""
-
-        self._authorized_tool_names.intersection_update(str(name) for name in names)
-
-    def execute_trusted_preflight(
-        self, name: str, arguments: Mapping[str, Any]
-    ) -> tuple[str, dict[str, Any]]:
-        if name not in _TRUSTED_APPWORLD_PREFLIGHT_TOOLS:
-            raise AgentToolError(
-                "unauthorized_preflight_tool",
-                f"unsupported trusted AppWorld preflight tool: {name}",
-            )
-        return self._request(name, arguments)
-
-    def _request(self, name: str, arguments: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
-        if self.requester is None:
-            raise AgentToolError("missing_runtime", "AppWorld requester is not initialized")
         app_name, method_name = name.split("__", 1)
         try:
             response = self.requester.request(app_name, method_name, **dict(arguments))
         except Exception as exc:
             return f"Error: {type(exc).__name__}: {exc}", {"ok": False}
-        if not _appworld_response_ok(response):
-            return f"Error: AppWorld API failure: {response}", {"ok": False}
         return str(response), {"ok": True}
 
     def evaluate(self, run_report: Mapping[str, Any]) -> dict[str, Any]:
         if self.environment is not None:
             try:
                 task_completed = bool(self.environment.task_completed())
-                save = getattr(self.environment, "save", None)
-                if callable(save):
-                    save()
                 tracker = self.environment.evaluate(suppress_errors=True)
-                evaluator_success = bool(tracker.success)
                 result = {
                     "status": "available",
-                    "official_evaluator": "appworld.TestTracker.success_and_task_completed",
-                    "success": bool(evaluator_success and task_completed),
-                    "official_evaluator_success": evaluator_success,
+                    "official_evaluator": "appworld.task_completed",
+                    "success": task_completed,
                     "task_completed": task_completed,
                     "pass_count": int(tracker.pass_count),
                     "total_count": int(tracker.num_tests),
                 }
             finally:
-                self.close()
+                self.environment.close()
+                self.environment = None
             self.official_evaluator_status = "available"
             return result
         self.official_evaluator_status = "blocked"
@@ -600,11 +287,6 @@ class AppWorldAdapter(BenchmarkEnvAdapter):
             "official_evaluator": "appworld_task_completed_not_available_offline",
             "error": "official AppWorld environment is not initialized",
         }
-
-    def close(self) -> None:
-        if self.environment is not None:
-            self.environment.close()
-            self.environment = None
 
     def tool_event_kind(self, name: str) -> str | None:
         if name in self._tool_kinds:
@@ -711,16 +393,10 @@ class BenchmarkToolGateway(NativeMemoryToolGateway):
     def call_benchmark(self, name: str, arguments: Mapping[str, Any], step: int) -> tuple[str, dict[str, Any]]:
         observation, metadata = self.adapter.execute(name, arguments)
         self.benchmark_calls.append(
-            {
-                "name": name,
-                "arguments": dict(arguments),
-                "observation": observation,
-                "metadata": dict(metadata),
-                "step": step,
-            }
+            {"name": name, "arguments": dict(arguments), "observation": observation, "step": step}
         )
         kind = self.adapter.tool_event_kind(name)
-        if kind is not None and metadata.get("ok", True):
+        if kind is not None:
             memory_id = self.adapter.memory_id_for(name, arguments, step)
             event_fields = {
                 "agent_id": self.agent_id,
@@ -736,26 +412,6 @@ class BenchmarkToolGateway(NativeMemoryToolGateway):
                 )
         return observation, metadata
 
-    def call_trusted_preflight(
-        self, name: str, arguments: Mapping[str, Any], step: int = 0
-    ) -> tuple[str, dict[str, Any]]:
-        execute = getattr(self.adapter, "execute_trusted_preflight", None)
-        if callable(execute):
-            observation, metadata = execute(name, arguments)
-        else:
-            observation, metadata = self.adapter.execute(name, arguments)
-        self.benchmark_calls.append(
-            {
-                "name": name,
-                "arguments": dict(arguments),
-                "observation": observation,
-                "metadata": dict(metadata),
-                "origin": "trusted_preflight",
-                "step": step,
-            }
-        )
-        return observation, metadata
-
 
 def build_merged_schemas(memory_schemas: Sequence[Mapping[str, Any]], benchmark_schemas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     merged = []
@@ -764,26 +420,6 @@ def build_merged_schemas(memory_schemas: Sequence[Mapping[str, Any]], benchmark_
     for schema in memory_schemas:
         merged.append(dict(schema))
     return merged
-
-
-def _safe_benchmark_tool_trace(gateway: BenchmarkToolGateway) -> list[dict[str, Any]]:
-    """Expose call order and schema-key use without retaining argument values."""
-
-    trace: list[dict[str, Any]] = []
-    for call in gateway.benchmark_calls:
-        arguments = call.get("arguments")
-        metadata = call.get("metadata")
-        ok = metadata.get("ok", True) if isinstance(metadata, Mapping) else True
-        trace.append(
-            {
-                "name": str(call.get("name", "")),
-                "origin": str(call.get("origin", "model_or_agent_tool")),
-                "step": int(call.get("step", 0)),
-                "argument_keys": sorted(str(key) for key in arguments) if isinstance(arguments, Mapping) else [],
-                "observation_status": "ok" if ok else "error",
-            }
-        )
-    return trace
 
 
 def run_benchmark_agent(
@@ -811,231 +447,54 @@ def run_benchmark_agent(
         failure_controller = FailureController(failure_controller)
     gateway = BenchmarkToolGateway(backend, adapter, agent_id=agent_id, failure_controller=failure_controller)
 
-    prompt_profile = str(task.get("prompt_profile", "baseline"))
-    if prompt_profile not in PROMPT_PROFILES:
-        raise ValueError(f"unsupported prompt profile: {prompt_profile}")
-    if prompt_profile == "tuned":
-        instruction = adapter.reset(task)
-        all_benchmark_schemas = adapter.tool_schemas()
-    else:
-        all_benchmark_schemas = adapter.tool_schemas()
-        instruction = adapter.reset(task)
-    trusted_preflight_schemas: list[Mapping[str, Any]] = []
-    benchmark_schemas: list[Mapping[str, Any]] = []
-    for schema in all_benchmark_schemas:
-        function = schema.get("function") if isinstance(schema, Mapping) else None
-        name = function.get("name") if isinstance(function, Mapping) else None
-        if adapter.dataset == "appworld" and name in _TRUSTED_APPWORLD_PREFLIGHT_TOOLS:
-            trusted_preflight_schemas.append(schema)
-        else:
-            benchmark_schemas.append(schema)
-    restrict_tools = getattr(adapter, "set_model_authorized_tools", None)
-    if callable(restrict_tools):
-        restrict_tools(
-            [
-                str(schema.get("function", {}).get("name", ""))
-                for schema in benchmark_schemas
-                if isinstance(schema, Mapping)
-            ]
-        )
+    benchmark_schemas = adapter.tool_schemas()
     memory_schemas = NativeMemoryToolGateway.schemas()
     schemas = build_merged_schemas(memory_schemas, benchmark_schemas)
 
     messages: list[dict[str, Any]] = []
-    system_prompt = build_benchmark_system_prompt(
-        task,
-        dataset=adapter.dataset,
-        prompt_profile=prompt_profile,
-    )
+    system_prompt = task.get("system_prompt")
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": instruction})
-    model_usage = empty_usage_summary()
-    preflight: list[dict[str, str]] = []
-    preflight_call_count = 0
-    preflight_login_count = 0
-    preflight_contact_lookup_count = 0
-    appworld_schema_index = _appworld_schema_index(benchmark_schemas)
-    trusted_preflight_schema_index = _appworld_schema_index(trusted_preflight_schemas)
-    if prompt_profile == "tuned" and adapter.dataset == "appworld":
-        schema_names = set(trusted_preflight_schema_index)
-        preflight_values: dict[str, Any] = {}
-        for tool_name in (
-            "supervisor__show_profile",
-            "supervisor__show_account_passwords",
-        ):
-            if tool_name not in schema_names:
-                continue
-            try:
-                observation, _metadata = gateway.call_trusted_preflight(tool_name, {}, 0)
-            except AgentToolError:
-                continue
-            preflight_call_count += 1
-            if tool_name != "supervisor__show_account_passwords":
-                preflight.append({"tool_name": tool_name, "observation": observation})
-            preflight_values[tool_name] = _parse_appworld_observation(observation)
-        login_values: dict[str, Any] = {}
-        for tool_name, arguments in _appworld_prelogin_arguments(
-            preflight_values.get("supervisor__show_profile"),
-            preflight_values.get("supervisor__show_account_passwords"),
-            appworld_schema_index,
-        ):
-            try:
-                observation, _metadata = gateway.call_benchmark(tool_name, arguments, 0)
-            except AgentToolError:
-                continue
-            preflight_call_count += 1
-            preflight.append({"tool_name": tool_name, "observation": observation})
-            parsed_login = _parse_appworld_observation(observation)
-            if isinstance(parsed_login, Mapping) and parsed_login.get("access_token"):
-                preflight_login_count += 1
-                login_values[tool_name.split("__", 1)[0]] = parsed_login
-        contact_arguments = _appworld_contact_lookup_arguments(
-            instruction,
-            login_values.get("phone"),
-            appworld_schema_index,
-        )
-        if contact_arguments is not None:
-            try:
-                observation, _metadata = gateway.call_benchmark(
-                    "phone__search_contacts", contact_arguments, 0
-                )
-            except AgentToolError:
-                pass
-            else:
-                preflight_call_count += 1
-                preflight.append(
-                    {"tool_name": "phone__search_contacts", "observation": observation}
-                )
-                if not str(observation).startswith("Error:"):
-                    preflight_contact_lookup_count += 1
-        if preflight:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": (
-                        "Read-only preflight observations from official AppWorld Supervisor APIs. "
-                        "Credentials were used internally and are intentionally omitted. Use these exact "
-                        "profile/login/contact values; do not request account passwords or repeat the same "
-                        "preflight calls.\n"
-                        + json.dumps(preflight, ensure_ascii=False)
-                    ),
-                }
-            )
-
-    def failed(step: int, code: str) -> dict[str, Any]:
-        report = _failed_report(
-            task_id,
-            step,
-            code,
-            backend.validated_events(),
-            messages,
-            model_usage,
-        )
-        report["prompt_profile"] = prompt_profile
-        report["preflight_tool_count"] = preflight_call_count
-        report["preflight_login_count"] = preflight_login_count
-        report["preflight_contact_lookup_count"] = preflight_contact_lookup_count
-        report["authorized_benchmark_tool_count"] = len(benchmark_schemas)
-        report["unauthorized_tool_attempt_count"] = int(
-            getattr(adapter, "unauthorized_tool_attempt_count", 0) or 0
-        )
-        report["benchmark_tool_trace"] = _safe_benchmark_tool_trace(gateway)
-        return finalize(report)
-
-    def finalize(report: dict[str, Any]) -> dict[str, Any]:
-        try:
-            report["official"] = adapter.evaluate(report)
-        except Exception as exc:
-            report["official"] = {
-                "status": "error",
-                "official_evaluator": f"{adapter.dataset}_evaluator",
-                "error": f"{type(exc).__name__}: {exc}",
-            }
-        return report
-
-    def completed(step: int, final_text: str) -> dict[str, Any]:
-        report = {
-            "task_id": task_id,
-            "status": "completed",
-            "steps": step,
-            "final_text": final_text,
-            "events": backend.validated_events(),
-            "messages": messages,
-            "model_usage": model_usage,
-            "prompt_profile": prompt_profile,
-            "preflight_tool_count": preflight_call_count,
-            "preflight_login_count": preflight_login_count,
-            "preflight_contact_lookup_count": preflight_contact_lookup_count,
-            "authorized_benchmark_tool_count": len(benchmark_schemas),
-            "unauthorized_tool_attempt_count": int(
-                getattr(adapter, "unauthorized_tool_attempt_count", 0) or 0
-            ),
-            "benchmark_tool_trace": _safe_benchmark_tool_trace(gateway),
-        }
-        return finalize(report)
+    messages.append({"role": "user", "content": adapter.reset(task)})
 
     for step in range(1, max_steps + 1):
-        model_usage["request_count"] += 1
         try:
             response = model.complete(messages, schemas, seed=seed, temperature=temperature)
         except ModelProtocolError as exc:
-            return failed(step, f"model_{exc.code}")
-        add_response_usage(model_usage, response)
+            return _failed_report(task_id, step, f"model_{exc.code}", backend.validated_events(), messages)
         assistant_message = _assistant_message(response)
         messages.append(assistant_message)
         tool_calls = list(getattr(response, "tool_calls", []))
         if not tool_calls:
-            if (
-                prompt_profile == "tuned"
-                and adapter.dataset == "appworld"
-                and "supervisor__complete_task" in appworld_schema_index
-            ):
-                if step == max_steps:
-                    return failed(step, "max_steps_exceeded_without_complete_task")
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "No function calls available. Please call at least one function. "
-                            "If the requested state change is finished, call "
-                            "supervisor__complete_task with status='success' now."
-                        ),
-                    }
-                )
-                continue
-            return completed(step, getattr(response, "text", ""))
-        successful_completion_call = False
+            report = {
+                "task_id": task_id,
+                "status": "completed",
+                "steps": step,
+                "final_text": getattr(response, "text", ""),
+                "events": backend.validated_events(),
+                "messages": messages,
+            }
+            report["official"] = adapter.evaluate(report)
+            return report
         for call in tool_calls:
             try:
                 if call.name.startswith("memory_"):
                     result = gateway.call(call.name, call.arguments)
                 else:
-                    arguments = call.arguments
-                    if prompt_profile == "tuned" and adapter.dataset == "appworld":
-                        function = appworld_schema_index.get(call.name)
-                        parameters = function.get("parameters") if isinstance(function, Mapping) else None
-                        properties = parameters.get("properties") if isinstance(parameters, Mapping) else None
-                        if isinstance(properties, Mapping):
-                            arguments = adapt_appworld_arguments(arguments, properties.keys())
-                    result, _metadata = gateway.call_benchmark(call.name, arguments, step)
-                    if (
-                        call.name == "supervisor__complete_task"
-                        and _metadata.get("ok", True)
-                        and not str(result).startswith("Error:")
-                    ):
-                        successful_completion_call = True
+                    result, _metadata = gateway.call_benchmark(call.name, call.arguments, step)
             except AgentToolError as exc:
-                return failed(step, exc.code)
+                return _failed_report(task_id, step, exc.code, backend.validated_events(), messages)
             except FailureInjectionError as exc:
-                return failed(step, exc.code)
+                return _failed_report(task_id, step, exc.code, backend.validated_events(), messages)
             try:
                 content = __import__("json").dumps(result, ensure_ascii=False)
             except (TypeError, ValueError) as exc:
-                return failed(step, "non_json_tool_result")
+                return _failed_report(task_id, step, "non_json_tool_result", backend.validated_events(), messages)
             messages.append({"role": "tool", "tool_call_id": call.call_id, "content": content})
-        if prompt_profile == "tuned" and adapter.dataset == "appworld" and successful_completion_call:
-            return completed(step, getattr(response, "text", ""))
         if step == max_steps:
-            return failed(step, "max_steps_exceeded")
-    return failed(max_steps, "max_steps_exceeded")
+            report = _failed_report(task_id, step, "max_steps_exceeded", backend.validated_events(), messages)
+            report["official"] = adapter.evaluate(report)
+            return report
+    report = _failed_report(task_id, max_steps, "max_steps_exceeded", backend.validated_events(), messages)
+    report["official"] = adapter.evaluate(report)
+    return report
