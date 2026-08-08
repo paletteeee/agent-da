@@ -1,0 +1,378 @@
+{
+  "bootstrap_repetitions": 2000,
+  "bootstrap_seed": 17,
+  "calibration": {
+    "agent_count": 1,
+    "branch_factor": 1,
+    "concurrency": 1,
+    "policy_churn": 2,
+    "provenance_depth": 1,
+    "source_instance_count": 141,
+    "txn_size": 1
+  },
+  "comparison_method": "feature-wise bootstrap intervals plus a joint RBF-RFF MMD permutation test",
+  "comparison_split": "holdout_only",
+  "evidence": {
+    "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+    "instance_count": 175,
+    "oracle_match_by_variant": {
+      "Naive": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      },
+      "TxnMem": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      },
+      "TxnMem-NoPolicyCommit": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      },
+      "TxnMem-NoRepair": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      },
+      "TxnMem-NoTxn": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      }
+    },
+    "production_latency_claim": false,
+    "replay_envelope_operation_count": 350,
+    "replay_operation_count": 1270,
+    "source_operation_count": 920,
+    "trace_ground_truth_native": false
+  },
+  "features": {
+    "agent_count": {
+      "mean_abs_diff": 0.0,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count_left": 400,
+        "sample_count_right": 34,
+        "seed": 5064,
+        "upper": 0.0
+      },
+      "relative_mean_abs_diff": 0.0,
+      "synthetic_mean": 1.0,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.0,
+        "lower": 1.0,
+        "sample_count": 400,
+        "seed": 5062,
+        "upper": 1.0
+      },
+      "synthetic_std": 0.0,
+      "trace_mean": 1.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.0,
+        "lower": 1.0,
+        "sample_count": 34,
+        "seed": 5063,
+        "upper": 1.0
+      },
+      "trace_std": 0.0
+    },
+    "branch_factor": {
+      "mean_abs_diff": 0.25,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.25,
+        "lower": 0.2075,
+        "sample_count_left": 400,
+        "sample_count_right": 34,
+        "seed": 4055,
+        "upper": 0.2925
+      },
+      "relative_mean_abs_diff": 0.25,
+      "synthetic_mean": 0.25,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.25,
+        "lower": 0.21,
+        "sample_count": 400,
+        "seed": 4053,
+        "upper": 0.2925
+      },
+      "synthetic_std": 0.4330127018922193,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 34,
+        "seed": 4054,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "operation_count": {
+      "mean_abs_diff": 2.9264705882352944,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 2.9264705882352944,
+        "lower": 1.6857352941176469,
+        "sample_count_left": 400,
+        "sample_count_right": 34,
+        "seed": 19,
+        "upper": 4.28
+      },
+      "relative_mean_abs_diff": 0.4077868852459017,
+      "synthetic_mean": 4.25,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 4.25,
+        "lower": 4.085,
+        "sample_count": 400,
+        "seed": 17,
+        "upper": 4.42
+      },
+      "synthetic_std": 1.713913650100261,
+      "trace_mean": 7.176470588235294,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 7.176470588235294,
+        "lower": 6.0,
+        "sample_count": 34,
+        "seed": 18,
+        "upper": 8.441176470588236
+      },
+      "trace_std": 3.8153759219250647
+    },
+    "policy_change_rate": {
+      "mean_abs_diff": 0.10833484326131385,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.10833484326131385,
+        "lower": 0.0765182611506141,
+        "sample_count_left": 400,
+        "sample_count_right": 34,
+        "seed": 2037,
+        "upper": 0.14088022679934445
+      },
+      "relative_mean_abs_diff": 0.10833484326131385,
+      "synthetic_mean": 0.07291666666666666,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.07291666666666666,
+        "lower": 0.060625,
+        "sample_count": 400,
+        "seed": 2035,
+        "upper": 0.08562499999999999
+      },
+      "synthetic_std": 0.1280021429942136,
+      "trace_mean": 0.1812515099279805,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.1812515099279805,
+        "lower": 0.15323850985615692,
+        "sample_count": 34,
+        "seed": 2036,
+        "upper": 0.21016320281026163
+      },
+      "trace_std": 0.08766612133564193
+    },
+    "provenance_depth": {
+      "mean_abs_diff": 0.5,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.5,
+        "lower": 0.415,
+        "sample_count_left": 400,
+        "sample_count_right": 34,
+        "seed": 3046,
+        "upper": 0.58
+      },
+      "relative_mean_abs_diff": 0.5,
+      "synthetic_mean": 0.5,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.5,
+        "lower": 0.42,
+        "sample_count": 400,
+        "seed": 3044,
+        "upper": 0.585
+      },
+      "synthetic_std": 0.8660254037844386,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 34,
+        "seed": 3045,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "transaction_size": {
+      "mean_abs_diff": 0.1470588235294117,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.1470588235294117,
+        "lower": 0.008823529411764675,
+        "sample_count_left": 400,
+        "sample_count_right": 34,
+        "seed": 1028,
+        "upper": 0.7089705882352939
+      },
+      "relative_mean_abs_diff": 0.08928571428571425,
+      "synthetic_mean": 1.5,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.5,
+        "lower": 1.43,
+        "sample_count": 400,
+        "seed": 1026,
+        "upper": 1.57
+      },
+      "synthetic_std": 0.7071067811865476,
+      "trace_mean": 1.6470588235294117,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.6470588235294117,
+        "lower": 1.088235294117647,
+        "sample_count": 34,
+        "seed": 1027,
+        "upper": 2.264705882352941
+      },
+      "trace_std": 1.678275602080836
+    }
+  },
+  "holdout_evidence": {
+    "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+    "instance_count": 34,
+    "oracle_match_by_variant": {
+      "Naive": {
+        "matched": 34,
+        "rate": 1.0,
+        "total": 34
+      },
+      "TxnMem": {
+        "matched": 34,
+        "rate": 1.0,
+        "total": 34
+      },
+      "TxnMem-NoPolicyCommit": {
+        "matched": 34,
+        "rate": 1.0,
+        "total": 34
+      },
+      "TxnMem-NoRepair": {
+        "matched": 34,
+        "rate": 1.0,
+        "total": 34
+      },
+      "TxnMem-NoTxn": {
+        "matched": 34,
+        "rate": 1.0,
+        "total": 34
+      }
+    },
+    "production_latency_claim": false,
+    "replay_envelope_operation_count": 68,
+    "replay_operation_count": 244,
+    "source_operation_count": 176,
+    "trace_ground_truth_native": false
+  },
+  "holdout_trace_inventory": {
+    "adapters": [
+      "tau-bench"
+    ],
+    "event_count": 176,
+    "instance_count": 34,
+    "sources": [
+      "tau-bench-historical-gpt4o-airline"
+    ],
+    "status": "trace_supplied"
+  },
+  "joint_feature_comparison": true,
+  "mean_feature_relative_abs_diff": 0.2259012404654883,
+  "multivariate_test": {
+    "bandwidth": 3.244698261978859,
+    "claim_boundary": "a non-significant result is not evidence of distributional equivalence",
+    "feature_names": [
+      "operation_count",
+      "transaction_size",
+      "policy_change_rate",
+      "provenance_depth",
+      "branch_factor",
+      "agent_count"
+    ],
+    "method": "standardized_rbf_random_fourier_mmd_permutation",
+    "null_hypothesis": "synthetic and trace-grounded joint feature distributions are equal",
+    "p_value": 0.001,
+    "permutations": 999,
+    "rff_dimensions": 128,
+    "seed": 10024,
+    "small_sample_warning": null,
+    "statistic": 0.18197906075782866,
+    "status": "available",
+    "synthetic_count": 400,
+    "trace_count": 34
+  },
+  "split": {
+    "calibration_instance_count": 141,
+    "holdout_fraction": 0.2,
+    "holdout_instance_count": 34,
+    "holdout_record_count": 40,
+    "seed": 17,
+    "test_instance_count": 34,
+    "train_instance_count": 141,
+    "train_record_count": 160,
+    "unit": "episode"
+  },
+  "synthetic_count": 400,
+  "synthetic_source": "results/final_controlled/data/generated_instances.jsonl",
+  "trace_count": 34,
+  "trace_grounded_status": "trace_supplied",
+  "trace_inventory": {
+    "adapters": [
+      "tau-bench"
+    ],
+    "event_count": 920,
+    "instance_count": 175,
+    "sources": [
+      "tau-bench-historical-gpt4o-airline"
+    ],
+    "status": "trace_supplied"
+  },
+  "train_trace_inventory": {
+    "adapters": [
+      "tau-bench"
+    ],
+    "event_count": 744,
+    "instance_count": 141,
+    "sources": [
+      "tau-bench-historical-gpt4o-airline"
+    ],
+    "status": "trace_supplied"
+  }
+}
