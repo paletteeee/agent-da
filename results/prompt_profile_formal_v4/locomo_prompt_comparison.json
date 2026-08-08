@@ -1,0 +1,54 @@
+{
+  "baseline_mean_f1_by_repetition": [
+    0.13645904072647844,
+    0.14113862194352642,
+    0.13748600619240534
+  ],
+  "baseline_token_usage_complete": true,
+  "baseline_total_tokens": 481410,
+  "category_f1_delta": {
+    "1": -0.0011595221835641045,
+    "2": -0.008376323273895689,
+    "3": 0.015671102055783342,
+    "4": 0.0036337350286309855,
+    "5": 0.003736920777279523
+  },
+  "claim_boundary": "descriptive paired repetitions; no population-level significance claim",
+  "comparison": "locomo_paired_prompt_profiles",
+  "condition_fingerprint": "c5ced4fd87de9ffcda732fc93c6b375e87d3e5e7fa0c6b06ae5408f1b55f4bc5",
+  "mean_f1_delta": 0.0016169580043333333,
+  "mean_f1_delta_std": 0.001921336312006298,
+  "model": "qwen2.5-7b-instruct",
+  "observed_token_delta": 40539,
+  "paired_mean_f1_deltas": [
+    -0.000945645942,
+    0.003680625363,
+    0.002115894592
+  ],
+  "paired_repetition_count": 3,
+  "question_count_per_repetition": [
+    1986,
+    1986,
+    1986
+  ],
+  "raw_predictions_committed": false,
+  "repetition_seeds": [
+    17,
+    1017,
+    2017
+  ],
+  "sample_count_per_repetition": [
+    10,
+    10,
+    10
+  ],
+  "token_delta": 40539,
+  "token_delta_status": "exact",
+  "tuned_mean_f1_by_repetition": [
+    0.13551339478412142,
+    0.14481924730630402,
+    0.13960190078469611
+  ],
+  "tuned_token_usage_complete": true,
+  "tuned_total_tokens": 521949
+}

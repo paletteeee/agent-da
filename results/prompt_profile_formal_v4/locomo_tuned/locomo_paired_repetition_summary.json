@@ -1,0 +1,96 @@
+{
+  "base_seed": 17,
+  "category_f1_mean": {
+    "1": 0.14784753837691478,
+    "2": 0.0562746718189269,
+    "3": 0.18018778741539274,
+    "4": 0.12795259331980252,
+    "5": 0.20926756352765322
+  },
+  "condition": {
+    "batch_size": 16,
+    "dataset": "locomo",
+    "evaluator": "locomo.task_eval.evaluation.eval_question_answering",
+    "max_context_chars": 24000,
+    "max_ingest_steps": 16,
+    "max_qa_steps": 6,
+    "max_tokens": 512,
+    "memory_backend": "SQLiteInstrumentedMemoryBackend",
+    "model": "qwen2.5-7b-instruct",
+    "model_revision": "7b44fc9c62f21ea990dc4290f251f127c53a06eb1b9f170f75a20f1cd29f26b4",
+    "model_revision_status": "sha256",
+    "model_server_build": "vllm:0.8.5.post1",
+    "question_count": 1986,
+    "retrieval_projection": "paired_memory_retrieval",
+    "runner_evaluator_source_identity": {
+      "component_sha256": {
+        "locomo_official_eval": "e289b0ad7c1ac74146acf4a5e0ebc2613425193e8743211720623ce9bc7f2715",
+        "locomo_official_task_evaluator": "8e3be5d57ff2ff9ec5cd05939592f468c5f3f1fd95d13e431932bdf6bf0fd6fd",
+        "locomo_paired_eval": "e985fc98e35bd8e2ea13287b88d5c5a0b0c10b58de7673266a74a8a5e4ea4fa0",
+        "txnmem_backend": "d984a06e3acd1c694c467584380708a3134e949a55794c4d4c52d510893a7cfd",
+        "txnmem_model_protocol": "373fe221a2b26b670418b5066585234ead25e045d854b5ce6ef5f4adbcbf4385",
+        "txnmem_real_agent": "6064f00c2f632054dcafddf41a7f2929c19647e3960156c600ab24bc3ff79afa"
+      },
+      "fingerprint": "941c671131bd1615670756f94c5e9de1fa83b4c6a410e1ada6a43e4c0d7e0b68"
+    },
+    "sample_count": 10,
+    "sample_manifest_sha256": "513f3301bcb2478c1d9c4c1b8c444eefb1343edb40c673b2dea5059e72411be5",
+    "seed_policy": "repetition_seed_plus_sample_and_batch_offsets",
+    "source_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+    "temperature": 0.0,
+    "timeout_seconds": 300.0
+  },
+  "condition_fingerprint": "c5ced4fd87de9ffcda732fc93c6b375e87d3e5e7fa0c6b06ae5408f1b55f4bc5",
+  "evaluator": "locomo.task_eval.evaluation.eval_question_answering",
+  "mean_f1_by_repetition": [
+    0.13551339478412142,
+    0.14481924730630402,
+    0.13960190078469611
+  ],
+  "mean_f1_mean": 0.13997818095837386,
+  "mean_f1_std": 0.00380840411616032,
+  "model": "qwen2.5-7b-instruct",
+  "model_usage": {
+    "completion_tokens": 110207,
+    "prompt_tokens": 411742,
+    "request_count": 420,
+    "responses_with_usage": 420,
+    "total_tokens": 521949
+  },
+  "native_event_count_total": 402,
+  "paired_native_memory": true,
+  "production_latency_claim": false,
+  "prompt_profile": "tuned",
+  "qa_batch_attempt_count_total": 387,
+  "qa_batch_failure_count_total": 0,
+  "qa_batch_parse_failure_count_total": 0,
+  "qa_batch_success_count_total": 387,
+  "qa_parsed_answer_count_total": 5958,
+  "qa_question_attempt_count_total": 5958,
+  "qa_question_successful_response_count_total": 5958,
+  "question_count_per_repetition": [
+    1986,
+    1986,
+    1986
+  ],
+  "raw_reports_committed": false,
+  "raw_reports_location": "rep_*/locomo_paired_summary.json",
+  "repetition_count": 3,
+  "repetition_seeds": [
+    17,
+    1017,
+    2017
+  ],
+  "sample_count_per_repetition": [
+    10,
+    10,
+    10
+  ],
+  "status": "available",
+  "successful_repetition_count": 3,
+  "token_usage_complete": true,
+  "total_question_evaluations": 5958,
+  "treatment": {
+    "prompt_profile": "tuned"
+  }
+}
