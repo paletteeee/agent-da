@@ -123,6 +123,16 @@ def _task_map(summary: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
     return result
 
 
+def _model_visible_tool_attestation(row: Mapping[str, Any], task_id: str) -> tuple[int, str]:
+    count = row.get("model_visible_benchmark_tool_count")
+    digest = row.get("model_visible_benchmark_tool_names_sha256")
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        raise ValueError(f"AppWorld model-visible tool count missing for {task_id}")
+    if not isinstance(digest, str) or not digest:
+        raise ValueError(f"AppWorld model-visible tool digest missing for {task_id}")
+    return count, digest
+
+
 def compare_appworld_prompt_profiles(
     baseline: Mapping[str, Any],
     tuned: Mapping[str, Any],
@@ -147,6 +157,16 @@ def compare_appworld_prompt_profiles(
     baseline_unavailable = 0
     tuned_unavailable = 0
     for task_id in sorted(baseline_tasks):
+        left_tool_attestation = _model_visible_tool_attestation(
+            baseline_tasks[task_id], task_id
+        )
+        right_tool_attestation = _model_visible_tool_attestation(
+            tuned_tasks[task_id], task_id
+        )
+        if left_tool_attestation != right_tool_attestation:
+            raise ValueError(
+                f"AppWorld model-visible tool attestation differs for {task_id}"
+            )
         left_value = baseline_tasks[task_id].get("official")
         right_value = tuned_tasks[task_id].get("official")
         left = left_value if isinstance(left_value, Mapping) else {}
@@ -195,6 +215,8 @@ def compare_appworld_prompt_profiles(
         "manifest_sha256": baseline.get("manifest_sha256"),
         "condition_fingerprint": condition_fingerprint,
         "paired_task_count": len(per_task),
+        "model_visible_tool_attestation_status": "matched_for_all_paired_tasks",
+        "model_visible_tool_attestation_matched_task_count": len(per_task),
         "paired_available_assertion_task_count": len(comparable_rows),
         "baseline_unavailable_task_count": baseline_unavailable,
         "tuned_unavailable_task_count": tuned_unavailable,

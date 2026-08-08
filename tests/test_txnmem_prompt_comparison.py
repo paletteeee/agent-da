@@ -98,6 +98,8 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
                 "task_summaries": [
                     {
                         "task_id": f"task-{index}",
+                        "model_visible_benchmark_tool_count": 10 + index,
+                        "model_visible_benchmark_tool_names_sha256": f"digest-{index}",
                         "official": {
                             "success": success,
                             "pass_count": pass_count,
@@ -128,8 +130,8 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
             "model_usage": {"total_tokens": 100},
             "token_usage_complete": True,
             "task_summaries": [
-                {"task_id": "task-1", "official": {"status": "available", "success": False, "pass_count": 1, "total_count": 7}},
-                {"task_id": "task-2", "official": {"status": "available", "success": False, "pass_count": 2, "total_count": 5}},
+                {"task_id": "task-1", "model_visible_benchmark_tool_count": 10, "model_visible_benchmark_tool_names_sha256": "digest-1", "official": {"status": "available", "success": False, "pass_count": 1, "total_count": 7}},
+                {"task_id": "task-2", "model_visible_benchmark_tool_count": 11, "model_visible_benchmark_tool_names_sha256": "digest-2", "official": {"status": "available", "success": False, "pass_count": 2, "total_count": 5}},
             ],
             "official": {"successes": 0, "trials": 2, "pass_count": 3, "total_count": 12},
         }
@@ -140,8 +142,8 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
             "model_usage": {"total_tokens": 200},
             "token_usage_complete": False,
             "task_summaries": [
-                {"task_id": "task-1", "official": {"status": "available", "success": True, "pass_count": 7, "total_count": 7}},
-                {"task_id": "task-2", "status": "failed", "failure_code": "model_http_error", "official": None},
+                {"task_id": "task-1", "model_visible_benchmark_tool_count": 10, "model_visible_benchmark_tool_names_sha256": "digest-1", "official": {"status": "available", "success": True, "pass_count": 7, "total_count": 7}},
+                {"task_id": "task-2", "model_visible_benchmark_tool_count": 11, "model_visible_benchmark_tool_names_sha256": "digest-2", "status": "failed", "failure_code": "model_http_error", "official": None},
             ],
             "official": {"successes": 1, "trials": 1, "pass_count": 7, "total_count": 7},
         }
@@ -158,6 +160,41 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
         self.assertIsNone(report["token_delta"])
         self.assertEqual(report["observed_token_delta"], 100)
         self.assertEqual(report["token_delta_status"], "observed_lower_bound_only")
+
+    def test_appworld_comparison_rejects_model_visible_tool_mismatch(self):
+        common = {
+            "manifest_sha256": "same",
+            "condition_fingerprint": "same-condition",
+            "model_usage": {"total_tokens": 100},
+            "token_usage_complete": True,
+        }
+        baseline = {
+            **common,
+            "prompt_profile": "baseline",
+            "task_summaries": [
+                {
+                    "task_id": "task-1",
+                    "model_visible_benchmark_tool_count": 10,
+                    "model_visible_benchmark_tool_names_sha256": "baseline-digest",
+                    "official": {"success": False, "pass_count": 1, "total_count": 7},
+                }
+            ],
+        }
+        tuned = {
+            **common,
+            "prompt_profile": "tuned",
+            "task_summaries": [
+                {
+                    "task_id": "task-1",
+                    "model_visible_benchmark_tool_count": 10,
+                    "model_visible_benchmark_tool_names_sha256": "tuned-digest",
+                    "official": {"success": False, "pass_count": 2, "total_count": 7},
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "model-visible tool attestation differs"):
+            compare_appworld_prompt_profiles(baseline, tuned)
 
 
 if __name__ == "__main__":
