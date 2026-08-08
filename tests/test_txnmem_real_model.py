@@ -110,7 +110,23 @@ class _PreflightAdapter(_NoopBenchmarkAdapter):
                 "type": "function",
                 "function": {
                     "name": name,
-                    "parameters": {"type": "object", "properties": {}},
+                    "parameters": {
+                        "type": "object",
+                        "properties": (
+                            {
+                                "zeta": {
+                                    "type": "string",
+                                    "description": "fixture-zeta-schema-description",
+                                },
+                                "alpha": {
+                                    "type": "string",
+                                    "description": "fixture-alpha-schema-description",
+                                },
+                            }
+                            if name == "venmo__get_profile"
+                            else {}
+                        ),
+                    },
                 },
             }
             for name in (
@@ -119,6 +135,11 @@ class _PreflightAdapter(_NoopBenchmarkAdapter):
                 "supervisor__show_account_passwords",
             )
         ]
+
+    def execute(self, name, arguments):
+        if name == "venmo__get_profile":
+            return "fixture-public-observation", {"ok": True}
+        return super().execute(name, arguments)
 
     def execute_trusted_preflight(self, name, arguments):
         if name == "supervisor__show_profile":
@@ -1036,7 +1057,24 @@ class TxnMemRealExperimentTests(unittest.TestCase):
             out_dir = Path(tmp)
             report = run_benchmark_batch(
                 manifest,
-                _ScriptedModel([ModelResponse("done", [])]),
+                _ScriptedModel(
+                    [
+                        ModelResponse(
+                            "",
+                            [
+                                ToolCall(
+                                    "audit-call",
+                                    "venmo__get_profile",
+                                    {
+                                        "zeta": "fixture-argument-z",
+                                        "alpha": "fixture-argument-a",
+                                    },
+                                )
+                            ],
+                        ),
+                        ModelResponse("done", []),
+                    ]
+                ),
                 out_dir,
                 adapter_factory=lambda: _PreflightAdapter(),
             )
@@ -1061,13 +1099,45 @@ class TxnMemRealExperimentTests(unittest.TestCase):
             self.assertIs(type(task_summary["model_visible_benchmark_tool_count"]), int)
             self.assertIs(task_summary["trusted_preflight_enabled"], True)
             self.assertNotIn("model_visible_benchmark_tool_names", task_summary)
+            trace = task_summary["benchmark_tool_trace"]
+            allowed_trace_keys = {
+                "name",
+                "origin",
+                "step",
+                "argument_keys",
+                "observation_status",
+            }
+            for row in trace:
+                self.assertEqual(set(row), allowed_trace_keys)
+                self.assertEqual(row["argument_keys"], sorted(row["argument_keys"]))
+            trace_by_name = {row["name"]: row for row in trace}
+            for trusted_name in (
+                "supervisor__show_profile",
+                "supervisor__show_account_passwords",
+            ):
+                self.assertIn(trusted_name, trace_by_name)
+                self.assertEqual(
+                    trace_by_name[trusted_name]["origin"], "trusted_preflight"
+                )
+            self.assertEqual(
+                trace_by_name["venmo__get_profile"]["argument_keys"],
+                ["alpha", "zeta"],
+            )
             serialized = json.dumps(task_summary, ensure_ascii=False)
-            self.assertNotIn("venmo__get_profile", serialized)
             self.assertNotIn('"function"', serialized)
+            self.assertNotIn('"parameters"', serialized)
             self.assertNotIn('"arguments"', serialized)
             self.assertNotIn('"messages"', serialized)
-            self.assertNotIn("Alex", serialized)
-            self.assertNotIn("fixture-secret-password", serialized)
+            for private_value in (
+                "fixture-zeta-schema-description",
+                "fixture-alpha-schema-description",
+                "fixture-argument-z",
+                "fixture-argument-a",
+                "fixture-public-observation",
+                "Alex",
+                "fixture-secret-password",
+            ):
+                self.assertNotIn(private_value, serialized)
 
     def test_manifest_records_replay_errors_without_aborting_later_tasks(self):
         model = _ScriptedModel(
