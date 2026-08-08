@@ -135,6 +135,53 @@ class TxnMemCliOutputTests(unittest.TestCase):
             self.assertIn("synthetic_source", realism)
             self.assertIn("mean_abs_diff_interval", realism["features"]["operation_count"])
 
+    def test_trace_replay_calibrates_on_train_and_tests_only_holdout_instances(self):
+        with TemporaryDirectory() as tmp:
+            events = Path(tmp) / "events.jsonl"
+            events.write_text(
+                "".join(
+                    json.dumps(
+                        {
+                            "episode_id": f"ep{index}",
+                            "event_id": f"e{index}",
+                            "kind": "memory_write",
+                            "memory_id": f"m{index}",
+                        }
+                    )
+                    + "\n"
+                    for index in range(5)
+                ),
+                encoding="utf-8",
+            )
+            out_dir = Path(tmp) / "out"
+            subprocess.run(
+                [
+                    sys.executable,
+                    "src/txnmem_experiment.py",
+                    "trace-replay",
+                    "--events",
+                    str(events),
+                    "--adapter",
+                    "normalized",
+                    "--out-dir",
+                    str(out_dir),
+                    "--holdout-fraction",
+                    "0.2",
+                ],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            realism = json.loads(
+                (out_dir / "results/trace_realism.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(realism["split"]["train_instance_count"], 4)
+            self.assertEqual(realism["split"]["holdout_instance_count"], 1)
+            self.assertEqual(realism["trace_count"], 1)
+            self.assertEqual(realism["calibration"]["source_instance_count"], 4)
+
     def test_process_smoke_command_writes_aggregate_only_report(self):
         with TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "out"

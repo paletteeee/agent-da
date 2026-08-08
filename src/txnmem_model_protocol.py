@@ -26,9 +26,56 @@ class ToolCall:
 
 
 @dataclass(frozen=True)
+class TokenUsage:
+    """Token counters returned by an OpenAI-compatible endpoint."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+@dataclass(frozen=True)
 class ModelResponse:
     text: str
     tool_calls: list[ToolCall]
+    usage: TokenUsage | None = None
+
+
+def empty_usage_summary() -> dict[str, int]:
+    """Return a stable aggregate schema for model-request accounting."""
+
+    return {
+        "request_count": 0,
+        "responses_with_usage": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    }
+
+
+def add_response_usage(summary: dict[str, int], response: ModelResponse) -> None:
+    """Accumulate one response's endpoint-provided counters in place."""
+
+    usage = response.usage
+    if usage is None:
+        return
+    summary["responses_with_usage"] += 1
+    summary["prompt_tokens"] += usage.prompt_tokens
+    summary["completion_tokens"] += usage.completion_tokens
+    summary["total_tokens"] += usage.total_tokens
+
+
+def merge_usage_summaries(summaries: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    """Sum already-sanitized usage summaries without estimating missing data."""
+
+    result = empty_usage_summary()
+    for summary in summaries:
+        for field in result:
+            value = summary.get(field, 0)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            result[field] += int(value)
+    return result
 
 
 def _required_string(value: Any, field: str, code: str) -> str:
@@ -89,7 +136,19 @@ def parse_chat_completion(payload: Mapping[str, Any]) -> ModelResponse:
         if not isinstance(arguments, Mapping):
             raise ModelProtocolError("invalid_tool_arguments", "tool arguments must be a JSON object")
         calls.append(ToolCall(call_id=call_id, name=name, arguments=dict(arguments)))
-    return ModelResponse(text=text, tool_calls=calls)
+    usage = None
+    raw_usage = payload.get("usage")
+    if raw_usage is not None:
+        if not isinstance(raw_usage, Mapping):
+            raise ModelProtocolError("invalid_usage", "response usage must be a mapping")
+        counters: dict[str, int] = {}
+        for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = raw_usage.get(field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ModelProtocolError("invalid_usage", f"usage.{field} must be a non-negative integer")
+            counters[field] = value
+        usage = TokenUsage(**counters)
+    return ModelResponse(text=text, tool_calls=calls, usage=usage)
 
 
 class OpenAICompatibleClient:
@@ -101,6 +160,7 @@ class OpenAICompatibleClient:
         model: str,
         api_key: str | None = None,
         timeout_s: float = 60.0,
+        max_tokens: int | None = None,
     ):
         self.endpoint = _completion_url(endpoint)
         self.model = _required_string(model, "model", "missing_model")
@@ -108,6 +168,9 @@ class OpenAICompatibleClient:
         if timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
         self.timeout_s = float(timeout_s)
+        if max_tokens is not None and (isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 1):
+            raise ValueError("max_tokens must be a positive integer")
+        self.max_tokens = max_tokens
 
     def request_metadata(
         self,
@@ -150,6 +213,8 @@ class OpenAICompatibleClient:
         }
         if seed is not None:
             payload["seed"] = int(seed)
+        if self.max_tokens is not None:
+            payload["max_tokens"] = self.max_tokens
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"

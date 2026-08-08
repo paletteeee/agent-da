@@ -1,0 +1,164 @@
+import unittest
+
+from txnmem_prompt_comparison import (
+    compare_appworld_prompt_profiles,
+    compare_locomo_prompt_profiles,
+)
+
+
+class TxnMemPromptComparisonTests(unittest.TestCase):
+    def test_locomo_comparison_pairs_identical_repetition_seeds(self):
+        common = {
+            "model": "qwen2.5-7b-instruct",
+            "condition_fingerprint": "same-condition",
+            "repetition_count": 3,
+            "repetition_seeds": [17, 1017, 2017],
+            "question_count_per_repetition": [100, 100, 100],
+            "sample_count_per_repetition": [10, 10, 10],
+            "category_f1_mean": {"1": 0.1, "2": 0.2},
+            "model_usage": {"total_tokens": 1000},
+            "token_usage_complete": True,
+        }
+        report = compare_locomo_prompt_profiles(
+            {**common, "prompt_profile": "baseline", "mean_f1_by_repetition": [0.1, 0.2, 0.3]},
+            {
+                **common,
+                "prompt_profile": "tuned",
+                "mean_f1_by_repetition": [0.2, 0.3, 0.5],
+                "category_f1_mean": {"1": 0.15, "2": 0.25},
+                "model_usage": {"total_tokens": 1200},
+            },
+        )
+
+        self.assertEqual(report["paired_repetition_count"], 3)
+        self.assertEqual(report["paired_mean_f1_deltas"], [0.1, 0.1, 0.2])
+        self.assertAlmostEqual(report["mean_f1_delta"], 0.13333333333333333)
+        self.assertAlmostEqual(report["category_f1_delta"]["1"], 0.05)
+        self.assertEqual(report["token_delta"], 200)
+        self.assertEqual(report["token_delta_status"], "exact")
+
+    def test_locomo_comparison_rejects_seed_mismatch(self):
+        baseline = {
+            "model": "qwen",
+            "condition_fingerprint": "same-condition",
+            "prompt_profile": "baseline",
+            "repetition_count": 1,
+            "repetition_seeds": [17],
+            "mean_f1_by_repetition": [0.1],
+            "question_count_per_repetition": [1],
+            "sample_count_per_repetition": [1],
+        }
+        with self.assertRaises(ValueError):
+            compare_locomo_prompt_profiles(
+                baseline,
+                {**baseline, "prompt_profile": "tuned", "repetition_seeds": [18]},
+            )
+
+    def test_locomo_comparison_rejects_condition_fingerprint_mismatch(self):
+        common = {
+            "model": "qwen",
+            "repetition_seeds": [17],
+            "mean_f1_by_repetition": [0.1],
+            "question_count_per_repetition": [1],
+            "sample_count_per_repetition": [1],
+            "model_usage": {"total_tokens": 10},
+            "token_usage_complete": True,
+        }
+        with self.assertRaises(ValueError):
+            compare_locomo_prompt_profiles(
+                {
+                    **common,
+                    "prompt_profile": "baseline",
+                    "condition_fingerprint": "condition-a",
+                },
+                {
+                    **common,
+                    "prompt_profile": "tuned",
+                    "condition_fingerprint": "condition-b",
+                },
+            )
+
+    def test_appworld_comparison_pairs_task_ids_and_official_assertions(self):
+        def summary(profile, successes, passes, tokens):
+            return {
+                "benchmark": "appworld",
+                "manifest_sha256": "same-manifest",
+                "condition_fingerprint": "same-condition",
+                "prompt_profile": profile,
+                "unique_task_count": 2,
+                "repetitions": 1,
+                "official": {
+                    "successes": sum(successes),
+                    "trials": 2,
+                    "pass_count": sum(passes),
+                    "total_count": 14,
+                },
+                "model_usage": {"total_tokens": tokens},
+                "token_usage_complete": True,
+                "task_summaries": [
+                    {
+                        "task_id": f"task-{index}",
+                        "official": {
+                            "success": success,
+                            "pass_count": pass_count,
+                            "total_count": 7,
+                        },
+                    }
+                    for index, (success, pass_count) in enumerate(zip(successes, passes), 1)
+                ],
+            }
+
+        report = compare_appworld_prompt_profiles(
+            summary("baseline", [False, False], [1, 2], 1000),
+            summary("tuned", [True, False], [7, 4], 1400),
+        )
+
+        self.assertEqual(report["paired_task_count"], 2)
+        self.assertEqual(report["official_success_delta"], 1)
+        self.assertAlmostEqual(report["official_assertion_rate_delta"], 8 / 14)
+        self.assertEqual(report["improved_task_count"], 2)
+        self.assertEqual(report["token_delta"], 400)
+        self.assertEqual(report["token_delta_status"], "exact")
+
+    def test_appworld_comparison_counts_blocked_task_as_failure_and_excludes_its_assertions(self):
+        baseline = {
+            "manifest_sha256": "same",
+            "condition_fingerprint": "same-condition",
+            "prompt_profile": "baseline",
+            "model_usage": {"total_tokens": 100},
+            "token_usage_complete": True,
+            "task_summaries": [
+                {"task_id": "task-1", "official": {"status": "available", "success": False, "pass_count": 1, "total_count": 7}},
+                {"task_id": "task-2", "official": {"status": "available", "success": False, "pass_count": 2, "total_count": 5}},
+            ],
+            "official": {"successes": 0, "trials": 2, "pass_count": 3, "total_count": 12},
+        }
+        tuned = {
+            "manifest_sha256": "same",
+            "condition_fingerprint": "same-condition",
+            "prompt_profile": "tuned",
+            "model_usage": {"total_tokens": 200},
+            "token_usage_complete": False,
+            "task_summaries": [
+                {"task_id": "task-1", "official": {"status": "available", "success": True, "pass_count": 7, "total_count": 7}},
+                {"task_id": "task-2", "status": "failed", "failure_code": "model_http_error", "official": None},
+            ],
+            "official": {"successes": 1, "trials": 1, "pass_count": 7, "total_count": 7},
+        }
+
+        report = compare_appworld_prompt_profiles(baseline, tuned)
+
+        self.assertEqual(report["paired_task_count"], 2)
+        self.assertEqual(report["paired_available_assertion_task_count"], 1)
+        self.assertEqual(report["official_success_tuned_all_tasks"], 1)
+        self.assertEqual(report["official_success_tuned_denominator"], 2)
+        self.assertEqual(report["tuned_unavailable_task_count"], 1)
+        self.assertEqual(report["official_assertion_total_common"], 7)
+        self.assertAlmostEqual(report["official_assertion_rate_delta_common"], 6 / 7)
+        self.assertIsNone(report["token_delta"])
+        self.assertEqual(report["observed_token_delta"], 100)
+        self.assertEqual(report["token_delta_status"], "observed_lower_bound_only")
+
+
+if __name__ == "__main__":
+    unittest.main()

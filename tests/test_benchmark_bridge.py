@@ -28,8 +28,8 @@ from txnmem_benchmark_manifests import (
     generate_locomo_manifest,
     generate_tau_bench_manifest,
 )
-from txnmem_model_protocol import ModelResponse, ToolCall
-from txnmem_real_agent import NativeMemoryToolGateway
+from txnmem_model_protocol import ModelProtocolError, ModelResponse, ToolCall
+from txnmem_real_agent import AgentToolError, NativeMemoryToolGateway
 
 
 class _StubModel:
@@ -130,6 +130,22 @@ class BenchmarkBridgeTest(unittest.TestCase):
         self.assertEqual([event["step"] for event in backend.events], [1, 2])
         self.assertEqual([event["model_step"] for event in backend.events], [2, 2])
 
+    def test_gateway_does_not_project_failed_benchmark_call_as_memory_event(self):
+        class _FailedAdapter(_StubAdapter):
+            def execute(self, name, arguments):
+                return "Error: rejected", {"ok": False}
+
+        backend = InstrumentedMemoryBackend()
+        gateway = BenchmarkToolGateway(backend, _FailedAdapter())
+
+        observation, metadata = gateway.call_benchmark(
+            "book_item", {"item_id": "a1"}, step=1
+        )
+
+        self.assertEqual(observation, "Error: rejected")
+        self.assertFalse(metadata["ok"])
+        self.assertEqual(backend.events, [])
+
     def test_run_benchmark_agent_full_loop(self):
         backend = InstrumentedMemoryBackend()
         model = _StubModel(
@@ -175,6 +191,53 @@ class BenchmarkBridgeTest(unittest.TestCase):
         )
         projections = {event.get("projection") for event in report["events"]}
         self.assertIn("benchmark_tool_call", projections)
+
+    def test_model_failure_still_runs_benchmark_evaluator(self):
+        evaluated = []
+
+        class _FailingModel:
+            def complete(self, messages, tools, *, seed=None, temperature=0.0):
+                raise ModelProtocolError("http_error", "offline")
+
+        class _LifecycleAdapter(_StubAdapter):
+            def evaluate(self, run_report):
+                evaluated.append(run_report["status"])
+                return {"status": "available", "success": False}
+
+        report = run_benchmark_agent(
+            {"task_id": "model-failure", "instruction": "book"},
+            _FailingModel(),
+            InstrumentedMemoryBackend(),
+            _LifecycleAdapter(),
+        )
+
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(evaluated, ["failed"])
+        self.assertEqual(report["official"]["status"], "available")
+
+    def test_tool_failure_still_runs_benchmark_evaluator(self):
+        evaluated = []
+
+        class _ToolFailureAdapter(_StubAdapter):
+            def execute(self, name, arguments):
+                raise AgentToolError("unauthorized_tool", "not exposed")
+
+            def evaluate(self, run_report):
+                evaluated.append(run_report["status"])
+                return {"status": "available", "success": False}
+
+        report = run_benchmark_agent(
+            {"task_id": "tool-failure", "instruction": "book"},
+            _StubModel(
+                [ModelResponse("", [ToolCall("c1", "book_item", {"item_id": "a1"})])]
+            ),
+            InstrumentedMemoryBackend(),
+            _ToolFailureAdapter(),
+        )
+
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(evaluated, ["failed"])
+        self.assertEqual(report["official"]["status"], "available")
 
 
 class ScriptedUserTest(unittest.TestCase):
@@ -235,6 +298,39 @@ class AppWorldAdapterTest(unittest.TestCase):
         adapter = AppWorldAdapter(api_name_allowlist=["amazon__show_cart"])
         self.assertEqual(adapter.api_name_allowlist, ("amazon__show_cart",))
 
+    def test_execute_rejects_tool_not_exposed_by_schema(self):
+        calls = []
+
+        class _Requester:
+            def request(self, app_name, method_name, **arguments):
+                calls.append((app_name, method_name, arguments))
+                return {"ok": True}
+
+        adapter = AppWorldAdapter(requester_factory=lambda: _Requester())
+        adapter.requester = _Requester()
+        adapter._authorized_tool_names = {"amazon__show_cart"}
+
+        with self.assertRaises(AgentToolError) as raised:
+            adapter.execute("amazon__show_account_passwords", {})
+
+        self.assertEqual(raised.exception.code, "unauthorized_tool")
+        self.assertEqual(calls, [])
+        self.assertEqual(adapter.unauthorized_tool_attempt_count, 1)
+
+    def test_execute_marks_structured_appworld_failure_as_error(self):
+        class _Requester:
+            def request(self, app_name, method_name, **arguments):
+                return {"success": False, "message": "invalid request"}
+
+        adapter = AppWorldAdapter(requester_factory=lambda: _Requester())
+        adapter.requester = _Requester()
+        adapter._authorized_tool_names = {"amazon__show_cart"}
+
+        observation, metadata = adapter.execute("amazon__show_cart", {})
+
+        self.assertTrue(observation.startswith("Error:"))
+        self.assertFalse(metadata["ok"])
+
     def test_classify_api_tools(self):
         adapter = AppWorldAdapter(requester_factory=lambda: None)
         adapter.tool_schemas()
@@ -256,7 +352,7 @@ class AppWorldAdapterTest(unittest.TestCase):
         adapter = AppWorldAdapter(requester_factory=lambda: None)
         self.assertTrue(adapter.memory_id_for("venmo__create", {}, 3).startswith("appworld:"))
 
-    def test_official_result_uses_task_completed_and_preserves_tracker_counts(self):
+    def test_official_result_requires_tracker_success_and_task_completion(self):
         class _Tracker:
             success = False
             pass_count = 2
@@ -277,9 +373,64 @@ class AppWorldAdapterTest(unittest.TestCase):
         adapter = AppWorldAdapter(requester_factory=lambda: None)
         adapter.environment = _Environment()
         result = adapter.evaluate({})
-        self.assertTrue(result["success"])
+        self.assertFalse(result["success"])
+        self.assertFalse(result["official_evaluator_success"])
         self.assertTrue(result["task_completed"])
         self.assertEqual(result["pass_count"], 2)
+
+    def test_official_result_does_not_accept_tracker_success_without_completion(self):
+        class _Tracker:
+            success = True
+            pass_count = 3
+            num_tests = 3
+
+        class _Environment:
+            def task_completed(self):
+                return False
+
+            def evaluate(self, suppress_errors=True):
+                return _Tracker()
+
+            def close(self):
+                return None
+
+        adapter = AppWorldAdapter(requester_factory=lambda: None)
+        adapter.environment = _Environment()
+        result = adapter.evaluate({})
+        self.assertFalse(result["success"])
+        self.assertTrue(result["official_evaluator_success"])
+        self.assertFalse(result["task_completed"])
+
+    def test_official_evaluator_saves_appworld_state_before_reading_output_dbs(self):
+        order = []
+
+        class _Tracker:
+            success = True
+            pass_count = 1
+            num_tests = 1
+
+        class _Environment:
+            def task_completed(self):
+                order.append("task_completed")
+                return True
+
+            def save(self):
+                order.append("save")
+
+            def evaluate(self, suppress_errors=True):
+                order.append("evaluate")
+                return _Tracker()
+
+            def close(self):
+                order.append("close")
+
+        adapter = AppWorldAdapter(requester_factory=lambda: None)
+        adapter.environment = _Environment()
+        result = adapter.evaluate({})
+
+        self.assertTrue(result["success"])
+        self.assertLess(order.index("save"), order.index("evaluate"))
+        self.assertEqual(order[-1], "close")
 
 
 class ManifestGeneratorTest(unittest.TestCase):

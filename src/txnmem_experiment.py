@@ -8,6 +8,7 @@ import csv
 import json
 import os
 from collections import Counter
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -24,6 +25,7 @@ from txnmem_coverage import schedule_effectiveness
 from txnmem_distributed import run_process_action_sequences
 from txnmem_distributed_protocol import run_protocol_matrix
 from txnmem_backend_performance import FaultScenario, benchmark_backend, run_fault_matrix
+from txnmem_conditions import canonical_fingerprint, source_identity
 from txnmem_service_faults import deterministic_fault_matrix
 from txnmem_mutation import run_mutation_campaign
 from txnmem_model_protocol import ModelResponse, OpenAICompatibleClient, ToolCall
@@ -61,6 +63,87 @@ CORE_WORKLOADS = (
     "provenance_chain_repair",
 )
 FORMAL_WORKLOADS = WORKLOADS
+
+
+def _benchmark_runtime_version(benchmark: str) -> str:
+    distribution = {
+        "appworld": "appworld",
+        "tau-bench": "tau-bench",
+    }.get(benchmark)
+    if distribution is None:
+        return "repository_source"
+    try:
+        return package_version(distribution)
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def _paired_benchmark_condition(
+    *,
+    benchmark: str,
+    manifest_sha256: str,
+    model_id: str,
+    model_execution_mode: str,
+    memory_backend: str,
+    repetitions: int,
+    max_tokens: int | None,
+    timeout_seconds: float,
+    model_revision: str,
+    model_server_build: str,
+) -> dict[str, object]:
+    import txnmem_benchmark_bridge as benchmark_bridge_module
+    import txnmem_model_protocol as model_protocol_module
+    import txnmem_real_experiment as real_experiment_module
+
+    source_paths: dict[str, Path] = {
+        "txnmem_experiment": Path(__file__),
+        "txnmem_benchmark_bridge": Path(benchmark_bridge_module.__file__),
+        "txnmem_model_protocol": Path(model_protocol_module.__file__),
+        "txnmem_real_experiment": Path(real_experiment_module.__file__),
+    }
+    if benchmark == "appworld":
+        try:
+            import appworld.common.evaluation as appworld_common_evaluation_module
+            import appworld.environment as appworld_environment_module
+            import appworld.evaluator as appworld_evaluator_module
+        except ImportError:
+            pass
+        else:
+            source_paths["appworld_environment"] = Path(
+                appworld_environment_module.__file__
+            )
+            source_paths["appworld_evaluator"] = Path(
+                appworld_evaluator_module.__file__
+            )
+            source_paths["appworld_common_evaluation"] = Path(
+                appworld_common_evaluation_module.__file__
+            )
+    return {
+        "benchmark": benchmark,
+        "manifest_sha256": manifest_sha256,
+        "model_id": model_id,
+        "model_revision": str(model_revision),
+        "model_revision_status": (
+            "sha256"
+            if len(str(model_revision)) == 64
+            and all(character in "0123456789abcdefABCDEF" for character in str(model_revision))
+            else "unspecified_or_non_hash"
+        ),
+        "model_server_build": str(model_server_build),
+        "runner_evaluator_source_identity": source_identity(source_paths),
+        "model_execution_mode": model_execution_mode,
+        "memory_backend": memory_backend,
+        "repetitions": int(repetitions),
+        "max_tokens": max_tokens,
+        "timeout_seconds": float(timeout_seconds),
+        "generation_parameters": "seed_temperature_and_max_steps_from_fixed_manifest",
+        "official_evaluator": (
+            "appworld.TestTracker.success_and_task_completed"
+            if benchmark == "appworld"
+            else f"{benchmark}_official_runtime"
+        ),
+        "runtime_version": _benchmark_runtime_version(benchmark),
+    }
 
 
 def write_jsonl(instances: Iterable[dict[str, Any]], path: Path) -> None:
@@ -177,6 +260,9 @@ def _build_parser() -> argparse.ArgumentParser:
     trace_replay.add_argument("--out-dir", type=Path, default=Path("."))
     trace_replay.add_argument("--holdout-fraction", type=float, default=0.2)
     trace_replay.add_argument("--seed", type=int, default=0)
+    trace_replay.add_argument("--bootstrap-repetitions", type=int, default=2000)
+    trace_replay.add_argument("--joint-permutations", type=int, default=999)
+    trace_replay.add_argument("--joint-rff-dimensions", type=int, default=64)
 
     performance = subparsers.add_parser(
         "performance", help="measure local deterministic replay timing"
@@ -213,7 +299,33 @@ def _build_parser() -> argparse.ArgumentParser:
     real_model.add_argument("--model", default=None, help="model id served by the endpoint")
     real_model.add_argument("--api-key-env", default="OPENAI_API_KEY")
     real_model.add_argument("--timeout", type=float, default=60.0)
+    real_model.add_argument("--max-tokens", type=int, default=1024)
     real_model.add_argument("--offline-fixture", action="store_true")
+    model_load = subparsers.add_parser(
+        "real-model-load",
+        help="run concurrent real-model Agent cycles with endpoint token accounting",
+    )
+    model_load.add_argument("--manifest", type=Path, required=True)
+    model_load.add_argument("--out-dir", type=Path, default=Path("."))
+    model_load.add_argument("--endpoint", required=True)
+    model_load.add_argument("--model", required=True)
+    model_load.add_argument("--model-revision", default="unspecified")
+    model_load.add_argument("--model-server-build", default="unknown")
+    model_load.add_argument("--api-key-env", default="OPENAI_API_KEY")
+    model_load.add_argument("--timeout", type=float, default=180.0)
+    model_load.add_argument("--max-tokens", type=int, default=1024)
+    model_load.add_argument("--max-steps", type=int, default=12)
+    model_load.add_argument("--concurrency", type=int, default=4)
+    model_load.add_argument("--minimum-cycles", type=int, default=1)
+    model_load.add_argument("--minimum-duration-seconds", type=float, default=0.0)
+    model_load.add_argument(
+        "--execution-scope",
+        choices=("single_host_multi_agent", "cross_host_client_server"),
+        default="single_host_multi_agent",
+    )
+    model_load.add_argument("--host-count", type=int, default=1)
+    model_load.add_argument("--network-transport", default="loopback_or_unspecified")
+    model_load.add_argument("--tunnel-process-id", type=int, default=None)
     benchmark_native = subparsers.add_parser(
         "benchmark-native-smoke", help="run a benchmark task through merged benchmark+memory tools"
     )
@@ -242,8 +354,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     benchmark_native.add_argument("--endpoint", default=None, help="OpenAI-compatible base or completion endpoint")
     benchmark_native.add_argument("--model", default=None, help="model id served by the endpoint")
+    benchmark_native.add_argument("--model-revision", default="unspecified")
+    benchmark_native.add_argument("--model-server-build", default="unknown")
     benchmark_native.add_argument("--api-key-env", default="OPENAI_API_KEY")
     benchmark_native.add_argument("--timeout", type=float, default=60.0)
+    benchmark_native.add_argument("--max-tokens", type=int, default=1024)
+    benchmark_native.add_argument(
+        "--prompt-profile", choices=("baseline", "tuned"), default="baseline"
+    )
     benchmark_native.add_argument("--offline-fixture", action="store_true")
     benchmark_batch = subparsers.add_parser(
         "benchmark-native-batch", help="run a fixed public benchmark manifest with task-level aggregation"
@@ -261,8 +379,14 @@ def _build_parser() -> argparse.ArgumentParser:
     benchmark_batch.add_argument("--repetitions", type=int, default=1)
     benchmark_batch.add_argument("--endpoint", default=None)
     benchmark_batch.add_argument("--model", default=None)
+    benchmark_batch.add_argument("--model-revision", default="unspecified")
+    benchmark_batch.add_argument("--model-server-build", default="unknown")
     benchmark_batch.add_argument("--api-key-env", default="OPENAI_API_KEY")
     benchmark_batch.add_argument("--timeout", type=float, default=60.0)
+    benchmark_batch.add_argument("--max-tokens", type=int, default=1024)
+    benchmark_batch.add_argument(
+        "--prompt-profile", choices=("baseline", "tuned"), default="baseline"
+    )
     benchmark_batch.add_argument("--offline-fixture", action="store_true")
     public_native = subparsers.add_parser(
         "public-native-smoke", help="run a public workflow through the native-agent boundary"
@@ -385,19 +509,36 @@ def main(argv: list[str] | None = None) -> int:
         return _run_core_experiment(instances, args.variants, args.out_dir)
     if args.command == "trace-replay":
         records = load_trace_records(args.events)
-        instances = build_trace_instances(
-            records,
+        train_records, holdout_records = split_holdout(
+            records, args.holdout_fraction, seed=args.seed
+        )
+        train_instances = build_trace_instances(
+            train_records,
             args.adapter,
             source=args.source,
             seed=args.seed,
         )
-        train, holdout = split_holdout(records, args.holdout_fraction, seed=args.seed)
+        holdout_instances = build_trace_instances(
+            holdout_records,
+            args.adapter,
+            source=args.source,
+            seed=args.seed + 100000,
+        )
+        for instance in train_instances:
+            instance.setdefault("trace_metadata", {})["split"] = "train"
+        for instance in holdout_instances:
+            instance.setdefault("trace_metadata", {})["split"] = "holdout"
+        instances = [*train_instances, *holdout_instances]
         rows = replay_trace_instances(instances, VARIANTS)
         write_jsonl(instances, args.out_dir / "data" / "trace_grounded_instances.jsonl")
         write_csv(rows, args.out_dir / "results" / "trace_replay.csv")
-        trace_features = [
+        calibration_features = [
             extract_trace_features(instance["operations"], instance["failure_schedule"])
-            for instance in instances
+            for instance in train_instances
+        ]
+        holdout_features = [
+            extract_trace_features(instance["operations"], instance["failure_schedule"])
+            for instance in holdout_instances
         ]
         synthetic_features = []
         if args.synthetic_instances is not None:
@@ -408,19 +549,44 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 for instance in synthetic_instances
             ]
-        realism = compare_distributions(synthetic_features, trace_features)
+        realism = compare_distributions(
+            synthetic_features,
+            holdout_features,
+            bootstrap_repetitions=args.bootstrap_repetitions,
+            joint_test_permutations=args.joint_permutations,
+            joint_test_dimensions=args.joint_rff_dimensions,
+            seed=args.seed,
+        )
         realism["trace_grounded_status"] = "trace_supplied" if instances else "not_supplied"
         realism["synthetic_source"] = str(args.synthetic_instances) if args.synthetic_instances else None
-        realism["joint_feature_comparison"] = args.synthetic_instances is not None
+        realism["joint_feature_comparison"] = (
+            realism["multivariate_test"]["status"] == "available"
+        )
         realism["trace_inventory"] = trace_inventory(instances)
-        realism["calibration"] = calibrate_config(trace_features)
+        realism["train_trace_inventory"] = trace_inventory(train_instances)
+        realism["holdout_trace_inventory"] = trace_inventory(holdout_instances)
+        realism["calibration"] = calibrate_config(calibration_features)
+        realism["calibration"]["source_instance_count"] = len(train_instances)
+        realism["comparison_split"] = "holdout_only"
         realism["split"] = {
-            "train_record_count": len(train),
-            "holdout_record_count": len(holdout),
+            "train_record_count": len(train_records),
+            "holdout_record_count": len(holdout_records),
+            "train_instance_count": len(train_instances),
+            "holdout_instance_count": len(holdout_instances),
+            "calibration_instance_count": len(train_instances),
+            "test_instance_count": len(holdout_instances),
+            "unit": "episode",
             "holdout_fraction": args.holdout_fraction,
             "seed": args.seed,
         }
         realism["evidence"] = trace_evidence_summary(instances, rows)
+        holdout_ids = {str(instance.get("instance_id")) for instance in holdout_instances}
+        holdout_rows = [
+            row for row in rows if str(row.get("instance_id")) in holdout_ids
+        ]
+        realism["holdout_evidence"] = trace_evidence_summary(
+            holdout_instances, holdout_rows
+        )
         write_summary(realism, args.out_dir / "results" / "trace_realism.json")
         print(f"adapted {len(records)} records into {len(instances)} trace instances")
         print(f"wrote trace replay artifacts -> {args.out_dir}")
@@ -569,6 +735,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.model,
                     api_key=os.environ.get(args.api_key_env),
                     timeout_s=args.timeout,
+                    max_tokens=args.max_tokens,
                 )
                 execution_mode = "remote_endpoint"
                 model_id = args.model
@@ -582,6 +749,45 @@ def main(argv: list[str] | None = None) -> int:
             print(f"real model experiment configuration error: {exc}")
             return 2
         print(f"wrote native model trace and summary -> {args.out_dir}")
+        return 0
+    if args.command == "real-model-load":
+        try:
+            manifest, manifest_sha256 = load_task_manifest(args.manifest)
+            model = OpenAICompatibleClient(
+                args.endpoint,
+                args.model,
+                api_key=os.environ.get(args.api_key_env),
+                timeout_s=args.timeout,
+                max_tokens=args.max_tokens,
+            )
+            from txnmem_model_load import run_model_load
+
+            report = run_model_load(
+                manifest,
+                model,
+                args.out_dir,
+                concurrency=args.concurrency,
+                minimum_cycles=args.minimum_cycles,
+                minimum_duration_s=args.minimum_duration_seconds,
+                max_steps=args.max_steps,
+                execution_scope=args.execution_scope,
+                host_count=args.host_count,
+                network_transport=args.network_transport,
+                tunnel_process_id=args.tunnel_process_id,
+                model_revision=args.model_revision,
+                model_server_build=args.model_server_build,
+            )
+            report["manifest_sha256"] = manifest_sha256
+            report["model_execution_mode"] = "remote_endpoint"
+            summary_path = args.out_dir / "results" / "model_load_summary.json"
+            summary_path.write_text(
+                json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        except (OSError, json.JSONDecodeError, RealExperimentError, ValueError) as exc:
+            print(f"real model load configuration error: {exc}")
+            return 2
+        print(f"wrote real model load summary -> {args.out_dir / 'results' / 'model_load_summary.json'}")
         return 0
     if args.command == "benchmark-native-smoke":
         try:
@@ -601,6 +807,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.model,
                     api_key=os.environ.get(args.api_key_env),
                     timeout_s=args.timeout,
+                    max_tokens=args.max_tokens,
                 )
                 execution_mode = "remote_endpoint"
                 model_id = args.model
@@ -609,6 +816,7 @@ def main(argv: list[str] | None = None) -> int:
                 LoCoMoAdapter,
                 TauBenchAdapter,
                 _official_tau_user_strategy,
+                infer_appworld_app_names,
             )
 
             if args.benchmark == "tau-bench":
@@ -649,10 +857,16 @@ def main(argv: list[str] | None = None) -> int:
                     task_app_names = task.get("app_names") if isinstance(task, dict) else None
                     task_api_allowlist = task.get("api_name_allowlist") if isinstance(task, dict) else None
                     effective_app_names = task_app_names or default_app_names
+                    if args.prompt_profile == "tuned":
+                        effective_app_names = infer_appworld_app_names(
+                            str(task.get("instruction", "")) if isinstance(task, dict) else "",
+                            effective_app_names,
+                        )
                     return AppWorldAdapter(
                         appworld_root=args.appworld_root,
                         app_names=effective_app_names,
                         api_name_allowlist=task_api_allowlist,
+                        always_allow_supervisor=args.prompt_profile == "tuned",
                     )
             else:
                 def adapter_factory():
@@ -666,7 +880,13 @@ def main(argv: list[str] | None = None) -> int:
                     return SQLiteInstrumentedMemoryBackend(root / "data" / f"memory_{index:04d}.sqlite")
 
             report = run_benchmark_experiment_manifest(
-                manifest,
+                {
+                    **manifest,
+                    "tasks": [
+                        {**task, "prompt_profile": args.prompt_profile}
+                        for task in manifest["tasks"]
+                    ],
+                },
                 model,
                 adapter_factory,
                 args.out_dir,
@@ -677,6 +897,7 @@ def main(argv: list[str] | None = None) -> int:
             report["manifest_sha256"] = manifest_sha256
             report["benchmark"] = args.benchmark
             report["memory_backend"] = args.memory_backend
+            report["prompt_profile"] = args.prompt_profile
             summary_path = args.out_dir / "results" / "native_model_summary.json"
             summary_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         except (OSError, json.JSONDecodeError, RealExperimentError) as exc:
@@ -702,6 +923,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.model,
                     api_key=os.environ.get(args.api_key_env),
                     timeout_s=args.timeout,
+                    max_tokens=args.max_tokens,
                 )
                 execution_mode = "remote_endpoint"
                 model_id = args.model
@@ -710,6 +932,7 @@ def main(argv: list[str] | None = None) -> int:
                 LoCoMoAdapter,
                 TauBenchAdapter,
                 _official_tau_user_strategy,
+                infer_appworld_app_names,
             )
 
             if args.benchmark == "tau-bench":
@@ -739,10 +962,16 @@ def main(argv: list[str] | None = None) -> int:
                     task_app_names = task.get("app_names") if isinstance(task, dict) else None
                     task_api_allowlist = task.get("api_name_allowlist") if isinstance(task, dict) else None
                     effective_app_names = task_app_names or default_app_names
+                    if args.prompt_profile == "tuned":
+                        effective_app_names = infer_appworld_app_names(
+                            str(task.get("instruction", "")) if isinstance(task, dict) else "",
+                            effective_app_names,
+                        )
                     return AppWorldAdapter(
                         appworld_root=args.appworld_root,
                         app_names=effective_app_names,
                         api_name_allowlist=task_api_allowlist,
+                        always_allow_supervisor=args.prompt_profile == "tuned",
                     )
             else:
                 evaluator_command = None
@@ -766,7 +995,13 @@ def main(argv: list[str] | None = None) -> int:
                     return SQLiteInstrumentedMemoryBackend(root / "data" / f"memory_{index:04d}.sqlite")
 
             report = run_benchmark_batch(
-                manifest,
+                {
+                    **manifest,
+                    "tasks": [
+                        {**task, "prompt_profile": args.prompt_profile}
+                        for task in manifest["tasks"]
+                    ],
+                },
                 model,
                 args.out_dir,
                 backend_factory=backend_factory,
@@ -778,6 +1013,31 @@ def main(argv: list[str] | None = None) -> int:
             report["manifest_sha256"] = manifest_sha256
             report["benchmark"] = args.benchmark
             report["memory_backend"] = args.memory_backend
+            report["prompt_profile"] = args.prompt_profile
+            condition = _paired_benchmark_condition(
+                benchmark=args.benchmark,
+                manifest_sha256=manifest_sha256,
+                model_id=model_id,
+                model_execution_mode=execution_mode,
+                memory_backend=args.memory_backend,
+                repetitions=args.repetitions,
+                max_tokens=args.max_tokens,
+                timeout_seconds=args.timeout,
+                model_revision=args.model_revision,
+                model_server_build=args.model_server_build,
+            )
+            report["condition"] = condition
+            report["condition_fingerprint"] = canonical_fingerprint(condition)
+            report["treatment"] = {
+                "prompt_profile": args.prompt_profile,
+                "app_tool_strategy": (
+                    "instruction_inferred_public_tools_with_supervisor_preflight"
+                    if args.benchmark == "appworld" and args.prompt_profile == "tuned"
+                    else "manifest_scoped_public_tools"
+                    if args.benchmark == "appworld"
+                    else "benchmark_default_tools"
+                ),
+            }
             summary_path = args.out_dir / "results" / "native_batch_summary.json"
             summary_path.write_text(
                 json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",

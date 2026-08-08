@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 import random
 import math
-from statistics import mean, pstdev
+from statistics import mean, median, pstdev
 from typing import Any, Iterable
 
 from txnmem_schema import DEFAULT_CONFIG
@@ -76,11 +76,176 @@ def extract_trace_features(
     }
 
 
+def _standardized_feature_matrix(
+    left: list[dict[str, Any]], right: list[dict[str, Any]]
+) -> list[list[float]]:
+    raw = [
+        [float(record.get(feature, 0.0)) for feature in FEATURES]
+        for record in [*left, *right]
+    ]
+    if not raw:
+        return []
+    centers = [mean(row[index] for row in raw) for index in range(len(FEATURES))]
+    scales = [
+        pstdev(row[index] for row in raw) or 1.0
+        for index in range(len(FEATURES))
+    ]
+    return [
+        [(value - centers[index]) / scales[index] for index, value in enumerate(row)]
+        for row in raw
+    ]
+
+
+def _median_pairwise_distance(matrix: list[list[float]], seed: int) -> float:
+    """Return a deterministic median distance, sampling large pair sets."""
+
+    pair_count = len(matrix) * (len(matrix) - 1) // 2
+    if pair_count <= 4096:
+        pairs = [
+            (left_index, right_index)
+            for left_index in range(len(matrix))
+            for right_index in range(left_index + 1, len(matrix))
+        ]
+    else:
+        rng = random.Random(seed)
+        pairs = []
+        seen: set[tuple[int, int]] = set()
+        while len(pairs) < 4096:
+            left_index = rng.randrange(len(matrix))
+            right_index = rng.randrange(len(matrix) - 1)
+            if right_index >= left_index:
+                right_index += 1
+            pair = tuple(sorted((left_index, right_index)))
+            if pair not in seen:
+                seen.add(pair)
+                pairs.append(pair)
+    squared_distances = [
+        sum(
+            (matrix[left_index][feature] - matrix[right_index][feature]) ** 2
+            for feature in range(len(FEATURES))
+        )
+        for left_index, right_index in pairs
+    ]
+    positive = [distance for distance in squared_distances if distance > 1e-12]
+    return math.sqrt(median(positive)) if positive else 1.0
+
+
+def multivariate_rff_mmd_test(
+    synthetic: Iterable[dict[str, Any]],
+    trace_grounded: Iterable[dict[str, Any]],
+    *,
+    permutations: int = 999,
+    rff_dimensions: int = 64,
+    seed: int = 17,
+) -> dict[str, Any]:
+    """Permutation test over a joint standardized RBF feature embedding.
+
+    Random Fourier features make the MMD-style statistic practical without a
+    heavy numerical dependency.  The permutation p-value tests distributional
+    difference; a large p-value is not evidence that the distributions are
+    equivalent.
+    """
+
+    if permutations < 1:
+        raise ValueError("permutations must be positive")
+    if rff_dimensions < 1:
+        raise ValueError("rff_dimensions must be positive")
+    left = list(synthetic)
+    right = list(trace_grounded)
+    base = {
+        "method": "standardized_rbf_random_fourier_mmd_permutation",
+        "feature_names": list(FEATURES),
+        "synthetic_count": len(left),
+        "trace_count": len(right),
+        "permutations": int(permutations),
+        "rff_dimensions": int(rff_dimensions),
+        "seed": int(seed),
+        "null_hypothesis": "synthetic and trace-grounded joint feature distributions are equal",
+        "claim_boundary": "a non-significant result is not evidence of distributional equivalence",
+        "small_sample_warning": (
+            "joint-test inference is low-power and unstable when either sample has fewer than 20 instances"
+            if min(len(left), len(right)) < 20
+            else None
+        ),
+    }
+    if len(left) < 2 or len(right) < 2:
+        return {
+            **base,
+            "status": "insufficient_data",
+            "statistic": None,
+            "p_value": None,
+        }
+
+    matrix = _standardized_feature_matrix(left, right)
+    bandwidth = _median_pairwise_distance(matrix, seed + 101)
+    rng_features = random.Random(seed + 211)
+    frequencies = [
+        [rng_features.gauss(0.0, 1.0 / bandwidth) for _ in FEATURES]
+        for _ in range(rff_dimensions)
+    ]
+    phases = [rng_features.random() * 2.0 * math.pi for _ in range(rff_dimensions)]
+    scale = math.sqrt(2.0 / rff_dimensions)
+    embedded = [
+        [
+            scale
+            * math.cos(
+                sum(weight * value for weight, value in zip(frequency, row)) + phase
+            )
+            for frequency, phase in zip(frequencies, phases)
+        ]
+        for row in matrix
+    ]
+    total = [sum(row[index] for row in embedded) for index in range(rff_dimensions)]
+    left_count = len(left)
+    right_count = len(right)
+    if left_count <= right_count:
+        selected_count = left_count
+        observed_indices = range(left_count)
+    else:
+        selected_count = right_count
+        observed_indices = range(left_count, left_count + right_count)
+    complement_count = len(embedded) - selected_count
+
+    def statistic(selected_indices: Iterable[int]) -> float:
+        selected_sums = [0.0] * rff_dimensions
+        for row_index in selected_indices:
+            row = embedded[row_index]
+            for feature_index, value in enumerate(row):
+                selected_sums[feature_index] += value
+        return sum(
+            (
+                selected_sums[index] / selected_count
+                - (total[index] - selected_sums[index]) / complement_count
+            )
+            ** 2
+            for index in range(rff_dimensions)
+        )
+
+    observed = statistic(observed_indices)
+    permutation_rng = random.Random(seed + 307)
+    indices = list(range(len(embedded)))
+    greater_or_equal = 0
+    for _ in range(permutations):
+        permutation_rng.shuffle(indices)
+        permuted = statistic(indices[:selected_count])
+        if permuted >= observed - 1e-15:
+            greater_or_equal += 1
+    return {
+        **base,
+        "status": "available",
+        "statistic": observed,
+        "p_value": (greater_or_equal + 1) / (permutations + 1),
+        "bandwidth": bandwidth,
+    }
+
+
 def compare_distributions(
     synthetic: Iterable[dict[str, Any]],
     trace_grounded: Iterable[dict[str, Any]],
     *,
     bootstrap_repetitions: int = 2000,
+    joint_test_permutations: int = 999,
+    joint_test_dimensions: int = 64,
     seed: int = 17,
 ) -> dict[str, Any]:
     if bootstrap_repetitions < 1:
@@ -116,14 +281,22 @@ def compare_distributions(
             ),
         }
     relative_diffs = [float(features[name]["relative_mean_abs_diff"]) for name in FEATURES]
+    multivariate_test = multivariate_rff_mmd_test(
+        left,
+        right,
+        permutations=joint_test_permutations,
+        rff_dimensions=joint_test_dimensions,
+        seed=seed + 10007,
+    )
     return {
         "synthetic_count": len(left),
         "trace_count": len(right),
         "bootstrap_repetitions": bootstrap_repetitions,
         "bootstrap_seed": seed,
-        "comparison_method": "feature-wise bootstrap mean intervals; no high-dimensional joint-test claim",
+        "comparison_method": "feature-wise bootstrap intervals plus a joint RBF-RFF MMD permutation test",
         "mean_feature_relative_abs_diff": mean(relative_diffs) if relative_diffs else 0.0,
         "features": features,
+        "multivariate_test": multivariate_test,
     }
 
 

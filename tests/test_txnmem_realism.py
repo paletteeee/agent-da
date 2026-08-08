@@ -5,7 +5,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from txnmem_realism import bootstrap_mean_interval, compare_distributions, extract_trace_features  # noqa: E402
+from txnmem_realism import (  # noqa: E402
+    bootstrap_mean_interval,
+    compare_distributions,
+    extract_trace_features,
+    multivariate_rff_mmd_test,
+)
 from txnmem_workloads import generate_instance  # noqa: E402
 
 
@@ -57,6 +62,94 @@ class TxnMemRealismTests(unittest.TestCase):
         self.assertIn("trace_mean_interval", operation)
         self.assertIn("mean_abs_diff_interval", operation)
         self.assertEqual(comparison["bootstrap_repetitions"], 100)
+
+    def test_joint_rff_mmd_test_is_deterministic_for_identical_samples(self):
+        sample = [
+            {name: float(index + offset) for offset, name in enumerate((
+                "operation_count",
+                "transaction_size",
+                "policy_change_rate",
+                "provenance_depth",
+                "branch_factor",
+                "agent_count",
+            ))}
+            for index in range(6)
+        ]
+
+        result = multivariate_rff_mmd_test(
+            sample,
+            list(sample),
+            permutations=99,
+            rff_dimensions=32,
+            seed=17,
+        )
+
+        self.assertEqual(result["status"], "available")
+        self.assertAlmostEqual(result["statistic"], 0.0)
+        self.assertEqual(result["p_value"], 1.0)
+        self.assertEqual(
+            result,
+            multivariate_rff_mmd_test(
+                sample,
+                list(sample),
+                permutations=99,
+                rff_dimensions=32,
+                seed=17,
+            ),
+        )
+
+    def test_joint_rff_mmd_detects_a_clear_multivariate_shift(self):
+        left = [
+            {name: float(index % 3) for name in (
+                "operation_count",
+                "transaction_size",
+                "policy_change_rate",
+                "provenance_depth",
+                "branch_factor",
+                "agent_count",
+            )}
+            for index in range(30)
+        ]
+        right = [
+            {name: float(20 + index % 3) for name in (
+                "operation_count",
+                "transaction_size",
+                "policy_change_rate",
+                "provenance_depth",
+                "branch_factor",
+                "agent_count",
+            )}
+            for index in range(30)
+        ]
+
+        result = multivariate_rff_mmd_test(
+            left,
+            right,
+            permutations=199,
+            rff_dimensions=64,
+            seed=23,
+        )
+
+        self.assertEqual(result["status"], "available")
+        self.assertLessEqual(result["p_value"], 0.02)
+        self.assertGreater(result["statistic"], 0.0)
+
+    def test_distribution_comparison_includes_a_joint_multivariate_test(self):
+        left = [{"operation_count": index, "transaction_size": index % 2} for index in range(8)]
+        right = [{"operation_count": index + 1, "transaction_size": (index + 1) % 2} for index in range(8)]
+
+        comparison = compare_distributions(
+            left,
+            right,
+            bootstrap_repetitions=20,
+            joint_test_permutations=19,
+            joint_test_dimensions=16,
+            seed=17,
+        )
+
+        self.assertEqual(comparison["multivariate_test"]["status"], "available")
+        self.assertEqual(comparison["multivariate_test"]["permutations"], 19)
+        self.assertIn("joint", comparison["comparison_method"])
 
 
 if __name__ == "__main__":

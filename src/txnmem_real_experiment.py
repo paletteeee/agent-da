@@ -14,6 +14,7 @@ from typing import Any
 from txnmem_backend import InstrumentedMemoryBackend
 from txnmem_event_contract import validate_events
 from txnmem_failure_controller import validate_failure_schedule
+from txnmem_model_protocol import merge_usage_summaries
 from txnmem_real_agent import run_real_agent
 from txnmem_realism import trace_evidence_summary
 from txnmem_statistics import aggregate_official_results
@@ -341,6 +342,22 @@ def run_benchmark_experiment_manifest(
                 "steps": run_report.get("steps", 0),
                 "official": run_report.get("official"),
                 "native_event_count": len(run_report.get("events", [])),
+                "model_usage": run_report.get("model_usage", {}),
+                "prompt_profile": run_report.get(
+                    "prompt_profile", task_record.get("prompt_profile", "baseline")
+                ),
+                "preflight_tool_count": int(run_report.get("preflight_tool_count", 0) or 0),
+                "preflight_login_count": int(run_report.get("preflight_login_count", 0) or 0),
+                "preflight_contact_lookup_count": int(
+                    run_report.get("preflight_contact_lookup_count", 0) or 0
+                ),
+                "authorized_benchmark_tool_count": int(
+                    run_report.get("authorized_benchmark_tool_count", 0) or 0
+                ),
+                "unauthorized_tool_attempt_count": int(
+                    run_report.get("unauthorized_tool_attempt_count", 0) or 0
+                ),
+                "benchmark_tool_trace": run_report.get("benchmark_tool_trace", []),
             }
             if run_report.get("failure_code") is not None:
                 task_summary["failure_code"] = run_report.get("failure_code")
@@ -368,6 +385,9 @@ def run_benchmark_experiment_manifest(
             else:
                 task_summary["failure_code"] = run_report.get("failure_code", "no_events")
             aggregate_tasks.append(task_summary)
+            close_adapter = getattr(adapter, "close", None)
+            if callable(close_adapter):
+                close_adapter()
             close = getattr(backend, "close", None)
             if callable(close):
                 close()
@@ -383,6 +403,9 @@ def run_benchmark_experiment_manifest(
         }
         for variant in sorted(variant_totals)
     }
+    model_usage = merge_usage_summaries(
+        [task.get("model_usage", {}) for task in aggregate_tasks]
+    )
     report = {
         "task_count": len(tasks),
         "completed_task_count": sum(task["status"] == "completed" for task in aggregate_tasks),
@@ -390,6 +413,12 @@ def run_benchmark_experiment_manifest(
         "evaluation_error_count": evaluation_error_count,
         "task_summaries": aggregate_tasks,
         "variants": variants,
+        "prompt_profiles": sorted(
+            {str(task.get("prompt_profile", "baseline")) for task in aggregate_tasks}
+        ),
+        "model_usage": model_usage,
+        "token_usage_complete": bool(model_usage["request_count"])
+        and model_usage["request_count"] == model_usage["responses_with_usage"],
         "trace_ground_truth_native": True,
         "production_latency_claim": False,
         "raw_trace_path": str(raw_path),
@@ -479,6 +508,9 @@ def run_benchmark_batch(
         }
         for variant in sorted(variant_totals)
     }
+    model_usage = merge_usage_summaries(
+        [report.get("model_usage", {}) for report in reports]
+    )
     result: dict[str, Any] = {
         "dataset": str(manifest.get("dataset_name", "benchmark")),
         "task_count": len(all_task_summaries),
@@ -491,6 +523,15 @@ def run_benchmark_batch(
         "task_summaries": all_task_summaries,
         "official": official,
         "variants": variants,
+        "prompt_profiles": sorted(
+            {
+                str(task.get("prompt_profile", "baseline"))
+                for task in all_task_summaries
+            }
+        ),
+        "model_usage": model_usage,
+        "token_usage_complete": bool(model_usage["request_count"])
+        and model_usage["request_count"] == model_usage["responses_with_usage"],
         "trace_ground_truth_native": True,
         "raw_reports_location": "rep_*/results/native_model_summary.json" if repetitions > 1 else "results/native_model_summary.json",
         "raw_reports_committed": False,
@@ -547,6 +588,7 @@ def run_experiment_manifest(
                 "task_id": task_id,
                 "status": run_report.get("status"),
                 "steps": run_report.get("steps", 0),
+                "model_usage": run_report.get("model_usage", {}),
             }
             if run_report.get("failure_code") is not None:
                 task_summary["failure_code"] = run_report.get("failure_code")
@@ -586,6 +628,9 @@ def run_experiment_manifest(
         }
         for variant in sorted(variant_totals)
     }
+    model_usage = merge_usage_summaries(
+        [task.get("model_usage", {}) for task in aggregate_tasks]
+    )
     report = {
         "task_count": len(tasks),
         "completed_task_count": sum(task["status"] == "completed" for task in aggregate_tasks),
@@ -593,6 +638,9 @@ def run_experiment_manifest(
         "evaluation_error_count": evaluation_error_count,
         "task_summaries": aggregate_tasks,
         "variants": variants,
+        "model_usage": model_usage,
+        "token_usage_complete": bool(model_usage["request_count"])
+        and model_usage["request_count"] == model_usage["responses_with_usage"],
         "trace_ground_truth_native": True,
         "production_latency_claim": False,
         "raw_trace_path": str(raw_path),

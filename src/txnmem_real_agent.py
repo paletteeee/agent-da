@@ -9,7 +9,7 @@ from typing import Any
 
 from txnmem_backend import InstrumentedMemoryBackend
 from txnmem_failure_controller import FailureController, FailureInjectionError
-from txnmem_model_protocol import ModelProtocolError
+from txnmem_model_protocol import ModelProtocolError, add_response_usage, empty_usage_summary
 
 
 class AgentToolError(RuntimeError):
@@ -211,7 +211,14 @@ def _assistant_message(response: Any) -> dict[str, Any]:
     return message
 
 
-def _failed_report(task_id: str, steps: int, code: str, events: list[dict[str, Any]], messages: list[dict[str, Any]]) -> dict[str, Any]:
+def _failed_report(
+    task_id: str,
+    steps: int,
+    code: str,
+    events: list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+    model_usage: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     return {
         "task_id": task_id,
         "status": "failed",
@@ -219,6 +226,7 @@ def _failed_report(task_id: str, steps: int, code: str, events: list[dict[str, A
         "steps": steps,
         "events": events,
         "messages": messages,
+        "model_usage": dict(model_usage or empty_usage_summary()),
     }
 
 
@@ -257,7 +265,9 @@ def run_real_agent(
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
+    model_usage = empty_usage_summary()
     for step in range(1, max_steps + 1):
+        model_usage["request_count"] += 1
         try:
             response = model.complete(
                 messages,
@@ -266,7 +276,15 @@ def run_real_agent(
                 temperature=temperature,
             )
         except ModelProtocolError as exc:
-            return _failed_report(task_id, step, f"model_{exc.code}", backend.validated_events(), messages)
+            return _failed_report(
+                task_id,
+                step,
+                f"model_{exc.code}",
+                backend.validated_events(),
+                messages,
+                model_usage,
+            )
+        add_response_usage(model_usage, response)
         assistant_message = _assistant_message(response)
         messages.append(assistant_message)
         tool_calls = list(getattr(response, "tool_calls", []))
@@ -278,17 +296,41 @@ def run_real_agent(
                 "final_text": getattr(response, "text", ""),
                 "events": backend.validated_events(),
                 "messages": messages,
+                "model_usage": model_usage,
             }
         for call in tool_calls:
             try:
                 result = gateway.call(call.name, call.arguments)
             except AgentToolError as exc:
-                return _failed_report(task_id, step, exc.code, backend.validated_events(), messages)
+                return _failed_report(
+                    task_id, step, exc.code, backend.validated_events(), messages, model_usage
+                )
             try:
                 content = json.dumps(result, ensure_ascii=False)
             except (TypeError, ValueError) as exc:
-                return _failed_report(task_id, step, "non_json_tool_result", backend.validated_events(), messages)
+                return _failed_report(
+                    task_id,
+                    step,
+                    "non_json_tool_result",
+                    backend.validated_events(),
+                    messages,
+                    model_usage,
+                )
             messages.append({"role": "tool", "tool_call_id": call.call_id, "content": content})
         if step == max_steps:
-            return _failed_report(task_id, step, "max_steps_exceeded", backend.validated_events(), messages)
-    return _failed_report(task_id, max_steps, "max_steps_exceeded", backend.validated_events(), messages)
+            return _failed_report(
+                task_id,
+                step,
+                "max_steps_exceeded",
+                backend.validated_events(),
+                messages,
+                model_usage,
+            )
+    return _failed_report(
+        task_id,
+        max_steps,
+        "max_steps_exceeded",
+        backend.validated_events(),
+        messages,
+        model_usage,
+    )

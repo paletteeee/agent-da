@@ -19,3 +19,18 @@ results/final_controlled_rep*/
 
 # Native-model manifests contain prompts; commit only sanitized aggregate summaries.
 results/real_model_qwen2.5_7b_aggregate_final/*_manifest.json
+
+# Regenerated AppWorld projection instances contain source-level API paths;
+# commit only the redacted inventory and aggregate replay statistics.
+results/appworld_projection_regenerated/data/
+results/joint_realism/*/data/
+
+# Multi-agent load traces retain prompts and model transcripts; commit summaries only.
+results/cross_host_model_load_*/data/
+
+# All experiment-local data directories and raw prediction/trace files are non-committable.
+results/**/data/
+results/**/locomo_paired_predictions.json
+results/**/native_model_traces.jsonl
+results/**/model_load_traces.jsonl
+results/remote_experiment_inputs/

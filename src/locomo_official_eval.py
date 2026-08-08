@@ -43,8 +43,17 @@ def parse_batch_answers(text: str, count: int) -> dict[int, str]:
         if parsed:
             return parsed
     parsed = {}
-    for match in re.finditer(r"(?:^|\n)\s*(\d+)\s*[.)：:]\s*(.+?)(?=\n\s*\d+\s*[.)：:]|$)", cleaned, re.S):
-        index = int(match.group(1)) - 1
+    matches = list(
+        re.finditer(
+            r"(?:^|\n)\s*(\d+)\s*[.)：:]\s*(.+?)(?=\n\s*\d+\s*[.)：:]|$)",
+            cleaned,
+            re.S,
+        )
+    )
+    zero_based = any(int(match.group(1)) == 0 for match in matches)
+    for match in matches:
+        number = int(match.group(1))
+        index = number if zero_based else number - 1
         if 0 <= index < count:
             parsed[index] = " ".join(match.group(2).split())
     return parsed
