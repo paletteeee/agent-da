@@ -19,6 +19,7 @@ from txnmem_benchmark_bridge import (
     appworld_tool_allowed,
     build_benchmark_system_prompt,
     infer_appworld_app_names,
+    resolve_appworld_app_names,
     run_benchmark_agent,
 )
 from txnmem_real_agent import NativeMemoryToolGateway, run_real_agent
@@ -259,6 +260,23 @@ class TxnMemRealAgentTests(unittest.TestCase):
                 supplied_app_names=["supervisor"],
             ),
             ["gmail", "phone", "spotify", "supervisor"],
+        )
+
+    def test_instruction_inferred_tool_strategy_is_prompt_profile_independent(self):
+        expected = ["phone", "venmo", "supervisor"]
+        self.assertEqual(
+            resolve_appworld_app_names(
+                "instruction_inferred",
+                "Request money on Venmo from my friend Stacy.",
+                ["supervisor"],
+            ),
+            expected,
+        )
+
+    def test_manifest_scoped_tool_strategy_preserves_manifest_apps(self):
+        self.assertEqual(
+            resolve_appworld_app_names("manifest_scoped", "Use Venmo.", ["supervisor"]),
+            ["supervisor"],
         )
 
     def test_tuned_appworld_allowlist_never_removes_supervisor_tools(self):

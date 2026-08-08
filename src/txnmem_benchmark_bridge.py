@@ -57,6 +57,7 @@ class BenchmarkEnvAdapter:
 
 
 PROMPT_PROFILES = ("baseline", "tuned")
+APPWORLD_TOOL_STRATEGIES = ("instruction_inferred", "manifest_scoped", "all_public")
 _TRUSTED_APPWORLD_PREFLIGHT_TOOLS = frozenset(
     {
         "supervisor__show_profile",
@@ -95,7 +96,7 @@ def infer_appworld_app_names(
     instruction: str,
     supplied_app_names: Sequence[str] | None = None,
 ) -> list[str]:
-    """Select task apps from public instruction text for the tuned condition."""
+    """Select task apps from public instruction text for AppWorld tool resolution."""
 
     lowered = str(instruction).lower()
     selected = {
@@ -111,6 +112,22 @@ def infer_appworld_app_names(
     if not selected:
         selected.update(_APPWORLD_KEYWORDS)
     return [*sorted(selected), "supervisor"]
+
+
+def resolve_appworld_app_names(
+    strategy: str,
+    instruction: str,
+    supplied_app_names: Sequence[str] | None,
+) -> list[str] | None:
+    """Resolve one shared AppWorld tool-exposure strategy."""
+
+    if strategy == "instruction_inferred":
+        return infer_appworld_app_names(instruction, supplied_app_names)
+    if strategy == "manifest_scoped":
+        return list(supplied_app_names) if supplied_app_names is not None else None
+    if strategy == "all_public":
+        return None
+    raise ValueError(f"unsupported AppWorld tool strategy: {strategy}")
 
 
 def appworld_tool_allowed(
