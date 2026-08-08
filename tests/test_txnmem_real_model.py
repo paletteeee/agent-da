@@ -101,6 +101,31 @@ class _NoopBenchmarkAdapter(BenchmarkEnvAdapter):
         return {"success": True}
 
 
+class _PreflightAdapter(_NoopBenchmarkAdapter):
+    dataset = "appworld"
+
+    def tool_schemas(self):
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+            for name in (
+                "venmo__get_profile",
+                "supervisor__show_profile",
+                "supervisor__show_account_passwords",
+            )
+        ]
+
+    def execute_trusted_preflight(self, name, arguments):
+        if name == "supervisor__show_profile":
+            return '{"first_name":"Alex"}', {"ok": True}
+        return '{"venmo":"redacted"}', {"ok": True}
+
+
 class TxnMemRealModelProtocolTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -352,6 +377,45 @@ class TxnMemRealAgentTests(unittest.TestCase):
 
             self.assertEqual(order[:2], ["reset", "schemas"])
             self.assertEqual(report["prompt_profile"], profile)
+
+    def test_supervisor_preflight_tools_are_never_model_visible(self):
+        model = _ScriptedModel([ModelResponse("done", [])])
+        report = run_benchmark_agent(
+            {
+                "task_id": "tuned",
+                "instruction": "Use Venmo.",
+                "prompt_profile": "tuned",
+            },
+            model,
+            InstrumentedMemoryBackend(),
+            _PreflightAdapter(),
+        )
+
+        names = {tool["function"]["name"] for tool in model.calls[0]["tools"]}
+        self.assertNotIn("supervisor__show_profile", names)
+        self.assertNotIn("supervisor__show_account_passwords", names)
+        self.assertEqual(report["trusted_preflight_enabled"], True)
+
+    def test_tool_set_digest_is_stable_across_prompt_profiles(self):
+        reports = {}
+        for profile in ("baseline", "tuned"):
+            reports[profile] = run_benchmark_agent(
+                {
+                    "task_id": profile,
+                    "instruction": "Use Venmo.",
+                    "prompt_profile": profile,
+                },
+                _ScriptedModel([ModelResponse("done", [])]),
+                InstrumentedMemoryBackend(),
+                _PreflightAdapter(),
+            )
+
+        self.assertEqual(
+            reports["baseline"]["model_visible_benchmark_tool_names_sha256"],
+            reports["tuned"]["model_visible_benchmark_tool_names_sha256"],
+        )
+        self.assertEqual(reports["baseline"]["model_visible_benchmark_tool_count"], 1)
+        self.assertEqual(reports["baseline"]["trusted_preflight_enabled"], False)
 
     def test_tuned_appworld_strategy_prefetches_supervisor_identity_and_credentials(self):
         calls = []

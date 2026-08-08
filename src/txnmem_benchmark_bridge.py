@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 import ast
+import hashlib
 import json
 import re
 import shutil
@@ -862,6 +863,22 @@ def run_benchmark_agent(
                 if isinstance(schema, Mapping)
             ]
         )
+    visible_names = sorted(
+        str(function["name"])
+        for schema in benchmark_schemas
+        if isinstance(schema, Mapping)
+        and isinstance((function := schema.get("function")), Mapping)
+        and isinstance(function.get("name"), str)
+    )
+    model_visible_tool_attestation = {
+        "model_visible_benchmark_tool_names_sha256": hashlib.sha256(
+            json.dumps(visible_names, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "model_visible_benchmark_tool_count": len(visible_names),
+        "trusted_preflight_enabled": (
+            prompt_profile == "tuned" and adapter.dataset == "appworld"
+        ),
+    }
     memory_schemas = NativeMemoryToolGateway.schemas()
     schemas = build_merged_schemas(memory_schemas, benchmark_schemas)
 
@@ -964,6 +981,7 @@ def run_benchmark_agent(
         report["unauthorized_tool_attempt_count"] = int(
             getattr(adapter, "unauthorized_tool_attempt_count", 0) or 0
         )
+        report.update(model_visible_tool_attestation)
         report["benchmark_tool_trace"] = _safe_benchmark_tool_trace(gateway)
         return finalize(report)
 
@@ -995,6 +1013,7 @@ def run_benchmark_agent(
             "unauthorized_tool_attempt_count": int(
                 getattr(adapter, "unauthorized_tool_attempt_count", 0) or 0
             ),
+            **model_visible_tool_attestation,
             "benchmark_tool_trace": _safe_benchmark_tool_trace(gateway),
         }
         return finalize(report)

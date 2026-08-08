@@ -214,6 +214,9 @@ class BenchmarkBridgeTest(unittest.TestCase):
         self.assertEqual(report["status"], "failed")
         self.assertEqual(evaluated, ["failed"])
         self.assertEqual(report["official"]["status"], "available")
+        self.assertIn("model_visible_benchmark_tool_names_sha256", report)
+        self.assertEqual(report["model_visible_benchmark_tool_count"], 2)
+        self.assertFalse(report["trusted_preflight_enabled"])
 
     def test_tool_failure_still_runs_benchmark_evaluator(self):
         evaluated = []
