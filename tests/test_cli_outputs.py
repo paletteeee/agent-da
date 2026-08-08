@@ -4,6 +4,7 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,6 +45,145 @@ class TxnMemCliOutputTests(unittest.TestCase):
         )
 
         self.assertEqual(args.appworld_tool_strategy, "instruction_inferred")
+
+    def test_appworld_smoke_accepts_instruction_inferred_tool_strategy(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import _build_parser
+
+        args = _build_parser().parse_args(
+            [
+                "benchmark-native-smoke",
+                "--benchmark",
+                "appworld",
+                "--manifest",
+                "manifest.json",
+                "--appworld-tool-strategy",
+                "instruction_inferred",
+            ]
+        )
+
+        self.assertEqual(args.appworld_tool_strategy, "instruction_inferred")
+
+    def test_appworld_native_paths_propagate_instruction_inferred_strategy(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        manifest = {"tasks": [{"task_id": "task-1", "instruction": "Use Venmo."}]}
+        observed_strategies = {}
+
+        def run_smoke(manifest, model, adapter_factory, out_dir, **_kwargs):
+            observed_strategies["smoke"] = adapter_factory(manifest["tasks"][0]).tool_strategy
+            (out_dir / "results").mkdir(parents=True, exist_ok=True)
+            return {}
+
+        def run_batch(manifest, model, out_dir, *, adapter_factory, **_kwargs):
+            observed_strategies["batch"] = adapter_factory(manifest["tasks"][0]).tool_strategy
+            (out_dir / "results").mkdir(parents=True, exist_ok=True)
+            return {}
+
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            with patch(
+                "txnmem_experiment.load_task_manifest",
+                return_value=(manifest, "manifest-sha256"),
+            ), patch(
+                "txnmem_experiment.run_benchmark_experiment_manifest",
+                side_effect=run_smoke,
+            ), patch(
+                "txnmem_experiment.run_benchmark_batch",
+                side_effect=run_batch,
+            ):
+                self.assertEqual(
+                    main(
+                        [
+                            "benchmark-native-smoke",
+                            "--benchmark",
+                            "appworld",
+                            "--manifest",
+                            "manifest.json",
+                            "--offline-fixture",
+                            "--out-dir",
+                            str(out_dir / "smoke"),
+                            "--appworld-tool-strategy",
+                            "instruction_inferred",
+                        ]
+                    ),
+                    0,
+                )
+                self.assertEqual(
+                    main(
+                        [
+                            "benchmark-native-batch",
+                            "--benchmark",
+                            "appworld",
+                            "--manifest",
+                            "manifest.json",
+                            "--offline-fixture",
+                            "--out-dir",
+                            str(out_dir / "batch"),
+                            "--appworld-tool-strategy",
+                            "instruction_inferred",
+                        ]
+                    ),
+                    0,
+                )
+                batch_report = json.loads(
+                    (out_dir / "batch" / "results" / "native_batch_summary.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(
+                    batch_report["condition"]["appworld_model_tool_strategy"],
+                    "instruction_inferred",
+                )
+                self.assertEqual(
+                    batch_report["treatment"],
+                    {
+                        "prompt_profile": "baseline",
+                        "trusted_preflight_enabled": False,
+                        "app_tool_strategy": "instruction_inferred",
+                    },
+                )
+
+        self.assertEqual(
+            observed_strategies,
+            {"smoke": "instruction_inferred", "batch": "instruction_inferred"},
+        )
+
+    def test_appworld_tool_strategy_changes_shared_condition_fingerprint(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_conditions import canonical_fingerprint
+        from txnmem_experiment import _paired_benchmark_condition
+
+        arguments = {
+            "benchmark": "appworld",
+            "manifest_sha256": "a" * 64,
+            "model_id": "qwen2.5-7b-instruct",
+            "model_execution_mode": "remote_endpoint",
+            "memory_backend": "sqlite",
+            "repetitions": 1,
+            "max_tokens": 1024,
+            "timeout_seconds": 300.0,
+            "model_revision": "b" * 64,
+            "model_server_build": "vllm:0.8.5.post1",
+        }
+        baseline = _paired_benchmark_condition(
+            **arguments, appworld_tool_strategy="instruction_inferred"
+        )
+        tuned = _paired_benchmark_condition(
+            **arguments, appworld_tool_strategy="instruction_inferred"
+        )
+        all_public = _paired_benchmark_condition(
+            **arguments, appworld_tool_strategy="all_public"
+        )
+        not_applicable = _paired_benchmark_condition(
+            **{**arguments, "benchmark": "locomo"}, appworld_tool_strategy="all_public"
+        )
+
+        self.assertEqual(baseline["appworld_model_tool_strategy"], "instruction_inferred")
+        self.assertEqual(canonical_fingerprint(baseline), canonical_fingerprint(tuned))
+        self.assertNotEqual(canonical_fingerprint(baseline), canonical_fingerprint(all_public))
+        self.assertEqual(not_applicable["appworld_model_tool_strategy"], "not_applicable")
 
     def test_experiment_command_writes_all_artifacts(self):
         with TemporaryDirectory() as tmp:

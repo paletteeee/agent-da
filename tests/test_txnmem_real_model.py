@@ -14,6 +14,7 @@ from txnmem_model_protocol import (
 )
 from txnmem_backend import InstrumentedMemoryBackend, SQLiteInstrumentedMemoryBackend
 from txnmem_benchmark_bridge import (
+    AppWorldAdapter,
     BenchmarkEnvAdapter,
     adapt_appworld_arguments,
     appworld_tool_allowed,
@@ -288,6 +289,10 @@ class TxnMemRealAgentTests(unittest.TestCase):
             resolve_appworld_app_names("manifest_scoped", "Use Venmo.", ["supervisor"]),
             ["supervisor"],
         )
+
+    def test_appworld_adapter_rejects_unsupported_tool_strategy(self):
+        with self.assertRaisesRegex(ValueError, "unsupported AppWorld tool strategy"):
+            AppWorldAdapter(tool_strategy="unsupported")
 
     def test_instruction_inferred_tool_strategy_allows_omitted_manifest_apps(self):
         self.assertEqual(

@@ -455,6 +455,8 @@ class AppWorldAdapter(BenchmarkEnvAdapter):
         self.requester_factory = requester_factory
         self.appworld_root = _normalize_appworld_root(appworld_root) if appworld_root else None
         self.tool_strategy = str(tool_strategy)
+        if self.tool_strategy not in APPWORLD_TOOL_STRATEGIES:
+            raise ValueError(f"unsupported AppWorld tool strategy: {self.tool_strategy}")
         self.supplied_app_names = (
             tuple(str(name) for name in supplied_app_names)
             if supplied_app_names is not None

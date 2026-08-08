@@ -91,6 +91,7 @@ def _paired_benchmark_condition(
     timeout_seconds: float,
     model_revision: str,
     model_server_build: str,
+    appworld_tool_strategy: str,
 ) -> dict[str, object]:
     import txnmem_benchmark_bridge as benchmark_bridge_module
     import txnmem_model_protocol as model_protocol_module
@@ -144,6 +145,9 @@ def _paired_benchmark_condition(
             else f"{benchmark}_official_runtime"
         ),
         "runtime_version": _benchmark_runtime_version(benchmark),
+        "appworld_model_tool_strategy": (
+            appworld_tool_strategy if benchmark == "appworld" else "not_applicable"
+        ),
     }
 
 
@@ -1022,15 +1026,17 @@ def main(argv: list[str] | None = None) -> int:
                 timeout_seconds=args.timeout,
                 model_revision=args.model_revision,
                 model_server_build=args.model_server_build,
+                appworld_tool_strategy=args.appworld_tool_strategy,
             )
             report["condition"] = condition
             report["condition_fingerprint"] = canonical_fingerprint(condition)
             report["treatment"] = {
                 "prompt_profile": args.prompt_profile,
+                "trusted_preflight_enabled": (
+                    args.benchmark == "appworld" and args.prompt_profile == "tuned"
+                ),
                 "app_tool_strategy": (
-                    "instruction_inferred_public_tools_with_supervisor_preflight"
-                    if args.benchmark == "appworld" and args.prompt_profile == "tuned"
-                    else "manifest_scoped_public_tools"
+                    args.appworld_tool_strategy
                     if args.benchmark == "appworld"
                     else "benchmark_default_tools"
                 ),
