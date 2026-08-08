@@ -8,11 +8,19 @@ from txnmem_model_protocol import (
     ModelProtocolError,
     ModelResponse,
     OpenAICompatibleClient,
+    TokenUsage,
     ToolCall,
     parse_chat_completion,
 )
 from txnmem_backend import InstrumentedMemoryBackend, SQLiteInstrumentedMemoryBackend
-from txnmem_benchmark_bridge import BenchmarkEnvAdapter
+from txnmem_benchmark_bridge import (
+    BenchmarkEnvAdapter,
+    adapt_appworld_arguments,
+    appworld_tool_allowed,
+    build_benchmark_system_prompt,
+    infer_appworld_app_names,
+    run_benchmark_agent,
+)
 from txnmem_real_agent import NativeMemoryToolGateway, run_real_agent
 from txnmem_real_experiment import (
     RealExperimentError,
@@ -20,6 +28,7 @@ from txnmem_real_experiment import (
     evaluate_task_contract,
     load_task_manifest,
     run_experiment_manifest,
+    run_benchmark_batch,
     run_benchmark_experiment_manifest,
     sanitize_run_report,
     split_task_manifest,
@@ -142,6 +151,33 @@ class TxnMemRealModelProtocolTests(unittest.TestCase):
             parse_chat_completion({"choices": []})
         self.assertEqual(raised.exception.code, "missing_choices")
 
+    def test_parser_preserves_openai_compatible_token_usage(self):
+        response = parse_chat_completion(
+            {
+                "choices": [{"message": {"content": "done", "tool_calls": []}}],
+                "usage": {
+                    "prompt_tokens": 101,
+                    "completion_tokens": 7,
+                    "total_tokens": 108,
+                },
+            }
+        )
+
+        self.assertEqual(response.usage.prompt_tokens, 101)
+        self.assertEqual(response.usage.completion_tokens, 7)
+        self.assertEqual(response.usage.total_tokens, 108)
+
+    def test_client_can_bound_generation_tokens(self):
+        client = OpenAICompatibleClient(
+            "http://model.test/v1/chat/completions",
+            model="local-test",
+            max_tokens=256,
+        )
+        with patch("txnmem_model_protocol.urlopen", self.fake_urlopen):
+            client.complete([{"role": "user", "content": "hello"}], [])
+
+        self.assertEqual(self.fake_urlopen.last_request["body"]["max_tokens"], 256)
+
 
 class _ScriptedModel:
     def __init__(self, responses):
@@ -154,6 +190,457 @@ class _ScriptedModel:
 
 
 class TxnMemRealAgentTests(unittest.TestCase):
+    def test_tool_loop_aggregates_model_usage_across_steps(self):
+        model = _ScriptedModel(
+            [
+                ModelResponse(
+                    "",
+                    [ToolCall("c1", "memory_write", {"memory_id": "m1", "value": "v"})],
+                    TokenUsage(prompt_tokens=20, completion_tokens=5, total_tokens=25),
+                ),
+                ModelResponse(
+                    "done",
+                    [],
+                    TokenUsage(prompt_tokens=30, completion_tokens=4, total_tokens=34),
+                ),
+            ]
+        )
+
+        report = run_real_agent(
+            {"task_id": "usage", "prompt": "remember", "agent_id": "agent_model"},
+            model,
+            InstrumentedMemoryBackend(),
+        )
+
+        self.assertEqual(
+            report["model_usage"],
+            {
+                "request_count": 2,
+                "responses_with_usage": 2,
+                "prompt_tokens": 50,
+                "completion_tokens": 9,
+                "total_tokens": 59,
+            },
+        )
+
+    def test_tuned_appworld_prompt_is_explicit_about_tools_and_verification(self):
+        prompt = build_benchmark_system_prompt(
+            {"system_prompt": "Keep actions safe."},
+            dataset="appworld",
+            prompt_profile="tuned",
+        )
+
+        self.assertIn("Keep actions safe.", prompt)
+        self.assertIn("exact function schema", prompt)
+        self.assertIn("verify", prompt.lower())
+        self.assertIn("do not change AppWorld state", prompt)
+        self.assertIn("publicly means private=false", prompt.lower())
+        self.assertIn("answer=null", prompt.lower())
+        self.assertIn("phone contacts", prompt.lower())
+
+    def test_tuned_appworld_app_selection_recovers_instruction_apps(self):
+        self.assertEqual(
+            infer_appworld_app_names(
+                'Request $13 publicly on Venmo with a note "meal".',
+                supplied_app_names=["supervisor"],
+            ),
+            ["venmo", "supervisor"],
+        )
+        self.assertEqual(
+            infer_appworld_app_names(
+                "Request money on Venmo from my friend Stacy.",
+                supplied_app_names=["supervisor"],
+            ),
+            ["phone", "venmo", "supervisor"],
+        )
+        self.assertEqual(
+            infer_appworld_app_names(
+                "Email the Spotify playlist to my phone contact.",
+                supplied_app_names=["supervisor"],
+            ),
+            ["gmail", "phone", "spotify", "supervisor"],
+        )
+
+    def test_tuned_appworld_allowlist_never_removes_supervisor_tools(self):
+        allowlist = ["amazon__search_products"]
+        self.assertTrue(
+            appworld_tool_allowed(
+                "supervisor__show_account_passwords",
+                allowlist,
+                always_allow_supervisor=True,
+            )
+        )
+        self.assertTrue(
+            appworld_tool_allowed(
+                "amazon__search_products",
+                allowlist,
+                always_allow_supervisor=True,
+            )
+        )
+        self.assertFalse(
+            appworld_tool_allowed(
+                "spotify__search_tracks",
+                allowlist,
+                always_allow_supervisor=True,
+            )
+        )
+
+    def test_tuned_profile_resets_appworld_before_loading_tool_schemas(self):
+        order = []
+
+        class _OrderingAdapter(_NoopBenchmarkAdapter):
+            dataset = "appworld"
+
+            def tool_schemas(self):
+                order.append("schemas")
+                return []
+
+            def reset(self, task):
+                order.append("reset")
+                return str(task["instruction"])
+
+        report = run_benchmark_agent(
+            {
+                "task_id": "appworld-order",
+                "instruction": "complete the workflow",
+                "prompt_profile": "tuned",
+            },
+            _ScriptedModel([ModelResponse("done", [])]),
+            InstrumentedMemoryBackend(),
+            _OrderingAdapter(),
+        )
+
+        self.assertEqual(order[:2], ["reset", "schemas"])
+        self.assertEqual(report["prompt_profile"], "tuned")
+
+    def test_tuned_appworld_strategy_prefetches_supervisor_identity_and_credentials(self):
+        calls = []
+
+        class _PreflightAdapter(_NoopBenchmarkAdapter):
+            dataset = "appworld"
+
+            def tool_schemas(self):
+                return [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "parameters": {"type": "object", "properties": {}},
+                        },
+                    }
+                    for name in (
+                        "supervisor__show_profile",
+                        "supervisor__show_account_passwords",
+                    )
+                ]
+
+            def execute(self, name, arguments):
+                calls.append(name)
+                return "private observation", {"ok": True}
+
+        model = _ScriptedModel([ModelResponse("done", [])])
+        report = run_benchmark_agent(
+            {
+                "task_id": "appworld-preflight",
+                "instruction": "complete the workflow",
+                "prompt_profile": "tuned",
+            },
+            model,
+            InstrumentedMemoryBackend(),
+            _PreflightAdapter(),
+        )
+
+        self.assertEqual(
+            calls,
+            ["supervisor__show_profile", "supervisor__show_account_passwords"],
+        )
+        self.assertEqual(report["preflight_tool_count"], 2)
+        model_tool_names = {
+            item["function"]["name"] for item in model.calls[0]["tools"]
+        }
+        self.assertNotIn("supervisor__show_profile", model_tool_names)
+        self.assertNotIn("supervisor__show_account_passwords", model_tool_names)
+        self.assertTrue(
+            any(
+                "read-only preflight" in str(message.get("content", "")).lower()
+                for message in model.calls[0]["messages"]
+            )
+        )
+
+    def test_tuned_appworld_strategy_prelogs_in_and_prunes_unsupported_arguments(self):
+        calls = []
+
+        class _PreloginAdapter(_NoopBenchmarkAdapter):
+            dataset = "appworld"
+
+            def tool_schemas(self):
+                return [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "parameters": {
+                                "type": "object",
+                                "properties": properties,
+                                "required": required,
+                            },
+                        },
+                    }
+                    for name, properties, required in (
+                        ("supervisor__show_profile", {}, []),
+                        ("supervisor__show_account_passwords", {}, []),
+                        (
+                            "venmo__login",
+                            {
+                                "username": {"type": "string", "description": "Your account email."},
+                                "password": {"type": "string"},
+                            },
+                            ["username", "password"],
+                        ),
+                        (
+                            "venmo__show_profile",
+                            {
+                                "access_token": {"type": "string"},
+                                "email": {"type": "string"},
+                            },
+                            ["access_token"],
+                        ),
+                    )
+                ]
+
+            def execute(self, name, arguments):
+                calls.append((name, dict(arguments)))
+                if name == "supervisor__show_profile":
+                    return str({"email": "agent@example.test", "phone_number": "+10000000000"}), {"ok": True}
+                if name == "supervisor__show_account_passwords":
+                    return str([{"account_name": "venmo", "password": "correct-password"}]), {"ok": True}
+                if name == "venmo__login":
+                    return str({"access_token": "official-token", "token_type": "Bearer"}), {"ok": True}
+                return "profile", {"ok": True}
+
+        model = _ScriptedModel(
+            [
+                ModelResponse(
+                    "",
+                    [
+                        ToolCall(
+                            "call-1",
+                            "venmo__show_profile",
+                            {
+                                "access_token": "official-token",
+                                "email": "agent@example.test",
+                                "unsupported": "must-be-removed",
+                            },
+                        )
+                    ],
+                ),
+                ModelResponse("done", []),
+            ]
+        )
+        report = run_benchmark_agent(
+            {
+                "task_id": "appworld-prelogin",
+                "instruction": "Use Venmo to complete the workflow.",
+                "prompt_profile": "tuned",
+            },
+            model,
+            InstrumentedMemoryBackend(),
+            _PreloginAdapter(),
+        )
+
+        self.assertEqual(
+            calls[:3],
+            [
+                ("supervisor__show_profile", {}),
+                ("supervisor__show_account_passwords", {}),
+                (
+                    "venmo__login",
+                    {"username": "agent@example.test", "password": "correct-password"},
+                ),
+            ],
+        )
+        self.assertEqual(
+            calls[3],
+            (
+                "venmo__show_profile",
+                {"access_token": "official-token", "email": "agent@example.test"},
+            ),
+        )
+        self.assertEqual(report["preflight_login_count"], 1)
+        self.assertEqual(report["preflight_tool_count"], 3)
+        visible_messages = json.dumps(model.calls[0]["messages"], ensure_ascii=False)
+        self.assertNotIn("correct-password", visible_messages)
+        self.assertIn("official-token", visible_messages)
+        self.assertEqual(
+            [item["name"] for item in report["benchmark_tool_trace"]],
+            [
+                "supervisor__show_profile",
+                "supervisor__show_account_passwords",
+                "venmo__login",
+                "venmo__show_profile",
+            ],
+        )
+        self.assertEqual(
+            report["benchmark_tool_trace"][-1]["argument_keys"],
+            ["access_token", "email"],
+        )
+
+    def test_appworld_argument_adapter_keeps_only_schema_properties(self):
+        self.assertEqual(
+            adapt_appworld_arguments(
+                {"username": "u", "password": "p", "access_token": "wrong-extra"},
+                {"username", "password"},
+            ),
+            {"username": "u", "password": "p"},
+        )
+
+    def test_tuned_appworld_reprompts_empty_turn_until_complete_task(self):
+        calls = []
+
+        class _CompletionAdapter(_NoopBenchmarkAdapter):
+            dataset = "appworld"
+
+            def tool_schemas(self):
+                return [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "supervisor__complete_task",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "answer": {},
+                                    "status": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                ]
+
+            def execute(self, name, arguments):
+                calls.append((name, dict(arguments)))
+                return str({"message": "Task completed successfully."}), {"ok": True}
+
+        model = _ScriptedModel(
+            [
+                ModelResponse("I am done.", []),
+                ModelResponse(
+                    "",
+                    [
+                        ToolCall(
+                            "complete-1",
+                            "supervisor__complete_task",
+                            {"answer": None, "status": "success"},
+                        )
+                    ],
+                ),
+            ]
+        )
+        report = run_benchmark_agent(
+            {
+                "task_id": "appworld-completion-loop",
+                "instruction": "Complete the workflow.",
+                "prompt_profile": "tuned",
+            },
+            model,
+            InstrumentedMemoryBackend(),
+            _CompletionAdapter(),
+            max_steps=4,
+        )
+
+        self.assertEqual(
+            calls,
+            [("supervisor__complete_task", {"answer": None, "status": "success"})],
+        )
+        self.assertEqual(report["steps"], 2)
+        self.assertEqual(report["status"], "completed")
+        self.assertTrue(
+            any(
+                "call at least one function" in str(message.get("content", "")).lower()
+                for message in model.calls[1]["messages"]
+            )
+        )
+
+    def test_tuned_appworld_prefetches_named_contact_after_phone_login(self):
+        calls = []
+
+        class _ContactAdapter(_NoopBenchmarkAdapter):
+            dataset = "appworld"
+
+            def tool_schemas(self):
+                function_specs = {
+                    "supervisor__show_profile": ({}, []),
+                    "supervisor__show_account_passwords": ({}, []),
+                    "phone__login": (
+                        {
+                            "username": {"type": "string", "description": "Your account phone_number."},
+                            "password": {"type": "string"},
+                        },
+                        ["username", "password"],
+                    ),
+                    "phone__search_contacts": (
+                        {
+                            "access_token": {"type": "string"},
+                            "query": {"type": "string"},
+                            "relationship": {"type": "string"},
+                            "page_index": {"type": "integer"},
+                            "page_limit": {"type": "integer"},
+                        },
+                        ["access_token"],
+                    ),
+                }
+                return [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "parameters": {
+                                "type": "object",
+                                "properties": properties,
+                                "required": required,
+                            },
+                        },
+                    }
+                    for name, (properties, required) in function_specs.items()
+                ]
+
+            def execute(self, name, arguments):
+                calls.append((name, dict(arguments)))
+                if name == "supervisor__show_profile":
+                    return str({"email": "agent@example.test", "phone_number": "+10000000000"}), {"ok": True}
+                if name == "supervisor__show_account_passwords":
+                    return str([{"account_name": "phone", "password": "phone-password"}]), {"ok": True}
+                if name == "phone__login":
+                    return str({"access_token": "phone-token", "token_type": "Bearer"}), {"ok": True}
+                return str([{"first_name": "Stacy", "relationship": "friend"}]), {"ok": True}
+
+        report = run_benchmark_agent(
+            {
+                "task_id": "appworld-contact-prefetch",
+                "instruction": "Request money from my friend, Stacy, on Venmo.",
+                "prompt_profile": "tuned",
+            },
+            _ScriptedModel([ModelResponse("done", [])]),
+            InstrumentedMemoryBackend(),
+            _ContactAdapter(),
+        )
+
+        self.assertEqual(
+            calls[-1],
+            (
+                "phone__search_contacts",
+                {
+                    "access_token": "phone-token",
+                    "query": "Stacy",
+                    "relationship": "friend",
+                    "page_index": 0,
+                    "page_limit": 20,
+                },
+            ),
+        )
+        self.assertEqual(report["preflight_contact_lookup_count"], 1)
+        self.assertEqual(report["preflight_tool_count"], 4)
+
     def test_tool_loop_records_actual_derive_sources(self):
         model = _ScriptedModel(
             [
@@ -360,6 +847,73 @@ class TxnMemRealExperimentTests(unittest.TestCase):
             reopened = SQLiteInstrumentedMemoryBackend(database)
             self.assertEqual(reopened.read("m1")["value"], "private")
             reopened.close()
+
+    def test_benchmark_manifest_closes_adapter_after_each_task(self):
+        closed = []
+
+        class _ClosingAdapter(_NoopBenchmarkAdapter):
+            def close(self):
+                closed.append(True)
+
+        with TemporaryDirectory() as tmp:
+            run_benchmark_experiment_manifest(
+                {
+                    "tasks": [
+                        {
+                            "task_id": "close_adapter",
+                            "instruction": "complete",
+                            "prompt": "complete",
+                        }
+                    ]
+                },
+                _ScriptedModel([ModelResponse("done", [])]),
+                lambda: _ClosingAdapter(),
+                Path(tmp),
+            )
+
+        self.assertEqual(closed, [True])
+
+    def test_benchmark_batch_aggregates_usage_and_prompt_profile(self):
+        model = _ScriptedModel(
+            [
+                ModelResponse(
+                    "done",
+                    [],
+                    TokenUsage(prompt_tokens=10, completion_tokens=2, total_tokens=12),
+                ),
+                ModelResponse(
+                    "done",
+                    [],
+                    TokenUsage(prompt_tokens=11, completion_tokens=3, total_tokens=14),
+                ),
+            ]
+        )
+        manifest = {
+            "dataset_name": "appworld",
+            "tasks": [
+                {
+                    "task_id": "appworld-1",
+                    "instruction": "complete",
+                    "prompt": "complete",
+                    "prompt_profile": "tuned",
+                }
+            ],
+        }
+
+        with TemporaryDirectory() as tmp:
+            report = run_benchmark_batch(
+                manifest,
+                model,
+                Path(tmp),
+                adapter_factory=lambda: _NoopBenchmarkAdapter(),
+                repetitions=2,
+            )
+
+        self.assertEqual(report["prompt_profiles"], ["tuned"])
+        self.assertEqual(report["model_usage"]["request_count"], 2)
+        self.assertEqual(report["model_usage"]["total_tokens"], 26)
+        self.assertTrue(report["token_usage_complete"])
+        self.assertEqual(report["task_summaries"][0]["benchmark_tool_trace"], [])
 
     def test_manifest_records_replay_errors_without_aborting_later_tasks(self):
         model = _ScriptedModel(
