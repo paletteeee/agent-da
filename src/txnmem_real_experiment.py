@@ -354,6 +354,15 @@ def run_benchmark_experiment_manifest(
                 "authorized_benchmark_tool_count": int(
                     run_report.get("authorized_benchmark_tool_count", 0) or 0
                 ),
+                "model_visible_benchmark_tool_names_sha256": str(
+                    run_report.get("model_visible_benchmark_tool_names_sha256", "") or ""
+                ),
+                "model_visible_benchmark_tool_count": int(
+                    run_report.get("model_visible_benchmark_tool_count", 0) or 0
+                ),
+                "trusted_preflight_enabled": bool(
+                    run_report.get("trusted_preflight_enabled", False)
+                ),
                 "unauthorized_tool_attempt_count": int(
                     run_report.get("unauthorized_tool_attempt_count", 0) or 0
                 ),

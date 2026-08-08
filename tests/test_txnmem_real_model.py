@@ -123,7 +123,7 @@ class _PreflightAdapter(_NoopBenchmarkAdapter):
     def execute_trusted_preflight(self, name, arguments):
         if name == "supervisor__show_profile":
             return '{"first_name":"Alex"}', {"ok": True}
-        return '{"venmo":"redacted"}', {"ok": True}
+        return '{"venmo":"fixture-secret-password"}', {"ok": True}
 
 
 class TxnMemRealModelProtocolTests(unittest.TestCase):
@@ -1018,6 +1018,56 @@ class TxnMemRealExperimentTests(unittest.TestCase):
         self.assertEqual(report["model_usage"]["total_tokens"], 26)
         self.assertTrue(report["token_usage_complete"])
         self.assertEqual(report["task_summaries"][0]["benchmark_tool_trace"], [])
+
+    def test_benchmark_batch_preserves_sanitized_model_visible_tool_attestation(self):
+        manifest = {
+            "dataset_name": "appworld",
+            "tasks": [
+                {
+                    "task_id": "appworld-attestation",
+                    "instruction": "Use Venmo.",
+                    "prompt": "Use Venmo.",
+                    "prompt_profile": "tuned",
+                }
+            ],
+        }
+
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            report = run_benchmark_batch(
+                manifest,
+                _ScriptedModel([ModelResponse("done", [])]),
+                out_dir,
+                adapter_factory=lambda: _PreflightAdapter(),
+            )
+            persisted = json.loads(
+                (out_dir / "results" / "native_batch_summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+        for task_summary in (
+            report["task_summaries"][0],
+            persisted["task_summaries"][0],
+        ):
+            self.assertEqual(
+                task_summary["model_visible_benchmark_tool_names_sha256"],
+                "c616c879dd4a61cd2d35da08c7b8559010309492bd3ec5b32df655a52f555b24",
+            )
+            self.assertIs(
+                type(task_summary["model_visible_benchmark_tool_names_sha256"]), str
+            )
+            self.assertEqual(task_summary["model_visible_benchmark_tool_count"], 1)
+            self.assertIs(type(task_summary["model_visible_benchmark_tool_count"]), int)
+            self.assertIs(task_summary["trusted_preflight_enabled"], True)
+            self.assertNotIn("model_visible_benchmark_tool_names", task_summary)
+            serialized = json.dumps(task_summary, ensure_ascii=False)
+            self.assertNotIn("venmo__get_profile", serialized)
+            self.assertNotIn('"function"', serialized)
+            self.assertNotIn('"arguments"', serialized)
+            self.assertNotIn('"messages"', serialized)
+            self.assertNotIn("Alex", serialized)
+            self.assertNotIn("fixture-secret-password", serialized)
 
     def test_manifest_records_replay_errors_without_aborting_later_tasks(self):
         model = _ScriptedModel(
