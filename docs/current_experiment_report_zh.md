@@ -1,9 +1,8 @@
 # TxnMem 当前实验报告
 
-更新时间：2026-08-07  
+更新时间：2026-08-10
 模型：Qwen2.5-7B-Instruct  
 实验仓库：`remote_staging/txnmem`  
-远端实验目录：`/data/txnmem_run_20260806`
 
 ## 1. 报告口径
 
@@ -47,7 +46,14 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 
 ### 5.2 AppWorld
 
-官方 runtime 完成 20-task batch，20/20 evaluator available，记录 49 个 native events，官方 `task_completed()` 为 0/20，112 个官方断言中通过 17 个。实验使用 DB snapshot 和 task-specific app/API allowlist。0/20 是当前 Agent/tool strategy 的官方任务结果，不是 TxnMem oracle；后续仍需做 baseline/tuned prompting 对比。
+同一 20-task manifest、Qwen2.5-7B revision、generation 参数、官方 evaluator、`instruction_inferred` 工具策略和逐任务模型可见工具集合下，完成 baseline/tuned 配对。20/20 任务的工具数量及工具名 SHA-256 摘要完全匹配，condition fingerprint 相同。
+
+- baseline：20/20 execution completed，官方 success 为 0/20，官方断言通过 17/112；40/40 模型响应含 usage，共 517,564 tokens。
+- tuned：官方 success 为 1/20，官方断言通过 53/112；13 个任务改善、7 个不变、0 个回退。14/20 execution completed；4 个任务因模型调用未授权工具名失败，2 个长工具链任务因 model HTTP error 失败。116 次请求中 114 次返回 usage，观测到 2,171,632 tokens，因此该 token 总量及相对 baseline 的增量只能写成下界。
+
+该结果表明当前 tuned prompt + trusted preflight 在这 20 个任务上改善了官方断言覆盖，并首次获得 1 个官方成功；样本量小且 tuned 存在 6 个 execution failure，不能声称通用显著提升，也不能把 AppWorld 结果解释为 TxnMem memory accuracy。
+
+证据路径：`results/prompt_profile_formal_v4/appworld_baseline/native_batch_summary.json`、`results/prompt_profile_formal_v4/appworld_tuned/native_batch_summary.json`、`results/prompt_profile_formal_v4/appworld_prompt_comparison.json`。
 
 ### 5.3 LoCoMo native contextual Agent
 
@@ -61,7 +67,13 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 
 证据路径：`results/locomo_paired_full_retrieval/locomo_paired_summary.json`。
 
-## 6. 真实 vector/graph backend 与网络故障
+在固定 condition fingerprint、相同 10 个 conversation、每次 1,986 个问题和 seeds `[17, 1017, 2017]` 下，进一步完成 baseline/tuned 各 3 次 paired repetition。baseline F1 分别为 `0.13646/0.14114/0.13749`，均值 `0.13836`；tuned F1 分别为 `0.13551/0.14482/0.13960`，均值 `0.13998`。逐 repetition 差值为 `-0.00095/+0.00368/+0.00212`，平均差值 `+0.00162`，总体标准差 `0.00192`。baseline 使用 481,410 tokens，tuned 使用 521,949 tokens，精确增加 40,539 tokens。
+
+这只是 3 次固定配对重复的描述性结果：更强提示带来的平均 F1 增益很小且一次回退，不能据此声称总体显著优于 baseline。
+
+证据路径：`results/prompt_profile_formal_v4/locomo_baseline/locomo_paired_repetition_summary.json`、`results/prompt_profile_formal_v4/locomo_tuned/locomo_paired_repetition_summary.json`、`results/prompt_profile_formal_v4/locomo_prompt_comparison.json`。
+
+## 6. 真实 vector/graph backend、网络故障与跨主机模型负载
 
 `VectorGraphMemoryBackend` 已在单机真实 Qdrant 1.11.5、Neo4j 5.22.0 和 Toxiproxy 环境中完成 direct service smoke。30 次重复 backend-only 写入性能结果如下：
 
@@ -77,38 +89,44 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 
 另有 5 个 τ-bench task 的 Qwen2.5-7B + Qdrant + Neo4j 端到端 smoke：5/5 completed，mean 17,879.4 ms，P50 15,351.6 ms。该结果包含模型、backend 和 evaluator 的端到端开销，不应当被当作 backend-only latency。
 
+在 `cross_host_client_server` 范围内，Qwen2.5-7B-Instruct（revision `7b44…26b4`，vLLM `0.8.5.post1`）完成 3 次独立 attested 运行：每次 68 cycles、544 attempts，elapsed 分别为 `605.798544333`、`604.362563375`、`605.420804708` 秒；合计 204 cycles、1,632 attempts、`1,815.581912416` 秒。三个 UTC interval 不重叠，distinct tunnel process count 为 3。每次 configured concurrency=4，observed peak=4。
+
+全部 1,632/1,632 attempts 达到 contract success；其中 1,224 个为 completed attempts，408 个 runner-level failures 全部是 workload 预期机制（204 `injected_crash`、204 `policy_denied`），不是模型或 endpoint/transport 错误。三份 endpoint/transport analysis 合计为 0 相关失败。endpoint 精确报告 3,672/3,672 request usage：prompt `2,935,706`、completion `315,828`、total `3,251,534` tokens。
+
+拓扑为 1 个 Agent-worker host 加 1 个 model-server host；ControlMaster same-session/PID binding 已验证、host identities distinct、`cross_host_network_claim=true`。这支持跨主机 client-to-model-server 负载实验的机制证据，但不等于生产级多主机 Agent workers、单一连续 30 分钟 tunnel、跨主机 Qdrant/Neo4j，亦不构成生产 latency 结论（`production_latency_claim=false`）。`cross_host_multi_agent_workers_claim=false`、`single_continuous_tunnel_claim=false`；没有显式 pricing rate，货币成本未计算。
+
+早期 v6 的三次运行虽模型、usage 与 topology 工件无错，但 strict aggregator 因 UTC 与 `perf_counter` 不一致而拒绝，根因是 macOS idle sleep 时 `mach_absolute_time` 暂停；因此 v6 不作为正式结果。以 `caffeinate` 重跑 v7 后，三次 clock difference 分别为 `0.000663`、`0.000359`、`0.007711` 秒，均显著低于 1% tolerance。
+
+证据路径：`results/cross_host_model_load_formal_v7_aggregate/results/model_load_repetition_summary.json`、`results/cross_host_model_load_formal_v7_rep1/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep2/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep3/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep1/results/endpoint_transport_failure_analysis.json`、`results/cross_host_model_load_formal_v7_rep2/results/endpoint_transport_failure_analysis.json`、`results/cross_host_model_load_formal_v7_rep3/results/endpoint_transport_failure_analysis.json`。
+
 ## 7. Synthetic 与 trace-grounded realism
 
-当前正式 realism 统计使用 400 个 synthetic instances、固定 seed 17、2,000 次 bootstrap；τ-bench 使用 175 个 trace-grounded episode，LoCoMo 使用 10 个 conversation。方法是 feature-wise bootstrap mean/mean-difference intervals，不是高维 joint test。
+正式 realism 统计使用 400 个 synthetic instances，并在 `operation_count`、`transaction_size`、`policy_change_rate`、`provenance_depth`、`branch_factor` 和 `agent_count` 六维联合空间执行 standardized RBF random-feature MMD permutation test；calibration/train 与 holdout/test 按 episode 隔离。
 
-- τ-bench 平均相对 feature absolute difference：0.225。
-- LoCoMo 平均相对 feature absolute difference：0.437。
-- τ-bench operation count：synthetic mean 4.25，trace mean 7.257，mean difference 3.007，95% bootstrap interval `[2.385, 3.626]`。
-- LoCoMo operation count：synthetic mean 4.25，trace mean 29.2，mean difference 24.95，95% bootstrap interval `[21.928, 27.493]`。
+- τ-bench：141 个 calibration、34 个 holdout episode；平均相对 feature absolute difference 为 `0.22590`，MMD²=`0.18198`、p=`0.001`（999 permutations）。
+- LoCoMo：8 个 calibration、2 个 holdout conversation；平均相对差异为 `0.43952`，MMD²=`1.94189`、p=`0.0005`（1,999 permutations）。holdout n=2，推断低功效且不稳定。
+- AppWorld：从官方 `ground_truth/api_calls.json` 重新生成 5 个 task 的 380 条 method/URL-only 脱敏原始 projection event，3 个用于 calibration、2 个用于 holdout；平均相对差异为 `0.43071`，MMD²=`1.22097`、p=`0.0005`（1,999 permutations）。holdout n=2，同样只能作为诊断证据。
 
-结果说明当前 generator 低估长对话的 operation/transaction size；它支持校准方向，不支持宣称 synthetic 与真实 trace 已经联合分布一致。AppWorld projection 的原始事件文件没有在本地重新生成，不能把现有 AppWorld projection 统计升级为 native memory ground truth。
+这些结果拒绝“当前 synthetic 与 holdout trace 的六维联合分布相同”这一零假设，说明 generator 仍需校准；它们不支持分布等价。AppWorld projection 是从官方 API call provenance 重新生成的 trace-grounded adaptation，不是 AppWorld 原生 memory ground truth。
 
-证据路径：`results/official_trace_runs/tau_bench_joint_bootstrap/results/trace_realism.json`、`results/official_trace_runs/locomo_joint_bootstrap/results/trace_realism.json`。
+证据路径：`results/joint_realism/tau_bench/results/trace_realism.json`、`results/joint_realism/locomo/results/trace_realism.json`、`results/appworld_projection_regenerated/projection_inventory.json`、`results/appworld_projection_regenerated/results/trace_realism.json`。
 
 ## 8. 可复现性与文档 QA
 
-- 全量单元测试：157 tests，3 个依赖缺失项 skipped，其他测试通过。
+- 全量单元测试：242 tests，3 个 skipped，0 failures。
 - 本地 process concurrency smoke：2 workers、3 operations、线性化序号完整，无未确认 operation。
 - DOCX 初稿已生成 20 页 PNG/PDF 并逐页视觉检查；accessibility audit 为 high=0、medium=0、low=0。
-- 本地 Git 已保存当前实现和 aggregate 结果；最近一次真实 backend 结果提交为 `f5de22e`。
+- artifact audit：0 findings。
+- 最近代码提交为 `15b8e69`。v7 results 仍为未提交工件，本报告不将其表述为已在 Git 中保存。
 
-论文初稿：`/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_论文初稿.docx`。
+## 9. 当前状态、claim boundary 与后续工作
 
-## 9. 当前未完成与下一步实验
+当前计划中的四个实验组均已完成：LoCoMo paired baseline/tuned 3 次重复、AppWorld baseline/tuned 配对、τ/LoCoMo/AppWorld joint realism，以及 attested cross-host model load。它们的已知限制应作为 claim boundary，而不是被误写为未完成实验：
 
-以下项目仍不能标记为完成：
+1. LoCoMo 只有 3 次描述性 paired repetition，平均 F1 增益很小且有一次回退；不能作统计显著性或普适改进结论。
+2. AppWorld tuned 有 6 个 execution failure，且 n=20；token 总量为观测下界，不能作总体显著性结论。
+3. joint realism 显示 synthetic 与 holdout trace 存在分布差异，特别是 LoCoMo/AppWorld holdout n=2；该结果不支持等价性。
+4. cross-host 证据仅覆盖 1 Agent-worker host 与 1 model-server host 的三次独立运行；不包含生产级多主机 Agent workers、连续 30 分钟 tunnel 或跨主机 Qdrant/Neo4j。货币成本未计算，原因是没有显式 pricing rate。
+5. Git 远端推送仍是唯一明确外部阻塞：`git remote -v` 为空，必须由用户提供 remote URL 后才能安全 push。
 
-1. LoCoMo paired QA 的多次 repetition，以及与更强 Agent/tool prompting 的同条件比较。
-2. AppWorld baseline/tuned agent/tool strategy 对比；当前官方 success 为 0/20。
-3. 多 Agent 并发、跨主机网络、长周期运行和真实模型 token cost 统计。当前已有单机 backend performance，但没有跨主机和成本计量证据。
-4. 高维 joint realism test，以及 AppWorld projection 原始事件的重新生成。
-5. Git 远端推送。当前仓库没有 remote URL，不能安全执行 push。
-
-2026-08-07 已尝试启动 LoCoMo paired repetition 2 和 AppWorld baseline/tuned 批次；远端 SSH 在认证后不稳定关闭，未产生可验证的新 aggregate。模型协议中也未发现 prompt/completion token usage 或 pricing 字段，因此没有用 wall-clock 时间估算模型成本。详细 blocked 记录见 `results/remaining_tasks/remaining_experiments_20260807.json`。
-
-继续实验时必须保持以下顺序：先固定 manifest 和 evaluator，再运行 baseline/tuned 对比；先保留 raw trace 在远端，只同步脱敏 aggregate；最后按 task/conversation 统计，而不是按 event 行数扩大样本量。
+未来 production-grade 扩展应固定 manifest/evaluator 并保持脱敏 aggregate 口径：增加多主机 Agent workers、连续 tunnel、跨主机 Qdrant/Neo4j 与有明确定价率的成本核算；这些是 future work，不是当前已完成的主张。
