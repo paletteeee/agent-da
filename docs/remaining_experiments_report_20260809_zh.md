@@ -22,15 +22,15 @@
 
 ## 4. Attested cross-host model load — DONE_WITH_CONCERNS
 
-Qwen2.5-7B-Instruct（revision `7b44…26b4`，vLLM `0.8.5.post1`）完成 3 次 independently attested `cross_host_client_server` repetition。每次 68 cycles、544 attempts，elapsed 为 `605.798544333`、`604.362563375`、`605.420804708` 秒；合计 204 cycles、1,632 attempts、`1,815.581912416` 秒。三次 UTC intervals non-overlapping、distinct tunnel process count=3；configured concurrency=4，observed peak=4。
+Qwen2.5-7B-Instruct（revision `7b44…26b4`，vLLM `0.8.5.post1`）在最终 attestation 修复后完成 3 次 independently attested v8 `cross_host_client_server` repetition。每次 68 cycles、544 attempts，elapsed 为 `604.165115041`、`603.328782334`、`603.574593500` 秒；合计 204 cycles、1,632 attempts、`1,811.068490875` 秒。三次 UTC intervals non-overlapping、distinct tunnel process count=3；configured concurrency=4，observed peak=4。
 
-总 contract success 为 1,632/1,632；completed attempts 1,224；408 个 runner-level failures 都是预期 workload 机制（204 `injected_crash`、204 `policy_denied`），不得算作模型错误。三份 endpoint/transport analysis 合计 0 相关失败。endpoint 精确报告 request/usage=3,672/3,672，prompt=2,935,706、completion=315,828、total=3,251,534 tokens。
+总 contract success 为 1,632/1,632；completed attempts 1,224；408 个 runner-level failures 都是预期 workload 机制（204 `injected_crash`、204 `policy_denied`），不得算作模型错误。三份 endpoint/transport analysis 合计 0 相关失败。endpoint 精确报告 request/usage=3,672/3,672，prompt=2,935,703、completion=315,803、total=3,251,506 tokens。
 
-拓扑为 1 Agent-worker host + 1 model-server host，ControlMaster same-session/PID binding 已验证且 host identities distinct，`cross_host_network_claim=true`。边界：`production_latency_claim=false`、`cross_host_multi_agent_workers_claim=false`、`single_continuous_tunnel_claim=false`；未覆盖生产级多主机 Agent workers、连续 30 分钟 tunnel 或跨主机 Qdrant/Neo4j。没有显式 pricing rate，货币成本未计算。
+拓扑为 1 Agent-worker host + 1 model-server host，每次均通过模型调用前 preflight 与结束时 final PID-owned listener 校验、ControlMaster PID pre/post check、严格 loopback forwarding 校验及拓扑连续性校验，host identities distinct，`cross_host_network_claim=true`。边界：`production_latency_claim=false`、`cross_host_multi_agent_workers_claim=false`、`single_continuous_tunnel_claim=false`；未覆盖生产级多主机 Agent workers、连续 30 分钟 tunnel 或跨主机 Qdrant/Neo4j。没有显式 pricing rate，货币成本未计算。
 
-初始 v6 预正式运行因 UTC 与 `perf_counter` 的时间证据不一致而被 strict aggregator 拒绝，v6 不作为正式结果。随后为降低休眠相关环境风险采用防休眠执行重跑 v7；正式检查记录的 clock diff 为 `0.000663`、`0.000359`、`0.007711` 秒，均低于 1% tolerance。
+初始 v6 预正式运行因 UTC 与 `perf_counter` 的时间证据不一致而被 strict aggregator 拒绝，v6 不作为正式结果。v7 虽通过当时聚合规则，但最终安全审查发现监听器归属与连续性证明不足，因此只保留为修复前审计历史。代码提交 `4669a01` 完成 listener ownership、ControlMaster continuity、严格 forwarding/UTC 和固定 `3 × 600` 秒聚合约束后重跑 v8；三次 clock diff 为 `0.002323041`、`0.009159334`、`0.039579500` 秒，均低于 1% tolerance，UTC offset 均为 0。
 
-证据：`results/cross_host_model_load_formal_v7_aggregate/results/model_load_repetition_summary.json`、`results/cross_host_model_load_formal_v7_rep1/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep2/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep3/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep1/results/endpoint_transport_failure_analysis.json`、`results/cross_host_model_load_formal_v7_rep2/results/endpoint_transport_failure_analysis.json`、`results/cross_host_model_load_formal_v7_rep3/results/endpoint_transport_failure_analysis.json`。
+证据：`results/cross_host_model_load_formal_v8_aggregate/results/model_load_repetition_summary.json`、`results/cross_host_model_load_formal_v8_rep1/results/model_load_summary.json`、`results/cross_host_model_load_formal_v8_rep2/results/model_load_summary.json`、`results/cross_host_model_load_formal_v8_rep3/results/model_load_summary.json`、`results/cross_host_model_load_formal_v8_rep1/results/endpoint_transport_failure_analysis.json`、`results/cross_host_model_load_formal_v8_rep2/results/endpoint_transport_failure_analysis.json`、`results/cross_host_model_load_formal_v8_rep3/results/endpoint_transport_failure_analysis.json`。v7 作废说明见 `results/cross_host_model_load_formal_v7_aggregate/SUPERSEDED.md`。
 
 ## 5. Git remote push — BLOCKED
 
@@ -38,8 +38,8 @@ Qwen2.5-7B-Instruct（revision `7b44…26b4`，vLLM `0.8.5.post1`）完成 3 次
 
 ## 验证与自审
 
-- fresh full test：242 tests，3 skipped，0 failures。
-- 对 7 个 v7 JSON 运行 `python3 -m json.tool` 均成功。
+- fresh full test：250 tests，3 skipped，0 failures。
+- 对 7 个 v8 JSON 运行严格 JSON 解析均成功。
 - artifact audit：0 findings。
-- 代码修复提交为 `15b8e69`；脱敏 v7 aggregate、per-repetition summaries 与 endpoint/transport analyses 已由本地结果提交 `c86b46f` 保存。
+- 最终 attestation 代码修复提交为 `4669a01`；脱敏 v8 aggregate、per-repetition summaries、endpoint/transport analyses 与 v7 作废标记已由本地结果提交 `9785a48` 保存。
 - 未使用统计显著性或生产级结论；预期 `injected_crash`/`policy_denied` 未当作模型错误。

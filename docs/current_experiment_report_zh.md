@@ -89,15 +89,15 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 
 另有 5 个 τ-bench task 的 Qwen2.5-7B + Qdrant + Neo4j 端到端 smoke：5/5 completed，mean 17,879.4 ms，P50 15,351.6 ms。该结果包含模型、backend 和 evaluator 的端到端开销，不应当被当作 backend-only latency。
 
-在 `cross_host_client_server` 范围内，Qwen2.5-7B-Instruct（revision `7b44…26b4`，vLLM `0.8.5.post1`）完成 3 次独立 attested 运行：每次 68 cycles、544 attempts，elapsed 分别为 `605.798544333`、`604.362563375`、`605.420804708` 秒；合计 204 cycles、1,632 attempts、`1,815.581912416` 秒。三个 UTC interval 不重叠，distinct tunnel process count 为 3。每次 configured concurrency=4，observed peak=4。
+在 `cross_host_client_server` 范围内，Qwen2.5-7B-Instruct（revision `7b44…26b4`，vLLM `0.8.5.post1`）完成 3 次独立 attested v8 运行：每次 68 cycles、544 attempts，elapsed 分别为 `604.165115041`、`603.328782334`、`603.574593500` 秒；合计 204 cycles、1,632 attempts、`1,811.068490875` 秒。三个 UTC interval 不重叠，distinct tunnel process count 为 3。每次 configured concurrency=4，observed peak=4。
 
-全部 1,632/1,632 attempts 达到 contract success；其中 1,224 个为 completed attempts，408 个 runner-level failures 全部是 workload 预期机制（204 `injected_crash`、204 `policy_denied`），不是模型或 endpoint/transport 错误。三份 endpoint/transport analysis 合计为 0 相关失败。endpoint 精确报告 3,672/3,672 request usage：prompt `2,935,706`、completion `315,828`、total `3,251,534` tokens。
+全部 1,632/1,632 attempts 达到 contract success；其中 1,224 个为 completed attempts，408 个 runner-level failures 全部是 workload 预期机制（204 `injected_crash`、204 `policy_denied`），不是模型或 endpoint/transport 错误。三份 endpoint/transport analysis 合计为 0 相关失败。endpoint 精确报告 3,672/3,672 request usage：prompt `2,935,703`、completion `315,803`、total `3,251,506` tokens。
 
-拓扑为 1 个 Agent-worker host 加 1 个 model-server host；ControlMaster same-session/PID binding 已验证、host identities distinct、`cross_host_network_claim=true`。这支持跨主机 client-to-model-server 负载实验的机制证据，但不等于生产级多主机 Agent workers、单一连续 30 分钟 tunnel、跨主机 Qdrant/Neo4j，亦不构成生产 latency 结论（`production_latency_claim=false`）。`cross_host_multi_agent_workers_claim=false`、`single_continuous_tunnel_claim=false`；没有显式 pricing rate，货币成本未计算。
+拓扑为 1 个 Agent-worker host 加 1 个 model-server host；每次运行均完成模型调用前的 preflight 与结束时的 final PID-owned listener 校验、ControlMaster PID pre/post check、严格 loopback forwarding 校验和拓扑连续性校验，host identities distinct、`cross_host_network_claim=true`。这支持跨主机 client-to-model-server 负载实验的机制证据，但不等于生产级多主机 Agent workers、单一连续 30 分钟 tunnel、跨主机 Qdrant/Neo4j，亦不构成生产 latency 结论（`production_latency_claim=false`）。`cross_host_multi_agent_workers_claim=false`、`single_continuous_tunnel_claim=false`；没有显式 pricing rate，货币成本未计算。
 
-早期 v6 预正式运行因 UTC 与 `perf_counter` 的时间证据不一致而被 strict aggregator 拒绝，因此 v6 不计入正式结果。随后为降低休眠相关环境风险采用防休眠执行重跑 v7；正式检查记录的三次 clock difference 分别为 `0.000663`、`0.000359`、`0.007711` 秒，均低于 1% tolerance。
+早期 v6 预正式运行因 UTC 与 `perf_counter` 的时间证据不一致而被 strict aggregator 拒绝，因此 v6 不计入正式结果。v7 虽通过当时的聚合规则，但最终安全审查发现其尚未证明 SSH 隧道进程在每次运行前后持续拥有模型端点监听器，故 v7 仅保留为修复前审计历史，不再承担最终跨主机结论。代码提交 `4669a01` 加入 preflight/final listener ownership、ControlMaster 连续性、严格 forwarding/UTC 校验和固定 `3 × 600` 秒正式聚合要求后，采用防休眠执行重跑 v8；三次 UTC wall-clock 与内部 elapsed 的差值分别为 `0.002323041`、`0.009159334`、`0.039579500` 秒，均低于 1% tolerance，且 UTC offset 均为 0。
 
-证据路径：`results/cross_host_model_load_formal_v7_aggregate/results/model_load_repetition_summary.json`、`results/cross_host_model_load_formal_v7_rep1/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep2/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep3/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep1/results/endpoint_transport_failure_analysis.json`、`results/cross_host_model_load_formal_v7_rep2/results/endpoint_transport_failure_analysis.json`、`results/cross_host_model_load_formal_v7_rep3/results/endpoint_transport_failure_analysis.json`。
+证据路径：`results/cross_host_model_load_formal_v8_aggregate/results/model_load_repetition_summary.json`、`results/cross_host_model_load_formal_v8_rep1/results/model_load_summary.json`、`results/cross_host_model_load_formal_v8_rep2/results/model_load_summary.json`、`results/cross_host_model_load_formal_v8_rep3/results/model_load_summary.json`、`results/cross_host_model_load_formal_v8_rep1/results/endpoint_transport_failure_analysis.json`、`results/cross_host_model_load_formal_v8_rep2/results/endpoint_transport_failure_analysis.json`、`results/cross_host_model_load_formal_v8_rep3/results/endpoint_transport_failure_analysis.json`。v7 作废说明见 `results/cross_host_model_load_formal_v7_aggregate/SUPERSEDED.md`。
 
 ## 7. Synthetic 与 trace-grounded realism
 
@@ -113,11 +113,11 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 
 ## 8. 可复现性与文档 QA
 
-- 全量单元测试：242 tests，3 个 skipped，0 failures。
+- 全量单元测试：250 tests，3 个 skipped，0 failures。
 - 本地 process concurrency smoke：2 workers、3 operations、线性化序号完整，无未确认 operation。
 - DOCX 初稿已生成 20 页 PNG/PDF 并逐页视觉检查；accessibility audit 为 high=0、medium=0、low=0。
 - artifact audit：0 findings。
-- 代码修复提交为 `15b8e69`；脱敏 v7 aggregate、per-repetition summaries 与 endpoint/transport analyses 已由本地结果提交 `c86b46f` 保存。
+- 最终 attestation 代码修复提交为 `4669a01`；脱敏 v8 aggregate、per-repetition summaries、endpoint/transport analyses 与 v7 作废标记已由本地结果提交 `9785a48` 保存。
 
 ## 9. 当前状态、claim boundary 与后续工作
 
@@ -126,7 +126,7 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 1. LoCoMo 只有 3 次描述性 paired repetition，平均 F1 增益很小且有一次回退；不能作统计显著性或普适改进结论。
 2. AppWorld tuned 有 6 个 execution failure，且 n=20；token 总量为观测下界，不能作总体显著性结论。
 3. joint realism 显示 synthetic 与 holdout trace 存在分布差异，特别是 LoCoMo/AppWorld holdout n=2；该结果不支持等价性。
-4. cross-host 证据仅覆盖 1 Agent-worker host 与 1 model-server host 的三次独立运行；不包含生产级多主机 Agent workers、连续 30 分钟 tunnel 或跨主机 Qdrant/Neo4j。货币成本未计算，原因是没有显式 pricing rate。
+4. cross-host v8 证据仅覆盖 1 Agent-worker host 与 1 model-server host 的三次独立运行；不包含生产级多主机 Agent workers、连续 30 分钟 tunnel 或跨主机 Qdrant/Neo4j。货币成本未计算，原因是没有显式 pricing rate。
 5. Git 远端推送仍是唯一明确外部阻塞：`git remote -v` 为空，必须由用户提供 remote URL 后才能安全 push。
 
 未来 production-grade 扩展应固定 manifest/evaluator 并保持脱敏 aggregate 口径：增加多主机 Agent workers、连续 tunnel、跨主机 Qdrant/Neo4j 与有明确定价率的成本核算；这些是 future work，不是当前已完成的主张。
