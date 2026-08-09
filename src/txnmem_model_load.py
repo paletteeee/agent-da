@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import hashlib
+import ipaddress
 import json
 import math
 import re
@@ -40,6 +41,94 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def _parse_attested_ssh_command(tokens: list[str]) -> dict[str, Any] | None:
+    """Accept only direct, config-free SSH forwarding command shapes."""
+
+    if not tokens or Path(tokens[0]).name != "ssh":
+        return None
+    index = 1
+    has_master = False
+    has_no_remote_command = False
+    has_no_config = False
+    control_socket = None
+    ssh_port = None
+    forward_spec = None
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "-M":
+            if has_master:
+                return None
+            has_master = True
+            index += 1
+            continue
+        if token == "-N":
+            if has_no_remote_command:
+                return None
+            has_no_remote_command = True
+            index += 1
+            continue
+        if token in {"-t", "-tt"}:
+            index += 1
+            continue
+        if token in {"-F", "-S", "-p", "-L", "-o"}:
+            if index + 1 >= len(tokens):
+                return None
+            value = tokens[index + 1]
+            if token == "-F":
+                if has_no_config or value != "/dev/null":
+                    return None
+                has_no_config = True
+            elif token == "-S":
+                if control_socket is not None or not value:
+                    return None
+                control_socket = value
+            elif token == "-p":
+                if ssh_port is not None or not value.isdigit() or not 0 < int(value) < 65536:
+                    return None
+                ssh_port = value
+            elif token == "-L":
+                if forward_spec is not None:
+                    return None
+                forward_spec = value
+            elif value != "ControlPersist=no":
+                return None
+            index += 2
+            continue
+        break
+    destinations = tokens[index:]
+    if (
+        not has_no_config
+        or not has_no_remote_command
+        or forward_spec is None
+        or len(destinations) != 1
+        or destinations[0].count("@") != 1
+    ):
+        return None
+    remote_target = destinations[0]
+    user, host = remote_target.rsplit("@", 1)
+    if not user or not host:
+        return None
+    try:
+        target_ip = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return None
+    parts = forward_spec.split(":")
+    if len(parts) < 3 or not parts[0].isdigit():
+        return None
+    local_port = int(parts[0])
+    if not 0 < local_port < 65536:
+        return None
+    return {
+        "remote_target": remote_target,
+        "target_is_loopback": target_ip.is_loopback,
+        "target_is_public": target_ip.is_global,
+        "control_socket": control_socket,
+        "has_master": has_master,
+        "ssh_port": ssh_port,
+        "local_port": local_port,
+    }
 
 
 def _observe_ssh_tunnel(
@@ -86,69 +175,46 @@ def _observe_ssh_tunnel(
         return {**base, "status": "unparseable_process_command"}
     if not tokens or Path(tokens[0]).name != "ssh":
         return {**base, "status": "process_is_not_ssh"}
-    forward_spec = None
-    for index, token in enumerate(tokens):
-        if token == "-L" and index + 1 < len(tokens):
-            forward_spec = tokens[index + 1]
-            break
-        if token.startswith("-L") and len(token) > 2:
-            forward_spec = token[2:]
-            break
-    remote_target = next((token for token in reversed(tokens) if "@" in token), None)
-    endpoint = urlparse(str(model_endpoint))
-    endpoint_port = endpoint.port
-    local_port = None
-    if forward_spec:
-        parts = forward_spec.split(":")
-        candidate = parts[-3] if len(parts) >= 3 else ""
-        if candidate.isdigit():
-            local_port = int(candidate)
-    endpoint_is_loopback = endpoint.hostname in {"127.0.0.1", "localhost", "::1"}
-    matches = bool(endpoint_is_loopback and endpoint_port and endpoint_port == local_port)
-    observed = bool(forward_spec and remote_target and matches)
-    if not observed:
+    parsed = _parse_attested_ssh_command(tokens)
+    command_sha256 = hashlib.sha256(command.encode("utf-8")).hexdigest()
+    if parsed is None:
         return {
             **base,
-            "status": "process_observed_but_mismatch",
-            "ssh_target_identity_sha256": (
-                hashlib.sha256(remote_target.encode("utf-8")).hexdigest()
-                if remote_target
-                else None
-            ),
-            "process_command_sha256": hashlib.sha256(command.encode("utf-8")).hexdigest(),
-            "local_forward_matches_model_endpoint": matches,
+            "status": "process_observed_but_unsafe_ssh_command",
+            "process_command_sha256": command_sha256,
         }
-    target_host = remote_target.rsplit("@", 1)[-1].strip("[]").lower()
+    remote_target = str(parsed["remote_target"])
+    endpoint = urlparse(str(model_endpoint))
+    endpoint_port = endpoint.port
+    endpoint_is_loopback = endpoint.hostname in {"127.0.0.1", "localhost", "::1"}
+    matches = bool(
+        endpoint_is_loopback
+        and endpoint_port
+        and endpoint_port == parsed["local_port"]
+    )
     common = {
         "ssh_target_identity_sha256": hashlib.sha256(
             remote_target.encode("utf-8")
         ).hexdigest(),
-        "process_command_sha256": hashlib.sha256(command.encode("utf-8")).hexdigest(),
+        "process_command_sha256": command_sha256,
         "local_forward_matches_model_endpoint": matches,
     }
-    if target_host in {"localhost", "127.0.0.1", "::1"}:
+    if not matches:
+        return {
+            **base,
+            **common,
+            "status": "process_observed_but_mismatch",
+        }
+    if parsed["target_is_loopback"]:
         return {**base, **common, "status": "process_observed_but_remote_target_loopback"}
-    control_socket = None
-    for index, token in enumerate(tokens):
-        if token == "-S" and index + 1 < len(tokens):
-            control_socket = tokens[index + 1]
-            break
-        if token.startswith("-S") and len(token) > 2:
-            control_socket = token[2:]
-            break
-    if "-M" not in tokens or not control_socket:
+    if not parsed["target_is_public"]:
+        return {**base, **common, "status": "process_observed_but_unsafe_ssh_command"}
+    control_socket = parsed["control_socket"]
+    if not parsed["has_master"] or not control_socket:
         return {**base, **common, "status": "process_observed_but_controlmaster_required"}
-    ssh_port = None
-    for index, token in enumerate(tokens):
-        if token == "-p" and index + 1 < len(tokens):
-            ssh_port = tokens[index + 1]
-            break
-        if token.startswith("-p") and len(token) > 2:
-            ssh_port = token[2:]
-            break
-    control_options = ["ssh", "-S", control_socket]
-    if ssh_port:
-        control_options.extend(["-p", ssh_port])
+    control_options = ["ssh", "-F", "/dev/null", "-S", control_socket]
+    if parsed["ssh_port"]:
+        control_options.extend(["-p", str(parsed["ssh_port"])])
     check = subprocess.run(
         [*control_options, "-O", "check", remote_target],
         check=False,
@@ -214,7 +280,6 @@ def run_model_load(
     host_count: int = 1,
     network_transport: str = "loopback_or_unspecified",
     tunnel_process_id: int | None = None,
-    tunnel_command_for_test: str | None = None,
     model_revision: str = "unspecified",
     model_server_build: str = "unknown",
 ) -> dict[str, Any]:
@@ -240,6 +305,13 @@ def run_model_load(
         raise ValueError("single_host_multi_agent requires host_count=1")
     if execution_scope == "cross_host_client_server" and host_count != 2:
         raise ValueError("cross_host_client_server requires host_count=2")
+    if (
+        execution_scope == "cross_host_client_server"
+        and network_transport != "ssh_local_port_forward"
+    ):
+        raise ValueError(
+            "cross_host_client_server requires network_transport=ssh_local_port_forward"
+        )
     if not str(network_transport).strip():
         raise ValueError("network_transport must be non-empty")
     if model is None or not callable(getattr(model, "complete", None)):
@@ -337,7 +409,6 @@ def run_model_load(
     topology_attestation = _observe_ssh_tunnel(
         str(getattr(model, "endpoint", "")),
         tunnel_process_id,
-        command_override=tunnel_command_for_test,
     )
     topology_attested = bool(
         execution_scope == "cross_host_client_server"

@@ -180,30 +180,104 @@ class TxnMemModelLoadTests(unittest.TestCase):
                     host_count=3,
                 )
 
+    def test_cross_host_client_server_requires_ssh_local_port_forward_transport(self):
+        manifest = {"tasks": [{"task_id": "task-1", "prompt": "x"}]}
+        with TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, "network_transport=ssh_local_port_forward"):
+                run_model_load(
+                    manifest,
+                    _UsageModel(),
+                    Path(tmp),
+                    execution_scope="cross_host_client_server",
+                    host_count=2,
+                    network_transport="unverified_transport",
+                )
+            single_host = run_model_load(
+                manifest,
+                _UsageModel(),
+                Path(tmp) / "single-host",
+                network_transport="unverified_transport",
+            )
+
+        self.assertFalse(single_host["cross_host_network_claim"])
+
+    def test_runner_reads_audited_process_command_and_rejects_command_override(self):
+        manifest = {"tasks": [{"task_id": "task-1", "prompt": "x"}]}
+        actual_command = (
+            "ssh -tt -F /dev/null -M -S /private/tmp/txnmem-control "
+            "-o ControlPersist=no -p 32222 -L 18001:127.0.0.1:8000 -N user@8.8.8.8"
+        )
+        with TemporaryDirectory() as tmp:
+            with self.assertRaises(TypeError):
+                run_model_load(
+                    manifest,
+                    _UsageModel(),
+                    Path(tmp) / "override",
+                    tunnel_command_for_test=actual_command,
+                )
+            with patch(
+                "txnmem_model_load.subprocess.run",
+                side_effect=[
+                    subprocess.CompletedProcess([], 0, f"{actual_command}\n", ""),
+                    subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
+                    subprocess.CompletedProcess([], 0, "remote-model-host\n", ""),
+                ],
+            ) as run:
+                report = run_model_load(
+                    manifest,
+                    _UsageModel(),
+                    Path(tmp) / "audited",
+                    execution_scope="cross_host_client_server",
+                    host_count=2,
+                    network_transport="ssh_local_port_forward",
+                    tunnel_process_id=4242,
+                )
+
+        self.assertTrue(report["cross_host_network_claim"])
+        self.assertEqual(run.call_args_list[0].args[0], ["ps", "-p", "4242", "-o", "command="])
+        self.assertEqual(
+            run.call_args_list[1].args[0],
+            ["ssh", "-F", "/dev/null", "-S", "/private/tmp/txnmem-control", "-p", "32222", "-O", "check", "user@8.8.8.8"],
+        )
+        self.assertEqual(
+            run.call_args_list[2].args[0],
+            ["ssh", "-F", "/dev/null", "-S", "/private/tmp/txnmem-control", "-p", "32222", "user@8.8.8.8", "hostname"],
+        )
+
     def test_tunnel_without_controlmaster_or_with_localhost_cannot_claim_cross_host(self):
         no_master = _observe_ssh_tunnel(
             "http://127.0.0.1:18001/v1",
             4242,
-            command_override="ssh -N -L 18001:127.0.0.1:8000 user@remote.example",
+            command_override="ssh -F /dev/null -N -L 18001:127.0.0.1:8000 user@8.8.8.8",
         )
         localhost = _observe_ssh_tunnel(
             "http://127.0.0.1:18001/v1",
             4242,
             command_override=(
-                "ssh -M -S /private/tmp/txnmem-control -N "
+                "ssh -F /dev/null -M -S /private/tmp/txnmem-control -N "
                 "-L 18001:127.0.0.1:8000 user@localhost"
+            ),
+        )
+        loopback = _observe_ssh_tunnel(
+            "http://127.0.0.1:18001/v1",
+            4242,
+            command_override=(
+                "ssh -F /dev/null -M -S /private/tmp/txnmem-control -N "
+                "-L 18001:127.0.0.1:8000 user@127.0.0.1"
             ),
         )
 
         self.assertEqual(no_master["status"], "process_observed_but_controlmaster_required")
         self.assertFalse(no_master["host_identities_distinct"])
-        self.assertEqual(localhost["status"], "process_observed_but_remote_target_loopback")
+        self.assertEqual(localhost["status"], "process_observed_but_unsafe_ssh_command")
         self.assertFalse(localhost["host_identities_distinct"])
+        self.assertEqual(loopback["status"], "process_observed_but_remote_target_loopback")
+        self.assertFalse(loopback["host_identities_distinct"])
 
     def test_matching_controlmaster_pid_observes_remote_hostname_over_same_socket(self):
         command = (
-            "ssh -M -S /private/tmp/txnmem-control -N "
-            "-L 18001:127.0.0.1:8000 user@remote.example"
+            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -N "
+            "-L 18001:127.0.0.1:8000 user@8.8.8.8"
         )
         with patch(
             "txnmem_model_load.subprocess.run",
@@ -236,10 +310,32 @@ class TxnMemModelLoadTests(unittest.TestCase):
         self.assertNotIn("remote.example", serialized)
         self.assertNotIn("txnmem-control", serialized)
 
+    def test_conservative_ssh_parser_rejects_indirect_or_rewritten_destinations(self):
+        commands = [
+            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -J user@8.8.4.4 -N -L 18001:127.0.0.1:8000 user@8.8.8.8",
+            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -N -L 18001:127.0.0.1:8000 user@8.8.8.8 command@8.8.4.4",
+            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -o HostName=127.0.0.1 -N -L 18001:127.0.0.1:8000 user@8.8.8.8",
+            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -l user -N -L 18001:127.0.0.1:8000 8.8.8.8",
+        ]
+        for command in commands:
+            with self.subTest(command=command), patch(
+                "txnmem_model_load.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
+            ) as run:
+                attestation = _observe_ssh_tunnel(
+                    "http://127.0.0.1:18001/v1",
+                    4242,
+                    command_override=command,
+                )
+
+            self.assertEqual(attestation["status"], "process_observed_but_unsafe_ssh_command")
+            self.assertFalse(attestation["host_identities_distinct"])
+            run.assert_not_called()
+
     def test_controlmaster_pid_mismatch_rejects_remote_identity_claim(self):
         command = (
-            "ssh -M -S /private/tmp/txnmem-control -N "
-            "-L 18001:127.0.0.1:8000 user@remote.example"
+            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -N "
+            "-L 18001:127.0.0.1:8000 user@8.8.8.8"
         )
         with patch(
             "txnmem_model_load.subprocess.run",
@@ -260,8 +356,8 @@ class TxnMemModelLoadTests(unittest.TestCase):
 
     def test_controlmaster_observation_preserves_port_and_accepts_pid_on_stderr(self):
         command = (
-            "ssh -tt -M -S /private/tmp/txnmem-control -o ControlPersist=no "
-            "-p 32222 -L 18002:127.0.0.1:8000 -N user@remote.example"
+            "ssh -tt -F /dev/null -M -S /private/tmp/txnmem-control -o ControlPersist=no "
+            "-p 32222 -L 18002:127.0.0.1:8000 -N user@8.8.8.8"
         )
         with patch(
             "txnmem_model_load.subprocess.run",
@@ -278,8 +374,10 @@ class TxnMemModelLoadTests(unittest.TestCase):
 
         self.assertEqual(attestation["status"], "process_observed")
         self.assertTrue(attestation["controlmaster_pid_matches_tunnel"])
-        self.assertEqual(run.call_args_list[0].args[0][3:5], ["-p", "32222"])
-        self.assertEqual(run.call_args_list[1].args[0][3:5], ["-p", "32222"])
+        self.assertEqual(run.call_args_list[0].args[0][:5], ["ssh", "-F", "/dev/null", "-S", "/private/tmp/txnmem-control"])
+        self.assertEqual(run.call_args_list[1].args[0][:5], ["ssh", "-F", "/dev/null", "-S", "/private/tmp/txnmem-control"])
+        self.assertEqual(run.call_args_list[0].args[0][5:7], ["-p", "32222"])
+        self.assertEqual(run.call_args_list[1].args[0][5:7], ["-p", "32222"])
 
 
 if __name__ == "__main__":

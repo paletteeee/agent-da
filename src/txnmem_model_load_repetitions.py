@@ -115,6 +115,8 @@ def _validate_cross_host_condition(summary: Mapping[str, Any], index: int) -> No
         or model_hosts != 1
     ):
         raise ValueError(f"invalid cross-host condition at repetition {index}")
+    if summary.get("production_latency_claim") is not False:
+        raise ValueError(f"invalid production latency claim at repetition {index}")
     _positive_integer(summary, "configured_concurrency")
     _positive_integer(summary, "task_count_per_cycle")
     _positive_integer(summary, "minimum_cycles")
@@ -427,6 +429,7 @@ def aggregate_model_load_repetitions(
         },
         "cross_host_network_claim": True,
         "cross_host_multi_agent_workers_claim": False,
+        "production_latency_claim": False,
         "agent_worker_host_count": reference_condition["agent_worker_host_count"],
         "model_server_host_count": reference_condition["model_server_host_count"],
         "configured_concurrency": reference_condition["configured_concurrency"],

@@ -86,6 +86,7 @@ def _summary(index: int) -> dict:
         "topology_attested": True,
         "cross_host_network_claim": True,
         "cross_host_multi_agent_workers_claim": False,
+        "production_latency_claim": False,
         "topology_attestation": {
             "status": "process_observed",
             "process_id": 1000 + index,
@@ -119,6 +120,21 @@ class ModelLoadRepetitionTests(unittest.TestCase):
         self.assertEqual(report["duration_design"], "3_independent_repetitions_x_600_seconds")
         self.assertFalse(report["single_continuous_tunnel_claim"])
         self.assertFalse(report["cross_host_multi_agent_workers_claim"])
+        self.assertIn("production_latency_claim", report)
+        self.assertFalse(report["production_latency_claim"])
+
+    def test_aggregate_requires_explicit_false_production_latency_claim(self):
+        missing = [_summary(1), _summary(2)]
+        for row in missing:
+            row.pop("production_latency_claim")
+        with self.assertRaisesRegex(ValueError, "production latency claim"):
+            aggregate_model_load_repetitions(missing)
+
+        claimed = [_summary(1), _summary(2)]
+        for row in claimed:
+            row["production_latency_claim"] = True
+        with self.assertRaisesRegex(ValueError, "production latency claim"):
+            aggregate_model_load_repetitions(claimed)
 
     def test_aggregate_rejects_condition_mismatch(self):
         changed = _summary(2)
