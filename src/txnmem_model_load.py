@@ -292,6 +292,11 @@ def run_model_load(
         "ended_at_utc": ended_at_utc,
         "configured_concurrency": concurrency,
         "observed_peak_in_flight": observed_peak_in_flight,
+        "generation_parameters": {
+            "max_steps": max_steps,
+            "max_tokens": getattr(model, "max_tokens", None),
+            "timeout_seconds": getattr(model, "timeout_s", None),
+        },
         "task_count_per_cycle": len(tasks),
         "completed_cycles": completed_cycles,
         "minimum_cycles": minimum_cycles,

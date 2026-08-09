@@ -12,6 +12,8 @@ from txnmem_experiment import _build_parser
 class _UsageModel:
     model = "fixture-model"
     endpoint = "http://127.0.0.1:18001/v1/chat/completions"
+    timeout_s = 123.0
+    max_tokens = 456
 
     def __init__(self):
         self._lock = Lock()
@@ -88,6 +90,7 @@ class TxnMemModelLoadTests(unittest.TestCase):
                 Path(tmp),
                 concurrency=2,
                 minimum_cycles=3,
+                max_steps=7,
             )
             summary_text = (Path(tmp) / "results" / "model_load_summary.json").read_text(
                 encoding="utf-8"
@@ -109,6 +112,10 @@ class TxnMemModelLoadTests(unittest.TestCase):
         self.assertGreaterEqual(report["observed_peak_in_flight"], 1)
         self.assertIn("started_at_utc", report)
         self.assertIn("ended_at_utc", report)
+        self.assertEqual(
+            report["generation_parameters"],
+            {"max_steps": 7, "max_tokens": 456, "timeout_seconds": 123.0},
+        )
         self.assertNotIn("private one", summary_text)
         self.assertIn("private one", raw_text)
         json.loads(summary_text)
