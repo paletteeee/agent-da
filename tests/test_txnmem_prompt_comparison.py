@@ -98,6 +98,8 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
                 "task_summaries": [
                     {
                         "task_id": f"task-{index}",
+                        "status": "completed",
+                        "failure_code": "no_events" if index == 1 else None,
                         "model_visible_benchmark_tool_count": 10 + index,
                         "model_visible_benchmark_tool_names_sha256": f"digest-{index}",
                         "official": {
@@ -119,6 +121,10 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
         self.assertEqual(report["official_success_delta"], 1)
         self.assertAlmostEqual(report["official_assertion_rate_delta"], 8 / 14)
         self.assertEqual(report["improved_task_count"], 2)
+        self.assertEqual(report["baseline_status_counts"], {"completed": 2})
+        self.assertEqual(report["tuned_status_counts"], {"completed": 2})
+        self.assertEqual(report["baseline_failure_code_counts"], {})
+        self.assertEqual(report["tuned_failure_code_counts"], {})
         self.assertEqual(report["token_delta"], 400)
         self.assertEqual(report["token_delta_status"], "exact")
 

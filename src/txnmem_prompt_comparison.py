@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 from pathlib import Path
 from statistics import mean, pstdev
@@ -133,6 +134,19 @@ def _model_visible_tool_attestation(row: Mapping[str, Any], task_id: str) -> tup
     return count, digest
 
 
+def _execution_counts(
+    tasks: Mapping[str, Mapping[str, Any]],
+) -> tuple[dict[str, int], dict[str, int]]:
+    statuses = Counter(str(row.get("status", "unknown")) for row in tasks.values())
+    failures = Counter(
+        str(row["failure_code"])
+        for row in tasks.values()
+        if row.get("status") != "completed"
+        and row.get("failure_code") not in (None, "")
+    )
+    return dict(sorted(statuses.items())), dict(sorted(failures.items()))
+
+
 def compare_appworld_prompt_profiles(
     baseline: Mapping[str, Any],
     tuned: Mapping[str, Any],
@@ -210,6 +224,10 @@ def compare_appworld_prompt_profiles(
         per_task.append(row)
     comparable_rows = [row for row in per_task if row["assertion_rate_delta"] is not None]
     token_comparison = _token_comparison(baseline, tuned)
+    baseline_status_counts, baseline_failure_code_counts = _execution_counts(
+        baseline_tasks
+    )
+    tuned_status_counts, tuned_failure_code_counts = _execution_counts(tuned_tasks)
     return {
         "comparison": "appworld_official_prompt_profiles",
         "manifest_sha256": baseline.get("manifest_sha256"),
@@ -217,6 +235,10 @@ def compare_appworld_prompt_profiles(
         "paired_task_count": len(per_task),
         "model_visible_tool_attestation_status": "matched_for_all_paired_tasks",
         "model_visible_tool_attestation_matched_task_count": len(per_task),
+        "baseline_status_counts": baseline_status_counts,
+        "tuned_status_counts": tuned_status_counts,
+        "baseline_failure_code_counts": baseline_failure_code_counts,
+        "tuned_failure_code_counts": tuned_failure_code_counts,
         "paired_available_assertion_task_count": len(comparable_rows),
         "baseline_unavailable_task_count": baseline_unavailable,
         "tuned_unavailable_task_count": tuned_unavailable,
