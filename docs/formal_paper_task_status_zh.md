@@ -15,7 +15,7 @@
 | 9 | AppWorld native runtime | 已完成（20-task baseline/tuned 配对） | 同 manifest/condition/tool attestation；baseline 0/20 success、17/112 assertions、517,564 exact tokens；tuned 1/20、53/112，13 task 改善、7 不变；20/20 evaluator available | tuned 有 4 个 unauthorized-tool 和 2 个 model-HTTP execution failure；2,171,632 observed tokens 为下界；n=20 不支持总体显著性声称 |
 | 10 | LoCoMo executable Agent | 已完成（10-conversation native + paired official QA + 3 repetitions） | Qwen2.5-7B native contextual batch；paired QA baseline/tuned 各 3 次、每次 1,986 问题、相同 seeds/condition；baseline mean F1=0.13836，tuned=0.13998，平均差值 +0.00162；token 精确增加 40,539 | 仅 3 次描述性 paired repetition，增益很小且一次回退，不能声称总体显著提升 |
 | 11 | 论文初稿与结果同步 | 已完成（含 render/视觉 QA） | `outputs/TxnMem_论文初稿.docx` 已写入三 benchmark、真实服务与 E2E 结果；已生成 20 页 PNG/PDF，完成逐页视觉检查；DOCX accessibility audit 为 high=0、medium=0、low=0 | 正式投稿前仍需按目标会议模板排版 |
-| 12 | Git 备份与远端推送 | 本地备份已完成；远端推送阻塞 | 当前新增代码已有 Git commit；`git remote -v` 为空 | 用户提供远端 URL 后才能 `git remote add origin` / push |
+| 12 | Git 备份与远端推送 | 本地备份已完成；远端推送阻塞 | 代码修复提交 `15b8e69` 与脱敏 v7 结果提交 `c86b46f` 已在本地保存；`git remote -v` 为空 | 用户提供远端 URL 后才能 `git remote add origin` / push |
 
 ## 论文目前可以正式声称的内容
 

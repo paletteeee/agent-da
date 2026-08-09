@@ -41,5 +41,5 @@ Qwen2.5-7B-Instruct（revision `7b44…26b4`，vLLM `0.8.5.post1`）完成 3 次
 - fresh full test：242 tests，3 skipped，0 failures。
 - 对 7 个 v7 JSON 运行 `python3 -m json.tool` 均成功。
 - artifact audit：0 findings。
-- 最近代码提交为 `15b8e69`；v7 results 仍未提交，本文不声称其已在 Git 中。
+- 代码修复提交为 `15b8e69`；脱敏 v7 aggregate、per-repetition summaries 与 endpoint/transport analyses 已由本地结果提交 `c86b46f` 保存。
 - 未使用统计显著性或生产级结论；预期 `injected_crash`/`policy_denied` 未当作模型错误。

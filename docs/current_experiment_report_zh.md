@@ -117,7 +117,7 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 - 本地 process concurrency smoke：2 workers、3 operations、线性化序号完整，无未确认 operation。
 - DOCX 初稿已生成 20 页 PNG/PDF 并逐页视觉检查；accessibility audit 为 high=0、medium=0、low=0。
 - artifact audit：0 findings。
-- 最近代码提交为 `15b8e69`。v7 results 仍为未提交工件，本报告不将其表述为已在 Git 中保存。
+- 代码修复提交为 `15b8e69`；脱敏 v7 aggregate、per-repetition summaries 与 endpoint/transport analyses 已由本地结果提交 `c86b46f` 保存。
 
 ## 9. 当前状态、claim boundary 与后续工作
 
