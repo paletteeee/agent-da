@@ -1,5 +1,7 @@
+import hashlib
 import json
 from pathlib import Path
+import socket
 from tempfile import TemporaryDirectory
 from threading import Lock
 import unittest
@@ -60,6 +62,8 @@ class TxnMemModelLoadTests(unittest.TestCase):
                 "ssh_local_port_forward",
                 "--tunnel-process-id",
                 "4242",
+                "--observed-model-host-identity-sha256",
+                "b" * 64,
             ]
         )
 
@@ -72,6 +76,7 @@ class TxnMemModelLoadTests(unittest.TestCase):
         self.assertEqual(args.host_count, 2)
         self.assertEqual(args.network_transport, "ssh_local_port_forward")
         self.assertEqual(args.tunnel_process_id, 4242)
+        self.assertEqual(args.observed_model_host_identity_sha256, "b" * 64)
         self.assertEqual(args.model_revision, "a" * 64)
         self.assertEqual(args.model_server_build, "vllm:fixture")
 
@@ -157,6 +162,7 @@ class TxnMemModelLoadTests(unittest.TestCase):
                     "ssh -N -L 18001:127.0.0.1:8000 "
                     "gpu-user@remote.example"
                 ),
+                observed_model_host_identity_sha256="b" * 64,
                 model_revision="a" * 64,
                 model_server_build="vllm:fixture",
             )
@@ -183,6 +189,51 @@ class TxnMemModelLoadTests(unittest.TestCase):
         self.assertEqual(report["execution_identity"]["model_revision"], "a" * 64)
         self.assertEqual(
             report["execution_identity"]["model_revision_status"], "sha256"
+        )
+        self.assertTrue(
+            report["topology_attestation"]["host_identities_distinct"]
+        )
+        self.assertEqual(
+            report["topology_attestation"]["model_host_identity_source"],
+            "ssh_remote_hostname_sha256_observation",
+        )
+
+    def test_cross_host_claim_requires_distinct_observed_remote_hostname(self):
+        manifest = {"tasks": [{"task_id": "task-1", "prompt": "x"}]}
+        command = "ssh -N -L 18001:127.0.0.1:8000 user@localhost"
+        local_hash = hashlib.sha256(socket.gethostname().encode("utf-8")).hexdigest()
+        with TemporaryDirectory() as tmp:
+            missing = run_model_load(
+                manifest,
+                _UsageModel(),
+                Path(tmp) / "missing",
+                execution_scope="cross_host_client_server",
+                host_count=2,
+                network_transport="ssh_local_port_forward",
+                tunnel_process_id=4242,
+                tunnel_command_for_test=command,
+            )
+            same = run_model_load(
+                manifest,
+                _UsageModel(),
+                Path(tmp) / "same",
+                execution_scope="cross_host_client_server",
+                host_count=2,
+                network_transport="ssh_local_port_forward",
+                tunnel_process_id=4243,
+                tunnel_command_for_test=command,
+                observed_model_host_identity_sha256=local_hash,
+            )
+
+        self.assertFalse(missing["cross_host_network_claim"])
+        self.assertEqual(
+            missing["topology_attestation"]["status"],
+            "process_observed_but_model_host_unattested",
+        )
+        self.assertFalse(same["cross_host_network_claim"])
+        self.assertEqual(
+            same["topology_attestation"]["status"],
+            "process_observed_but_model_host_not_distinct",
         )
 
 

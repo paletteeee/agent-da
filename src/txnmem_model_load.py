@@ -41,19 +41,32 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     )
 
 
+def _is_sha256(value: Any) -> bool:
+    return bool(
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdefABCDEF" for character in value)
+    )
+
+
 def _observe_ssh_tunnel(
     model_endpoint: str,
     process_id: int | None,
     *,
     command_override: str | None = None,
+    observed_model_host_identity_sha256: str | None = None,
 ) -> dict[str, Any]:
+    agent_host_identity_sha256 = hashlib.sha256(
+        socket.gethostname().encode("utf-8")
+    ).hexdigest()
     base = {
         "status": "not_observed",
         "process_id": process_id,
-        "agent_host_identity_sha256": hashlib.sha256(
-            socket.gethostname().encode("utf-8")
-        ).hexdigest(),
+        "agent_host_identity_sha256": agent_host_identity_sha256,
         "model_host_identity_sha256": None,
+        "model_host_identity_source": None,
+        "ssh_target_identity_sha256": None,
+        "host_identities_distinct": False,
         "process_command_sha256": None,
         "local_forward_matches_model_endpoint": False,
         "raw_host_identities_committed": False,
@@ -99,14 +112,38 @@ def _observe_ssh_tunnel(
     endpoint_is_loopback = endpoint.hostname in {"127.0.0.1", "localhost", "::1"}
     matches = bool(endpoint_is_loopback and endpoint_port and endpoint_port == local_port)
     observed = bool(forward_spec and remote_target and matches)
+    observed_host_identity = (
+        str(observed_model_host_identity_sha256).lower()
+        if _is_sha256(observed_model_host_identity_sha256)
+        else None
+    )
+    identities_distinct = bool(
+        observed_host_identity
+        and observed_host_identity != agent_host_identity_sha256.lower()
+    )
+    if not observed:
+        status = "process_observed_but_mismatch"
+    elif observed_host_identity is None:
+        status = "process_observed_but_model_host_unattested"
+    elif not identities_distinct:
+        status = "process_observed_but_model_host_not_distinct"
+    else:
+        status = "process_observed"
     return {
         **base,
-        "status": "process_observed" if observed else "process_observed_but_mismatch",
-        "model_host_identity_sha256": (
+        "status": status,
+        "model_host_identity_sha256": observed_host_identity,
+        "model_host_identity_source": (
+            "ssh_remote_hostname_sha256_observation"
+            if observed_host_identity
+            else None
+        ),
+        "ssh_target_identity_sha256": (
             hashlib.sha256(remote_target.encode("utf-8")).hexdigest()
             if remote_target
             else None
         ),
+        "host_identities_distinct": identities_distinct,
         "process_command_sha256": hashlib.sha256(command.encode("utf-8")).hexdigest(),
         "local_forward_matches_model_endpoint": matches,
     }
@@ -126,6 +163,7 @@ def run_model_load(
     network_transport: str = "loopback_or_unspecified",
     tunnel_process_id: int | None = None,
     tunnel_command_for_test: str | None = None,
+    observed_model_host_identity_sha256: str | None = None,
     model_revision: str = "unspecified",
     model_server_build: str = "unknown",
 ) -> dict[str, Any]:
@@ -153,6 +191,10 @@ def run_model_load(
         raise ValueError("cross_host_client_server requires host_count>=2")
     if not str(network_transport).strip():
         raise ValueError("network_transport must be non-empty")
+    if observed_model_host_identity_sha256 is not None and not _is_sha256(
+        observed_model_host_identity_sha256
+    ):
+        raise ValueError("observed model host identity must be a SHA-256 digest")
     if model is None or not callable(getattr(model, "complete", None)):
         raise ValueError("a configured model client is required")
     tasks = manifest.get("tasks") if isinstance(manifest, Mapping) else None
@@ -249,6 +291,7 @@ def run_model_load(
         str(getattr(model, "endpoint", "")),
         tunnel_process_id,
         command_override=tunnel_command_for_test,
+        observed_model_host_identity_sha256=observed_model_host_identity_sha256,
     )
     topology_attested = bool(
         execution_scope == "cross_host_client_server"

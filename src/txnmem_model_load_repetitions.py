@@ -41,6 +41,9 @@ _CONDITION_PATHS = (
     ("minimum_duration_seconds",),
     ("topology_attestation", "agent_host_identity_sha256"),
     ("topology_attestation", "model_host_identity_sha256"),
+    ("topology_attestation", "model_host_identity_source"),
+    ("topology_attestation", "ssh_target_identity_sha256"),
+    ("topology_attestation", "host_identities_distinct"),
     ("topology_attestation", "process_command_sha256"),
     ("topology_attestation", "local_forward_matches_model_endpoint"),
 )
@@ -90,6 +93,14 @@ def _positive_finite_number(summary: Mapping[str, Any], key: str) -> float:
     return number
 
 
+def _is_sha256(value: Any) -> bool:
+    return bool(
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdefABCDEF" for character in value)
+    )
+
+
 def _validate_cross_host_condition(summary: Mapping[str, Any], index: int) -> None:
     host_count = _integer(summary, "host_count")
     agent_hosts = _integer(summary, "agent_worker_host_count")
@@ -116,6 +127,22 @@ def _validate_cross_host_condition(summary: Mapping[str, Any], index: int) -> No
         _positive_finite_number(generation, "timeout_seconds")
     except ValueError as exc:
         raise ValueError(f"invalid generation parameters at repetition {index}") from exc
+    topology = summary.get("topology_attestation")
+    if not isinstance(topology, Mapping):
+        raise ValueError(f"invalid topology identity at repetition {index}")
+    agent_hash = topology.get("agent_host_identity_sha256")
+    model_hash = topology.get("model_host_identity_sha256")
+    if (
+        not _is_sha256(agent_hash)
+        or not _is_sha256(model_hash)
+        or not _is_sha256(topology.get("ssh_target_identity_sha256"))
+        or not _is_sha256(topology.get("process_command_sha256"))
+        or topology.get("model_host_identity_source")
+        != "ssh_remote_hostname_sha256_observation"
+        or topology.get("host_identities_distinct") is not True
+        or str(agent_hash).lower() == str(model_hash).lower()
+    ):
+        raise ValueError(f"invalid topology identity at repetition {index}")
 
 
 def _usage(summary: Mapping[str, Any]) -> dict[str, int]:
@@ -218,6 +245,8 @@ def _validate_task_summaries(
         source_ids_by_cycle[cycle].add(source_task_id)
         native_event_count += _integer(row, "native_event_count")
         usage = _usage(row)
+        if usage["request_count"] < 1 or usage["total_tokens"] < 1:
+            raise ValueError(f"attempt usage missing at repetition {index}")
         row_usage.update(usage)
         evaluator = row.get("task_evaluator")
         if not isinstance(evaluator, Mapping) or type(evaluator.get("success")) is not bool:
@@ -296,7 +325,10 @@ def aggregate_model_load_repetitions(
             raise ValueError(f"topology attestation invalid at repetition {index}")
         if topology.get("local_forward_matches_model_endpoint") is not True:
             raise ValueError(f"topology endpoint mismatch at repetition {index}")
-        process_id = _integer(topology, "process_id")
+        try:
+            process_id = _positive_integer(topology, "process_id")
+        except ValueError as exc:
+            raise ValueError(f"invalid topology identity at repetition {index}") from exc
         tunnel_process_ids.append(process_id)
         if summary.get("token_usage_complete") is not True:
             raise ValueError(f"token usage incomplete at repetition {index}")

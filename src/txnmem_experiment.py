@@ -331,6 +331,11 @@ def _build_parser() -> argparse.ArgumentParser:
     model_load.add_argument("--host-count", type=int, default=1)
     model_load.add_argument("--network-transport", default="loopback_or_unspecified")
     model_load.add_argument("--tunnel-process-id", type=int, default=None)
+    model_load.add_argument(
+        "--observed-model-host-identity-sha256",
+        default=None,
+        help="SHA-256 of the hostname returned by an independent SSH observation",
+    )
     benchmark_native = subparsers.add_parser(
         "benchmark-native-smoke", help="run a benchmark task through merged benchmark+memory tools"
     )
@@ -789,6 +794,9 @@ def main(argv: list[str] | None = None) -> int:
                 host_count=args.host_count,
                 network_transport=args.network_transport,
                 tunnel_process_id=args.tunnel_process_id,
+                observed_model_host_identity_sha256=(
+                    args.observed_model_host_identity_sha256
+                ),
                 model_revision=args.model_revision,
                 model_server_build=args.model_server_build,
             )

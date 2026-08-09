@@ -89,9 +89,12 @@ def _summary(index: int) -> dict:
         "topology_attestation": {
             "status": "process_observed",
             "process_id": 1000 + index,
-            "agent_host_identity_sha256": "agent-host",
-            "model_host_identity_sha256": "model-host",
-            "process_command_sha256": "ssh-command",
+            "agent_host_identity_sha256": "a" * 64,
+            "model_host_identity_sha256": "b" * 64,
+            "model_host_identity_source": "ssh_remote_hostname_sha256_observation",
+            "ssh_target_identity_sha256": "c" * 64,
+            "host_identities_distinct": True,
+            "process_command_sha256": "d" * 64,
             "local_forward_matches_model_endpoint": True,
         },
         "latency_ms": {"p50": 10.0 + index, "p95": 20.0 + index, "p99": 30.0 + index},
@@ -247,6 +250,22 @@ class ModelLoadRepetitionTests(unittest.TestCase):
             row["generation_parameters"]["timeout_seconds"] = "300"
         with self.assertRaisesRegex(ValueError, "generation parameters"):
             aggregate_model_load_repetitions(invalid)
+
+    def test_aggregate_rejects_zero_work_attempt_or_invalid_topology_identity(self):
+        zero_attempt = _summary(2)
+        usage = zero_attempt["task_summaries"][0]["model_usage"]
+        for key, value in usage.items():
+            zero_attempt["model_usage"][key] -= value
+            usage[key] = 0
+        with self.assertRaisesRegex(ValueError, "attempt usage"):
+            aggregate_model_load_repetitions([_summary(1), zero_attempt])
+
+        invalid_topology = [_summary(1), _summary(2)]
+        for row in invalid_topology:
+            row["topology_attestation"]["process_id"] = 0
+            row["topology_attestation"]["model_host_identity_sha256"] = "short"
+        with self.assertRaisesRegex(ValueError, "topology identity"):
+            aggregate_model_load_repetitions(invalid_topology)
 
 
 if __name__ == "__main__":
