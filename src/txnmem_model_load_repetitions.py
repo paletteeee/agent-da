@@ -66,6 +66,13 @@ def _integer(summary: Mapping[str, Any], key: str) -> int:
     return value
 
 
+def _positive_integer(summary: Mapping[str, Any], key: str) -> int:
+    value = _integer(summary, key)
+    if value < 1:
+        raise ValueError(f"invalid positive integer: {key}")
+    return value
+
+
 def _finite_number(summary: Mapping[str, Any], key: str) -> float:
     value = summary.get(key)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -74,6 +81,41 @@ def _finite_number(summary: Mapping[str, Any], key: str) -> float:
     if not math.isfinite(number) or number < 0:
         raise ValueError(f"invalid finite number: {key}")
     return number
+
+
+def _positive_finite_number(summary: Mapping[str, Any], key: str) -> float:
+    number = _finite_number(summary, key)
+    if number <= 0:
+        raise ValueError(f"invalid positive finite number: {key}")
+    return number
+
+
+def _validate_cross_host_condition(summary: Mapping[str, Any], index: int) -> None:
+    host_count = _integer(summary, "host_count")
+    agent_hosts = _integer(summary, "agent_worker_host_count")
+    model_hosts = _integer(summary, "model_server_host_count")
+    if (
+        summary.get("execution_scope") != "cross_host_client_server"
+        or summary.get("network_transport") != "ssh_local_port_forward"
+        or host_count < 2
+        or agent_hosts != 1
+        or model_hosts < 1
+        or host_count != agent_hosts + model_hosts
+    ):
+        raise ValueError(f"invalid cross-host condition at repetition {index}")
+    _positive_integer(summary, "configured_concurrency")
+    _positive_integer(summary, "task_count_per_cycle")
+    _positive_integer(summary, "minimum_cycles")
+    _positive_finite_number(summary, "minimum_duration_seconds")
+    generation = summary.get("generation_parameters")
+    if not isinstance(generation, Mapping):
+        raise ValueError(f"invalid generation parameters at repetition {index}")
+    try:
+        _positive_integer(generation, "max_steps")
+        _positive_integer(generation, "max_tokens")
+        _positive_finite_number(generation, "timeout_seconds")
+    except ValueError as exc:
+        raise ValueError(f"invalid generation parameters at repetition {index}") from exc
 
 
 def _usage(summary: Mapping[str, Any]) -> dict[str, int]:
@@ -142,6 +184,7 @@ def _validate_task_summaries(
     native_event_count = 0
     contract_success = 0
     attempt_ids: set[str] = set()
+    source_ids_by_cycle: dict[int, set[str]] = {}
     for row in task_summaries:
         status = row.get("status")
         if status not in {"completed", "failed"}:
@@ -153,20 +196,44 @@ def _validate_task_summaries(
                 raise ValueError(f"failed task lacks failure code at repetition {index}")
             failures[failure_code] += 1
         attempt_id = row.get("attempt_id")
-        if attempt_id is not None:
-            if not isinstance(attempt_id, str) or not attempt_id or attempt_id in attempt_ids:
-                raise ValueError(f"attempt IDs inconsistent at repetition {index}")
-            attempt_ids.add(attempt_id)
+        cycle = row.get("cycle")
+        source_task_id = row.get("source_task_id")
+        if (
+            not isinstance(attempt_id, str)
+            or not attempt_id
+            or attempt_id in attempt_ids
+            or isinstance(cycle, bool)
+            or not isinstance(cycle, int)
+            or cycle < 1
+            or cycle > completed_cycles
+            or not isinstance(source_task_id, str)
+            or not source_task_id
+            or attempt_id != f"cycle_{cycle:04d}:{source_task_id}"
+        ):
+            raise ValueError(f"attempt IDs inconsistent at repetition {index}")
+        attempt_ids.add(attempt_id)
+        source_ids_by_cycle.setdefault(cycle, set())
+        if source_task_id in source_ids_by_cycle[cycle]:
+            raise ValueError(f"attempt grid inconsistent at repetition {index}")
+        source_ids_by_cycle[cycle].add(source_task_id)
         native_event_count += _integer(row, "native_event_count")
         usage = _usage(row)
         row_usage.update(usage)
         evaluator = row.get("task_evaluator")
-        if not isinstance(evaluator, Mapping) or evaluator.get("success") not in {
-            True,
-            False,
-        }:
+        if not isinstance(evaluator, Mapping) or type(evaluator.get("success")) is not bool:
             raise ValueError(f"task evaluator missing at repetition {index}")
         contract_success += int(evaluator["success"] is True)
+
+    expected_sources = source_ids_by_cycle.get(1, set())
+    if (
+        len(source_ids_by_cycle) != completed_cycles
+        or len(expected_sources) != task_count_per_cycle
+        or any(
+            source_ids_by_cycle.get(cycle) != expected_sources
+            for cycle in range(1, completed_cycles + 1)
+        )
+    ):
+        raise ValueError(f"attempt grid inconsistent at repetition {index}")
 
     if statuses["completed"] != _integer(summary, "completed_attempt_count") or statuses[
         "failed"
@@ -213,6 +280,7 @@ def aggregate_model_load_repetitions(
     minimum_duration = _finite_number(summaries[0], "minimum_duration_seconds")
 
     for index, summary in enumerate(summaries, start=1):
+        _validate_cross_host_condition(summary, index)
         if _condition(summary) != reference_condition:
             raise ValueError(f"repetition condition mismatch at repetition {index}")
         if summary.get("duration_target_met") is not True:
@@ -233,7 +301,7 @@ def aggregate_model_load_repetitions(
         if summary.get("token_usage_complete") is not True:
             raise ValueError(f"token usage incomplete at repetition {index}")
 
-        elapsed = _finite_number(summary, "elapsed_seconds")
+        elapsed = _positive_finite_number(summary, "elapsed_seconds")
         if elapsed < minimum_duration:
             raise ValueError(f"elapsed duration below target at repetition {index}")
         started = _utc_time(summary, "started_at_utc")
@@ -247,12 +315,20 @@ def aggregate_model_load_repetitions(
         intervals.append((started, ended, index))
         elapsed_rows.append(elapsed)
 
-        attempt_count = _integer(summary, "attempt_count")
+        completed_cycles = _integer(summary, "completed_cycles")
+        if completed_cycles < _positive_integer(summary, "minimum_cycles"):
+            raise ValueError(f"completed cycles below minimum at repetition {index}")
+        attempt_count = _positive_integer(summary, "attempt_count")
         if attempt_count != _integer(
             summary, "completed_attempt_count"
         ) + _integer(summary, "failed_attempt_count"):
             raise ValueError(f"attempt counts inconsistent at repetition {index}")
         usage = _usage(summary)
+        if usage["request_count"] < 1 or usage["total_tokens"] < 1:
+            raise ValueError(f"nonzero token usage required at repetition {index}")
+        observed_peak = _positive_integer(summary, "observed_peak_in_flight")
+        if observed_peak > _positive_integer(summary, "configured_concurrency"):
+            raise ValueError(f"observed concurrency invalid at repetition {index}")
         usage_rows.append(usage)
         contract_success, failures = _validate_task_summaries(
             summary, index, usage
@@ -266,16 +342,14 @@ def aggregate_model_load_repetitions(
                 "started_at_utc": str(summary["started_at_utc"]),
                 "ended_at_utc": str(summary["ended_at_utc"]),
                 "elapsed_seconds": elapsed,
-                "completed_cycles": _integer(summary, "completed_cycles"),
+                "completed_cycles": completed_cycles,
                 "attempt_count": attempt_count,
                 "completed_attempt_count": _integer(
                     summary, "completed_attempt_count"
                 ),
                 "failed_attempt_count": _integer(summary, "failed_attempt_count"),
                 "contract_success_count": contract_success,
-                "observed_peak_in_flight": _integer(
-                    summary, "observed_peak_in_flight"
-                ),
+                "observed_peak_in_flight": observed_peak,
                 "model_usage": usage,
                 "latency_ms": dict(summary.get("latency_ms", {})),
                 "tunnel_process_id": process_id,

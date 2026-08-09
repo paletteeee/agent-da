@@ -23,6 +23,11 @@ def _summary(index: int) -> dict:
         request_count = 2 if task_index < 20 else 1
         task_summaries.append(
             {
+                "attempt_id": (
+                    f"cycle_{task_index // 8 + 1:04d}:task-{task_index % 8 + 1}"
+                ),
+                "cycle": task_index // 8 + 1,
+                "source_task_id": f"task-{task_index % 8 + 1}",
                 "status": status,
                 "failure_code": failure_code,
                 "native_event_count": 3 if task_index < 40 else 2,
@@ -190,6 +195,58 @@ class ModelLoadRepetitionTests(unittest.TestCase):
 
         self.assertEqual(payload, {"value": 1})
         self.assertEqual(digest, hashlib.sha256(original).hexdigest())
+
+    def test_aggregate_rejects_non_cross_host_or_zero_work_summaries(self):
+        single_host = [_summary(1), _summary(2)]
+        for row in single_host:
+            row["execution_scope"] = "single_host_multi_agent"
+            row["host_count"] = 1
+            row["agent_worker_host_count"] = 1
+            row["model_server_host_count"] = 0
+            row["network_transport"] = "loopback_or_unspecified"
+        with self.assertRaisesRegex(ValueError, "cross-host condition"):
+            aggregate_model_load_repetitions(single_host)
+
+        empty = [_summary(1), _summary(2)]
+        for row in empty:
+            row["completed_cycles"] = 0
+            row["attempt_count"] = 0
+            row["completed_attempt_count"] = 0
+            row["failed_attempt_count"] = 0
+            row["failure_counts"] = {}
+            row["native_event_count"] = 0
+            row["observed_peak_in_flight"] = 0
+            row["task_summaries"] = []
+            row["model_usage"] = {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "request_count": 0,
+                "responses_with_usage": 0,
+            }
+        with self.assertRaisesRegex(ValueError, "completed cycles"):
+            aggregate_model_load_repetitions(empty)
+
+    def test_aggregate_requires_attempt_grid_and_strict_evaluator_boolean(self):
+        missing_ids = _summary(2)
+        for row in missing_ids["task_summaries"]:
+            row.pop("attempt_id")
+        with self.assertRaisesRegex(ValueError, "attempt IDs"):
+            aggregate_model_load_repetitions([_summary(1), missing_ids])
+
+        malformed_evaluator = _summary(2)
+        malformed_evaluator["task_summaries"][0]["task_evaluator"]["success"] = 1
+        with self.assertRaisesRegex(ValueError, "task evaluator"):
+            aggregate_model_load_repetitions([_summary(1), malformed_evaluator])
+
+    def test_aggregate_rejects_invalid_generation_parameters_even_when_matched(self):
+        invalid = [_summary(1), _summary(2)]
+        for row in invalid:
+            row["generation_parameters"]["max_steps"] = 0
+            row["generation_parameters"]["max_tokens"] = None
+            row["generation_parameters"]["timeout_seconds"] = "300"
+        with self.assertRaisesRegex(ValueError, "generation parameters"):
+            aggregate_model_load_repetitions(invalid)
 
 
 if __name__ == "__main__":
