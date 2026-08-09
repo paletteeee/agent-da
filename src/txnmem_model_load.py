@@ -32,7 +32,18 @@ _ATTESTED_SSH_OPTIONS = frozenset(
         "ControlPersist=no",
         "ServerAliveInterval=30",
         "ServerAliveCountMax=3",
+        "ExitOnForwardFailure=yes",
     }
+)
+
+_ATTESTATION_CONTINUITY_FIELDS = (
+    "process_id",
+    "agent_host_identity_sha256",
+    "model_host_identity_sha256",
+    "ssh_target_identity_sha256",
+    "process_command_sha256",
+    "forwarding_binding",
+    "listener_binding",
 )
 
 
@@ -64,6 +75,8 @@ def _parse_attested_ssh_command(tokens: list[str]) -> dict[str, Any] | None:
     control_socket = None
     ssh_port = None
     forward_spec = None
+    tty_option = None
+    ssh_options: set[str] = set()
     while index < len(tokens):
         token = tokens[index]
         if token == "-M":
@@ -79,6 +92,9 @@ def _parse_attested_ssh_command(tokens: list[str]) -> dict[str, Any] | None:
             index += 1
             continue
         if token in {"-t", "-tt"}:
+            if tty_option is not None:
+                return None
+            tty_option = token
             index += 1
             continue
         if token in {"-F", "-S", "-p", "-L", "-o"}:
@@ -101,16 +117,21 @@ def _parse_attested_ssh_command(tokens: list[str]) -> dict[str, Any] | None:
                 if forward_spec is not None:
                     return None
                 forward_spec = value
-            elif value not in _ATTESTED_SSH_OPTIONS:
-                return None
+            else:
+                if value not in _ATTESTED_SSH_OPTIONS or value in ssh_options:
+                    return None
+                ssh_options.add(value)
             index += 2
             continue
         break
     destinations = tokens[index:]
     if (
         not has_no_config
+        or not has_master
         or not has_no_remote_command
+        or control_socket is None
         or forward_spec is None
+        or ssh_options != _ATTESTED_SSH_OPTIONS
         or len(destinations) != 1
         or destinations[0].count("@") != 1
     ):
@@ -123,11 +144,15 @@ def _parse_attested_ssh_command(tokens: list[str]) -> dict[str, Any] | None:
         target_ip = ipaddress.ip_address(host.strip("[]"))
     except ValueError:
         return None
-    parts = forward_spec.split(":")
-    if len(parts) < 3 or not parts[0].isdigit():
+    forward_match = re.fullmatch(
+        r"127\.0\.0\.1:([1-9][0-9]{0,4}):127\.0\.0\.1:([1-9][0-9]{0,4})",
+        forward_spec,
+    )
+    if forward_match is None:
         return None
-    local_port = int(parts[0])
-    if not 0 < local_port < 65536:
+    local_port = int(forward_match.group(1))
+    remote_port = int(forward_match.group(2))
+    if local_port >= 65536 or remote_port >= 65536:
         return None
     return {
         "remote_target": remote_target,
@@ -137,7 +162,68 @@ def _parse_attested_ssh_command(tokens: list[str]) -> dict[str, Any] | None:
         "has_master": has_master,
         "ssh_port": ssh_port,
         "local_port": local_port,
+        "forwarding_binding": {
+            "local_address_class": "ipv4_loopback",
+            "local_port": local_port,
+            "remote_address_class": "ipv4_loopback",
+            "remote_port": remote_port,
+        },
+        "exit_on_forward_failure": True,
     }
+
+
+def _controlmaster_pid(
+    control_options: list[str], remote_target: str
+) -> tuple[bool, int | None]:
+    check = subprocess.run(
+        [*control_options, "-O", "check", remote_target],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if check.returncode != 0:
+        return False, None
+    pid_matches = re.findall(r"\bpid=(\d+)\b", f"{check.stdout}\n{check.stderr}")
+    if len(pid_matches) != 1:
+        return True, None
+    return True, int(pid_matches[0])
+
+
+def _listener_is_owned_by_process(output: str, process_id: int, port: int) -> bool:
+    observed_process_id: int | None = None
+    in_file_record = False
+    exact_name_observed = False
+    listen_state_observed = False
+    expected_name = f"127.0.0.1:{port}"
+
+    def current_record_matches() -> bool:
+        return bool(
+            observed_process_id == process_id
+            and in_file_record
+            and exact_name_observed
+            and listen_state_observed
+        )
+
+    for line in output.splitlines():
+        if line.startswith("p"):
+            if current_record_matches():
+                return True
+            value = line[1:]
+            observed_process_id = int(value) if value.isdigit() else None
+            in_file_record = False
+            exact_name_observed = False
+            listen_state_observed = False
+        elif line.startswith("f"):
+            if current_record_matches():
+                return True
+            in_file_record = bool(line[1:])
+            exact_name_observed = False
+            listen_state_observed = False
+        elif line.startswith("n") and in_file_record:
+            exact_name_observed = line[1:] == expected_name
+        elif line.startswith("TST=") and in_file_record:
+            listen_state_observed = line == "TST=LISTEN"
+    return current_record_matches()
 
 
 def _observe_ssh_tunnel(
@@ -157,10 +243,26 @@ def _observe_ssh_tunnel(
         "model_host_identity_source": None,
         "ssh_target_identity_sha256": None,
         "host_identities_distinct": False,
+        "controlmaster_precheck_verified": False,
+        "controlmaster_precheck_pid_matches_tunnel": False,
+        "controlmaster_postcheck_verified": False,
+        "controlmaster_postcheck_pid_matches_tunnel": False,
         "controlmaster_session_verified": False,
         "controlmaster_pid_matches_tunnel": False,
         "process_command_sha256": None,
+        "exit_on_forward_failure": False,
         "local_forward_matches_model_endpoint": False,
+        "forwarding_binding": {
+            "local_address_class": None,
+            "local_port": None,
+            "remote_address_class": None,
+            "remote_port": None,
+        },
+        "listener_binding": {
+            "address_class": "ipv4_loopback",
+            "port": None,
+            "owned_by_tunnel_process": False,
+        },
         "raw_host_identities_committed": False,
         "raw_process_command_committed": False,
     }
@@ -193,9 +295,13 @@ def _observe_ssh_tunnel(
             "process_command_sha256": command_sha256,
         }
     remote_target = str(parsed["remote_target"])
-    endpoint = urlparse(str(model_endpoint))
-    endpoint_port = endpoint.port
-    endpoint_is_loopback = endpoint.hostname in {"127.0.0.1", "localhost", "::1"}
+    try:
+        endpoint = urlparse(str(model_endpoint))
+        endpoint_port = endpoint.port
+    except ValueError:
+        endpoint_port = None
+        endpoint = urlparse("")
+    endpoint_is_loopback = endpoint.hostname == "127.0.0.1"
     matches = bool(
         endpoint_is_loopback
         and endpoint_port
@@ -206,7 +312,14 @@ def _observe_ssh_tunnel(
             remote_target.encode("utf-8")
         ).hexdigest(),
         "process_command_sha256": command_sha256,
+        "exit_on_forward_failure": bool(parsed["exit_on_forward_failure"]),
         "local_forward_matches_model_endpoint": matches,
+        "forwarding_binding": dict(parsed["forwarding_binding"]),
+        "listener_binding": {
+            "address_class": "ipv4_loopback",
+            "port": parsed["local_port"],
+            "owned_by_tunnel_process": False,
+        },
     }
     if not matches:
         return {
@@ -215,32 +328,43 @@ def _observe_ssh_tunnel(
             "status": "process_observed_but_mismatch",
         }
     if parsed["target_is_loopback"]:
-        return {**base, **common, "status": "process_observed_but_remote_target_loopback"}
-    if not parsed["target_is_public"]:
-        return {**base, **common, "status": "process_observed_but_unsafe_ssh_command"}
-    control_socket = parsed["control_socket"]
-    if not parsed["has_master"] or not control_socket:
-        return {**base, **common, "status": "process_observed_but_controlmaster_required"}
-    control_options = ["ssh", "-F", "/dev/null", "-S", control_socket]
-    if parsed["ssh_port"]:
-        control_options.extend(["-p", str(parsed["ssh_port"])])
-    check = subprocess.run(
-        [*control_options, "-O", "check", remote_target],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if check.returncode != 0:
-        return {**base, **common, "status": "process_observed_but_controlmaster_check_failed"}
-    pid_match = re.search(r"\bpid=(\d+)\b", f"{check.stdout}\n{check.stderr}")
-    if pid_match is None:
-        return {**base, **common, "status": "process_observed_but_controlmaster_pid_unavailable"}
-    if int(pid_match.group(1)) != process_id:
         return {
             **base,
             **common,
+            "status": "process_observed_but_remote_target_loopback",
+        }
+    if not parsed["target_is_public"]:
+        return {**base, **common, "status": "process_observed_but_unsafe_ssh_command"}
+    control_socket = str(parsed["control_socket"])
+    control_options = ["ssh", "-F", "/dev/null", "-S", control_socket]
+    if parsed["ssh_port"]:
+        control_options.extend(["-p", str(parsed["ssh_port"])])
+    precheck_verified, precheck_pid = _controlmaster_pid(
+        control_options, remote_target
+    )
+    if not precheck_verified:
+        return {
+            **base,
+            **common,
+            "status": "process_observed_but_controlmaster_check_failed",
+        }
+    precheck = {
+        "controlmaster_precheck_verified": True,
+        "controlmaster_precheck_pid_matches_tunnel": precheck_pid == process_id,
+    }
+    if precheck_pid is None:
+        return {
+            **base,
+            **common,
+            **precheck,
+            "status": "process_observed_but_controlmaster_pid_unavailable",
+        }
+    if precheck_pid != process_id:
+        return {
+            **base,
+            **common,
+            **precheck,
             "status": "process_observed_but_controlmaster_pid_mismatch",
-            "controlmaster_session_verified": True,
         }
     hostname = subprocess.run(
         [*control_options, remote_target, "hostname"],
@@ -253,12 +377,86 @@ def _observe_ssh_tunnel(
         return {
             **base,
             **common,
+            **precheck,
             "status": "process_observed_but_remote_hostname_unavailable",
-            "controlmaster_session_verified": True,
-            "controlmaster_pid_matches_tunnel": True,
+        }
+    postcheck_verified, postcheck_pid = _controlmaster_pid(
+        control_options, remote_target
+    )
+    postcheck = {
+        "controlmaster_postcheck_verified": postcheck_verified,
+        "controlmaster_postcheck_pid_matches_tunnel": postcheck_pid == process_id,
+    }
+    if not postcheck_verified:
+        return {
+            **base,
+            **common,
+            **precheck,
+            **postcheck,
+            "status": "process_observed_but_controlmaster_postcheck_failed",
+        }
+    if postcheck_pid is None:
+        return {
+            **base,
+            **common,
+            **precheck,
+            **postcheck,
+            "status": "process_observed_but_controlmaster_postcheck_pid_unavailable",
+        }
+    if postcheck_pid != process_id:
+        return {
+            **base,
+            **common,
+            **precheck,
+            **postcheck,
+            "status": "process_observed_but_controlmaster_postcheck_pid_mismatch",
         }
     observed_host_identity = hashlib.sha256(remote_hostname.encode("utf-8")).hexdigest()
     identities_distinct = observed_host_identity != agent_host_identity_sha256.lower()
+    listener = subprocess.run(
+        [
+            "lsof",
+            "-nP",
+            "-a",
+            "-p",
+            str(process_id),
+            f"-iTCP@127.0.0.1:{parsed['local_port']}",
+            "-sTCP:LISTEN",
+            "-FpcnT",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    listener_owned = bool(
+        listener.returncode == 0
+        and _listener_is_owned_by_process(
+            listener.stdout, process_id, int(parsed["local_port"])
+        )
+    )
+    verified = {
+        **precheck,
+        **postcheck,
+        "model_host_identity_sha256": observed_host_identity,
+        "model_host_identity_source": (
+            "ssh_controlmaster_bound_remote_hostname_sha256"
+        ),
+        "host_identities_distinct": identities_distinct,
+        "controlmaster_session_verified": True,
+        "controlmaster_pid_matches_tunnel": True,
+        "listener_binding": {
+            "address_class": "ipv4_loopback",
+            "port": parsed["local_port"],
+            "owned_by_tunnel_process": listener_owned,
+        },
+    }
+    if not listener_owned:
+        return {
+            **base,
+            **common,
+            **verified,
+            "status": "process_observed_but_listener_not_owned",
+        }
     status = (
         "process_observed"
         if identities_distinct
@@ -267,13 +465,22 @@ def _observe_ssh_tunnel(
     return {
         **base,
         **common,
+        **verified,
         "status": status,
-        "model_host_identity_sha256": observed_host_identity,
-        "model_host_identity_source": "ssh_controlmaster_bound_remote_hostname_sha256",
-        "host_identities_distinct": identities_distinct,
-        "controlmaster_session_verified": True,
-        "controlmaster_pid_matches_tunnel": True,
     }
+
+
+def _attestations_are_continuous(
+    preflight: Mapping[str, Any], final: Mapping[str, Any]
+) -> bool:
+    return bool(
+        preflight.get("status") == "process_observed"
+        and final.get("status") == "process_observed"
+        and all(
+            preflight.get(field) == final.get(field)
+            for field in _ATTESTATION_CONTINUITY_FIELDS
+        )
+    )
 
 
 def run_model_load(
@@ -328,6 +535,20 @@ def run_model_load(
     tasks = manifest.get("tasks") if isinstance(manifest, Mapping) else None
     if not isinstance(tasks, list) or not tasks or not all(isinstance(task, Mapping) for task in tasks):
         raise ValueError("manifest.tasks must be a non-empty list of mappings")
+
+    model_endpoint = str(getattr(model, "endpoint", ""))
+    topology_preflight_attestation = _observe_ssh_tunnel(
+        model_endpoint,
+        tunnel_process_id if execution_scope == "cross_host_client_server" else None,
+    )
+    if (
+        execution_scope == "cross_host_client_server"
+        and topology_preflight_attestation["status"] != "process_observed"
+    ):
+        raise ValueError(
+            "cross-host topology preflight failed: "
+            f"{topology_preflight_attestation['status']}"
+        )
 
     root = Path(out_dir)
     raw_path = root / "data" / "model_load_traces.jsonl"
@@ -416,12 +637,18 @@ def run_model_load(
         for attempt in attempts
     ]
     topology_attestation = _observe_ssh_tunnel(
-        str(getattr(model, "endpoint", "")),
-        tunnel_process_id,
+        model_endpoint,
+        tunnel_process_id if execution_scope == "cross_host_client_server" else None,
+    )
+    topology_continuity_verified = bool(
+        execution_scope == "cross_host_client_server"
+        and _attestations_are_continuous(
+            topology_preflight_attestation, topology_attestation
+        )
     )
     topology_attested = bool(
         execution_scope == "cross_host_client_server"
-        and topology_attestation["status"] == "process_observed"
+        and topology_continuity_verified
     )
     import txnmem_model_protocol as model_protocol_module
     import txnmem_real_agent as real_agent_module
@@ -455,6 +682,8 @@ def run_model_load(
         "model_server_host_count": 1,
         "network_transport": str(network_transport),
         "topology_attested": topology_attested,
+        "topology_continuity_verified": topology_continuity_verified,
+        "topology_preflight_attestation": topology_preflight_attestation,
         "topology_attestation": topology_attestation,
         "execution_identity": execution_identity,
         "started_at_utc": started_at_utc,

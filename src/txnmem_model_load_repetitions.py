@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import json
 import math
@@ -18,6 +18,19 @@ _USAGE_FIELDS = (
     "total_tokens",
     "request_count",
     "responses_with_usage",
+)
+
+_FORMAL_REPETITION_COUNT = 3
+_FORMAL_MINIMUM_DURATION_SECONDS = 600.0
+_TOPOLOGY_CONTINUITY_FIELDS = (
+    "process_id",
+    "agent_host_identity_sha256",
+    "model_host_identity_sha256",
+    "model_host_identity_source",
+    "ssh_target_identity_sha256",
+    "process_command_sha256",
+    "forwarding_binding",
+    "listener_binding",
 )
 
 _CONDITION_PATHS = (
@@ -39,6 +52,18 @@ _CONDITION_PATHS = (
     ("task_count_per_cycle",),
     ("minimum_cycles",),
     ("minimum_duration_seconds",),
+    ("topology_preflight_attestation", "agent_host_identity_sha256"),
+    ("topology_preflight_attestation", "model_host_identity_sha256"),
+    ("topology_preflight_attestation", "model_host_identity_source"),
+    ("topology_preflight_attestation", "ssh_target_identity_sha256"),
+    ("topology_preflight_attestation", "process_command_sha256"),
+    ("topology_preflight_attestation", "exit_on_forward_failure"),
+    ("topology_preflight_attestation", "forwarding_binding", "local_address_class"),
+    ("topology_preflight_attestation", "forwarding_binding", "local_port"),
+    ("topology_preflight_attestation", "forwarding_binding", "remote_address_class"),
+    ("topology_preflight_attestation", "forwarding_binding", "remote_port"),
+    ("topology_preflight_attestation", "listener_binding", "address_class"),
+    ("topology_preflight_attestation", "listener_binding", "port"),
     ("topology_attestation", "agent_host_identity_sha256"),
     ("topology_attestation", "model_host_identity_sha256"),
     ("topology_attestation", "model_host_identity_source"),
@@ -47,7 +72,14 @@ _CONDITION_PATHS = (
     ("topology_attestation", "controlmaster_session_verified"),
     ("topology_attestation", "controlmaster_pid_matches_tunnel"),
     ("topology_attestation", "process_command_sha256"),
+    ("topology_attestation", "exit_on_forward_failure"),
     ("topology_attestation", "local_forward_matches_model_endpoint"),
+    ("topology_attestation", "forwarding_binding", "local_address_class"),
+    ("topology_attestation", "forwarding_binding", "local_port"),
+    ("topology_attestation", "forwarding_binding", "remote_address_class"),
+    ("topology_attestation", "forwarding_binding", "remote_port"),
+    ("topology_attestation", "listener_binding", "address_class"),
+    ("topology_attestation", "listener_binding", "port"),
 )
 
 
@@ -103,6 +135,65 @@ def _is_sha256(value: Any) -> bool:
     )
 
 
+def _validate_topology_attestation(
+    summary: Mapping[str, Any], key: str, index: int
+) -> tuple[Mapping[str, Any], int]:
+    label = "preflight topology" if key == "topology_preflight_attestation" else "final topology"
+    topology = summary.get(key)
+    if not isinstance(topology, Mapping):
+        raise ValueError(f"invalid {label} attestation at repetition {index}")
+    agent_hash = topology.get("agent_host_identity_sha256")
+    model_hash = topology.get("model_host_identity_sha256")
+    if (
+        topology.get("status") != "process_observed"
+        or not _is_sha256(agent_hash)
+        or not _is_sha256(model_hash)
+        or not _is_sha256(topology.get("ssh_target_identity_sha256"))
+        or not _is_sha256(topology.get("process_command_sha256"))
+        or topology.get("model_host_identity_source")
+        != "ssh_controlmaster_bound_remote_hostname_sha256"
+        or topology.get("host_identities_distinct") is not True
+        or topology.get("controlmaster_precheck_verified") is not True
+        or topology.get("controlmaster_precheck_pid_matches_tunnel") is not True
+        or topology.get("controlmaster_postcheck_verified") is not True
+        or topology.get("controlmaster_postcheck_pid_matches_tunnel") is not True
+        or topology.get("controlmaster_session_verified") is not True
+        or topology.get("controlmaster_pid_matches_tunnel") is not True
+        or topology.get("exit_on_forward_failure") is not True
+        or topology.get("local_forward_matches_model_endpoint") is not True
+        or str(agent_hash).lower() == str(model_hash).lower()
+    ):
+        raise ValueError(f"invalid topology identity at repetition {index}")
+    forwarding = topology.get("forwarding_binding")
+    listener = topology.get("listener_binding")
+    if not isinstance(forwarding, Mapping) or not isinstance(listener, Mapping):
+        raise ValueError(f"invalid normalized topology binding at repetition {index}")
+    try:
+        local_port = _positive_integer(forwarding, "local_port")
+        remote_port = _positive_integer(forwarding, "remote_port")
+        listener_port = _positive_integer(listener, "port")
+    except ValueError as exc:
+        raise ValueError(
+            f"invalid normalized topology binding at repetition {index}"
+        ) from exc
+    if (
+        local_port >= 65536
+        or remote_port >= 65536
+        or forwarding.get("local_address_class") != "ipv4_loopback"
+        or forwarding.get("remote_address_class") != "ipv4_loopback"
+        or listener.get("address_class") != "ipv4_loopback"
+        or listener_port != local_port
+    ):
+        raise ValueError(f"invalid normalized topology binding at repetition {index}")
+    if listener.get("owned_by_tunnel_process") is not True:
+        raise ValueError(f"invalid listener ownership at repetition {index}")
+    try:
+        process_id = _positive_integer(topology, "process_id")
+    except ValueError as exc:
+        raise ValueError(f"invalid topology identity at repetition {index}") from exc
+    return topology, process_id
+
+
 def _validate_cross_host_condition(summary: Mapping[str, Any], index: int) -> None:
     host_count = _integer(summary, "host_count")
     agent_hosts = _integer(summary, "agent_worker_host_count")
@@ -120,7 +211,12 @@ def _validate_cross_host_condition(summary: Mapping[str, Any], index: int) -> No
     _positive_integer(summary, "configured_concurrency")
     _positive_integer(summary, "task_count_per_cycle")
     _positive_integer(summary, "minimum_cycles")
-    _positive_finite_number(summary, "minimum_duration_seconds")
+    minimum_duration = _positive_finite_number(summary, "minimum_duration_seconds")
+    if minimum_duration < _FORMAL_MINIMUM_DURATION_SECONDS:
+        raise ValueError(
+            "formal minimum duration must be at least 600 seconds "
+            f"at repetition {index}"
+        )
     generation = summary.get("generation_parameters")
     if not isinstance(generation, Mapping):
         raise ValueError(f"invalid generation parameters at repetition {index}")
@@ -130,24 +226,6 @@ def _validate_cross_host_condition(summary: Mapping[str, Any], index: int) -> No
         _positive_finite_number(generation, "timeout_seconds")
     except ValueError as exc:
         raise ValueError(f"invalid generation parameters at repetition {index}") from exc
-    topology = summary.get("topology_attestation")
-    if not isinstance(topology, Mapping):
-        raise ValueError(f"invalid topology identity at repetition {index}")
-    agent_hash = topology.get("agent_host_identity_sha256")
-    model_hash = topology.get("model_host_identity_sha256")
-    if (
-        not _is_sha256(agent_hash)
-        or not _is_sha256(model_hash)
-        or not _is_sha256(topology.get("ssh_target_identity_sha256"))
-        or not _is_sha256(topology.get("process_command_sha256"))
-        or topology.get("model_host_identity_source")
-        != "ssh_controlmaster_bound_remote_hostname_sha256"
-        or topology.get("host_identities_distinct") is not True
-        or topology.get("controlmaster_session_verified") is not True
-        or topology.get("controlmaster_pid_matches_tunnel") is not True
-        or str(agent_hash).lower() == str(model_hash).lower()
-    ):
-        raise ValueError(f"invalid topology identity at repetition {index}")
 
 
 def _usage(summary: Mapping[str, Any]) -> dict[str, int]:
@@ -188,6 +266,8 @@ def _utc_time(summary: Mapping[str, Any], key: str) -> datetime:
         raise ValueError(f"invalid UTC timestamp: {key}") from exc
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError(f"timestamp lacks timezone: {key}")
+    if parsed.utcoffset() != timedelta(0):
+        raise ValueError(f"timestamp must use zero UTC offset: {key}")
     return parsed
 
 
@@ -295,8 +375,8 @@ def aggregate_model_load_repetitions(
 ) -> dict[str, Any]:
     """Aggregate only condition-matched, independent, fully attested runs."""
 
-    if len(summaries) < 2:
-        raise ValueError("at least two model-load repetitions are required")
+    if len(summaries) != _FORMAL_REPETITION_COUNT:
+        raise ValueError("formal aggregation requires exactly three repetitions")
     if not all(isinstance(summary, Mapping) for summary in summaries):
         raise ValueError("each model-load repetition must be a mapping")
     summary_digests = [_canonical_digest(summary) for summary in summaries]
@@ -315,6 +395,19 @@ def aggregate_model_load_repetitions(
 
     for index, summary in enumerate(summaries, start=1):
         _validate_cross_host_condition(summary, index)
+        preflight_topology, preflight_process_id = _validate_topology_attestation(
+            summary, "topology_preflight_attestation", index
+        )
+        topology, process_id = _validate_topology_attestation(
+            summary, "topology_attestation", index
+        )
+        if summary.get("topology_continuity_verified") is not True:
+            raise ValueError(f"topology continuity missing at repetition {index}")
+        if preflight_process_id != process_id or any(
+            preflight_topology.get(field) != topology.get(field)
+            for field in _TOPOLOGY_CONTINUITY_FIELDS
+        ):
+            raise ValueError(f"topology continuity mismatch at repetition {index}")
         if _condition(summary) != reference_condition:
             raise ValueError(f"repetition condition mismatch at repetition {index}")
         if summary.get("duration_target_met") is not True:
@@ -325,15 +418,6 @@ def aggregate_model_load_repetitions(
             raise ValueError(f"topology attestation missing at repetition {index}")
         if summary.get("cross_host_multi_agent_workers_claim") is not False:
             raise ValueError(f"worker-host claim invalid at repetition {index}")
-        topology = summary.get("topology_attestation")
-        if not isinstance(topology, Mapping) or topology.get("status") != "process_observed":
-            raise ValueError(f"topology attestation invalid at repetition {index}")
-        if topology.get("local_forward_matches_model_endpoint") is not True:
-            raise ValueError(f"topology endpoint mismatch at repetition {index}")
-        try:
-            process_id = _positive_integer(topology, "process_id")
-        except ValueError as exc:
-            raise ValueError(f"invalid topology identity at repetition {index}") from exc
         tunnel_process_ids.append(process_id)
         if summary.get("token_usage_complete") is not True:
             raise ValueError(f"token usage incomplete at repetition {index}")
@@ -390,6 +474,7 @@ def aggregate_model_load_repetitions(
                 "model_usage": usage,
                 "latency_ms": dict(summary.get("latency_ms", {})),
                 "tunnel_process_id": process_id,
+                "topology_preflight_status": preflight_topology["status"],
                 "topology_status": topology["status"],
             }
         )

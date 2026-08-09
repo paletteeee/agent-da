@@ -14,6 +14,14 @@ from txnmem_model_protocol import ModelResponse, TokenUsage
 from txnmem_experiment import _build_parser
 
 
+_STRICT_TUNNEL_COMMAND = (
+    "ssh -tt -F /dev/null -M -S /private/tmp/txnmem-control "
+    "-o ControlPersist=no -o ServerAliveInterval=30 "
+    "-o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -p 32222 "
+    "-L 127.0.0.1:18001:127.0.0.1:8000 -N user@8.8.8.8"
+)
+
+
 class _UsageModel:
     model = "fixture-model"
     endpoint = "http://127.0.0.1:18001/v1/chat/completions"
@@ -203,12 +211,7 @@ class TxnMemModelLoadTests(unittest.TestCase):
 
     def test_runner_reads_audited_process_command_and_rejects_command_override(self):
         manifest = {"tasks": [{"task_id": "task-1", "prompt": "x"}]}
-        actual_command = (
-            "ssh -tt -F /dev/null -M -S /private/tmp/txnmem-control "
-            "-o ControlPersist=no -o ServerAliveInterval=30 "
-            "-o ServerAliveCountMax=3 -p 32222 "
-            "-L 18001:127.0.0.1:8000 -N user@8.8.8.8"
-        )
+        actual_command = _STRICT_TUNNEL_COMMAND
         with TemporaryDirectory() as tmp:
             with self.assertRaises(TypeError):
                 run_model_load(
@@ -223,6 +226,25 @@ class TxnMemModelLoadTests(unittest.TestCase):
                     subprocess.CompletedProcess([], 0, f"{actual_command}\n", ""),
                     subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
                     subprocess.CompletedProcess([], 0, "remote-model-host\n", ""),
+                    subprocess.CompletedProcess([], 0, "", "Master running (pid=4242)\n"),
+                    subprocess.CompletedProcess(
+                        [],
+                        0,
+                        "p4242\ncssh\nf4\nn127.0.0.1:18001\n"
+                        "TST=LISTEN\nTQR=0\nTQS=0\n",
+                        "",
+                    ),
+                    subprocess.CompletedProcess([], 0, f"{actual_command}\n", ""),
+                    subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
+                    subprocess.CompletedProcess([], 0, "remote-model-host\n", ""),
+                    subprocess.CompletedProcess([], 0, "", "Master running (pid=4242)\n"),
+                    subprocess.CompletedProcess(
+                        [],
+                        0,
+                        "p4242\ncssh\nf4\nn127.0.0.1:18001\n"
+                        "TST=LISTEN\nTQR=0\nTQS=0\n",
+                        "",
+                    ),
                 ],
             ) as run:
                 report = run_model_load(
@@ -236,6 +258,12 @@ class TxnMemModelLoadTests(unittest.TestCase):
                 )
 
         self.assertTrue(report["cross_host_network_claim"])
+        self.assertTrue(report["topology_continuity_verified"])
+        self.assertTrue(
+            report["topology_preflight_attestation"]["listener_binding"][
+                "owned_by_tunnel_process"
+            ]
+        )
         self.assertEqual(run.call_args_list[0].args[0], ["ps", "-p", "4242", "-o", "command="])
         self.assertEqual(
             run.call_args_list[1].args[0],
@@ -245,31 +273,96 @@ class TxnMemModelLoadTests(unittest.TestCase):
             run.call_args_list[2].args[0],
             ["ssh", "-F", "/dev/null", "-S", "/private/tmp/txnmem-control", "-p", "32222", "user@8.8.8.8", "hostname"],
         )
+        self.assertEqual(
+            run.call_args_list[3].args[0],
+            ["ssh", "-F", "/dev/null", "-S", "/private/tmp/txnmem-control", "-p", "32222", "-O", "check", "user@8.8.8.8"],
+        )
+        self.assertEqual(
+            run.call_args_list[4].args[0],
+            [
+                "lsof",
+                "-nP",
+                "-a",
+                "-p",
+                "4242",
+                "-iTCP@127.0.0.1:18001",
+                "-sTCP:LISTEN",
+                "-FpcnT",
+            ],
+        )
+
+    def test_cross_host_preflight_rejects_unowned_listener_before_model_calls(self):
+        manifest = {"tasks": [{"task_id": "task-1", "prompt": "x"}]}
+        model = _UsageModel()
+        with TemporaryDirectory() as tmp, patch(
+            "txnmem_model_load.subprocess.run",
+            side_effect=[
+                subprocess.CompletedProcess([], 0, f"{_STRICT_TUNNEL_COMMAND}\n", ""),
+                subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
+                subprocess.CompletedProcess([], 0, "remote-model-host\n", ""),
+                subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
+                subprocess.CompletedProcess([], 1, "", ""),
+            ],
+        ) as run:
+            with self.assertRaisesRegex(ValueError, "topology preflight.*listener"):
+                run_model_load(
+                    manifest,
+                    model,
+                    Path(tmp),
+                    execution_scope="cross_host_client_server",
+                    host_count=2,
+                    network_transport="ssh_local_port_forward",
+                    tunnel_process_id=4242,
+                )
+
+        self.assertEqual(model.calls, 0)
+        self.assertEqual(
+            run.call_args_list[-1].args[0],
+            [
+                "lsof",
+                "-nP",
+                "-a",
+                "-p",
+                "4242",
+                "-iTCP@127.0.0.1:18001",
+                "-sTCP:LISTEN",
+                "-FpcnT",
+            ],
+        )
 
     def test_tunnel_without_controlmaster_or_with_localhost_cannot_claim_cross_host(self):
         no_master = _observe_ssh_tunnel(
             "http://127.0.0.1:18001/v1",
             4242,
-            command_override="ssh -F /dev/null -N -L 18001:127.0.0.1:8000 user@8.8.8.8",
+            command_override=(
+                "ssh -F /dev/null -S /private/tmp/txnmem-control "
+                "-o ControlPersist=no -o ServerAliveInterval=30 "
+                "-o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -N "
+                "-L 127.0.0.1:18001:127.0.0.1:8000 user@8.8.8.8"
+            ),
         )
         localhost = _observe_ssh_tunnel(
             "http://127.0.0.1:18001/v1",
             4242,
             command_override=(
-                "ssh -F /dev/null -M -S /private/tmp/txnmem-control -N "
-                "-L 18001:127.0.0.1:8000 user@localhost"
+                "ssh -F /dev/null -M -S /private/tmp/txnmem-control "
+                "-o ControlPersist=no -o ServerAliveInterval=30 "
+                "-o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -N "
+                "-L 127.0.0.1:18001:127.0.0.1:8000 user@localhost"
             ),
         )
         loopback = _observe_ssh_tunnel(
             "http://127.0.0.1:18001/v1",
             4242,
             command_override=(
-                "ssh -F /dev/null -M -S /private/tmp/txnmem-control -N "
-                "-L 18001:127.0.0.1:8000 user@127.0.0.1"
+                "ssh -F /dev/null -M -S /private/tmp/txnmem-control "
+                "-o ControlPersist=no -o ServerAliveInterval=30 "
+                "-o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -N "
+                "-L 127.0.0.1:18001:127.0.0.1:8000 user@127.0.0.1"
             ),
         )
 
-        self.assertEqual(no_master["status"], "process_observed_but_controlmaster_required")
+        self.assertEqual(no_master["status"], "process_observed_but_unsafe_ssh_command")
         self.assertFalse(no_master["host_identities_distinct"])
         self.assertEqual(localhost["status"], "process_observed_but_unsafe_ssh_command")
         self.assertFalse(localhost["host_identities_distinct"])
@@ -277,15 +370,20 @@ class TxnMemModelLoadTests(unittest.TestCase):
         self.assertFalse(loopback["host_identities_distinct"])
 
     def test_matching_controlmaster_pid_observes_remote_hostname_over_same_socket(self):
-        command = (
-            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -N "
-            "-L 18001:127.0.0.1:8000 user@8.8.8.8"
-        )
+        command = _STRICT_TUNNEL_COMMAND
         with patch(
             "txnmem_model_load.subprocess.run",
             side_effect=[
                 subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
                 subprocess.CompletedProcess([], 0, "remote-model-host\n", ""),
+                subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
+                subprocess.CompletedProcess(
+                    [],
+                    0,
+                    "p4242\ncssh\nf4\nn127.0.0.1:18001\n"
+                    "TST=LISTEN\nTQR=0\nTQS=0\n",
+                    "",
+                ),
             ],
         ) as run:
             attestation = _observe_ssh_tunnel(
@@ -304,13 +402,43 @@ class TxnMemModelLoadTests(unittest.TestCase):
             "ssh_controlmaster_bound_remote_hostname_sha256",
         )
         self.assertTrue(attestation["host_identities_distinct"])
-        self.assertEqual(run.call_count, 2)
+        self.assertTrue(attestation["listener_binding"]["owned_by_tunnel_process"])
+        self.assertEqual(run.call_count, 4)
         self.assertIn("-S", run.call_args_list[0].args[0])
         self.assertIn("-S", run.call_args_list[1].args[0])
         serialized = json.dumps(attestation, sort_keys=True)
         self.assertNotIn("remote-model-host", serialized)
         self.assertNotIn("remote.example", serialized)
         self.assertNotIn("txnmem-control", serialized)
+
+    def test_listener_observation_requires_listen_state_on_exact_lsof_record(self):
+        with patch(
+            "txnmem_model_load.subprocess.run",
+            side_effect=[
+                subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
+                subprocess.CompletedProcess([], 0, "remote-model-host\n", ""),
+                subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
+                subprocess.CompletedProcess(
+                    [],
+                    0,
+                    "p4242\ncssh\nf4\nn127.0.0.1:18001\n"
+                    "TST=ESTABLISHED\nTQR=0\nTQS=0\n",
+                    "",
+                ),
+            ],
+        ):
+            attestation = _observe_ssh_tunnel(
+                "http://127.0.0.1:18001/v1",
+                4242,
+                command_override=_STRICT_TUNNEL_COMMAND,
+            )
+
+        self.assertEqual(
+            attestation["status"], "process_observed_but_listener_not_owned"
+        )
+        self.assertFalse(
+            attestation["listener_binding"]["owned_by_tunnel_process"]
+        )
 
     def test_conservative_ssh_parser_rejects_indirect_or_rewritten_destinations(self):
         commands = [
@@ -356,11 +484,31 @@ class TxnMemModelLoadTests(unittest.TestCase):
             self.assertFalse(attestation["host_identities_distinct"])
             run.assert_not_called()
 
+    def test_strict_forward_parser_rejects_third_host_extra_fields_and_missing_exit_option(self):
+        commands = [
+            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -o ControlPersist=no -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -N -L 18001:10.0.0.5:8000 user@8.8.8.8",
+            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -o ControlPersist=no -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -N -L 18001:127.0.0.1:8000:extra user@8.8.8.8",
+            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -o ControlPersist=no -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -N -L 18001:127.0.0.1:8000 user@8.8.8.8",
+        ]
+        for command in commands:
+            with self.subTest(command=command), patch(
+                "txnmem_model_load.subprocess.run",
+                side_effect=[
+                    subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
+                    subprocess.CompletedProcess([], 0, "remote-model-host\n", ""),
+                ],
+            ) as run:
+                attestation = _observe_ssh_tunnel(
+                    "http://127.0.0.1:18001/v1",
+                    4242,
+                    command_override=command,
+                )
+
+            self.assertEqual(attestation["status"], "process_observed_but_unsafe_ssh_command")
+            run.assert_not_called()
+
     def test_controlmaster_pid_mismatch_rejects_remote_identity_claim(self):
-        command = (
-            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -N "
-            "-L 18001:127.0.0.1:8000 user@8.8.8.8"
-        )
+        command = _STRICT_TUNNEL_COMMAND
         with patch(
             "txnmem_model_load.subprocess.run",
             return_value=subprocess.CompletedProcess(
@@ -378,16 +526,49 @@ class TxnMemModelLoadTests(unittest.TestCase):
         self.assertFalse(attestation["host_identities_distinct"])
         self.assertEqual(run.call_count, 1)
 
+    def test_controlmaster_postcheck_failure_rejects_remote_identity_claim(self):
+        with patch(
+            "txnmem_model_load.subprocess.run",
+            side_effect=[
+                subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
+                subprocess.CompletedProcess([], 0, "remote-model-host\n", ""),
+                subprocess.CompletedProcess([], 1, "", "control socket missing"),
+            ],
+        ) as run:
+            attestation = _observe_ssh_tunnel(
+                "http://127.0.0.1:18001/v1",
+                4242,
+                command_override=_STRICT_TUNNEL_COMMAND,
+            )
+
+        self.assertEqual(
+            attestation["status"],
+            "process_observed_but_controlmaster_postcheck_failed",
+        )
+        self.assertFalse(attestation["controlmaster_session_verified"])
+        self.assertFalse(attestation["controlmaster_pid_matches_tunnel"])
+        self.assertEqual(run.call_count, 3)
+
     def test_controlmaster_observation_preserves_port_and_accepts_pid_on_stderr(self):
         command = (
             "ssh -tt -F /dev/null -M -S /private/tmp/txnmem-control -o ControlPersist=no "
-            "-p 32222 -L 18002:127.0.0.1:8000 -N user@8.8.8.8"
+            "-o ServerAliveInterval=30 -o ServerAliveCountMax=3 "
+            "-o ExitOnForwardFailure=yes -p 32222 "
+            "-L 127.0.0.1:18002:127.0.0.1:8000 -N user@8.8.8.8"
         )
         with patch(
             "txnmem_model_load.subprocess.run",
             side_effect=[
                 subprocess.CompletedProcess([], 0, "", "Master running (pid=4242)\n"),
                 subprocess.CompletedProcess([], 0, "remote-model-host\n", ""),
+                subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
+                subprocess.CompletedProcess(
+                    [],
+                    0,
+                    "p4242\ncssh\nf4\nn127.0.0.1:18002\n"
+                    "TST=LISTEN\nTQR=0\nTQS=0\n",
+                    "",
+                ),
             ],
         ) as run:
             attestation = _observe_ssh_tunnel(
@@ -402,6 +583,7 @@ class TxnMemModelLoadTests(unittest.TestCase):
         self.assertEqual(run.call_args_list[1].args[0][:5], ["ssh", "-F", "/dev/null", "-S", "/private/tmp/txnmem-control"])
         self.assertEqual(run.call_args_list[0].args[0][5:7], ["-p", "32222"])
         self.assertEqual(run.call_args_list[1].args[0][5:7], ["-p", "32222"])
+        self.assertEqual(run.call_args_list[2].args[0][5:7], ["-p", "32222"])
 
 
 if __name__ == "__main__":
