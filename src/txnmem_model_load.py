@@ -27,6 +27,15 @@ from txnmem_real_agent import run_real_agent
 from txnmem_real_experiment import evaluate_task_contract, sanitize_run_report
 
 
+_ATTESTED_SSH_OPTIONS = frozenset(
+    {
+        "ControlPersist=no",
+        "ServerAliveInterval=30",
+        "ServerAliveCountMax=3",
+    }
+)
+
+
 def _percentile(values: list[float], probability: float) -> float:
     if not values:
         return 0.0
@@ -92,7 +101,7 @@ def _parse_attested_ssh_command(tokens: list[str]) -> dict[str, Any] | None:
                 if forward_spec is not None:
                     return None
                 forward_spec = value
-            elif value != "ControlPersist=no":
+            elif value not in _ATTESTED_SSH_OPTIONS:
                 return None
             index += 2
             continue

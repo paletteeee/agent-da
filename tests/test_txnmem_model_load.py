@@ -205,7 +205,9 @@ class TxnMemModelLoadTests(unittest.TestCase):
         manifest = {"tasks": [{"task_id": "task-1", "prompt": "x"}]}
         actual_command = (
             "ssh -tt -F /dev/null -M -S /private/tmp/txnmem-control "
-            "-o ControlPersist=no -p 32222 -L 18001:127.0.0.1:8000 -N user@8.8.8.8"
+            "-o ControlPersist=no -o ServerAliveInterval=30 "
+            "-o ServerAliveCountMax=3 -p 32222 "
+            "-L 18001:127.0.0.1:8000 -N user@8.8.8.8"
         )
         with TemporaryDirectory() as tmp:
             with self.assertRaises(TypeError):
@@ -321,6 +323,28 @@ class TxnMemModelLoadTests(unittest.TestCase):
             with self.subTest(command=command), patch(
                 "txnmem_model_load.subprocess.run",
                 return_value=subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
+            ) as run:
+                attestation = _observe_ssh_tunnel(
+                    "http://127.0.0.1:18001/v1",
+                    4242,
+                    command_override=command,
+                )
+
+            self.assertEqual(attestation["status"], "process_observed_but_unsafe_ssh_command")
+            self.assertFalse(attestation["host_identities_distinct"])
+            run.assert_not_called()
+
+    def test_conservative_ssh_parser_rejects_unknown_or_wrong_keepalive_options(self):
+        commands = [
+            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -o Compression=yes -N -L 18001:127.0.0.1:8000 user@8.8.8.8",
+            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -o ProxyJump=user@8.8.4.4 -N -L 18001:127.0.0.1:8000 user@8.8.8.8",
+            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -o ProxyCommand=none -N -L 18001:127.0.0.1:8000 user@8.8.8.8",
+            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -o ServerAliveInterval=31 -N -L 18001:127.0.0.1:8000 user@8.8.8.8",
+            "ssh -F /dev/null -M -S /private/tmp/txnmem-control -o ServerAliveCountMax=4 -N -L 18001:127.0.0.1:8000 user@8.8.8.8",
+        ]
+        for command in commands:
+            with self.subTest(command=command), patch(
+                "txnmem_model_load.subprocess.run",
             ) as run:
                 attestation = _observe_ssh_tunnel(
                     "http://127.0.0.1:18001/v1",
