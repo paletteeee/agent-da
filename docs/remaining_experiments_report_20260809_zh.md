@@ -28,7 +28,7 @@ Qwen2.5-7B-Instruct（revision `7b44…26b4`，vLLM `0.8.5.post1`）完成 3 次
 
 拓扑为 1 Agent-worker host + 1 model-server host，ControlMaster same-session/PID binding 已验证且 host identities distinct，`cross_host_network_claim=true`。边界：`production_latency_claim=false`、`cross_host_multi_agent_workers_claim=false`、`single_continuous_tunnel_claim=false`；未覆盖生产级多主机 Agent workers、连续 30 分钟 tunnel 或跨主机 Qdrant/Neo4j。没有显式 pricing rate，货币成本未计算。
 
-初始 v6 三次的模型、usage 与 topology 工件无错，但 strict aggregator 因 UTC 与 `perf_counter` 不一致而拒绝；根因是 macOS idle sleep 期间 `mach_absolute_time` 暂停。经 `caffeinate` 重跑后，v7 clock diff 为 `0.000663`、`0.000359`、`0.007711` 秒，均远低于 1% tolerance；v6 不作为正式结果。
+初始 v6 预正式运行因 UTC 与 `perf_counter` 的时间证据不一致而被 strict aggregator 拒绝，v6 不作为正式结果。随后为降低休眠相关环境风险采用防休眠执行重跑 v7；正式检查记录的 clock diff 为 `0.000663`、`0.000359`、`0.007711` 秒，均低于 1% tolerance。
 
 证据：`results/cross_host_model_load_formal_v7_aggregate/results/model_load_repetition_summary.json`、`results/cross_host_model_load_formal_v7_rep1/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep2/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep3/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep1/results/endpoint_transport_failure_analysis.json`、`results/cross_host_model_load_formal_v7_rep2/results/endpoint_transport_failure_analysis.json`、`results/cross_host_model_load_formal_v7_rep3/results/endpoint_transport_failure_analysis.json`。
 

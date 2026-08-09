@@ -26,7 +26,7 @@
 
 完整汇总报告见 `docs/current_experiment_report_zh.md`。
 
-## 仍未完成且不能用措辞掩盖的任务
+## 已完成结果的限制、future work 与外部阻塞
 
 - τ-bench 50-task 主 batch + 2 个网络错误 task retry 已完成最终合并：50/50 evaluator available，497 native events；2 max-step、1 no-events、1 retry 后 no-events，不能把这些 episode 写成任务成功。
 - 真实 backend 当前是单机 Qdrant/Neo4j/Toxiproxy 和 5-task E2E smoke；50/200/1000 events 的真实服务性能扩展已完成各 30 次。v7 已补足跨主机 client-to-model-server 负载，不改变其不是生产级跨主机多 Agent 部署的边界。

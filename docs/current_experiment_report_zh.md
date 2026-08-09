@@ -95,7 +95,7 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 
 拓扑为 1 个 Agent-worker host 加 1 个 model-server host；ControlMaster same-session/PID binding 已验证、host identities distinct、`cross_host_network_claim=true`。这支持跨主机 client-to-model-server 负载实验的机制证据，但不等于生产级多主机 Agent workers、单一连续 30 分钟 tunnel、跨主机 Qdrant/Neo4j，亦不构成生产 latency 结论（`production_latency_claim=false`）。`cross_host_multi_agent_workers_claim=false`、`single_continuous_tunnel_claim=false`；没有显式 pricing rate，货币成本未计算。
 
-早期 v6 的三次运行虽模型、usage 与 topology 工件无错，但 strict aggregator 因 UTC 与 `perf_counter` 不一致而拒绝，根因是 macOS idle sleep 时 `mach_absolute_time` 暂停；因此 v6 不作为正式结果。以 `caffeinate` 重跑 v7 后，三次 clock difference 分别为 `0.000663`、`0.000359`、`0.007711` 秒，均显著低于 1% tolerance。
+早期 v6 预正式运行因 UTC 与 `perf_counter` 的时间证据不一致而被 strict aggregator 拒绝，因此 v6 不计入正式结果。随后为降低休眠相关环境风险采用防休眠执行重跑 v7；正式检查记录的三次 clock difference 分别为 `0.000663`、`0.000359`、`0.007711` 秒，均低于 1% tolerance。
 
 证据路径：`results/cross_host_model_load_formal_v7_aggregate/results/model_load_repetition_summary.json`、`results/cross_host_model_load_formal_v7_rep1/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep2/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep3/results/model_load_summary.json`、`results/cross_host_model_load_formal_v7_rep1/results/endpoint_transport_failure_analysis.json`、`results/cross_host_model_load_formal_v7_rep2/results/endpoint_transport_failure_analysis.json`、`results/cross_host_model_load_formal_v7_rep3/results/endpoint_transport_failure_analysis.json`。
 
