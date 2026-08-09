@@ -1,12 +1,15 @@
+import contextlib
 import hashlib
+import io
 import json
 from pathlib import Path
-import socket
+import subprocess
 from tempfile import TemporaryDirectory
 from threading import Lock
 import unittest
+from unittest.mock import patch
 
-from txnmem_model_load import run_model_load
+from txnmem_model_load import _observe_ssh_tunnel, run_model_load
 from txnmem_model_protocol import ModelResponse, TokenUsage
 from txnmem_experiment import _build_parser
 
@@ -32,7 +35,7 @@ class _UsageModel:
 
 
 class TxnMemModelLoadTests(unittest.TestCase):
-    def test_cli_exposes_concurrency_cycle_duration_and_generation_bounds(self):
+    def test_cli_exposes_topology_inputs_but_rejects_caller_supplied_host_identity(self):
         args = _build_parser().parse_args(
             [
                 "real-model-load",
@@ -62,8 +65,6 @@ class TxnMemModelLoadTests(unittest.TestCase):
                 "ssh_local_port_forward",
                 "--tunnel-process-id",
                 "4242",
-                "--observed-model-host-identity-sha256",
-                "b" * 64,
             ]
         )
 
@@ -76,9 +77,31 @@ class TxnMemModelLoadTests(unittest.TestCase):
         self.assertEqual(args.host_count, 2)
         self.assertEqual(args.network_transport, "ssh_local_port_forward")
         self.assertEqual(args.tunnel_process_id, 4242)
-        self.assertEqual(args.observed_model_host_identity_sha256, "b" * 64)
         self.assertEqual(args.model_revision, "a" * 64)
         self.assertEqual(args.model_server_build, "vllm:fixture")
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                _build_parser().parse_args(
+                    [
+                        "real-model-load",
+                        "--manifest",
+                        "manifest.json",
+                        "--endpoint",
+                        "http://model.test/v1",
+                        "--model",
+                        "qwen",
+                        "--observed-model-host-identity-sha256",
+                        "b" * 64,
+                    ]
+                )
+        with TemporaryDirectory() as tmp:
+            with self.assertRaises(TypeError):
+                run_model_load(
+                    {"tasks": [{"task_id": "task-1", "prompt": "x"}]},
+                    _UsageModel(),
+                    Path(tmp),
+                    observed_model_host_identity_sha256="b" * 64,
+                )
 
     def test_multi_agent_cycles_report_usage_latency_and_claim_boundary(self):
         manifest = {
@@ -145,96 +168,118 @@ class TxnMemModelLoadTests(unittest.TestCase):
                     minimum_cycles=0,
                 )
 
-    def test_cross_host_client_server_scope_does_not_claim_multi_host_workers(self):
+    def test_cross_host_client_server_scope_requires_exactly_two_hosts(self):
         manifest = {"tasks": [{"task_id": "task-1", "prompt": "x"}]}
         with TemporaryDirectory() as tmp:
-            report = run_model_load(
-                manifest,
-                _UsageModel(),
-                Path(tmp),
-                concurrency=1,
-                minimum_cycles=1,
-                execution_scope="cross_host_client_server",
-                host_count=2,
-                network_transport="ssh_local_port_forward",
-                tunnel_process_id=4242,
-                tunnel_command_for_test=(
-                    "ssh -N -L 18001:127.0.0.1:8000 "
-                    "gpu-user@remote.example"
-                ),
-                observed_model_host_identity_sha256="b" * 64,
-                model_revision="a" * 64,
-                model_server_build="vllm:fixture",
-            )
+            with self.assertRaisesRegex(ValueError, "host_count=2"):
+                run_model_load(
+                    manifest,
+                    _UsageModel(),
+                    Path(tmp),
+                    execution_scope="cross_host_client_server",
+                    host_count=3,
+                )
 
-        self.assertEqual(report["execution_scope"], "cross_host_client_server")
-        self.assertEqual(report["host_count"], 2)
-        self.assertTrue(report["cross_host_network_claim"])
-        self.assertFalse(report["cross_host_multi_agent_workers_claim"])
-        self.assertEqual(report["agent_worker_host_count"], 1)
-        self.assertEqual(report["model_server_host_count"], 1)
-        self.assertEqual(report["network_transport"], "ssh_local_port_forward")
-        self.assertTrue(report["topology_attested"])
-        self.assertEqual(
-            report["topology_attestation"]["status"], "process_observed"
+    def test_tunnel_without_controlmaster_or_with_localhost_cannot_claim_cross_host(self):
+        no_master = _observe_ssh_tunnel(
+            "http://127.0.0.1:18001/v1",
+            4242,
+            command_override="ssh -N -L 18001:127.0.0.1:8000 user@remote.example",
         )
-        self.assertNotEqual(
-            report["topology_attestation"]["agent_host_identity_sha256"],
-            "",
-        )
-        self.assertNotEqual(
-            report["topology_attestation"]["model_host_identity_sha256"],
-            "gpu-user@remote.example",
-        )
-        self.assertEqual(report["execution_identity"]["model_revision"], "a" * 64)
-        self.assertEqual(
-            report["execution_identity"]["model_revision_status"], "sha256"
-        )
-        self.assertTrue(
-            report["topology_attestation"]["host_identities_distinct"]
-        )
-        self.assertEqual(
-            report["topology_attestation"]["model_host_identity_source"],
-            "ssh_remote_hostname_sha256_observation",
+        localhost = _observe_ssh_tunnel(
+            "http://127.0.0.1:18001/v1",
+            4242,
+            command_override=(
+                "ssh -M -S /private/tmp/txnmem-control -N "
+                "-L 18001:127.0.0.1:8000 user@localhost"
+            ),
         )
 
-    def test_cross_host_claim_requires_distinct_observed_remote_hostname(self):
-        manifest = {"tasks": [{"task_id": "task-1", "prompt": "x"}]}
-        command = "ssh -N -L 18001:127.0.0.1:8000 user@localhost"
-        local_hash = hashlib.sha256(socket.gethostname().encode("utf-8")).hexdigest()
-        with TemporaryDirectory() as tmp:
-            missing = run_model_load(
-                manifest,
-                _UsageModel(),
-                Path(tmp) / "missing",
-                execution_scope="cross_host_client_server",
-                host_count=2,
-                network_transport="ssh_local_port_forward",
-                tunnel_process_id=4242,
-                tunnel_command_for_test=command,
-            )
-            same = run_model_load(
-                manifest,
-                _UsageModel(),
-                Path(tmp) / "same",
-                execution_scope="cross_host_client_server",
-                host_count=2,
-                network_transport="ssh_local_port_forward",
-                tunnel_process_id=4243,
-                tunnel_command_for_test=command,
-                observed_model_host_identity_sha256=local_hash,
+        self.assertEqual(no_master["status"], "process_observed_but_controlmaster_required")
+        self.assertFalse(no_master["host_identities_distinct"])
+        self.assertEqual(localhost["status"], "process_observed_but_remote_target_loopback")
+        self.assertFalse(localhost["host_identities_distinct"])
+
+    def test_matching_controlmaster_pid_observes_remote_hostname_over_same_socket(self):
+        command = (
+            "ssh -M -S /private/tmp/txnmem-control -N "
+            "-L 18001:127.0.0.1:8000 user@remote.example"
+        )
+        with patch(
+            "txnmem_model_load.subprocess.run",
+            side_effect=[
+                subprocess.CompletedProcess([], 0, "Master running (pid=4242)\n", ""),
+                subprocess.CompletedProcess([], 0, "remote-model-host\n", ""),
+            ],
+        ) as run:
+            attestation = _observe_ssh_tunnel(
+                "http://127.0.0.1:18001/v1",
+                4242,
+                command_override=command,
             )
 
-        self.assertFalse(missing["cross_host_network_claim"])
+        self.assertEqual(attestation["status"], "process_observed")
         self.assertEqual(
-            missing["topology_attestation"]["status"],
-            "process_observed_but_model_host_unattested",
+            attestation["model_host_identity_sha256"],
+            hashlib.sha256(b"remote-model-host").hexdigest(),
         )
-        self.assertFalse(same["cross_host_network_claim"])
         self.assertEqual(
-            same["topology_attestation"]["status"],
-            "process_observed_but_model_host_not_distinct",
+            attestation["model_host_identity_source"],
+            "ssh_controlmaster_bound_remote_hostname_sha256",
         )
+        self.assertTrue(attestation["host_identities_distinct"])
+        self.assertEqual(run.call_count, 2)
+        self.assertIn("-S", run.call_args_list[0].args[0])
+        self.assertIn("-S", run.call_args_list[1].args[0])
+        serialized = json.dumps(attestation, sort_keys=True)
+        self.assertNotIn("remote-model-host", serialized)
+        self.assertNotIn("remote.example", serialized)
+        self.assertNotIn("txnmem-control", serialized)
+
+    def test_controlmaster_pid_mismatch_rejects_remote_identity_claim(self):
+        command = (
+            "ssh -M -S /private/tmp/txnmem-control -N "
+            "-L 18001:127.0.0.1:8000 user@remote.example"
+        )
+        with patch(
+            "txnmem_model_load.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                [], 0, "Master running (pid=4243)\n", ""
+            ),
+        ) as run:
+            attestation = _observe_ssh_tunnel(
+                "http://127.0.0.1:18001/v1",
+                4242,
+                command_override=command,
+            )
+
+        self.assertEqual(attestation["status"], "process_observed_but_controlmaster_pid_mismatch")
+        self.assertIsNone(attestation["model_host_identity_sha256"])
+        self.assertFalse(attestation["host_identities_distinct"])
+        self.assertEqual(run.call_count, 1)
+
+    def test_controlmaster_observation_preserves_port_and_accepts_pid_on_stderr(self):
+        command = (
+            "ssh -tt -M -S /private/tmp/txnmem-control -o ControlPersist=no "
+            "-p 32222 -L 18002:127.0.0.1:8000 -N user@remote.example"
+        )
+        with patch(
+            "txnmem_model_load.subprocess.run",
+            side_effect=[
+                subprocess.CompletedProcess([], 0, "", "Master running (pid=4242)\n"),
+                subprocess.CompletedProcess([], 0, "remote-model-host\n", ""),
+            ],
+        ) as run:
+            attestation = _observe_ssh_tunnel(
+                "http://127.0.0.1:18002/v1",
+                4242,
+                command_override=command,
+            )
+
+        self.assertEqual(attestation["status"], "process_observed")
+        self.assertTrue(attestation["controlmaster_pid_matches_tunnel"])
+        self.assertEqual(run.call_args_list[0].args[0][3:5], ["-p", "32222"])
+        self.assertEqual(run.call_args_list[1].args[0][3:5], ["-p", "32222"])
 
 
 if __name__ == "__main__":

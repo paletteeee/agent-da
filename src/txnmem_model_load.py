@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+import re
 import shlex
 import socket
 import subprocess
@@ -41,20 +42,11 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     )
 
 
-def _is_sha256(value: Any) -> bool:
-    return bool(
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdefABCDEF" for character in value)
-    )
-
-
 def _observe_ssh_tunnel(
     model_endpoint: str,
     process_id: int | None,
     *,
     command_override: str | None = None,
-    observed_model_host_identity_sha256: str | None = None,
 ) -> dict[str, Any]:
     agent_host_identity_sha256 = hashlib.sha256(
         socket.gethostname().encode("utf-8")
@@ -67,6 +59,8 @@ def _observe_ssh_tunnel(
         "model_host_identity_source": None,
         "ssh_target_identity_sha256": None,
         "host_identities_distinct": False,
+        "controlmaster_session_verified": False,
+        "controlmaster_pid_matches_tunnel": False,
         "process_command_sha256": None,
         "local_forward_matches_model_endpoint": False,
         "raw_host_identities_committed": False,
@@ -112,40 +106,98 @@ def _observe_ssh_tunnel(
     endpoint_is_loopback = endpoint.hostname in {"127.0.0.1", "localhost", "::1"}
     matches = bool(endpoint_is_loopback and endpoint_port and endpoint_port == local_port)
     observed = bool(forward_spec and remote_target and matches)
-    observed_host_identity = (
-        str(observed_model_host_identity_sha256).lower()
-        if _is_sha256(observed_model_host_identity_sha256)
-        else None
-    )
-    identities_distinct = bool(
-        observed_host_identity
-        and observed_host_identity != agent_host_identity_sha256.lower()
-    )
     if not observed:
-        status = "process_observed_but_mismatch"
-    elif observed_host_identity is None:
-        status = "process_observed_but_model_host_unattested"
-    elif not identities_distinct:
-        status = "process_observed_but_model_host_not_distinct"
-    else:
-        status = "process_observed"
-    return {
-        **base,
-        "status": status,
-        "model_host_identity_sha256": observed_host_identity,
-        "model_host_identity_source": (
-            "ssh_remote_hostname_sha256_observation"
-            if observed_host_identity
-            else None
-        ),
-        "ssh_target_identity_sha256": (
-            hashlib.sha256(remote_target.encode("utf-8")).hexdigest()
-            if remote_target
-            else None
-        ),
-        "host_identities_distinct": identities_distinct,
+        return {
+            **base,
+            "status": "process_observed_but_mismatch",
+            "ssh_target_identity_sha256": (
+                hashlib.sha256(remote_target.encode("utf-8")).hexdigest()
+                if remote_target
+                else None
+            ),
+            "process_command_sha256": hashlib.sha256(command.encode("utf-8")).hexdigest(),
+            "local_forward_matches_model_endpoint": matches,
+        }
+    target_host = remote_target.rsplit("@", 1)[-1].strip("[]").lower()
+    common = {
+        "ssh_target_identity_sha256": hashlib.sha256(
+            remote_target.encode("utf-8")
+        ).hexdigest(),
         "process_command_sha256": hashlib.sha256(command.encode("utf-8")).hexdigest(),
         "local_forward_matches_model_endpoint": matches,
+    }
+    if target_host in {"localhost", "127.0.0.1", "::1"}:
+        return {**base, **common, "status": "process_observed_but_remote_target_loopback"}
+    control_socket = None
+    for index, token in enumerate(tokens):
+        if token == "-S" and index + 1 < len(tokens):
+            control_socket = tokens[index + 1]
+            break
+        if token.startswith("-S") and len(token) > 2:
+            control_socket = token[2:]
+            break
+    if "-M" not in tokens or not control_socket:
+        return {**base, **common, "status": "process_observed_but_controlmaster_required"}
+    ssh_port = None
+    for index, token in enumerate(tokens):
+        if token == "-p" and index + 1 < len(tokens):
+            ssh_port = tokens[index + 1]
+            break
+        if token.startswith("-p") and len(token) > 2:
+            ssh_port = token[2:]
+            break
+    control_options = ["ssh", "-S", control_socket]
+    if ssh_port:
+        control_options.extend(["-p", ssh_port])
+    check = subprocess.run(
+        [*control_options, "-O", "check", remote_target],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if check.returncode != 0:
+        return {**base, **common, "status": "process_observed_but_controlmaster_check_failed"}
+    pid_match = re.search(r"\bpid=(\d+)\b", f"{check.stdout}\n{check.stderr}")
+    if pid_match is None:
+        return {**base, **common, "status": "process_observed_but_controlmaster_pid_unavailable"}
+    if int(pid_match.group(1)) != process_id:
+        return {
+            **base,
+            **common,
+            "status": "process_observed_but_controlmaster_pid_mismatch",
+            "controlmaster_session_verified": True,
+        }
+    hostname = subprocess.run(
+        [*control_options, remote_target, "hostname"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    remote_hostname = hostname.stdout.strip() if hostname.returncode == 0 else ""
+    if not remote_hostname:
+        return {
+            **base,
+            **common,
+            "status": "process_observed_but_remote_hostname_unavailable",
+            "controlmaster_session_verified": True,
+            "controlmaster_pid_matches_tunnel": True,
+        }
+    observed_host_identity = hashlib.sha256(remote_hostname.encode("utf-8")).hexdigest()
+    identities_distinct = observed_host_identity != agent_host_identity_sha256.lower()
+    status = (
+        "process_observed"
+        if identities_distinct
+        else "process_observed_but_model_host_not_distinct"
+    )
+    return {
+        **base,
+        **common,
+        "status": status,
+        "model_host_identity_sha256": observed_host_identity,
+        "model_host_identity_source": "ssh_controlmaster_bound_remote_hostname_sha256",
+        "host_identities_distinct": identities_distinct,
+        "controlmaster_session_verified": True,
+        "controlmaster_pid_matches_tunnel": True,
     }
 
 
@@ -163,7 +215,6 @@ def run_model_load(
     network_transport: str = "loopback_or_unspecified",
     tunnel_process_id: int | None = None,
     tunnel_command_for_test: str | None = None,
-    observed_model_host_identity_sha256: str | None = None,
     model_revision: str = "unspecified",
     model_server_build: str = "unknown",
 ) -> dict[str, Any]:
@@ -187,14 +238,10 @@ def run_model_load(
         raise ValueError("unsupported execution_scope")
     if execution_scope == "single_host_multi_agent" and host_count != 1:
         raise ValueError("single_host_multi_agent requires host_count=1")
-    if execution_scope == "cross_host_client_server" and host_count < 2:
-        raise ValueError("cross_host_client_server requires host_count>=2")
+    if execution_scope == "cross_host_client_server" and host_count != 2:
+        raise ValueError("cross_host_client_server requires host_count=2")
     if not str(network_transport).strip():
         raise ValueError("network_transport must be non-empty")
-    if observed_model_host_identity_sha256 is not None and not _is_sha256(
-        observed_model_host_identity_sha256
-    ):
-        raise ValueError("observed model host identity must be a SHA-256 digest")
     if model is None or not callable(getattr(model, "complete", None)):
         raise ValueError("a configured model client is required")
     tasks = manifest.get("tasks") if isinstance(manifest, Mapping) else None
@@ -291,7 +338,6 @@ def run_model_load(
         str(getattr(model, "endpoint", "")),
         tunnel_process_id,
         command_override=tunnel_command_for_test,
-        observed_model_host_identity_sha256=observed_model_host_identity_sha256,
     )
     topology_attested = bool(
         execution_scope == "cross_host_client_server"

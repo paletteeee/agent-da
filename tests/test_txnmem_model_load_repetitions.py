@@ -91,9 +91,11 @@ def _summary(index: int) -> dict:
             "process_id": 1000 + index,
             "agent_host_identity_sha256": "a" * 64,
             "model_host_identity_sha256": "b" * 64,
-            "model_host_identity_source": "ssh_remote_hostname_sha256_observation",
+            "model_host_identity_source": "ssh_controlmaster_bound_remote_hostname_sha256",
             "ssh_target_identity_sha256": "c" * 64,
             "host_identities_distinct": True,
+            "controlmaster_session_verified": True,
+            "controlmaster_pid_matches_tunnel": True,
             "process_command_sha256": "d" * 64,
             "local_forward_matches_model_endpoint": True,
         },
@@ -229,6 +231,16 @@ class ModelLoadRepetitionTests(unittest.TestCase):
             }
         with self.assertRaisesRegex(ValueError, "completed cycles"):
             aggregate_model_load_repetitions(empty)
+
+    def test_aggregate_rejects_multiple_model_hosts_even_when_counts_add_up(self):
+        summaries = [_summary(1), _summary(2)]
+        for row in summaries:
+            row["host_count"] = 3
+            row["agent_worker_host_count"] = 1
+            row["model_server_host_count"] = 2
+
+        with self.assertRaisesRegex(ValueError, "cross-host condition"):
+            aggregate_model_load_repetitions(summaries)
 
     def test_aggregate_requires_attempt_grid_and_strict_evaluator_boolean(self):
         missing_ids = _summary(2)

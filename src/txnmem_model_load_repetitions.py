@@ -44,6 +44,8 @@ _CONDITION_PATHS = (
     ("topology_attestation", "model_host_identity_source"),
     ("topology_attestation", "ssh_target_identity_sha256"),
     ("topology_attestation", "host_identities_distinct"),
+    ("topology_attestation", "controlmaster_session_verified"),
+    ("topology_attestation", "controlmaster_pid_matches_tunnel"),
     ("topology_attestation", "process_command_sha256"),
     ("topology_attestation", "local_forward_matches_model_endpoint"),
 )
@@ -108,10 +110,9 @@ def _validate_cross_host_condition(summary: Mapping[str, Any], index: int) -> No
     if (
         summary.get("execution_scope") != "cross_host_client_server"
         or summary.get("network_transport") != "ssh_local_port_forward"
-        or host_count < 2
+        or host_count != 2
         or agent_hosts != 1
-        or model_hosts < 1
-        or host_count != agent_hosts + model_hosts
+        or model_hosts != 1
     ):
         raise ValueError(f"invalid cross-host condition at repetition {index}")
     _positive_integer(summary, "configured_concurrency")
@@ -138,8 +139,10 @@ def _validate_cross_host_condition(summary: Mapping[str, Any], index: int) -> No
         or not _is_sha256(topology.get("ssh_target_identity_sha256"))
         or not _is_sha256(topology.get("process_command_sha256"))
         or topology.get("model_host_identity_source")
-        != "ssh_remote_hostname_sha256_observation"
+        != "ssh_controlmaster_bound_remote_hostname_sha256"
         or topology.get("host_identities_distinct") is not True
+        or topology.get("controlmaster_session_verified") is not True
+        or topology.get("controlmaster_pid_matches_tunnel") is not True
         or str(agent_hash).lower() == str(model_hash).lower()
     ):
         raise ValueError(f"invalid topology identity at repetition {index}")
