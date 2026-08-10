@@ -10,6 +10,7 @@ from pathlib import Path
 from txnmem_evidence_aggregates import (
     aggregate_e2e_submission_evidence,
     aggregate_tau_submission_evidence,
+    aggregate_toxiproxy_submission_evidence,
 )
 
 
@@ -42,6 +43,14 @@ def main() -> int:
     e2e.add_argument("--source-commit", required=True)
     e2e.add_argument("--run-command", required=True)
 
+    toxiproxy = subparsers.add_parser("toxiproxy")
+    toxiproxy.add_argument("--source", type=Path, required=True)
+    toxiproxy.add_argument("--out", type=Path, required=True)
+    toxiproxy.add_argument("--expected-repetitions", type=int, default=30)
+    toxiproxy.add_argument("--toxiproxy-version", required=True)
+    toxiproxy.add_argument("--source-commit", required=True)
+    toxiproxy.add_argument("--run-command", required=True)
+
     args = parser.parse_args()
     if args.command == "tau":
         attestation = json.loads(args.runtime_attestation.read_text(encoding="utf-8"))
@@ -54,10 +63,18 @@ def main() -> int:
             run_command=args.run_command,
             runtime_attestation=attestation,
         )
-    else:
+    elif args.command == "e2e":
         result = aggregate_e2e_submission_evidence(
             args.source,
             expected_task_count=args.expected_task_count,
+            source_commit=args.source_commit,
+            run_command=args.run_command,
+        )
+    else:
+        result = aggregate_toxiproxy_submission_evidence(
+            args.source,
+            expected_repetitions=args.expected_repetitions,
+            toxiproxy_version=args.toxiproxy_version,
             source_commit=args.source_commit,
             run_command=args.run_command,
         )

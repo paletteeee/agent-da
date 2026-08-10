@@ -265,6 +265,8 @@ def aggregate_e2e_submission_evidence(
         source_commit=source_commit,
         run_command=run_command,
     )
+    if str(payload.get("source_commit", "")) != metadata["source_commit"]:
+        raise ValueError("E2E source_commit does not match the attested command")
     manifest_sha256 = _hex_digest(payload.get("manifest_sha256"), "manifest_sha256", {64})
     return {
         "schema_version": 1,
@@ -285,5 +287,150 @@ def aggregate_e2e_submission_evidence(
         **metadata,
         "source_artifact": {"path": str(source), "sha256": _sha256(source)},
         "claim_boundary": "single-host end-to-end smoke; not production latency",
+        "production_latency_claim": False,
+    }
+
+
+def aggregate_toxiproxy_submission_evidence(
+    source_path: str | Path,
+    *,
+    expected_repetitions: int = 30,
+    toxiproxy_version: str,
+    source_commit: str,
+    run_command: str,
+) -> dict[str, Any]:
+    """Validate that every declared network fault traversed a real proxy."""
+
+    source, payload = _load(source_path)
+    if expected_repetitions <= 0:
+        raise ValueError("expected_repetitions must be positive")
+    commit = _hex_digest(source_commit, "source_commit", {40, 64})
+    command = str(run_command or "").strip()
+    if not command or _SECRET_TEXT.search(command):
+        raise ValueError("run_command is missing or contains a secret-bearing token")
+    version = str(toxiproxy_version or "").strip()
+    if not version:
+        raise ValueError("toxiproxy_version must be specified")
+    if payload.get("backend") != "vector-graph":
+        raise ValueError("Toxiproxy evidence must use the vector-graph backend")
+
+    health = payload.get("backend_health")
+    if not isinstance(health, Mapping):
+        raise ValueError("Toxiproxy evidence is missing backend health")
+    normalized_health: dict[str, dict[str, Any]] = {}
+    for service in ("qdrant", "neo4j"):
+        item = health.get(service)
+        if not isinstance(item, Mapping) or item.get("available") is not True or not item.get("version"):
+            raise ValueError(f"Toxiproxy backend health is unavailable: {service}")
+        normalized_health[service] = {
+            "available": True,
+            "version": str(item["version"]),
+        }
+
+    matrix = payload.get("fault_matrix")
+    if not isinstance(matrix, Mapping):
+        raise ValueError("Toxiproxy fault matrix is missing")
+    if matrix.get("all_scenarios_evidence_valid") is not True:
+        raise ValueError("Toxiproxy matrix contains invalid trigger evidence")
+    if matrix.get("all_scenarios_no_partial_commit") is not True:
+        raise ValueError("Toxiproxy matrix contains a partial commit")
+    raw_scenarios = matrix.get("scenarios")
+    expected_names = {"normal", "delay", "timeout", "connection_drop", "retry_success"}
+    if not isinstance(raw_scenarios, Mapping) or set(raw_scenarios) != expected_names:
+        raise ValueError("Toxiproxy matrix must contain the five fixed scenarios")
+
+    scenarios: dict[str, dict[str, Any]] = {}
+    total_partial = 0
+    for name in sorted(expected_names):
+        row = raw_scenarios[name]
+        if not isinstance(row, Mapping) or row.get("repetitions") != expected_repetitions:
+            raise ValueError(f"Toxiproxy scenario repetition mismatch: {name}")
+        repetitions = expected_repetitions
+        partial = int(row.get("partial_commit_count", 0) or 0)
+        total_partial += partial
+        if partial != 0 or row.get("oracle_match_count") != repetitions:
+            raise ValueError(f"Toxiproxy scenario violates atomicity/oracle: {name}")
+        if row.get("evidence_valid") is not True:
+            raise ValueError(f"Toxiproxy scenario lacks valid evidence: {name}")
+        for field in (
+            "fault_evidence_count",
+            "proxy_path_verified_count",
+            "evidence_valid_count",
+        ):
+            if row.get(field) != repetitions:
+                raise ValueError(f"Toxiproxy scenario evidence count mismatch: {name}/{field}")
+        non_normal = name != "normal"
+        for field in (
+            "trigger_fired_count",
+            "toxic_installed_count",
+            "toxic_cleared_count",
+            "fault_observed_count",
+        ):
+            expected = repetitions if non_normal else 0
+            if row.get(field) != expected:
+                raise ValueError(f"Toxiproxy trigger count mismatch: {name}/{field}")
+        evidence_rows = row.get("repetition_evidence")
+        if not isinstance(evidence_rows, list) or len(evidence_rows) != repetitions:
+            raise ValueError(f"Toxiproxy repetition evidence missing: {name}")
+        elapsed: list[float] = []
+        for evidence in evidence_rows:
+            if not isinstance(evidence, Mapping) or evidence.get("evidence_valid") is not True:
+                raise ValueError(f"Toxiproxy invalid repetition evidence: {name}")
+            for event in evidence.get("events", []):
+                if isinstance(event, Mapping) and event.get("operation_elapsed_ms") is not None:
+                    elapsed.append(
+                        _finite_number(
+                            event["operation_elapsed_ms"],
+                            "operation_elapsed_ms",
+                            positive=True,
+                        )
+                    )
+        if non_normal and len(elapsed) != repetitions:
+            raise ValueError(f"Toxiproxy trigger latency evidence missing: {name}")
+
+        success_count = int(row.get("success_count", 0) or 0)
+        abort_count = int(row.get("abort_count", 0) or 0)
+        retry_count = int(row.get("retry_count", 0) or 0)
+        retry_success_count = int(row.get("retry_success_count", 0) or 0)
+        if name in {"timeout", "connection_drop"}:
+            if success_count != 0 or abort_count != repetitions:
+                raise ValueError(f"Toxiproxy abort semantics mismatch: {name}")
+        elif name == "retry_success":
+            if success_count != repetitions or retry_count != repetitions or retry_success_count != repetitions:
+                raise ValueError("Toxiproxy retry-success semantics mismatch")
+        elif success_count != repetitions or abort_count != 0:
+            raise ValueError(f"Toxiproxy success semantics mismatch: {name}")
+
+        scenarios[name] = {
+            "repetitions": repetitions,
+            "success_count": success_count,
+            "abort_count": abort_count,
+            "retry_count": retry_count,
+            "retry_success_count": retry_success_count,
+            "trigger_fired_count": int(row.get("trigger_fired_count", 0) or 0),
+            "toxic_installed_count": int(row.get("toxic_installed_count", 0) or 0),
+            "proxy_path_verified_count": int(
+                row.get("proxy_path_verified_count", 0) or 0
+            ),
+            "partial_commit_count": partial,
+            "p50_trigger_elapsed_ms": statistics.median(elapsed) if elapsed else None,
+        }
+
+    return {
+        "schema_version": 1,
+        "evidence_id": "toxiproxy_fault_matrix_30",
+        "status": "complete",
+        "scenario_count": len(scenarios),
+        "repetitions_per_scenario": expected_repetitions,
+        "total_repetitions": expected_repetitions * len(scenarios),
+        "total_partial_commit_count": total_partial,
+        "all_scenarios_evidence_valid": True,
+        "backend_health": normalized_health,
+        "toxiproxy_version": version,
+        "scenarios": scenarios,
+        "source_commit": commit,
+        "run_command": command,
+        "source_artifact": {"path": str(source), "sha256": _sha256(source)},
+        "claim_boundary": "single-host service fault injection; not production availability",
         "production_latency_claim": False,
     }

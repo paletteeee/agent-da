@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from txnmem_evidence_aggregates import (  # noqa: E402
     aggregate_e2e_submission_evidence,
     aggregate_tau_submission_evidence,
+    aggregate_toxiproxy_submission_evidence,
 )
 
 
@@ -22,6 +23,70 @@ SOURCE_COMMIT = "a" * 40
 
 
 class SubmissionEvidenceAggregateTests(unittest.TestCase):
+    def test_toxiproxy_aggregate_requires_every_real_trigger_and_zero_partial_commit(self):
+        scenarios = {}
+        for name in ("normal", "delay", "timeout", "connection_drop", "retry_success"):
+            non_normal = name != "normal"
+            retry = name == "retry_success"
+            abort = name in {"timeout", "connection_drop"}
+            evidence = {
+                "trigger_fired": non_normal,
+                "toxic_installed": non_normal,
+                "toxic_cleared": non_normal,
+                "proxy_path_verified": True,
+                "fault_observed": non_normal,
+                "evidence_valid": True,
+                "events": [] if not non_normal else [{"operation_elapsed_ms": 10.0}],
+            }
+            scenarios[name] = {
+                "repetitions": 1,
+                "success_count": int(not abort),
+                "error_count": int(abort),
+                "retry_success_count": int(retry),
+                "abort_count": int(abort),
+                "partial_commit_count": 0,
+                "oracle_match_count": 1,
+                "retry_count": int(retry),
+                "fault_evidence_count": 1,
+                "trigger_fired_count": int(non_normal),
+                "toxic_installed_count": int(non_normal),
+                "toxic_cleared_count": int(non_normal),
+                "proxy_path_verified_count": 1,
+                "fault_observed_count": int(non_normal),
+                "evidence_valid_count": 1,
+                "repetition_evidence": [evidence],
+                "evidence_valid": True,
+            }
+        source = {
+            "backend": "vector-graph",
+            "backend_health": {
+                "qdrant": {"available": True, "version": "1.11.5"},
+                "neo4j": {"available": True, "version": "5.22.0"},
+            },
+            "fault_matrix": {
+                "all_scenarios_evidence_valid": True,
+                "all_scenarios_no_partial_commit": True,
+                "scenarios": scenarios,
+            },
+            "production_latency_claim": False,
+        }
+        with TemporaryDirectory() as tmp:
+            path = self._write(Path(tmp), "toxiproxy.json", source)
+            result = aggregate_toxiproxy_submission_evidence(
+                path,
+                expected_repetitions=1,
+                toxiproxy_version="2.5.0",
+                source_commit=SOURCE_COMMIT,
+                run_command="python txnmem_experiment.py backend-performance",
+            )
+
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["scenario_count"], 5)
+        self.assertEqual(result["total_repetitions"], 5)
+        self.assertEqual(result["total_partial_commit_count"], 0)
+        self.assertEqual(result["scenarios"]["retry_success"]["retry_success_count"], 1)
+        self.assertEqual(result["scenarios"]["delay"]["p50_trigger_elapsed_ms"], 10.0)
+
     def _write(self, root: Path, name: str, payload: dict) -> Path:
         path = root / name
         path.write_text(json.dumps(payload), encoding="utf-8")
@@ -76,6 +141,7 @@ class SubmissionEvidenceAggregateTests(unittest.TestCase):
             "model": "qwen2.5-7b-instruct",
             "model_revision": MODEL_REVISION,
             "model_server_build": "vllm:0.8.5.post1",
+            "source_commit": SOURCE_COMMIT,
             "backend_health": {
                 "qdrant": {"available": True, "version": "1.11.5"},
                 "neo4j": {"available": True, "version": "5.22.0"},
@@ -174,6 +240,17 @@ class SubmissionEvidenceAggregateTests(unittest.TestCase):
                     path,
                     expected_task_count=2,
                     source_commit=SOURCE_COMMIT,
+                    run_command="command",
+                )
+
+    def test_e2e_aggregate_rejects_source_commit_mismatch(self):
+        with TemporaryDirectory() as tmp:
+            path = self._write(Path(tmp), "e2e.json", self._e2e_source())
+            with self.assertRaisesRegex(ValueError, "source_commit"):
+                aggregate_e2e_submission_evidence(
+                    path,
+                    expected_task_count=2,
+                    source_commit="c" * 40,
                     run_command="command",
                 )
 
