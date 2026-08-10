@@ -125,6 +125,15 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertTrue(any(edge[3] == "DERIVED_FROM" for edge in self.neo4j.edges))
         self.assertTrue(any(edge[3] == "SUPERSEDES" for edge in self.neo4j.edges))
 
+    def test_search_handles_structured_memory_values_without_hashing_them(self):
+        self.backend.write("m-structured", value={"tool": "search", "result": [1, 2]})
+
+        self.assertEqual(self.backend.search("not-present"), [])
+        self.assertEqual(
+            self.backend.search("m-structured")[0]["memory_id"],
+            "m-structured",
+        )
+
     def test_duplicate_request_is_idempotent_and_does_not_duplicate_event(self):
         first = self.backend.write("m0", value="source")
         second = self.backend.write("m0", value="source")

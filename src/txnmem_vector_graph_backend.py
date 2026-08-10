@@ -323,7 +323,17 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             for row in rows
             if isinstance(row, Mapping)
             and self.memories.get(str(row.get("memory_id")), row).get("status") == "active"
-            and (query is None or query in {row.get("memory_id"), row.get("value"), row.get("attribute")})
+            and (
+                query is None
+                or any(
+                    query == candidate
+                    for candidate in (
+                        row.get("memory_id"),
+                        row.get("value"),
+                        row.get("attribute"),
+                    )
+                )
+            )
         ]
         self._event("memory_search", query=query, **fields)
         return matches
