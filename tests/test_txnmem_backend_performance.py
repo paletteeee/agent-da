@@ -28,11 +28,11 @@ class BackendPerformanceTests(unittest.TestCase):
 
     def test_fault_matrix_records_abort_without_partial_commit(self):
         scenarios = [
-            FaultScenario("normal", "none", "write", "none", 17),
-            FaultScenario("timeout", "qdrant", "write", "timeout", 17),
+            FaultScenario("normal", "none", "none", "none", 17, "none"),
+            FaultScenario("timeout", "qdrant", "write", "timeout", 17, "retry_once"),
         ]
 
-        def factory(scenario):
+        def factory(*, scenario=None):
             backend = InstrumentedMemoryBackend()
             if scenario.action == "timeout":
                 original = backend.write
@@ -44,6 +44,16 @@ class BackendPerformanceTests(unittest.TestCase):
                     return original(*args, **kwargs)
 
                 backend.write = failing
+            backend.fault_evidence = lambda: {
+                "scenario": scenario.name,
+                "trigger_fired": scenario.name != "normal",
+                "toxic_installed": scenario.name != "normal",
+                "toxic_cleared": scenario.name != "normal",
+                "proxy_path_verified": True,
+                "retry_count": int(scenario.name == "timeout"),
+                "retry_success_count": int(scenario.name == "timeout"),
+                "evidence_valid": True,
+            }
             return backend
 
         report = run_fault_matrix(
@@ -56,7 +66,44 @@ class BackendPerformanceTests(unittest.TestCase):
         self.assertEqual(timeout["repetitions"], 2)
         self.assertEqual(timeout["partial_commit_count"], 0)
         self.assertEqual(timeout["retry_success_count"], 2)
+        self.assertTrue(timeout["evidence_valid"])
+        self.assertTrue(report["all_scenarios_evidence_valid"])
         self.assertTrue(report["all_scenarios_no_partial_commit"])
+
+    def test_backend_factory_receives_scenario_by_keyword(self):
+        observed = []
+
+        def factory(*, scenario=None):
+            observed.append(None if scenario is None else scenario.name)
+            backend = InstrumentedMemoryBackend()
+            backend.fault_evidence = lambda: {
+                "scenario": scenario.name,
+                "trigger_fired": False,
+                "toxic_installed": False,
+                "toxic_cleared": False,
+                "proxy_path_verified": True,
+                "retry_count": 0,
+                "retry_success_count": 0,
+                "evidence_valid": True,
+            }
+            return backend
+
+        run_fault_matrix(
+            factory,
+            [FaultScenario("normal", "none", "none", "none", 17, "none")],
+            [{"type": "write", "memory_id": "m0", "value": "v0"}],
+        )
+        self.assertEqual(observed, ["normal"])
+
+    def test_non_normal_scenario_without_trigger_evidence_fails_closed(self):
+        report = run_fault_matrix(
+            lambda *, scenario=None: InstrumentedMemoryBackend(),
+            [FaultScenario("drop", "qdrant", "write", "connection_drop", 17, "abort")],
+            [{"type": "write", "memory_id": "m0", "value": "v0"}],
+        )
+
+        self.assertFalse(report["scenarios"]["drop"]["evidence_valid"])
+        self.assertFalse(report["all_scenarios_evidence_valid"])
 
 
 if __name__ == "__main__":

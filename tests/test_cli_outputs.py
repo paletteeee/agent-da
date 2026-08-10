@@ -11,6 +11,96 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TxnMemCliOutputTests(unittest.TestCase):
+    def test_vector_graph_fault_cli_binds_scenario_to_toxiproxy_requester(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        captured = {}
+
+        class FakeVectorGraphBackend:
+            def __init__(
+                self,
+                namespace,
+                qdrant_url,
+                neo4j_uri,
+                auth,
+                proxy_requester=None,
+                **kwargs,
+            ):
+                captured.update(
+                    {
+                        "namespace": namespace,
+                        "qdrant_url": qdrant_url,
+                        "neo4j_uri": neo4j_uri,
+                        "proxy_requester": proxy_requester,
+                        "kwargs": kwargs,
+                    }
+                )
+
+            def close(self):
+                return None
+
+            def healthcheck(self):
+                captured["healthcheck_called"] = True
+                return {
+                    "qdrant": {"available": True, "version": "1.11.5"},
+                    "neo4j": {"available": True, "version": "5.22.0"},
+                }
+
+        def fake_fault_matrix(factory, scenarios, workload, repetitions):
+            delay = next(scenario for scenario in scenarios if scenario.name == "delay")
+            backend = factory(scenario=delay)
+            backend.close()
+            return {
+                "benchmark": "backend_fault_matrix",
+                "scenarios": {},
+                "all_scenarios_no_partial_commit": True,
+                "all_scenarios_evidence_valid": True,
+                "production_latency_claim": False,
+            }
+
+        with TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            {
+                "TXNMEM_NEO4J_URI": "bolt://127.0.0.1:19001",
+                "TXNMEM_TOXIPROXY_URL": "http://127.0.0.1:8474",
+            },
+            clear=False,
+        ), patch(
+            "txnmem_experiment.benchmark_backend",
+            return_value={"benchmark": "backend_only", "rows": []},
+        ), patch(
+            "txnmem_experiment.run_fault_matrix", side_effect=fake_fault_matrix
+        ), patch(
+            "txnmem_vector_graph_backend.VectorGraphMemoryBackend",
+            FakeVectorGraphBackend,
+        ):
+            exit_code = main(
+                [
+                    "backend-performance",
+                    "--backend",
+                    "vector-graph",
+                    "--service-url",
+                    "http://127.0.0.1:19000",
+                    "--events",
+                    "1",
+                    "--repetitions",
+                    "1",
+                    "--out-dir",
+                    tmp,
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        controller = captured["proxy_requester"]
+        self.assertIsNotNone(controller)
+        self.assertEqual(controller.scenario["name"], "delay")
+        self.assertEqual(captured["qdrant_url"], "http://127.0.0.1:19000")
+        self.assertEqual(captured["neo4j_uri"], "bolt://127.0.0.1:19001")
+        self.assertEqual(captured["kwargs"]["max_retries"], 0)
+        self.assertEqual(captured["kwargs"]["request_timeout_seconds"], 2.0)
+        self.assertTrue(captured["healthcheck_called"])
+
     def test_benchmark_native_parser_accepts_persistent_memory_backend(self):
         sys.path.insert(0, str(ROOT / "src"))
         from txnmem_experiment import _build_parser

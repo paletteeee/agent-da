@@ -27,7 +27,7 @@ from txnmem_distributed_protocol import run_protocol_matrix
 from txnmem_backend_performance import FaultScenario, benchmark_backend, run_fault_matrix
 from txnmem_benchmark_bridge import APPWORLD_TOOL_STRATEGIES
 from txnmem_conditions import canonical_fingerprint, source_identity
-from txnmem_service_faults import deterministic_fault_matrix
+from txnmem_service_faults import ToxiproxyFaultController, deterministic_fault_matrix
 from txnmem_mutation import run_mutation_campaign
 from txnmem_model_protocol import ModelResponse, OpenAICompatibleClient, ToolCall
 from txnmem_performance import benchmark_replay
@@ -618,6 +618,10 @@ def main(argv: list[str] | None = None) -> int:
 
             backend_counter = {"value": 0}
 
+            toxiproxy_url = os.environ.get(
+                "TXNMEM_TOXIPROXY_URL", "http://127.0.0.1:8474"
+            )
+
             def backend_factory(size=None, scenario=None):
                 backend_counter["value"] += 1
                 if args.backend == "memory":
@@ -630,12 +634,61 @@ def main(argv: list[str] | None = None) -> int:
                 neo4j_uri = os.environ.get("TXNMEM_NEO4J_URI", "bolt://127.0.0.1:7687")
                 neo4j_user = os.environ.get("TXNMEM_NEO4J_USER", "neo4j")
                 neo4j_password = os.environ.get("TXNMEM_NEO4J_PASSWORD", "txnmem-local-only")
+                proxy_routes = {
+                    "qdrant": {
+                        "proxy_name": os.environ.get(
+                            "TXNMEM_QDRANT_PROXY_NAME", "txnmem-qdrant"
+                        ),
+                        "client_endpoint": args.service_url,
+                        "listen": os.environ.get(
+                            "TXNMEM_QDRANT_PROXY_LISTEN", "0.0.0.0:19000"
+                        ),
+                        "upstream": os.environ.get(
+                            "TXNMEM_QDRANT_PROXY_UPSTREAM", "qdrant:6333"
+                        ),
+                    },
+                    "neo4j": {
+                        "proxy_name": os.environ.get(
+                            "TXNMEM_NEO4J_PROXY_NAME", "txnmem-neo4j"
+                        ),
+                        "client_endpoint": neo4j_uri,
+                        "listen": os.environ.get(
+                            "TXNMEM_NEO4J_PROXY_LISTEN", "0.0.0.0:19001"
+                        ),
+                        "upstream": os.environ.get(
+                            "TXNMEM_NEO4J_PROXY_UPSTREAM", "neo4j:7687"
+                        ),
+                    },
+                }
+                controller = None
+                if scenario is not None:
+                    controller = ToxiproxyFaultController(
+                        scenario.as_dict(),
+                        management_url=toxiproxy_url,
+                        proxy_routes=proxy_routes,
+                    )
                 return VectorGraphMemoryBackend(
                     f"perf-{backend_counter['value']:05d}",
                     args.service_url,
                     neo4j_uri,
                     (neo4j_user, neo4j_password),
+                    proxy_requester=controller,
+                    max_retries=0 if scenario is not None else 1,
+                    request_timeout_seconds=2.0 if scenario is not None else 15.0,
                 )
+
+            backend_health = None
+            if args.backend == "vector-graph":
+                health_backend = backend_factory(size=0)
+                try:
+                    backend_health = health_backend.healthcheck()
+                finally:
+                    health_backend.close()
+                if not all(
+                    bool(backend_health.get(service, {}).get("available"))
+                    for service in ("qdrant", "neo4j")
+                ):
+                    raise RuntimeError("vector/graph backend healthcheck failed")
 
             performance = benchmark_backend(
                 backend_factory,
@@ -653,6 +706,8 @@ def main(argv: list[str] | None = None) -> int:
                     trigger_operation=str(item["trigger_operation"]),
                     action=str(item["action"]),
                     seed=int(item.get("seed", 17)),
+                    recovery_action=str(item.get("recovery_action", "abort")),
+                    trigger_ordinal=int(item.get("trigger_ordinal", 1)),
                 )
                 for item in raw_scenarios
             ]
@@ -666,9 +721,26 @@ def main(argv: list[str] | None = None) -> int:
                 "service_url": args.service_url if args.backend == "vector-graph" else None,
                 "performance": performance,
                 "fault_matrix": faults,
+                "backend_health": backend_health,
+                "toxiproxy": {
+                    "management_url": toxiproxy_url,
+                    "qdrant_proxy_name": os.environ.get(
+                        "TXNMEM_QDRANT_PROXY_NAME", "txnmem-qdrant"
+                    ),
+                    "neo4j_proxy_name": os.environ.get(
+                        "TXNMEM_NEO4J_PROXY_NAME", "txnmem-neo4j"
+                    ),
+                }
+                if args.backend == "vector-graph"
+                else None,
                 "production_latency_claim": False,
             }
             write_summary(report, args.out_dir / "results" / "backend_performance.json")
+            if args.backend == "vector-graph" and not faults.get(
+                "all_scenarios_evidence_valid", False
+            ):
+                print("backend fault evidence invalid: one or more scenarios did not traverse Toxiproxy")
+                return 2
         except (OSError, ValueError, ImportError, RuntimeError) as exc:
             blocked = {
                 "status": "blocked",

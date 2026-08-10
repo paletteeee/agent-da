@@ -43,9 +43,10 @@ def _embedding(value: Any, dimension: int = 32) -> list[float]:
 
 
 class _QdrantHTTPClient:
-    def __init__(self, base_url: str, dimension: int = 32):
+    def __init__(self, base_url: str, dimension: int = 32, timeout_seconds: float = 15.0):
         self.base_url = str(base_url).rstrip("/")
         self.dimension = int(dimension)
+        self.timeout_seconds = float(timeout_seconds)
         self.collection = "txnmem_memory"
 
     def _request(self, method: str, path: str, payload: Mapping[str, Any] | None = None) -> Any:
@@ -56,7 +57,7 @@ class _QdrantHTTPClient:
             method=method,
             headers={"Content-Type": "application/json"},
         )
-        with urlopen(request, timeout=15) as response:  # noqa: S310 - endpoint is explicit experiment config
+        with urlopen(request, timeout=self.timeout_seconds) as response:  # noqa: S310 - endpoint is explicit experiment config
             raw = response.read()
         return json.loads(raw.decode("utf-8")) if raw else {}
 
@@ -155,8 +156,14 @@ class _Neo4jBoltClient:
 
     def healthcheck(self):
         with self.driver.session() as session:
-            record = session.run("RETURN 1 AS ok").single()
-        return {"available": bool(record and record.get("ok") == 1), "version": "neo4j-bolt"}
+            record = session.run(
+                "CALL dbms.components() YIELD versions "
+                "RETURN 1 AS ok, versions[0] AS version"
+            ).single()
+        return {
+            "available": bool(record and record.get("ok") == 1),
+            "version": record.get("version") if record else None,
+        }
 
     def close(self):
         self.driver.close()
@@ -177,13 +184,16 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         neo4j_client: Any | None = None,
         embedder: Callable[[Any], list[float]] | None = None,
         max_retries: int = 1,
+        request_timeout_seconds: float = 15.0,
     ):
         super().__init__()
         self.db_namespace = str(db_namespace)
         self.qdrant_url = str(qdrant_url)
         self.neo4j_uri = str(neo4j_uri)
         self.neo4j_auth = tuple(str(item) for item in neo4j_auth)
-        self.qdrant = qdrant_client or _QdrantHTTPClient(self.qdrant_url)
+        self.qdrant = qdrant_client or _QdrantHTTPClient(
+            self.qdrant_url, timeout_seconds=request_timeout_seconds
+        )
         self.neo4j = neo4j_client or _Neo4jBoltClient(self.neo4j_uri, self.neo4j_auth)
         self.proxy_requester = proxy_requester
         self.embedder = embedder or _embedding
@@ -246,14 +256,14 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         try:
             self._call(
                 "qdrant",
-                "upsert",
+                "write",
                 lambda: self.qdrant.upsert(self.db_namespace, memory_id, vector, memory, key),
                 key,
             )
             try:
                 self._call(
                     "neo4j",
-                    "upsert",
+                    "commit",
                     lambda: self.neo4j.upsert_memory(
                         self.db_namespace, memory_id, memory, source_ids, supersedes_id, key
                     ),
@@ -366,6 +376,10 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
 
     def metrics(self) -> dict[str, Any]:
         return copy.deepcopy(self._metrics)
+
+    def fault_evidence(self) -> dict[str, Any] | None:
+        provider = getattr(self.proxy_requester, "evidence", None)
+        return copy.deepcopy(provider()) if callable(provider) else None
 
     def close(self) -> None:
         close = getattr(self.neo4j, "close", None)

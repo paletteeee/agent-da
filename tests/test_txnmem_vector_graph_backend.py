@@ -9,7 +9,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from txnmem_vector_graph_backend import VectorGraphMemoryBackend, _qdrant_point_id
+from txnmem_vector_graph_backend import (
+    VectorGraphMemoryBackend,
+    _Neo4jBoltClient,
+    _qdrant_point_id,
+)
 
 
 class _FakeQdrant:
@@ -65,6 +69,33 @@ class _FakeNeo4j:
 
 
 class VectorGraphMemoryBackendTests(unittest.TestCase):
+    def test_neo4j_healthcheck_reports_server_version(self):
+        class Session:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def run(self, query):
+                self.query = query
+                return self
+
+            def single(self):
+                return {"ok": 1, "version": "5.22.0"}
+
+        class Driver:
+            def session(self):
+                return Session()
+
+        client = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
+        client.driver = Driver()
+
+        self.assertEqual(
+            client.healthcheck(),
+            {"available": True, "version": "5.22.0"},
+        )
+
     def test_qdrant_point_id_is_stable_uuid_for_arbitrary_memory_ids(self):
         first = _qdrant_point_id("tenant", "real_a")
         self.assertEqual(first, _qdrant_point_id("tenant", "real_a"))
@@ -117,6 +148,31 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.backend.write("m0", value="source")
         self.backend.invalidate("m0")
         self.assertEqual(self.backend.read("m0"), None)
+
+    def test_proxy_requester_observes_semantic_write_and_commit_boundaries(self):
+        observed = []
+
+        def requester(service, operation, function, key):
+            observed.append((service, operation, key))
+            return function()
+
+        backend = VectorGraphMemoryBackend(
+            "episode-proxy",
+            "http://qdrant-proxy:19000",
+            "bolt://neo4j-proxy:19001",
+            ("neo4j", "password"),
+            proxy_requester=requester,
+            qdrant_client=_FakeQdrant(),
+            neo4j_client=_FakeNeo4j(),
+            max_retries=0,
+        )
+
+        backend.write("m0", value="source")
+
+        self.assertEqual(
+            [(service, operation) for service, operation, _ in observed],
+            [("qdrant", "write"), ("neo4j", "commit")],
+        )
 
 
 if __name__ == "__main__":
