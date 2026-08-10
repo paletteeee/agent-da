@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "superseded_artifacts": [
+    {
+      "artifact_path": "results/remaining_tasks/final_status.json",
+      "replacement_path": "results/paper_evidence/claim_audit.json",
+      "reason": "historical task-state snapshot predating the submission evidence closure",
+      "superseded_on": "2026-08-11"
+    },
+    {
+      "artifact_path": "results/remaining_tasks/production_evidence_status.json",
+      "replacement_path": "results/paper_evidence/claim_audit.json",
+      "reason": "historical blocked-state snapshot superseded by attested aggregates",
+      "superseded_on": "2026-08-11"
+    },
+    {
+      "artifact_path": "results/real_backend_performance_reps30_v2/results/backend_performance.json",
+      "replacement_path": "results/submission_evidence/toxiproxy_faults_30/aggregate.json",
+      "reason": "the older fault rows did not prove that service requests traversed an active Toxiproxy toxic",
+      "superseded_on": "2026-08-11"
+    }
+  ]
+}

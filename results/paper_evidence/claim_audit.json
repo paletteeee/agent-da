@@ -1,0 +1,71 @@
+{
+  "active_claim_count": 14,
+  "checked_artifacts": [
+    {
+      "path": "results/appworld_projection_regenerated/projection_inventory.json",
+      "sha256": "96831e1e65662b0695c7a994118080ab21584d204c5bb477cc292cf9da118866"
+    },
+    {
+      "path": "results/appworld_projection_regenerated/results/trace_realism.json",
+      "sha256": "4686ce1d7f1fb9dcbfc28d0550222370cac92fa6b1cdbec4dabf13fd30560929"
+    },
+    {
+      "path": "results/cross_host_model_load_formal_v8_aggregate/results/model_load_repetition_summary.json",
+      "sha256": "c65dda52edc9c66e8441580a90c39d1aef60c34e8f44feca3415429f8d8622ed"
+    },
+    {
+      "path": "results/final_controlled/results/minimal_mutant_witnesses.json",
+      "sha256": "8a8c19faf8c906652596c6da351fa410444f78472f02e807b8b625c4a31b539d"
+    },
+    {
+      "path": "results/final_controlled/results/schedule_baseline.json",
+      "sha256": "9bbce21983e152cde55b2b0cb27932b79afaf38406e9d41ce80cf64a424a6758"
+    },
+    {
+      "path": "results/joint_realism/locomo/results/trace_realism.json",
+      "sha256": "979126497d980cab295c4b92caa49cda3effa62e888f4d257bdf82a163ad3f58"
+    },
+    {
+      "path": "results/joint_realism/tau_bench/results/trace_realism.json",
+      "sha256": "8036fe1e95a614a9651f895abee490e6038b211e42adb1b229fd4031794a7dee"
+    },
+    {
+      "path": "results/paper_evidence/controlled_suite.json",
+      "sha256": "4337cd70033244177dccbd2e24e3596945b94d9b9cc34797363069988cf17db0"
+    },
+    {
+      "path": "results/prompt_profile_formal_v4/appworld_prompt_comparison.json",
+      "sha256": "ce9ec092782a75d6b5c7adc519407b9ec8bfc8384c84549edf8b536242de88d0"
+    },
+    {
+      "path": "results/prompt_profile_formal_v4/locomo_prompt_comparison.json",
+      "sha256": "e635c8f73b8482ea01d0aa5fc228ffb031ea707759959bb0b43cdd72428406ee"
+    },
+    {
+      "path": "results/remaining_tasks/native_repetitions5/repetition_report.json",
+      "sha256": "bc68cd36f7d22f857aabb7885f47cf66f65597ba4ce084f825a7d56ad8eb0b3e"
+    },
+    {
+      "path": "results/submission_evidence/qwen_vector_graph_e2e_5/aggregate.json",
+      "sha256": "d58ee041a644f989492bf0ac590f47ecd9f080dbf4b815d04917b444ede50c13"
+    },
+    {
+      "path": "results/submission_evidence/tau_bench_50/aggregate.json",
+      "sha256": "f714ec70a86ed6f15b34bf9679a7ef4d6271b27c1fc64c9c1c61db09ed7fc7a6"
+    },
+    {
+      "path": "results/submission_evidence/toxiproxy_faults_30/aggregate.json",
+      "sha256": "94dd588d1309c065fd7cfdd76e071d9955a59e5830254ed652c15722a492df00"
+    }
+  ],
+  "checked_assertion_count": 107,
+  "claim_count": 14,
+  "evidence_id": "paper_claim_audit",
+  "finding_count": 0,
+  "findings": [],
+  "ledger_path": "configs/paper_claims.json",
+  "ledger_sha256": "5d8f858a4ea60aece27053525647b03e5f7b0670db8b38a6308e89171bf4f6eb",
+  "schema_version": 1,
+  "status": "passed",
+  "superseded_artifact_count": 3
+}

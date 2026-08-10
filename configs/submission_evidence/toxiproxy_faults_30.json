@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "seed": 17,
+  "repetitions_per_scenario": 30,
+  "request_path": {
+    "qdrant": "client -> toxiproxy -> qdrant:6333",
+    "neo4j": "client -> toxiproxy -> neo4j:7687"
+  },
+  "scenarios": [
+    {
+      "name": "normal",
+      "service": "none",
+      "trigger_operation": "none",
+      "trigger_ordinal": 1,
+      "action": "none",
+      "recovery_action": "none"
+    },
+    {
+      "name": "delay",
+      "service": "qdrant",
+      "trigger_operation": "write",
+      "trigger_ordinal": 1,
+      "action": "delay",
+      "recovery_action": "continue"
+    },
+    {
+      "name": "timeout",
+      "service": "qdrant",
+      "trigger_operation": "write",
+      "trigger_ordinal": 1,
+      "action": "timeout",
+      "recovery_action": "abort"
+    },
+    {
+      "name": "connection_drop",
+      "service": "neo4j",
+      "trigger_operation": "commit",
+      "trigger_ordinal": 1,
+      "action": "connection_drop",
+      "recovery_action": "abort"
+    },
+    {
+      "name": "retry_success",
+      "service": "qdrant",
+      "trigger_operation": "write",
+      "trigger_ordinal": 1,
+      "action": "connection_drop",
+      "recovery_action": "retry_once"
+    }
+  ],
+  "claim_boundary": "single-host service fault injection; not production availability or production latency"
+}
