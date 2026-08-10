@@ -32,6 +32,10 @@ class TxnMemCoverageTests(unittest.TestCase):
         self.assertIsNotNone(counterexample)
         self.assertLess(counterexample["operation_count"], len(instance["operations"]))
         self.assertIn("atomicity_violation", counterexample["violations"])
+        self.assertIn("minimal_instance", counterexample)
+        self.assertFalse(
+            counterexample["minimality"]["predecessor_reproduces_failure"]
+        )
 
     def test_coverage_report_contains_schedule_and_invariant_coverage(self):
         instances = [

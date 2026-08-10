@@ -303,6 +303,52 @@ class TxnMemCliOutputTests(unittest.TestCase):
             self.assertTrue((Path(tmp) / "results/realism.json").exists())
             self.assertTrue(list((Path(tmp) / "results/figures").glob("*.svg")))
 
+    def test_mutation_witnesses_command_writes_replayable_report(self):
+        with TemporaryDirectory() as tmp:
+            instances = Path(tmp) / "instances.jsonl"
+            subprocess.run(
+                [
+                    sys.executable,
+                    "src/txnmem_experiment.py",
+                    "generate",
+                    "--out",
+                    str(instances),
+                    "--seeds",
+                    "1",
+                    "--workloads",
+                    "atomic_multi_write",
+                    "revoke_before_commit",
+                    "provenance_chain_repair",
+                    "scope_bypass",
+                ],
+                cwd=ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            report_path = Path(tmp) / "minimal_mutant_witnesses.json"
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "src/txnmem_experiment.py",
+                    "mutation-witnesses",
+                    "--instances",
+                    str(instances),
+                    "--out",
+                    str(report_path),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["witness_count"], 4)
+            self.assertTrue(report["all_prefix_minimal"])
+            self.assertEqual(len(report["source_instances_sha256"]), 64)
+
     def test_trace_replay_command_writes_trace_grounded_artifacts(self):
         with TemporaryDirectory() as tmp:
             events = Path(tmp) / "events.jsonl"

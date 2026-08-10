@@ -85,25 +85,55 @@ def _prefix_instance(instance: dict[str, Any], operation_count: int) -> dict[str
     return prefix
 
 
+def prefix_instance(instance: dict[str, Any], operation_count: int) -> dict[str, Any]:
+    """Return a schedule-consistent operation prefix for witness replay."""
+
+    if operation_count < 0 or operation_count > len(instance.get("operations", [])):
+        raise ValueError("operation_count is outside the instance operation range")
+    return _prefix_instance(instance, operation_count)
+
+
 def find_minimal_counterexample(instance: dict[str, Any], variant: str) -> dict[str, Any] | None:
     """Return the shortest operation prefix rejected by the oracle, if any."""
 
     full_result = run_instance(instance, variant)
     if compare_result_to_oracle(instance, full_result)["matches"]:
         return None
+    shrink_trace: list[dict[str, Any]] = []
     for operation_count in range(1, len(instance.get("operations", [])) + 1):
-        prefix = _prefix_instance(instance, operation_count)
+        prefix = prefix_instance(instance, operation_count)
         result = run_instance(prefix, variant)
         comparison = compare_result_to_oracle(prefix, result)
-        if not comparison["matches"]:
+        violations = check_invariants(prefix, result)
+        reproduced = not comparison["matches"]
+        shrink_trace.append(
+            {
+                "operation_count": operation_count,
+                "reproduced": reproduced,
+                "violations": violations,
+                "oracle_mismatches": comparison["mismatches"],
+            }
+        )
+        if reproduced:
+            predecessor_reproduces = bool(
+                len(shrink_trace) > 1 and shrink_trace[-2]["reproduced"]
+            )
             return {
                 "instance_id": instance.get("instance_id"),
                 "variant": variant,
                 "operation_count": operation_count,
+                "source_operation_count": len(instance.get("operations", [])),
                 "operation_ids": [operation.get("op_id") for operation in prefix["operations"]],
                 "failure_schedule": prefix["failure_schedule"],
-                "violations": check_invariants(prefix, result),
+                "violations": violations,
                 "oracle_mismatches": comparison["mismatches"],
+                "minimal_instance": prefix,
+                "shrink_trace": shrink_trace,
+                "minimality": {
+                    "method": "shortest_operation_prefix",
+                    "predecessor_operation_count": max(0, operation_count - 1),
+                    "predecessor_reproduces_failure": predecessor_reproduces,
+                },
             }
     return None
 

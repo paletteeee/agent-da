@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 from collections import Counter
@@ -28,7 +29,11 @@ from txnmem_backend_performance import FaultScenario, benchmark_backend, run_fau
 from txnmem_benchmark_bridge import APPWORLD_TOOL_STRATEGIES
 from txnmem_conditions import canonical_fingerprint, source_identity
 from txnmem_service_faults import ToxiproxyFaultController, deterministic_fault_matrix
-from txnmem_mutation import run_mutation_campaign
+from txnmem_mutation import (
+    build_minimal_mutant_witnesses,
+    run_mutation_campaign,
+    validate_minimal_mutant_witnesses,
+)
 from txnmem_model_protocol import ModelResponse, OpenAICompatibleClient, ToolCall
 from txnmem_performance import benchmark_replay
 from txnmem_realism import (
@@ -247,6 +252,13 @@ def _build_parser() -> argparse.ArgumentParser:
     experiment.add_argument("--out-dir", type=Path, default=Path("."))
     experiment.add_argument("--seeds", type=int, default=10)
     experiment.add_argument("--variants", nargs="+", choices=VARIANTS, default=list(VARIANTS))
+
+    mutation_witnesses = subparsers.add_parser(
+        "mutation-witnesses",
+        help="derive and replay one prefix-minimal witness for each major mutant",
+    )
+    mutation_witnesses.add_argument("--instances", type=Path, required=True)
+    mutation_witnesses.add_argument("--out", type=Path, required=True)
 
     trace_replay = subparsers.add_parser(
         "trace-replay", help="adapt and replay externally supplied Agent memory traces"
@@ -522,6 +534,21 @@ def main(argv: list[str] | None = None) -> int:
         load_workload_config(args.config)
         instances = generate_suite(WORKLOADS, range(args.seeds))
         return _run_core_experiment(instances, args.variants, args.out_dir)
+    if args.command == "mutation-witnesses":
+        instances = _read_jsonl(args.instances)
+        report = build_minimal_mutant_witnesses(instances)
+        validate_minimal_mutant_witnesses(report)
+        report["source_instances_path"] = str(args.instances)
+        report["source_instances_sha256"] = hashlib.sha256(
+            args.instances.read_bytes()
+        ).hexdigest()
+        report["validation"] = {
+            "status": "passed",
+            "method": "replay_target_violation_and_one_step_shorter_prefix",
+        }
+        write_summary(report, args.out)
+        print(f"wrote {report['witness_count']} minimal mutant witnesses -> {args.out}")
+        return 0
     if args.command == "trace-replay":
         records = load_trace_records(args.events)
         train_records, holdout_records = split_holdout(
