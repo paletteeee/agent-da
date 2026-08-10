@@ -12,9 +12,9 @@
 
 ## 2. Controlled correctness suite
 
-TxnMemBench 覆盖 8 个 workload family、160 个实例、5 个系统变体和 800 条 variant-level 结果。核心 workload 包括 atomic multi-write、crash during commit、policy revoke、scope bypass、supersession consistency、provenance chain repair、provenance branch repair 和 mixed stress。
+TxnMemBench 覆盖 8 个 workload family、50 个 seed、400 个实例、5 个系统变体和 2,000 条 variant-level 结果。核心 workload 包括 atomic multi-write、crash during commit、policy revoke、scope bypass、supersession consistency、provenance chain repair、provenance branch repair 和 mixed stress。上述计数由 `results/paper_evidence/controlled_suite.json` 从 `generated_instances.jsonl` 与完整 CSV 笛卡尔积直接复算，不采用手工填写的样本总数。
 
-在当前受控实例中，TxnMem 的目标违规数为 0/160，TxnMem oracle match 为 160/160。对照结果为：Naive 140/160 违规，TxnMem-NoTxn 80/160，TxnMem-NoPolicyCommit 20/160，TxnMem-NoRepair 40/160。该结果支持三个机制判断：事务边界防止 partial update，commit-time policy revalidation 防止 stale authorization，provenance repair 防止失效源对象继续污染派生对象。
+在当前受控实例中，TxnMem 的目标违规数为 0/400，TxnMem oracle match 为 400/400。对照结果为：Naive 350/400 违规，TxnMem-NoTxn 200/400，TxnMem-NoPolicyCommit 50/400，TxnMem-NoRepair 100/400。该结果支持三个机制判断：事务边界防止 partial update，commit-time policy revalidation 防止 stale authorization，provenance repair 防止失效源对象继续污染派生对象。
 
 ## 3. Failure schedule、coverage 与 mutation
 

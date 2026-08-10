@@ -5,7 +5,7 @@ __pycache__/
 .coverage
 htmlcov/
 .worktrees/
-external_data/
+external_data
 results/real_model_*/
 results/real_model_*
 results/*_download.log
