@@ -23,6 +23,7 @@ def main() -> int:
     model_revision = os.environ["TXNMEM_MODEL_REVISION"]
     model_server_build = os.environ["TXNMEM_MODEL_SERVER_BUILD"]
     source_commit = os.environ["TXNMEM_SOURCE_COMMIT"]
+    run_id = os.environ["TXNMEM_RUN_ID"]
     qdrant_url = os.environ.get("TXNMEM_QDRANT_URL", "http://127.0.0.1:6333")
     neo4j_uri = os.environ.get("TXNMEM_NEO4J_URI", "bolt://127.0.0.1:7687")
     neo4j_auth = (
@@ -67,7 +68,7 @@ def main() -> int:
 
         def backend_factory(_index: int, _root: Path, task_index: int = index) -> VectorGraphMemoryBackend:
             return VectorGraphMemoryBackend(
-                f"e2e-tau-{task_index:04d}",
+                f"e2e-{run_id}-tau-{task_index:04d}",
                 qdrant_url,
                 neo4j_uri,
                 neo4j_auth,
@@ -103,6 +104,7 @@ def main() -> int:
         "model_revision": model_revision,
         "model_server_build": model_server_build,
         "source_commit": source_commit,
+        "run_id": run_id,
         "backend": {
             service: backend_health[service].get("version")
             for service in ("qdrant", "neo4j")

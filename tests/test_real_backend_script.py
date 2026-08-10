@@ -15,6 +15,8 @@ class RealBackendScriptTests(unittest.TestCase):
 
         self.assertIn('os.environ["TXNMEM_MODEL_REVISION"]', script)
         self.assertIn('os.environ["TXNMEM_MODEL_SERVER_BUILD"]', script)
+        self.assertIn('os.environ["TXNMEM_RUN_ID"]', script)
+        self.assertIn('f"e2e-{run_id}-tau-', script)
         self.assertIn('"backend_health": backend_health', script)
         self.assertIn("health_backend.healthcheck()", script)
         self.assertIn('"source_commit":', script)
