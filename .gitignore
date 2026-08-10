@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+.worktrees/
 external_data/
 results/real_model_*/
 results/real_model_*
