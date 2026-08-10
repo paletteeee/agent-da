@@ -20,12 +20,37 @@ def main() -> int:
     out_root = root / os.environ.get("TXNMEM_E2E_OUT", "results/e2e_real_backend")
     manifest, digest = load_task_manifest(manifest_path)
     limit = int(os.environ.get("TXNMEM_E2E_LIMIT", "5"))
+    model_revision = os.environ["TXNMEM_MODEL_REVISION"]
+    model_server_build = os.environ["TXNMEM_MODEL_SERVER_BUILD"]
+    source_commit = os.environ["TXNMEM_SOURCE_COMMIT"]
+    qdrant_url = os.environ.get("TXNMEM_QDRANT_URL", "http://127.0.0.1:6333")
+    neo4j_uri = os.environ.get("TXNMEM_NEO4J_URI", "bolt://127.0.0.1:7687")
+    neo4j_auth = (
+        os.environ.get("TXNMEM_NEO4J_USER", "neo4j"),
+        os.environ["TXNMEM_NEO4J_PASSWORD"],
+    )
     model = OpenAICompatibleClient(
         os.environ.get("TXNMEM_ENDPOINT", "http://127.0.0.1:8000/v1"),
         os.environ.get("TXNMEM_MODEL", "qwen2.5-7b-instruct"),
         timeout_s=float(os.environ.get("TXNMEM_TIMEOUT", "180")),
     )
     rows: list[dict[str, object]] = []
+
+    health_backend = VectorGraphMemoryBackend(
+        "e2e-healthcheck",
+        qdrant_url,
+        neo4j_uri,
+        neo4j_auth,
+    )
+    try:
+        backend_health = health_backend.healthcheck()
+    finally:
+        health_backend.close()
+    if not all(
+        bool(backend_health.get(service, {}).get("available"))
+        for service in ("qdrant", "neo4j")
+    ):
+        raise RuntimeError("Qdrant/Neo4j healthcheck failed before E2E run")
 
     for index, task in enumerate(manifest["tasks"][:limit], start=1):
         task_out = out_root / f"task_{index:02d}"
@@ -43,12 +68,9 @@ def main() -> int:
         def backend_factory(_index: int, _root: Path, task_index: int = index) -> VectorGraphMemoryBackend:
             return VectorGraphMemoryBackend(
                 f"e2e-tau-{task_index:04d}",
-                os.environ.get("TXNMEM_QDRANT_URL", "http://127.0.0.1:6333"),
-                os.environ.get("TXNMEM_NEO4J_URI", "bolt://127.0.0.1:7687"),
-                (
-                    os.environ.get("TXNMEM_NEO4J_USER", "neo4j"),
-                    os.environ["TXNMEM_NEO4J_PASSWORD"],
-                ),
+                qdrant_url,
+                neo4j_uri,
+                neo4j_auth,
             )
 
         started = time.perf_counter()
@@ -78,11 +100,19 @@ def main() -> int:
         "benchmark": "tau-bench-airline",
         "task_count": len(rows),
         "model": os.environ.get("TXNMEM_MODEL", "qwen2.5-7b-instruct"),
-        "backend": {"qdrant": "1.11.5", "neo4j": "5.22.0"},
+        "model_revision": model_revision,
+        "model_server_build": model_server_build,
+        "source_commit": source_commit,
+        "backend": {
+            service: backend_health[service].get("version")
+            for service in ("qdrant", "neo4j")
+        },
+        "backend_health": backend_health,
         "manifest_sha256": digest,
         "rows": rows,
         "mean_ms": statistics.mean(elapsed_values) if elapsed_values else None,
         "p50_ms": statistics.median(elapsed_values) if elapsed_values else None,
+        "execution_scope": "single_host_model_and_vector_graph_services",
         "production_latency_claim": False,
     }
     output = out_root / "e2e_real_backend_summary.json"

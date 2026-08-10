@@ -8,6 +8,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RealBackendScriptTests(unittest.TestCase):
+    def test_e2e_runner_attests_model_identity_and_live_backend_health(self):
+        script = (ROOT / "scripts" / "run_e2e_real_backend.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('os.environ["TXNMEM_MODEL_REVISION"]', script)
+        self.assertIn('os.environ["TXNMEM_MODEL_SERVER_BUILD"]', script)
+        self.assertIn('"backend_health": backend_health', script)
+        self.assertIn("health_backend.healthcheck()", script)
+        self.assertIn('"source_commit":', script)
+
     def test_smoke_script_creates_both_proxies_and_runs_fault_cli_through_them(self):
         script = (ROOT / "scripts" / "run_real_backend_smoke.sh").read_text(
             encoding="utf-8"
