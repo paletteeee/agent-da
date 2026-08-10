@@ -1,6 +1,6 @@
 # TxnMem 当前实验报告
 
-更新时间：2026-08-10
+更新时间：2026-08-11
 模型：Qwen2.5-7B-Instruct  
 实验仓库：`remote_staging/txnmem`  
 
@@ -25,10 +25,11 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 - schedule 结论：因果 schedule 的检测效率高于随机故障 baseline，但该比较不是对真实生产故障分布的估计。
 - distributed protocol smoke：4 类 schedule，5/5 invariant coverage，无 minimal counterexample。
 - mutation testing：kill rate 0.8571；已覆盖 NoTxn、NoPolicyCommit、NoRepair 等实现缺陷。
+- minimal mutant witness：`partial_commit`、`remove_commit_revalidation`、`disable_provenance_traversal`、`bypass_scope_check` 四类 mutant 均已从 400 个实例中找到可重放的最短 operation prefix；最小前缀长度分别为 2、1、6、1，删除最后一个操作后均不再复现同一目标违规。
 
 独立 reference coverage 覆盖 atomicity、commit authorization、provenance closure、recovery consistency、scope safety 和 supersession consistency，coverage rate 为 1.0。
 
-证据路径：`results/final_controlled/results/coverage.json`、`results/final_controlled/results/schedule_baseline.json`、`results/final_controlled/results/mutation_report.json`、`results/remaining_tasks/distributed_protocol/results/process_protocol.json`。
+证据路径：`results/final_controlled/results/coverage.json`、`results/final_controlled/results/schedule_baseline.json`、`results/final_controlled/results/mutation_report.json`、`results/final_controlled/results/minimal_mutant_witnesses.json`、`results/remaining_tasks/distributed_protocol/results/process_protocol.json`。
 
 ## 4. Qwen2.5-7B native-agent 实验
 
@@ -43,6 +44,8 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 ### 5.1 τ-bench
 
 官方 runtime 完成 50-task batch，最终合并 497 个 native events，50/50 evaluator available，reward sum 为 15，mean reward 为 0.3000。2 个 task 达到 max steps，1 个 task 没有 memory event，另 1 个长请求在 timeout retry 后完成但仍无 memory event。τ-bench reward 不是 memory accuracy，不能把 reward 直接解释为 TxnMem 的任务成功率。
+
+该聚合记录 50 个唯一 task ID、retry 归并规则、manifest/hash、Qwen2.5-7B revision、vLLM build、官方 evaluator 状态、运行命令、源 artifact hash 和运行时连续性 attestation。证据路径：`results/submission_evidence/tau_bench_50/aggregate.json`、`results/submission_evidence/tau_bench_50/runtime_attestation.json`。
 
 ### 5.2 AppWorld
 
@@ -75,19 +78,15 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 
 ## 6. 真实 vector/graph backend、网络故障与跨主机模型负载
 
-`VectorGraphMemoryBackend` 已在单机真实 Qdrant 1.11.5、Neo4j 5.22.0 和 Toxiproxy 环境中完成 direct service smoke。30 次重复 backend-only 写入性能结果如下：
+`VectorGraphMemoryBackend` 已在单机真实 Qdrant 1.11.5、Neo4j 5.22.0 和 Toxiproxy 2.5.0 上完成正式故障矩阵。客户端只连接两个代理 listen port，Toxiproxy management API 在指定 Qdrant `write` 或 Neo4j `commit` ordinal 前安装 toxic。normal、delay、timeout、connection-drop 和 retry-success 各执行 30 次，共 150 次；四个非 normal 场景的 `trigger_fired`、`toxic_installed`、`proxy_path_verified` 均为 30/30，全部场景 partial commit 为 0。
 
-| workload | repetition | p50 ms | p95 ms | p99 ms | throughput ops/s | errors | partial commit |
-|---:|---:|---:|---:|---:|---:|---:|---:|
-| 50 events | 30 | 381.259 | 423.219 | 465.135 | 130.337 | 0 | 0 |
-| 200 events | 30 | 1,794.536 | 2,058.061 | 2,083.128 | 109.537 | 0 | 0 |
-| 1000 events | 30 | 15,787.283 | 20,770.839 | 20,947.253 | 62.764 | 0 | 0 |
+- normal 与 delay 均为 30/30 success；delay 的 trigger request P50 为 204.863 ms。
+- timeout 与 connection-drop 均为 30/30 abort；trigger request P50 分别为 1.625 ms 和 1.596 ms。
+- retry-success 为 30/30 首次故障、清除 toxic 后 30/30 单次重试成功；trigger request P50 为 4.542 ms。
 
-真实 Toxiproxy fault matrix 覆盖 normal、Qdrant delay、Qdrant timeout、Neo4j connection drop 和 retry-success，所有已执行场景均无 partial commit。上述 backend timing 是单机服务测量，统一标记 `production_latency_claim=false`，不能推出生产吞吐、跨主机一致性或生产级 2PC 结论。
+旧的 `results/real_backend_performance_reps30_v2/results/backend_performance.json` 没有证明请求实际穿过已激活的 toxic，已在 supersession index 中标为历史结果，不再承担正式故障或性能结论。当前故障证据路径为 `results/submission_evidence/toxiproxy_faults_30/aggregate.json`；其边界是单机服务故障注入，`production_latency_claim=false`，不能推出生产吞吐、跨主机一致性或生产级 2PC。
 
-证据路径：`results/real_backend_performance_reps30_v2/results/backend_performance.json`。
-
-另有 5 个 τ-bench task 的 Qwen2.5-7B + Qdrant + Neo4j 端到端 smoke：5/5 completed，mean 17,879.4 ms，P50 15,351.6 ms。该结果包含模型、backend 和 evaluator 的端到端开销，不应当被当作 backend-only latency。
+另有 5 个 τ-bench task 的 Qwen2.5-7B + Qdrant + Neo4j 端到端 smoke：5/5 completed，记录 30 个 native events，mean 18,851.6 ms，P50 15,497.0 ms。模型 revision 为 `7b44…26b4`，vLLM 为 `0.8.5.post1`，运行时健康检查确认 Qdrant 1.11.5 与 Neo4j 5.22.0 可用。该结果包含模型、backend 和 evaluator 的端到端开销，不应当被当作 backend-only 或生产 latency。证据路径：`results/submission_evidence/qwen_vector_graph_e2e_5/aggregate.json`。
 
 在 `cross_host_client_server` 范围内，Qwen2.5-7B-Instruct（revision `7b44…26b4`，vLLM `0.8.5.post1`）完成 3 次独立 attested v8 运行：每次 68 cycles、544 attempts，elapsed 分别为 `604.165115041`、`603.328782334`、`603.574593500` 秒；合计 204 cycles、1,632 attempts、`1,811.068490875` 秒。三个 UTC interval 不重叠，distinct tunnel process count 为 3。每次 configured concurrency=4，observed peak=4。
 
@@ -113,15 +112,16 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 
 ## 8. 可复现性与文档 QA
 
-- 全量单元测试：250 tests，3 个 skipped，0 failures。
+- 全量单元测试：280 tests，3 个 skipped，0 failures。
 - 本地 process concurrency smoke：2 workers、3 operations、线性化序号完整，无未确认 operation。
-- DOCX 初稿已生成 20 页 PNG/PDF 并逐页视觉检查；accessibility audit 为 high=0、medium=0、low=0。
+- DOCX 初稿已生成 21 页 PNG/PDF 并逐页视觉检查；accessibility audit 为 high=0、medium=0、low=0。
 - artifact audit：0 findings。
+- claim audit：14 条 active claim、107 个字段断言、0 findings；每条正式数字关联 artifact/hash、运行命令、manifest/hash、source commit 与 claim boundary。历史状态和旧故障结果由 `results/paper_evidence/supersession_index.json` 标记，不再作为当前结论来源。
 - 最终 attestation 代码修复提交为 `4669a01`；脱敏 v8 aggregate、per-repetition summaries、endpoint/transport analyses 与 v7 作废标记已由本地结果提交 `9785a48` 保存。
 
 ## 9. 当前状态、claim boundary 与后续工作
 
-当前计划中的四个实验组均已完成：LoCoMo paired baseline/tuned 3 次重复、AppWorld baseline/tuned 配对、τ/LoCoMo/AppWorld joint realism，以及 attested cross-host model load。它们的已知限制应作为 claim boundary，而不是被误写为未完成实验：
+投稿前六项证据闭环均已完成：controlled 400/2,000 统一口径、真实 Toxiproxy 5×30 故障路径、τ-bench 50-task 严格聚合、5-task Qwen+Qdrant+Neo4j E2E 聚合、四类前缀最小 mutant witness，以及覆盖正式实验数字的 claim ledger/supersession audit。其余已完成实验的限制应作为 claim boundary，而不是被误写为未完成实验：
 
 1. LoCoMo 只有 3 次描述性 paired repetition，平均 F1 增益很小且有一次回退；不能作统计显著性或普适改进结论。
 2. AppWorld tuned 有 6 个 execution failure，且 n=20；token 总量为观测下界，不能作总体显著性结论。
