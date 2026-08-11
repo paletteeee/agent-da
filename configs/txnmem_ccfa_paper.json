@@ -49,7 +49,15 @@
   "forbidden_artifacts": [
     "results/remaining_tasks/final_status.json",
     "results/remaining_tasks/production_evidence_status.json",
-    "results/real_backend_performance_reps30_v2/results/backend_performance.json"
+    "results/real_backend_performance_reps30_v2/results/backend_performance.json",
+    "results/cross_host_model_load_formal_v6_aggregate",
+    "results/cross_host_model_load_formal_v6_rep1",
+    "results/cross_host_model_load_formal_v6_rep2",
+    "results/cross_host_model_load_formal_v6_rep3",
+    "results/cross_host_model_load_formal_v7_aggregate",
+    "results/cross_host_model_load_formal_v7_rep1",
+    "results/cross_host_model_load_formal_v7_rep2",
+    "results/cross_host_model_load_formal_v7_rep3"
   ],
   "required_claim_boundaries": [
     "deterministic controlled simulator evidence against an independent reference semantics; not a public-task accuracy claim",

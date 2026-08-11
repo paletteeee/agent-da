@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from decimal import Decimal, InvalidOperation
@@ -176,6 +177,30 @@ def _check_claim_audit(root: Path, config: dict[str, Any]) -> list[dict[str, Any
         return [_finding("claim_audit_invalid", f"cannot parse claim audit: {exc}")]
     if not isinstance(payload, dict):
         return [_finding("claim_audit_invalid", "claim audit must be a JSON object")]
+    ledger_value = config.get("claim_ledger_path", "configs/paper_claims.json")
+    if not isinstance(ledger_value, str) or not ledger_value:
+        return [_finding("paper_config_invalid", "claim_ledger_path is required")]
+    ledger_path = root / ledger_value
+    if not ledger_path.is_file():
+        return [
+            _finding("claim_ledger_missing", f"claim ledger not found: {ledger_value}")
+        ]
+    recorded_digest = payload.get("ledger_sha256")
+    if not isinstance(recorded_digest, str) or not recorded_digest:
+        return [
+            _finding(
+                "claim_audit_ledger_sha256_missing",
+                "claim audit must record the audited claim-ledger SHA-256",
+            )
+        ]
+    current_digest = hashlib.sha256(ledger_path.read_bytes()).hexdigest()
+    if recorded_digest != current_digest:
+        return [
+            _finding(
+                "claim_audit_ledger_sha256_mismatch",
+                "claim audit ledger SHA-256 does not match the current claim ledger",
+            )
+        ]
     if payload.get("status") != "passed" or payload.get("finding_count") != 0:
         return [
             _finding(
@@ -261,32 +286,81 @@ def _check_claim_values(text: str, root: Path, config: dict[str, Any]) -> tuple[
             )
         )
 
-    referenced_ids = _CLAIM_MARKER.findall(text)
     active_id_set = set(ledger_ids)
-    for claim_id in referenced_ids:
-        if claim_id not in active_id_set:
+    allowed_numbers: set[Decimal] = set()
+    allowed_numbers_by_claim: dict[str, set[Decimal]] = {}
+    boundaries_by_claim: dict[str, str] = {}
+    for claim in claims:
+        claim_id = str(claim.get("claim_id", ""))
+        boundary = claim.get("claim_boundary")
+        if not isinstance(boundary, str) or boundary not in config.get(
+            "required_claim_boundaries", []
+        ):
             findings.append(
                 _finding(
-                    "inactive_claim_id",
-                    f"manuscript references a claim that is not active: {claim_id}",
+                    "claim_boundary_configuration_mismatch",
+                    "active claim boundary must be configured for manuscript use",
                     claim_id=claim_id,
                 )
             )
-
-    allowed_numbers: set[Decimal] = set()
-    for claim in claims:
+            continue
+        boundaries_by_claim[claim_id] = boundary
+        claim_numbers: set[Decimal] = set()
         for assertion in claim.get("assertions", []):
             if isinstance(assertion, dict):
-                allowed_numbers.update(_collect_numbers(assertion.get("expected")))
-    for literal, value in _numeric_tokens(text):
-        if value not in allowed_numbers:
-            findings.append(
-                _finding(
-                    "uncovered_claim_value",
-                    f"manuscript number is not covered by an active claim: {literal}",
-                    value=literal,
+                claim_numbers.update(_collect_numbers(assertion.get("expected")))
+        allowed_numbers.update(claim_numbers)
+        allowed_numbers_by_claim[claim_id] = claim_numbers
+
+    for paragraph in re.split(r"\n\s*\n", text):
+        marker_ids = _CLAIM_MARKER.findall(paragraph)
+        active_markers = [claim_id for claim_id in marker_ids if claim_id in active_id_set]
+        for claim_id in marker_ids:
+            if claim_id not in active_id_set:
+                findings.append(
+                    _finding(
+                        "inactive_claim_id",
+                        f"manuscript references a claim that is not active: {claim_id}",
+                        claim_id=claim_id,
+                    )
                 )
-            )
+                continue
+            boundary = boundaries_by_claim.get(claim_id)
+            if boundary is None or boundary not in paragraph:
+                findings.append(
+                    _finding(
+                        "missing_claim_binding",
+                        "claim marker must share a paragraph with its configured boundary",
+                        claim_id=claim_id,
+                    )
+                )
+        paragraph_without_boundaries = paragraph
+        for claim_id in active_markers:
+            boundary = boundaries_by_claim.get(claim_id)
+            if boundary:
+                paragraph_without_boundaries = paragraph_without_boundaries.replace(
+                    boundary, ""
+                )
+        for literal, value in _numeric_tokens(paragraph_without_boundaries):
+            if not active_markers:
+                findings.append(
+                    _finding(
+                        "unmarked_claim_value",
+                        "formal manuscript number lacks an active claim marker and boundary",
+                        value=literal,
+                    )
+                )
+            if not any(
+                value in allowed_numbers_by_claim.get(claim_id, set())
+                for claim_id in active_markers
+            ):
+                findings.append(
+                    _finding(
+                        "uncovered_claim_value",
+                        f"manuscript number is not covered by its active claim marker: {literal}",
+                        value=literal,
+                    )
+                )
 
     return findings, ledger_ids, [str(value) for value in sorted(allowed_numbers)]
 
