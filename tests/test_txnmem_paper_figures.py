@@ -4,6 +4,7 @@ import hashlib
 import json
 import sys
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -91,14 +92,53 @@ class PaperFigureBuilderTests(unittest.TestCase):
         self.assertIn("未来扩展", repair)
         self.assertIn("stale / 重算 / 新来源", repair)
 
-    def test_architecture_adapter_boxes_start_below_their_panel_header(self):
+    def test_architecture_svg_encodes_revalidation_before_persist(self):
         with TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "figures"
             manifest = build_all(ROOT, out_dir)
-            architecture = (out_dir / manifest["figures"]["architecture"]["file"]).read_text(encoding="utf-8")
+            architecture = self._svg_root(
+                out_dir / manifest["figures"]["architecture"]["file"]
+            )
 
-        self.assertIn('x="72.0" y="135.0"', architecture)
-        self.assertIn('x="68.0" y="455.0"', architecture)
+        manager = self._labelled_box(architecture, "Transaction Manager")
+        policy = self._labelled_box(architecture, "Policy Engine")
+        store = self._labelled_box(architecture, "Memory Store")
+        repair = self._labelled_box(architecture, "Provenance Repair")
+        self.assertTrue(self._has_arrow(architecture, manager, policy))
+        self.assertTrue(self._has_arrow(architecture, policy, store))
+        self.assertFalse(self._has_arrow(architecture, manager, store))
+        self.assertFalse(self._has_arrow(architecture, store, policy))
+        self.assertTrue(self._has_arrow(architecture, repair, store))
+        self.assertFalse(self._has_arrow(architecture, repair, policy))
+
+    def test_motivation_risk_rectangles_do_not_overlap(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "figures"
+            manifest = build_all(ROOT, out_dir)
+            timeline = self._svg_root(
+                out_dir / manifest["figures"]["motivation_timeline"]["file"]
+            )
+
+        risk_boxes = [
+            self._labelled_box(timeline, f"风险 {number}") for number in (1, 2, 3)
+        ]
+        for left_index, left in enumerate(risk_boxes):
+            for right in risk_boxes[left_index + 1 :]:
+                self.assertFalse(self._rectangles_overlap(left, right))
+
+    def test_secondary_svg_labels_meet_one_column_size_floor(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "figures"
+            manifest = build_all(ROOT, out_dir)
+
+            for figure_id, item in manifest["figures"].items():
+                with self.subTest(figure_id=figure_id):
+                    root = self._svg_root(out_dir / item["file"])
+                    sizes = [
+                        float(text.attrib["font-size"])
+                        for text in root.findall("{http://www.w3.org/2000/svg}text")
+                    ]
+                    self.assertGreaterEqual(min(sizes), 15.0)
 
     def test_manifest_declares_required_source_dependencies(self):
         with TemporaryDirectory() as tmp:
@@ -121,3 +161,64 @@ class PaperFigureBuilderTests(unittest.TestCase):
     @staticmethod
     def _sha256(path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    @staticmethod
+    def _svg_root(path: Path) -> ET.Element:
+        return ET.fromstring(path.read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _rectangles_overlap(
+        left: tuple[float, float, float, float],
+        right: tuple[float, float, float, float],
+    ) -> bool:
+        left_x, left_y, left_width, left_height = left
+        right_x, right_y, right_width, right_height = right
+        return (
+            max(left_x, right_x) < min(left_x + left_width, right_x + right_width)
+            and max(left_y, right_y) < min(left_y + left_height, right_y + right_height)
+        )
+
+    @staticmethod
+    def _point_in_or_on(
+        point: tuple[float, float], bounds: tuple[float, float, float, float]
+    ) -> bool:
+        x, y = point
+        left, top, width, height = bounds
+        epsilon = 0.01
+        return (
+            left - epsilon <= x <= left + width + epsilon
+            and top - epsilon <= y <= top + height + epsilon
+        )
+
+    @classmethod
+    def _has_arrow(
+        cls,
+        root: ET.Element,
+        source: tuple[float, float, float, float],
+        target: tuple[float, float, float, float],
+    ) -> bool:
+        for line in root.findall("{http://www.w3.org/2000/svg}line"):
+            if line.attrib.get("stroke") != "#1F4E79" or line.attrib.get("stroke-width") != "2":
+                continue
+            start = (float(line.attrib["x1"]), float(line.attrib["y1"]))
+            end = (float(line.attrib["x2"]), float(line.attrib["y2"]))
+            if cls._point_in_or_on(start, source) and cls._point_in_or_on(end, target):
+                return True
+        return False
+
+    @staticmethod
+    def _labelled_box(root: ET.Element, label_fragment: str) -> tuple[float, float, float, float]:
+        text = next(
+            item
+            for item in root.findall("{http://www.w3.org/2000/svg}text")
+            if label_fragment in (item.text or "")
+        )
+        x, y = float(text.attrib["x"]), float(text.attrib["y"])
+        candidates = []
+        for rect in root.findall("{http://www.w3.org/2000/svg}rect"):
+            bounds = tuple(float(rect.attrib[field]) for field in ("x", "y", "width", "height"))
+            if PaperFigureBuilderTests._point_in_or_on((x, y), bounds):
+                candidates.append(bounds)
+        if not candidates:
+            raise AssertionError(f"no enclosing rectangle for {label_fragment}")
+        return min(candidates, key=lambda bounds: bounds[2] * bounds[3])

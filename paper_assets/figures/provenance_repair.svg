@@ -7,19 +7,19 @@
 <text x="50" y="77" font-size="15" fill="#68737D">地址源被撤销或取代后，沿已记录的反向依赖使后代退出默认可见集合。</text>
 <rect x="105.0" y="180.0" width="150.0" height="70.0" rx="7" fill="none" stroke="#A63D40" stroke-width="2"/>
 <text x="180.0" y="210.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">地址 v1</text>
-<text x="180.0" y="233.0" text-anchor="middle" font-size="13" font-weight="400" fill="#68737D">source</text>
+<text x="180.0" y="233.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">source</text>
 <rect x="380.0" y="180.0" width="150.0" height="70.0" rx="7" fill="none" stroke="#1F4E79" stroke-width="1.4"/>
 <text x="455.0" y="210.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">发货建议</text>
-<text x="455.0" y="233.0" text-anchor="middle" font-size="13" font-weight="400" fill="#68737D">derived</text>
+<text x="455.0" y="233.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">derived</text>
 <rect x="655.0" y="116.0" width="150.0" height="70.0" rx="7" fill="none" stroke="#1F4E79" stroke-width="1.4"/>
 <text x="730.0" y="146.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">订单更新</text>
-<text x="730.0" y="169.0" text-anchor="middle" font-size="13" font-weight="400" fill="#68737D">derived</text>
+<text x="730.0" y="169.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">derived</text>
 <rect x="655.0" y="244.0" width="150.0" height="70.0" rx="7" fill="none" stroke="#1F4E79" stroke-width="1.4"/>
 <text x="730.0" y="274.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">客服副本</text>
-<text x="730.0" y="297.0" text-anchor="middle" font-size="13" font-weight="400" fill="#68737D">propagated</text>
+<text x="730.0" y="297.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">propagated</text>
 <rect x="918.0" y="180.0" width="150.0" height="70.0" rx="7" fill="none" stroke="#1F4E79" stroke-width="1.4"/>
 <text x="993.0" y="210.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">下游计划</text>
-<text x="993.0" y="233.0" text-anchor="middle" font-size="13" font-weight="400" fill="#68737D">descendant</text>
+<text x="993.0" y="233.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">descendant</text>
 <line x1="255.0" y1="215.0" x2="376.0" y2="215.0" stroke="#1F4E79" stroke-width="2"/>
 <polygon points="376.0,215.0 366.0,210.0 366.0,220.0" fill="#1F4E79"/>
 <line x1="530.0" y1="207.0" x2="651.0" y2="151.0" stroke="#1F4E79" stroke-width="2"/>
@@ -42,5 +42,5 @@
 <polygon points="730.0,338.0 725.0,328.0 735.0,328.0" fill="#1F4E79"/>
 <rect x="355.0" y="448.0" width="540.0" height="58.0" rx="7" fill="none" stroke="#A63D40" stroke-width="1.4" stroke-dasharray="6 4"/>
 <text x="625.0" y="473.0" text-anchor="middle" font-size="16" font-weight="700" fill="#A63D40">未来扩展（不属于当前路径）：stale / 重算 / 新来源 repair</text>
-<text x="625.0" y="494.0" text-anchor="middle" font-size="14" font-weight="400" fill="#263238">需要额外状态、授权条件与证据</text>
+<text x="625.0" y="494.0" text-anchor="middle" font-size="15" font-weight="400" fill="#263238">需要额外状态、授权条件与证据</text>
 </svg>

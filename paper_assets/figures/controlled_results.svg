@@ -7,15 +7,15 @@
 <text x="50" y="75" font-size="15" fill="#68737D">400 instances × 5 variants；横条为目标违规数（分母 400）。</text>
 <line x1="250" y1="112" x2="950" y2="112" stroke="#68737D" stroke-width="1.2"/>
 <line x1="250.0" y1="112" x2="250.0" y2="470" stroke="#E8ECEF" stroke-width="1"/>
-<text x="250.0" y="100.0" text-anchor="middle" font-size="14" font-weight="400" fill="#68737D">0</text>
+<text x="250.0" y="100.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">0</text>
 <line x1="425.0" y1="112" x2="425.0" y2="470" stroke="#E8ECEF" stroke-width="1"/>
-<text x="425.0" y="100.0" text-anchor="middle" font-size="14" font-weight="400" fill="#68737D">100</text>
+<text x="425.0" y="100.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">100</text>
 <line x1="600.0" y1="112" x2="600.0" y2="470" stroke="#E8ECEF" stroke-width="1"/>
-<text x="600.0" y="100.0" text-anchor="middle" font-size="14" font-weight="400" fill="#68737D">200</text>
+<text x="600.0" y="100.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">200</text>
 <line x1="775.0" y1="112" x2="775.0" y2="470" stroke="#E8ECEF" stroke-width="1"/>
-<text x="775.0" y="100.0" text-anchor="middle" font-size="14" font-weight="400" fill="#68737D">300</text>
+<text x="775.0" y="100.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">300</text>
 <line x1="950.0" y1="112" x2="950.0" y2="470" stroke="#E8ECEF" stroke-width="1"/>
-<text x="950.0" y="100.0" text-anchor="middle" font-size="14" font-weight="400" fill="#68737D">400</text>
+<text x="950.0" y="100.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">400</text>
 <text x="50.0" y="126.0" text-anchor="start" font-size="15" font-weight="700" fill="#68737D">variant</text>
 <text x="978.0" y="126.0" text-anchor="middle" font-size="15" font-weight="700" fill="#68737D">oracle match</text>
 <text x="50.0" y="182.0" text-anchor="start" font-size="17" font-weight="400" fill="#263238">Naive</text>

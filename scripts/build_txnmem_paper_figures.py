@@ -96,7 +96,7 @@ def _arrow(parts: list[str], x1: float, y1: float, x2: float, y2: float, *, colo
 
 
 def _note(parts: list[str], x: float, y: float, text: str, *, color: str = GRAY, anchor: str = "start") -> None:
-    _lines(parts, x, y, [text], size=14, fill=color, anchor=anchor)
+    _lines(parts, x, y, [text], size=15, fill=color, anchor=anchor)
 
 
 def _motivation_timeline(_: Path) -> tuple[str, str, str, list[str], tuple[int, int]]:
@@ -116,7 +116,7 @@ def _motivation_timeline(_: Path) -> tuple[str, str, str, list[str], tuple[int, 
 
     risks = [
         (250, 255, "风险 1：写入中崩溃", ["地址已写、订单未写", "半更新对后继可见"], "crash"),
-        (560, 345, "风险 2：提交时撤权", ["begin 时允许", "commit 时旧授权仍写入"], "revoke"),
+        (560, 380, "风险 2：提交时撤权", ["begin 时允许", "commit 时旧授权仍写入"], "revoke"),
         (830, 255, "风险 3：来源失效", ["地址源被更正", "派生建议仍被读取"], "source"),
     ]
     for x, y, heading, details, marker in risks:
@@ -149,11 +149,11 @@ def _architecture(_: Path) -> tuple[str, str, str, list[str], tuple[int, int]]:
     for y, label in adapter_boxes:
         _box(parts, 72, y, 232, 72, stroke=GRAY, fill=LIGHT_GRAY, radius=6)
         _lines(parts, 188, y + 31, [label], size=16, fill=DARK, anchor="middle", weight="600")
-        _lines(parts, 188, y + 53, ["per-event adapter"], size=14, fill=GRAY, anchor="middle")
+        _lines(parts, 188, y + 53, ["per-event adapter"], size=15, fill=GRAY, anchor="middle")
     _box(parts, 68, 455, 240, 76, stroke=RED, fill="none", radius=6)
     _lines(parts, 188, 482, ["逐事件接线"], size=17, fill=RED, anchor="middle", weight="700")
     _lines(parts, 188, 505, ["非事务适配；不提供事务"], size=15, fill=DARK, anchor="middle")
-    _lines(parts, 188, 526, ["不缓冲跨工具调用写集"], size=14, fill=GRAY, anchor="middle")
+    _lines(parts, 188, 526, ["不缓冲跨工具调用写集"], size=15, fill=GRAY, anchor="middle")
 
     _box(parts, 370, 76, 494, 480, stroke=BLUE, fill="none", radius=10, stroke_width=2)
     _lines(parts, 394, 108, ["确定性 TxnMem core（事务语义）"], size=20, fill=BLUE, weight="700")
@@ -167,12 +167,12 @@ def _architecture(_: Path) -> tuple[str, str, str, list[str], tuple[int, int]]:
     for x, y, w, h, title, subtitle in components:
         _box(parts, x, y, w, h, stroke=BLUE, fill="none", radius=6)
         _lines(parts, x + w / 2, y + 34, [title], size=16, fill=DARK, anchor="middle", weight="700")
-        _lines(parts, x + w / 2, y + 58, subtitle, size=13, fill=GRAY, anchor="middle")
+        _lines(parts, x + w / 2, y + 58, subtitle, size=15, fill=GRAY, anchor="middle")
     _arrow(parts, 593, 189, 638, 189)
-    _arrow(parts, 732, 232, 732, 288)
-    _arrow(parts, 638, 335, 593, 335)
-    _arrow(parts, 732, 378, 650, 426)
-    _arrow(parts, 615, 473, 593, 378)
+    _arrow(parts, 638, 216, 593, 292)
+    _arrow(parts, 593, 335, 638, 335)
+    _arrow(parts, 650, 430, 732, 378)
+    _note(parts, 707, 418, "invalidation", color=GRAY, anchor="middle")
     _arrow(parts, 304, 220, 405, 189, color=GRAY)
     _note(parts, 322, 207, "event contract", anchor="middle")
 
@@ -180,10 +180,10 @@ def _architecture(_: Path) -> tuple[str, str, str, list[str], tuple[int, int]]:
     _lines(parts, 925, 108, ["独立 reference simulator"], size=18, fill=DARK, weight="700")
     _box(parts, 928, 150, 162, 86, stroke=GRAY, fill=LIGHT_GRAY, radius=6)
     _lines(parts, 1009, 184, ["serial semantics"], size=16, fill=DARK, anchor="middle", weight="600")
-    _lines(parts, 1009, 207, ["合法线性化集合"], size=14, fill=GRAY, anchor="middle")
+    _lines(parts, 1009, 207, ["合法线性化集合"], size=15, fill=GRAY, anchor="middle")
     _box(parts, 928, 290, 162, 86, stroke=GRAY, fill="none", radius=6)
     _lines(parts, 1009, 324, ["differential oracle"], size=16, fill=DARK, anchor="middle", weight="600")
-    _lines(parts, 1009, 347, ["比较可观察历史"], size=14, fill=GRAY, anchor="middle")
+    _lines(parts, 1009, 347, ["比较可观察历史"], size=15, fill=GRAY, anchor="middle")
     _arrow(parts, 864, 335, 928, 335, color=GRAY)
     _arrow(parts, 1009, 236, 1009, 286, color=GRAY)
     _note(parts, 50, 592, "事务性承诺只来自 TxnMem core；适配器、模型与服务保持为可替换的逐事件边界。", color=DARK)
@@ -209,13 +209,13 @@ def _commit_protocol(_: Path) -> tuple[str, str, str, list[str], tuple[int, int]
     for (x, title, detail), box_width in zip(steps, widths):
         _box(parts, x, 168, box_width, 146, stroke=BLUE, fill="none", radius=7)
         _lines(parts, x + box_width / 2, 205, [title], size=18, fill=BLUE, anchor="middle", weight="700")
-        _lines(parts, x + box_width / 2, 234, detail, size=14, fill=DARK, anchor="middle", leading=20)
+        _lines(parts, x + box_width / 2, 234, detail, size=15, fill=DARK, anchor="middle", leading=20)
     _arrow(parts, 234, 244, 286, 244)
     _arrow(parts, 499, 244, 546, 244)
     _arrow(parts, 798, 244, 848, 244)
     _box(parts, 573, 354, 194, 68, stroke=RED, fill="none", radius=7)
     _lines(parts, 670, 382, ["策略拒绝 / 冲突 → abort"], size=16, fill=RED, anchor="middle", weight="700")
-    _lines(parts, 670, 405, ["丢弃缓冲写集"], size=14, fill=DARK, anchor="middle")
+    _lines(parts, 670, 405, ["丢弃缓冲写集"], size=15, fill=DARK, anchor="middle")
     _arrow(parts, 670, 315, 670, 350, color=RED)
     _lines(parts, 935, 388, ["崩溃恢复可见结果："], size=17, fill=DARK, anchor="middle", weight="700")
     _lines(parts, 935, 416, ["完整提交 / 未提交"], size=18, fill=BLUE, anchor="middle", weight="700")
@@ -242,7 +242,7 @@ def _provenance_repair(_: Path) -> tuple[str, str, str, list[str], tuple[int, in
     for x, y, label, kind, color in nodes:
         _box(parts, x, y, 150, 70, stroke=color, fill="none", radius=7, stroke_width=2 if color == RED else 1.4)
         _lines(parts, x + 75, y + 30, [label], size=18, fill=DARK, anchor="middle", weight="700")
-        _lines(parts, x + 75, y + 53, [kind], size=13, fill=GRAY, anchor="middle")
+        _lines(parts, x + 75, y + 53, [kind], size=15, fill=GRAY, anchor="middle")
     _arrow(parts, 255, 215, 376, 215)
     _arrow(parts, 530, 207, 651, 151)
     _arrow(parts, 530, 223, 651, 279)
@@ -259,7 +259,7 @@ def _provenance_repair(_: Path) -> tuple[str, str, str, list[str], tuple[int, in
 
     _box(parts, 355, 448, 540, 58, stroke=RED, fill="none", radius=7, dash="6 4")
     _lines(parts, 625, 473, ["未来扩展（不属于当前路径）：stale / 重算 / 新来源 repair"], size=16, fill=RED, anchor="middle", weight="700")
-    _lines(parts, 625, 494, ["需要额外状态、授权条件与证据"], size=14, fill=DARK, anchor="middle")
+    _lines(parts, 625, 494, ["需要额外状态、授权条件与证据"], size=15, fill=DARK, anchor="middle")
     caption = "当前 provenance repair 仅沿已记录依赖执行后代失效闭包；stale、重算和新来源修复均为未来扩展。"
     alt = "地址源失效后，发货建议、订单更新、客服副本和下游计划组成的依赖图被后代失效闭包处理；下方虚线框将 stale、重算和新来源 repair 标为未来扩展。"
     sources = ["docs/paper/txnmem_ccfa_draft_zh.md", "results/final_controlled/results/minimal_mutant_witnesses.json"]
@@ -336,8 +336,8 @@ def _evidence_layers(root: Path) -> tuple[str, str, str, list[str], tuple[int, i
         _box(parts, 88, y + 15, 150, 42, stroke=color, fill=LIGHT_GRAY if color != RED else "none", radius=5)
         _lines(parts, 163, y + 42, [label], size=18, fill=DARK, anchor="middle", weight="700")
         _lines(parts, 265, y + 32, [evidence], size=16, fill=DARK, weight="600")
-        _lines(parts, 265, y + 55, ["边界：" + boundary], size=14, fill=RED if color == RED else GRAY)
-    _lines(parts, 70, 599, ["设计配置声明的正文图：" + "、".join(config["body_figure_ids"])], size=14, fill=GRAY)
+        _lines(parts, 265, y + 55, ["边界：" + boundary], size=15, fill=RED if color == RED else GRAY)
+    _lines(parts, 70, 599, ["设计配置声明的正文图：" + "、".join(config["body_figure_ids"])], size=15, fill=GRAY)
     _lines(parts, 70, 623, ["证据链强调：controlled correctness → 接线/服务/拓扑的外部相关性；后者不改写前者的语义结论。"], size=15, fill=DARK)
     caption = "TxnMem 的分层证据链：从受控正确性到模型、公共 runtime、真实服务和跨主机证据；每层均附有简洁 claim boundary。"
     alt = "五层证据图依次为受控正确性、原生模型、公共 runtime、真实服务和跨主机；每层显示证据对象以及明确的非结论边界。"

@@ -8,7 +8,7 @@
         "width": 1160
       },
       "file": "architecture.svg",
-      "output_sha256": "a3479bf6437f56ce5219212b15e6dc960c42683fabccdb6ac175b211af36c337",
+      "output_sha256": "9a132f6bc2240bdde399af8ab2735f805f33544697346ea1af1cfcb28518bb92",
       "sources": [
         {
           "path": "docs/paper/txnmem_ccfa_draft_zh.md",
@@ -28,7 +28,7 @@
         "width": 1120
       },
       "file": "commit_protocol.svg",
-      "output_sha256": "ab4df579c5abaee9598ca9daf3ca766554ff80cc545d4c63946ebcdecb22c660",
+      "output_sha256": "dc66463a6dfb8654395ddd21e8a4e10b6ff748f320297354b8bf0460a6d77d1d",
       "sources": [
         {
           "path": "docs/paper/txnmem_ccfa_draft_zh.md",
@@ -48,7 +48,7 @@
         "width": 1100
       },
       "file": "controlled_results.svg",
-      "output_sha256": "b460866302f3d9000890ffcf694ec13ba0f936be1cd9d52831815418c6ce810c",
+      "output_sha256": "5596e7a62775f7a2f0aa5e264fac296ad00e8bf8cbaf7265cd8ae6b86eab575a",
       "sources": [
         {
           "path": "results/paper_evidence/controlled_suite.json",
@@ -64,7 +64,7 @@
         "width": 1160
       },
       "file": "evidence_layers.svg",
-      "output_sha256": "25cff79180165eae8c0971100d06829846f7b6a0eef05d35463bee64afb87279",
+      "output_sha256": "8645741e2bb9b0fffe738a71e00a712b87945594eb2c37d7b7a6f446c4a344e0",
       "sources": [
         {
           "path": "configs/txnmem_ccfa_paper.json",
@@ -104,7 +104,7 @@
         "width": 1100
       },
       "file": "motivation_timeline.svg",
-      "output_sha256": "9b3faecfa79c77a182d0f41ecab1e236eeb490c63698a10f102c869f307d621d",
+      "output_sha256": "50504849cad425ee2a5e1ca17e8217088462eed88e23cbc007de6de1face86db",
       "sources": [
         {
           "path": "docs/paper/txnmem_ccfa_draft_zh.md",
@@ -128,7 +128,7 @@
         "width": 1120
       },
       "file": "provenance_repair.svg",
-      "output_sha256": "4e4ea76e3dd3117b328d03311e85100d08f0f5469195981152171f8df5e0fe69",
+      "output_sha256": "40efbf5782697e6ab2c9138f8d2512558ff336a1ae2c0adb7b6965f45ff07970",
       "sources": [
         {
           "path": "docs/paper/txnmem_ccfa_draft_zh.md",
