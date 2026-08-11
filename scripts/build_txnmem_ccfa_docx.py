@@ -14,7 +14,6 @@ import json
 import re
 import shutil
 import subprocess
-import tempfile
 import zipfile
 from pathlib import Path
 from typing import Iterable
@@ -58,6 +57,8 @@ W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS = {"w": W_NS}
 MARKER = re.compile(r"^`?\[\[(FIG|TABLE):([a-z_]+)\]\]`?$")
 HEADING = re.compile(r"^(#{1,3})\s+(.+?)\s*$")
+CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+SVG_RASTER_SCALE = 2
 
 
 def _load(path: Path) -> dict:
@@ -289,40 +290,80 @@ def _add_list_item(doc: Document, text: str) -> None:
     paragraph.add_run(_plain(text))
 
 
-def _rasterize_svg(svg: Path, destination: Path) -> Path:
-    """Use macOS Quick Look deterministically because python-docx cannot embed SVG."""
+def _svg_viewbox_dimensions(svg: Path) -> tuple[float, float]:
+    """Return the intrinsic SVG canvas dimensions required for raster output."""
+    root = ET.parse(svg).getroot()
+    viewbox = root.attrib.get("viewBox", "").replace(",", " ").split()
+    if len(viewbox) != 4:
+        raise ValueError(f"{svg.name} must define a four-value viewBox")
+    width, height = float(viewbox[2]), float(viewbox[3])
+    if width <= 0 or height <= 0:
+        raise ValueError(f"{svg.name} has an invalid viewBox: {root.attrib['viewBox']!r}")
+    return width, height
+
+
+def _is_expected_raster(path: Path, pixel_width: int, pixel_height: int) -> bool:
+    """Validate cache reuse so old square Quick Look thumbnails cannot re-enter Word."""
+    try:
+        from PIL import Image
+
+        with Image.open(path) as image:
+            return image.size == (pixel_width, pixel_height)
+    except OSError:
+        return False
+
+
+def _rasterize_svg(svg: Path, destination: Path) -> tuple[Path, float]:
+    """Render SVG into an exact-aspect 2× PNG canvas for python-docx embedding."""
     destination.mkdir(parents=True, exist_ok=True)
-    # Quick Look may need an unsandboxed macOS XPC service. A digest-keyed shared
-    # cache lets a preceding deterministic conversion be reused by test runners.
+    svg_width, svg_height = _svg_viewbox_dimensions(svg)
+    pixel_width = round(svg_width * SVG_RASTER_SCALE)
+    pixel_height = round(svg_height * SVG_RASTER_SCALE)
+    ratio = svg_height / svg_width
+    # Cache keys include geometry/version, preventing reuse of the legacy square
+    # Quick Look thumbnail canvas that clipped wide diagrams.
     digest = hashlib.sha256(svg.read_bytes()).hexdigest()[:16]
-    shared = Path("/private/tmp/txnmem-docx-svg-cache") / f"{svg.stem}-{digest}.png"
+    shared = Path("/private/tmp/txnmem-docx-svg-cache") / (
+        f"{svg.stem}-{digest}-{pixel_width}x{pixel_height}-v2.png"
+    )
     target = destination / f"{svg.stem}.png"
-    if shared.is_file():
+    if shared.is_file() and _is_expected_raster(shared, pixel_width, pixel_height):
         shutil.copyfile(shared, target)
-        return target
-    with tempfile.TemporaryDirectory(prefix="txnmem-svg-", dir="/private/tmp") as tmp:
-        tmp_path = Path(tmp)
-        completed = subprocess.run(
-            ["qlmanage", "-t", "-s", "2200", "-o", str(tmp_path), str(svg)],
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        return target, ratio
+    if not CHROME.is_file():
+        raise RuntimeError(
+            "Exact-aspect SVG rasterization requires headless Google Chrome; "
+            f"missing {CHROME} and no valid cached raster exists for {svg.name}."
         )
-        generated = tmp_path / f"{svg.name}.png"
-        if completed.returncode != 0 or not generated.is_file():
-            raise RuntimeError(f"SVG rasterization failed for {svg.name}: {completed.stderr.strip()}")
-        shared.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(generated, shared)
-        shutil.copyfile(shared, target)
-    return target
+    shared.parent.mkdir(parents=True, exist_ok=True)
+    completed = subprocess.run(
+        [str(CHROME), "--headless", "--disable-gpu", "--hide-scrollbars",
+         "--force-device-scale-factor=1", f"--window-size={pixel_width},{pixel_height}",
+         f"--screenshot={shared}", svg.resolve().as_uri()],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if completed.returncode != 0 or not _is_expected_raster(shared, pixel_width, pixel_height):
+        raise RuntimeError(
+            f"Exact-aspect SVG rasterization failed for {svg.name}: {completed.stderr.strip()}"
+        )
+    shutil.copyfile(shared, target)
+    return target, ratio
 
 
 def _add_figure(doc: Document, figure_id: str, manifest: dict, root: Path, cache: Path) -> None:
     item = manifest["figures"][figure_id]
-    png = _rasterize_svg(root / "paper_assets/figures" / item["file"], cache)
-    ratio = item["dimensions"]["height"] / item["dimensions"]["width"]
+    png, ratio = _rasterize_svg(root / "paper_assets/figures" / item["file"], cache)
+    manifest_ratio = item["dimensions"]["height"] / item["dimensions"]["width"]
+    if abs(ratio - manifest_ratio) > 0.002:
+        raise ValueError(f"{figure_id} SVG viewBox does not match manifest dimensions")
     width = min(6.25, 6.0 / max(ratio, 0.5))
     paragraph = doc.add_paragraph()
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    shape = paragraph.add_run().add_picture(str(png), width=Inches(width))
+    shape = paragraph.add_run().add_picture(
+        str(png), width=Inches(width), height=Inches(width * ratio)
+    )
+    if abs(shape.height / shape.width - ratio) > 0.002:
+        raise RuntimeError(f"{figure_id} Word drawing extent does not preserve the SVG ratio")
     shape._inline.docPr.set("descr", item["alt_text"])
     shape._inline.docPr.set("title", f"图：{figure_id}")
     caption = doc.add_paragraph(style="Caption")
@@ -490,10 +531,15 @@ def _scrub_metadata(path: Path) -> None:
     with zipfile.ZipFile(path) as source:
         members = {name: source.read(name) for name in source.namelist() if name != "docProps/custom.xml"}
     core = ET.fromstring(members["docProps/core.xml"])
-    for element in core:
+    for element in list(core):
         if element.tag.endswith("creator") or element.tag.endswith("lastModifiedBy"):
-            element.text = ""
+            core.remove(element)
     members["docProps/core.xml"] = ET.tostring(core, encoding="utf-8", xml_declaration=True)
+    app = ET.fromstring(members["docProps/app.xml"])
+    for element in list(app):
+        if not list(element) and not (element.text or "").strip():
+            app.remove(element)
+    members["docProps/app.xml"] = ET.tostring(app, encoding="utf-8", xml_declaration=True)
     for name, content in list(members.items()):
         if name.startswith("word/") and name.endswith(".xml"):
             root = ET.fromstring(content)
