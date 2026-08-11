@@ -58,13 +58,13 @@
       "sha256": "94dd588d1309c065fd7cfdd76e071d9955a59e5830254ed652c15722a492df00"
     }
   ],
-  "checked_assertion_count": 107,
+  "checked_assertion_count": 113,
   "claim_count": 14,
   "evidence_id": "paper_claim_audit",
   "finding_count": 0,
   "findings": [],
   "ledger_path": "configs/paper_claims.json",
-  "ledger_sha256": "5d8f858a4ea60aece27053525647b03e5f7b0670db8b38a6308e89171bf4f6eb",
+  "ledger_sha256": "474dd871cc0eeb0540bfc69c6e4a291ccf247da178a30f9fc6776627c9dc2bd4",
   "schema_version": 1,
   "status": "passed",
   "superseded_artifact_count": 3

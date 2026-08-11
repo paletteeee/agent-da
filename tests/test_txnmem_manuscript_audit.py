@@ -4,6 +4,7 @@ import json
 import re
 import sys
 import unittest
+from collections import Counter
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -30,6 +31,19 @@ class ManuscriptAuditTests(unittest.TestCase):
         "[[FIG:commit_protocol]]",
         "[[FIG:provenance_repair]]",
     )
+    TASK_FOUR_MARKERS = (
+        "[[TABLE:system_invariants]]",
+        "[[TABLE:workload_family]]",
+        "[[TABLE:experimental_setup]]",
+        "[[FIG:controlled_results]]",
+        "[[TABLE:controlled_results]]",
+        "[[FIG:evidence_layers]]",
+        "[[TABLE:runtime_results]]",
+    )
+    APPENDIX_MARKERS = (
+        "[[TABLE:claim_ledger]]",
+        "[[TABLE:workload_schema]]",
+    )
 
     def _claim_blocks(self) -> str:
         return "\n\n".join(
@@ -47,6 +61,19 @@ class ManuscriptAuditTests(unittest.TestCase):
         self.assertEqual(
             re.findall(r"\[\[(?:FIG|TABLE):[^]]+\]\]", reader_text),
             list(self.TASK_THREE_MARKERS),
+        )
+
+    def _assert_all_configured_markers(self, reader_text: str) -> None:
+        expected = {
+            *(f"[[FIG:{marker}]]" for marker in CONFIG["body_figure_ids"]),
+            *(f"[[TABLE:{marker}]]" for marker in CONFIG["body_table_ids"]),
+            *(f"[[FIG:{marker}]]" for marker in CONFIG["appendix_figure_ids"]),
+            *(f"[[TABLE:{marker}]]" for marker in CONFIG["appendix_table_ids"]),
+        }
+        observed = re.findall(r"\[\[(?:FIG|TABLE):[^]]+\]\]", reader_text)
+        self.assertEqual(
+            Counter(observed),
+            Counter({marker: 1 for marker in expected}),
         )
 
     def test_rejects_superseded_artifact(self):
@@ -148,14 +175,16 @@ class ManuscriptAuditTests(unittest.TestCase):
         )
 
     def test_drafting_mode_only_allows_deferred_sections_to_be_absent(self):
+        config = dict(CONFIG)
+        config["drafting_mode"] = True
         text = "\n\n".join(
             f"# {section}"
-            for section in CONFIG["required_sections"]
-            if section not in CONFIG["drafting_optional_sections"]
+            for section in config["required_sections"]
+            if section not in config["drafting_optional_sections"]
         )
         text += "\n\n" + self._claim_blocks()
 
-        report = audit_text(text, root=ROOT, config=CONFIG)
+        report = audit_text(text, root=ROOT, config=config)
 
         self.assertNotIn(
             "missing_required_section", {item["code"] for item in report["findings"]}
@@ -190,7 +219,7 @@ class ManuscriptAuditTests(unittest.TestCase):
         )
         self.assertEqual(len(re.findall(r"^- ", introduction, re.MULTILINE)), 4)
         self.assertTrue(all(term in introduction for term in ("地址", "订单", "崩溃", "撤回", "源记录")))
-        self._assert_task_three_markers(reader_text)
+        self._assert_task_three_markers(reader_text.split("# 6 评估", 1)[0])
         self.assertTrue(
             all(
                 term in reader_text
@@ -226,6 +255,64 @@ class ManuscriptAuditTests(unittest.TestCase):
 
         with self.assertRaises(AssertionError):
             self._assert_task_three_markers(reader_text)
+
+    def test_task_four_source_contract(self):
+        source = (ROOT / CONFIG["paper_source_path"]).read_text(encoding="utf-8")
+        reader_text = strip_author_annotations(source)
+        evaluation = reader_text.split("# 6 评估", 1)[1].split("# 7 讨论与局限性", 1)[0]
+        related_work = reader_text.split("# 8 相关工作", 1)[1].split("# 9 结论", 1)[0]
+        references = reader_text.split("# 参考文献", 1)[1].split("# 附录", 1)[0]
+
+        self.assertFalse(CONFIG["drafting_mode"])
+        self._assert_all_configured_markers(reader_text)
+        self.assertTrue(
+            all(rq in evaluation for rq in ("RQ1", "RQ2", "RQ3", "RQ4", "RQ5"))
+        )
+        self.assertTrue(
+            all(
+                term in source
+                for term in (
+                    "400 个实例和 2,000 条变体结果",
+                    "0/400",
+                    "400/400",
+                    "350/400",
+                    "200/400",
+                    "50/400",
+                    "100/400",
+                    "0.875",
+                    "4,000",
+                    "0.750",
+                    "2、1、6、1",
+                    "五次、每次十个 task",
+                    "50/50 contract",
+                    "50/50 oracle",
+                    "110 个 native event",
+                    "6 个 execution failure",
+                    "+0.0016169580043333333",
+                    "5×30",
+                    "150 次",
+                    "0 partial commit",
+                    "5/5",
+                    "30 个 native event",
+                    "MMD²",
+                    "generator 仍需校准",
+                )
+            )
+        )
+        self.assertIn("四个 non-normal 路径", evaluation)
+        self.assertIn("一个 Agent-worker host 到一个 model-server host", evaluation)
+        self.assertTrue(
+            all(term in related_work for term in ("Agent memory", "governed memory/access control", "transaction/provenance", "distributed-system testing"))
+        )
+        self.assertTrue(all(f"[R{number:02d}]" in related_work for number in range(1, 33)))
+        self.assertIn("configs/txnmem_paper_references.json", references)
+        self.assertIn("[R01]--[R32]", references)
+        self.assertTrue(
+            all(
+                phrase not in reader_text
+                for phrase in ("接近真实分布", "证明等价", "分布等价证明", "生产级性能")
+            )
+        )
 
 
 if __name__ == "__main__":

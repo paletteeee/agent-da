@@ -107,7 +107,8 @@
         {"pointer": "/improved_task_count", "operator": "equals", "expected": 13},
         {"pointer": "/regressed_task_count", "operator": "equals", "expected": 0},
         {"pointer": "/baseline_total_tokens", "operator": "equals", "expected": 517564},
-        {"pointer": "/tuned_total_tokens", "operator": "equals", "expected": 2171632}
+        {"pointer": "/tuned_total_tokens", "operator": "equals", "expected": 2171632},
+        {"pointer": "/tuned_status_counts/failed", "operator": "equals", "expected": 6}
       ],
       "run_command": "PYTHONPATH=src python3 src/txnmem_prompt_comparison.py --kind appworld --baseline results/prompt_profile_formal_v4/appworld_baseline/native_batch_summary.json --tuned results/prompt_profile_formal_v4/appworld_tuned/native_batch_summary.json --out results/prompt_profile_formal_v4/appworld_prompt_comparison.json",
       "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "e611b0d773b4445aff4292f5f3a1e3f543cccb9ab3d2b281237c203b5dc899f3"},
@@ -154,7 +155,8 @@
         {"pointer": "/total_partial_commit_count", "operator": "equals", "expected": 0},
         {"pointer": "/scenarios/retry_success/retry_success_count", "operator": "equals", "expected": 30},
         {"pointer": "/scenarios/timeout/abort_count", "operator": "equals", "expected": 30},
-        {"pointer": "/scenarios/connection_drop/abort_count", "operator": "equals", "expected": 30}
+        {"pointer": "/scenarios/connection_drop/abort_count", "operator": "equals", "expected": 30},
+        {"pointer": "/scenarios/delay/success_count", "operator": "equals", "expected": 30}
       ],
       "run_command": "TXNMEM_NEO4J_URI=bolt://127.0.0.1:27687 TXNMEM_TOXIPROXY_URL=http://127.0.0.1:8474 PYTHONPATH=src python3 src/txnmem_experiment.py backend-performance --backend vector-graph --service-url http://127.0.0.1:26333 --events 2 --repetitions 30 --out-dir results/toxiproxy_formal30",
       "manifest": {"path": "configs/submission_evidence/toxiproxy_faults_30.json", "sha256": "206f2096709d52901504e16ecc2b233348c3d2b06e9bc96c9990e5b6aa6ed0d7"},
@@ -303,7 +305,11 @@
         {"pointer": "/mutant_count", "operator": "equals", "expected": 4},
         {"pointer": "/witness_count", "operator": "equals", "expected": 4},
         {"pointer": "/all_prefix_minimal", "operator": "equals", "expected": true},
-        {"pointer": "/validation/status", "operator": "equals", "expected": "passed"}
+        {"pointer": "/validation/status", "operator": "equals", "expected": "passed"},
+        {"pointer": "/witnesses/partial_commit/minimal_operation_count", "operator": "equals", "expected": 2},
+        {"pointer": "/witnesses/remove_commit_revalidation/minimal_operation_count", "operator": "equals", "expected": 1},
+        {"pointer": "/witnesses/disable_provenance_traversal/minimal_operation_count", "operator": "equals", "expected": 6},
+        {"pointer": "/witnesses/bypass_scope_check/minimal_operation_count", "operator": "equals", "expected": 1}
       ],
       "run_command": "PYTHONPATH=src python3 src/txnmem_experiment.py mutation-witnesses --instances results/final_controlled/data/generated_instances.jsonl --out results/final_controlled/results/minimal_mutant_witnesses.json",
       "manifest": {"path": "configs/workload_families.yaml", "sha256": "b1a4d206a55565fb64eafe47f88e5df905823a3909cc8b0dd575de696376ed50"},

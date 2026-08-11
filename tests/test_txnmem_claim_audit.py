@@ -236,6 +236,29 @@ class PaperClaimLedgerTests(unittest.TestCase):
             {"run_command", "manifest", "source_commit", "claim_boundary"},
         )
 
+    def test_task_four_ledger_extensions_cover_the_authorized_artifact_values(self):
+        ledger = json.loads((ROOT / "configs" / "paper_claims.json").read_text())
+        claims = {claim["claim_id"]: claim for claim in ledger["claims"]}
+        expected = {
+            "minimal_mutant_witnesses_4": {
+                "/witnesses/partial_commit/minimal_operation_count": 2,
+                "/witnesses/remove_commit_revalidation/minimal_operation_count": 1,
+                "/witnesses/disable_provenance_traversal/minimal_operation_count": 6,
+                "/witnesses/bypass_scope_check/minimal_operation_count": 1,
+            },
+            "appworld_prompt_profile_pair": {"/tuned_status_counts/failed": 6},
+            "toxiproxy_fault_matrix_5x30": {"/scenarios/delay/success_count": 30},
+        }
+
+        for claim_id, expected_assertions in expected.items():
+            assertions = {
+                row["pointer"]: row["expected"] for row in claims[claim_id]["assertions"]
+            }
+            self.assertEqual(
+                {pointer: assertions.get(pointer) for pointer in expected_assertions},
+                expected_assertions,
+            )
+
     def test_audit_rejects_incomplete_tau_task_set(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
