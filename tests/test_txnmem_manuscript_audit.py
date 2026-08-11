@@ -264,6 +264,11 @@ class ManuscriptAuditTests(unittest.TestCase):
         references = reader_text.split("# 参考文献", 1)[1].split("# 附录", 1)[0]
 
         self.assertFalse(CONFIG["drafting_mode"])
+        self.assertIn("controlled_mutation_matrix_350", CONFIG["active_claim_ids"])
+        self.assertIn(
+            "controlled mutation-matrix sensitivity over 350 variant-instance cases; not a production defect rate or universal mutant-coverage claim",
+            CONFIG["required_claim_boundaries"],
+        )
         self._assert_all_configured_markers(reader_text)
         self.assertTrue(
             all(rq in evaluation for rq in ("RQ1", "RQ2", "RQ3", "RQ4", "RQ5"))
@@ -282,6 +287,8 @@ class ManuscriptAuditTests(unittest.TestCase):
                     "0.875",
                     "4,000",
                     "0.750",
+                    "300/350",
+                    "0.8571428571428571",
                     "2、1、6、1",
                     "五次、每次十个 task",
                     "50/50 contract",

@@ -259,7 +259,9 @@ Qwen 工具循环通过结构化工具调用产生逐个 memory event；模型�
 
 因果调度在 400 个 schedule case 上的目标违规检测率为 0.875；随机基线由每个实例的十个带 seed 调度构成，在 4,000 个 case 上的检测率为 0.750。前者把触发条件与注入点对齐，因此更容易把失败落在会改变可观察 history 的边界；这一比较仅衡量受控 simulator 的检测表现，不是对生产故障概率的估计。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:causal_schedule_vs_random]] schedule detection in the controlled simulator; random baseline consists of ten seeded schedules per instance<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
 
-mutation 证据进一步给出四个可重放的 operation-prefix-minimal witness：partial commit、移除提交重验证、关闭 provenance 遍历和绕过 scope 检查的最小前缀长度依次为 2、1、6、1。每个 witness 均针对其变异体的目标违规；最小性只指删除末尾操作后不再复现该违规，并不表示真实工作流的最短攻击序列。当前 active ledger 没有覆盖独立 mutation kill-rate 数值，故本文不把该数值写入正式结果。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:minimal_mutant_witnesses_4]] one deterministic operation-prefix-minimal witness per major mutant; minimality is with respect to suffix removal<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
+受控 mutation matrix 覆盖 350 个 variant-instance case，其中 300/350 个被杀死，mutation kill rate 为 0.8571428571428571。这个量度表示 benchmark 对预设 mutation 的敏感性，而不是生产 defect rate 或普适的 mutant-coverage 主张。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:controlled_mutation_matrix_350]] controlled mutation-matrix sensitivity over 350 variant-instance cases; not a production defect rate or universal mutant-coverage claim<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
+
+mutation 证据进一步给出四个可重放的 operation-prefix-minimal witness：partial commit、移除提交重验证、关闭 provenance 遍历和绕过 scope 检查的最小前缀长度依次为 2、1、6、1。每个 witness 均针对其变异体的目标违规；最小性只指删除末尾操作后不再复现该违规，并不表示真实工作流的最短攻击序列。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:minimal_mutant_witnesses_4]] one deterministic operation-prefix-minimal witness per major mutant; minimality is with respect to suffix removal<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
 
 ## 6.3 RQ3：真实模型和公开 runtime 能否接入？
 

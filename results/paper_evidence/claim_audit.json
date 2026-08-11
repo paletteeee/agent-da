@@ -1,5 +1,5 @@
 {
-  "active_claim_count": 14,
+  "active_claim_count": 15,
   "checked_artifacts": [
     {
       "path": "results/appworld_projection_regenerated/projection_inventory.json",
@@ -12,6 +12,10 @@
     {
       "path": "results/cross_host_model_load_formal_v8_aggregate/results/model_load_repetition_summary.json",
       "sha256": "c65dda52edc9c66e8441580a90c39d1aef60c34e8f44feca3415429f8d8622ed"
+    },
+    {
+      "path": "results/final_controlled/reproducibility_report.json",
+      "sha256": "af49ab105b043094d6813c72c270b186e3a091640ccf3529bf39f4fe64addd2c"
     },
     {
       "path": "results/final_controlled/results/minimal_mutant_witnesses.json",
@@ -58,13 +62,13 @@
       "sha256": "94dd588d1309c065fd7cfdd76e071d9955a59e5830254ed652c15722a492df00"
     }
   ],
-  "checked_assertion_count": 113,
-  "claim_count": 14,
+  "checked_assertion_count": 128,
+  "claim_count": 15,
   "evidence_id": "paper_claim_audit",
   "finding_count": 0,
   "findings": [],
   "ledger_path": "configs/paper_claims.json",
-  "ledger_sha256": "474dd871cc0eeb0540bfc69c6e4a291ccf247da178a30f9fc6776627c9dc2bd4",
+  "ledger_sha256": "a369145fdf9333d530586464ae5b5bb3599b91b138528fbe0181f4d83459b64f",
   "schema_version": 1,
   "status": "passed",
   "superseded_artifact_count": 3

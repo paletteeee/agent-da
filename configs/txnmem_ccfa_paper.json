@@ -33,6 +33,7 @@
   "active_claim_ids": [
     "controlled_correctness_400x5",
     "causal_schedule_vs_random",
+    "controlled_mutation_matrix_350",
     "native_qwen_repetitions_5x10",
     "tau_bench_native_50",
     "appworld_prompt_profile_pair",
@@ -62,6 +63,7 @@
   "required_claim_boundaries": [
     "deterministic controlled simulator evidence against an independent reference semantics; not a public-task accuracy claim",
     "schedule detection in the controlled simulator; random baseline consists of ten seeded schedules per instance",
+    "controlled mutation-matrix sensitivity over 350 variant-instance cases; not a production defect rate or universal mutant-coverage claim",
     "mechanism-level model tool-loop and differential-oracle evidence; not end-user task success or production quality",
     "official τ-bench workflow reward with native memory events; reward is not memory accuracy",
     "descriptive 20-task paired result; tuned token total is an observed lower bound and no population-significance claim is made",

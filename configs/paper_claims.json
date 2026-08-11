@@ -47,6 +47,23 @@
       "claim_boundary": "schedule detection in the controlled simulator; random baseline consists of ten seeded schedules per instance"
     },
     {
+      "claim_id": "controlled_mutation_matrix_350",
+      "status": "active",
+      "paper_location": ["Experiments/Mutation matrix sensitivity", "docs/current_experiment_report_zh.md#3"],
+      "artifact_path": "results/final_controlled/reproducibility_report.json",
+      "artifact_format": "json",
+      "artifact_sha256": "af49ab105b043094d6813c72c270b186e3a091640ccf3529bf39f4fe64addd2c",
+      "assertions": [
+        {"pointer": "/mutation_cases", "operator": "equals", "expected": 350},
+        {"pointer": "/mutation_killed", "operator": "equals", "expected": 300},
+        {"pointer": "/mutation_kill_rate", "operator": "equals", "expected": 0.8571428571428571}
+      ],
+      "run_command": "PYTHONPATH=src python3 src/txnmem_experiment.py experiment --config configs/workload_families.yaml --out-dir results/final_controlled --seeds 50",
+      "manifest": {"path": "configs/workload_families.yaml", "sha256": "b1a4d206a55565fb64eafe47f88e5df905823a3909cc8b0dd575de696376ed50"},
+      "source_commit": "c900ca99c7f3dd85e6aaa81229a76b2527566871",
+      "claim_boundary": "controlled mutation-matrix sensitivity over 350 variant-instance cases; not a production defect rate or universal mutant-coverage claim"
+    },
+    {
       "claim_id": "native_qwen_repetitions_5x10",
       "status": "active",
       "paper_location": ["Experiments/Real-model mechanism evidence", "docs/current_experiment_report_zh.md#4"],
@@ -156,7 +173,19 @@
         {"pointer": "/scenarios/retry_success/retry_success_count", "operator": "equals", "expected": 30},
         {"pointer": "/scenarios/timeout/abort_count", "operator": "equals", "expected": 30},
         {"pointer": "/scenarios/connection_drop/abort_count", "operator": "equals", "expected": 30},
-        {"pointer": "/scenarios/delay/success_count", "operator": "equals", "expected": 30}
+        {"pointer": "/scenarios/delay/success_count", "operator": "equals", "expected": 30},
+        {"pointer": "/scenarios/retry_success/trigger_fired_count", "operator": "equals", "expected": 30},
+        {"pointer": "/scenarios/retry_success/toxic_installed_count", "operator": "equals", "expected": 30},
+        {"pointer": "/scenarios/retry_success/proxy_path_verified_count", "operator": "equals", "expected": 30},
+        {"pointer": "/scenarios/timeout/trigger_fired_count", "operator": "equals", "expected": 30},
+        {"pointer": "/scenarios/timeout/toxic_installed_count", "operator": "equals", "expected": 30},
+        {"pointer": "/scenarios/timeout/proxy_path_verified_count", "operator": "equals", "expected": 30},
+        {"pointer": "/scenarios/connection_drop/trigger_fired_count", "operator": "equals", "expected": 30},
+        {"pointer": "/scenarios/connection_drop/toxic_installed_count", "operator": "equals", "expected": 30},
+        {"pointer": "/scenarios/connection_drop/proxy_path_verified_count", "operator": "equals", "expected": 30},
+        {"pointer": "/scenarios/delay/trigger_fired_count", "operator": "equals", "expected": 30},
+        {"pointer": "/scenarios/delay/toxic_installed_count", "operator": "equals", "expected": 30},
+        {"pointer": "/scenarios/delay/proxy_path_verified_count", "operator": "equals", "expected": 30}
       ],
       "run_command": "TXNMEM_NEO4J_URI=bolt://127.0.0.1:27687 TXNMEM_TOXIPROXY_URL=http://127.0.0.1:8474 PYTHONPATH=src python3 src/txnmem_experiment.py backend-performance --backend vector-graph --service-url http://127.0.0.1:26333 --events 2 --repetitions 30 --out-dir results/toxiproxy_formal30",
       "manifest": {"path": "configs/submission_evidence/toxiproxy_faults_30.json", "sha256": "206f2096709d52901504e16ecc2b233348c3d2b06e9bc96c9990e5b6aa6ed0d7"},

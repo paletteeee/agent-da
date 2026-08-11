@@ -236,10 +236,15 @@ class PaperClaimLedgerTests(unittest.TestCase):
             {"run_command", "manifest", "source_commit", "claim_boundary"},
         )
 
-    def test_task_four_ledger_extensions_cover_the_authorized_artifact_values(self):
+    def test_task_four_ledger_extensions_cover_the_reviewed_artifact_values(self):
         ledger = json.loads((ROOT / "configs" / "paper_claims.json").read_text())
         claims = {claim["claim_id"]: claim for claim in ledger["claims"]}
         expected = {
+            "controlled_mutation_matrix_350": {
+                "/mutation_cases": 350,
+                "/mutation_killed": 300,
+                "/mutation_kill_rate": 0.8571428571428571,
+            },
             "minimal_mutant_witnesses_4": {
                 "/witnesses/partial_commit/minimal_operation_count": 2,
                 "/witnesses/remove_commit_revalidation/minimal_operation_count": 1,
@@ -247,7 +252,23 @@ class PaperClaimLedgerTests(unittest.TestCase):
                 "/witnesses/bypass_scope_check/minimal_operation_count": 1,
             },
             "appworld_prompt_profile_pair": {"/tuned_status_counts/failed": 6},
-            "toxiproxy_fault_matrix_5x30": {"/scenarios/delay/success_count": 30},
+            "toxiproxy_fault_matrix_5x30": {
+                "/scenarios/delay/success_count": 30,
+                **{
+                    f"/scenarios/{scenario}/{field}": 30
+                    for scenario in (
+                        "retry_success",
+                        "timeout",
+                        "connection_drop",
+                        "delay",
+                    )
+                    for field in (
+                        "trigger_fired_count",
+                        "toxic_installed_count",
+                        "proxy_path_verified_count",
+                    )
+                },
+            },
         }
 
         for claim_id, expected_assertions in expected.items():
