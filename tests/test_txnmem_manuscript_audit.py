@@ -145,6 +145,11 @@ class ManuscriptAuditTests(unittest.TestCase):
             "missing_required_section", {item["code"] for item in report["findings"]}
         )
 
+    def test_current_draft_conforms_to_manuscript_contract(self):
+        report = audit_manuscript(ROOT / CONFIG["paper_source_path"], ROOT, CONFIG)
+
+        self.assertEqual(report["finding_count"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
