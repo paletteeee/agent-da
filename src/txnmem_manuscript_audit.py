@@ -12,9 +12,33 @@ from typing import Any
 
 
 _CLAIM_MARKER = re.compile(r"\[\[CLAIM:([A-Za-z0-9_-]+)\]\]")
+_AUTHOR_ANNOTATION_BEGIN = "<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->"
+_AUTHOR_ANNOTATION_END = "<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->"
+_AUTHOR_ANNOTATION_BLOCK = re.compile(
+    rf"{re.escape(_AUTHOR_ANNOTATION_BEGIN)}.*?{re.escape(_AUTHOR_ANNOTATION_END)}",
+    re.DOTALL,
+)
 _HEADING_LINE = re.compile(r"^\s{0,3}#{1,6}\s+.*$", re.MULTILINE)
 _VERSION_NUMBER = re.compile(r"(?<![\w.])\d+(?:\.\d+){2,}(?![\w.])")
 _NUMBER = re.compile(r"(?<![\w.])\d{1,3}(?:,\d{3})+(?:\.\d+)?|(?<![\w.])\d+(?:\.\d+)?(?![\w.])")
+
+
+def strip_author_annotations(text: str) -> str:
+    """Return reader-facing Markdown without fail-closed audit annotations.
+
+    Manuscript auditing deliberately consumes the unstripped source so claim
+    boundaries remain available to the evidence checks. Renderers should call
+    this projection before producing reader-facing output.
+    """
+
+    begins = text.count(_AUTHOR_ANNOTATION_BEGIN)
+    ends = text.count(_AUTHOR_ANNOTATION_END)
+    if begins != ends:
+        raise ValueError("author annotation delimiters must be paired")
+    stripped, block_count = _AUTHOR_ANNOTATION_BLOCK.subn("", text)
+    if block_count != begins:
+        raise ValueError("author annotation delimiters must form complete blocks")
+    return stripped
 
 
 def _finding(code: str, message: str, **details: Any) -> dict[str, Any]:

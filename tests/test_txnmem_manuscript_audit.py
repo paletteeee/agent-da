@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -14,6 +15,7 @@ from txnmem_manuscript_audit import (  # noqa: E402
     audit_manuscript,
     audit_text,
     load_paper_config,
+    strip_author_annotations,
 )
 
 
@@ -149,6 +151,68 @@ class ManuscriptAuditTests(unittest.TestCase):
         report = audit_manuscript(ROOT / CONFIG["paper_source_path"], ROOT, CONFIG)
 
         self.assertEqual(report["finding_count"], 0)
+
+    def test_reader_projection_strips_delimited_author_annotations(self):
+        source = (ROOT / CONFIG["paper_source_path"]).read_text(encoding="utf-8")
+
+        reader_text = strip_author_annotations(source)
+
+        self.assertIn("<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->", source)
+        self.assertIn("<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->", source)
+        self.assertNotIn("[[CLAIM:", reader_text)
+        self.assertNotIn("deterministic controlled simulator evidence", reader_text)
+        self.assertNotIn("作者侧证据注释", reader_text)
+
+    def test_task_three_source_contract(self):
+        source = (ROOT / CONFIG["paper_source_path"]).read_text(encoding="utf-8")
+        reader_text = strip_author_annotations(source)
+        abstract = reader_text.split("# 摘要\n", 1)[1].split("关键词：", 1)[0]
+        introduction = reader_text.split("# 1 引言", 1)[1].split("# 2 背景与动机", 1)[0]
+
+        self.assertGreaterEqual(len(re.findall(r"[\u4e00-\u9fff]", abstract)), 450)
+        self.assertLessEqual(len(re.findall(r"[\u4e00-\u9fff]", abstract)), 650)
+        self.assertEqual(
+            len([part for part in re.split(r"[。！？]", abstract) if part.strip()]), 6
+        )
+        self.assertEqual(len(re.findall(r"^- ", introduction, re.MULTILINE)), 4)
+        self.assertTrue(all(term in introduction for term in ("地址", "订单", "崩溃", "撤回", "源记录")))
+        self.assertEqual(
+            set(re.findall(r"\[\[(?:FIG|TABLE):[^]]+\]\]", reader_text)),
+            {
+                "[[FIG:motivation_timeline]]",
+                "[[FIG:architecture]]",
+                "[[FIG:commit_protocol]]",
+                "[[FIG:provenance_repair]]",
+                "[[TABLE:requirements_gap]]",
+            },
+        )
+        self.assertTrue(
+            all(
+                term in reader_text
+                for term in (
+                    "F=(A,M,P,T,G)",
+                    "独立的 serial reference semantics",
+                    "合法线性化",
+                    "I-atomicity",
+                    "I-commit authorization",
+                    "I-scope safety",
+                    "I-supersession consistency",
+                    "I-provenance closure",
+                    "I-recovery consistency",
+                    "Agent Memory Transaction",
+                    "Policy-Consistent Commit",
+                    "Provenance-Driven Repair",
+                    "procedure COMMIT(tx)",
+                    "procedure REPAIR(seed, reason)",
+                )
+            )
+        )
+        self.assertIn("确定性 TxnMem core/reference simulator", reader_text)
+        self.assertIn("逐个 memory event", reader_text)
+        self.assertIn("invalidation-only", reader_text)
+        self.assertIn("stale/recompute 是未来扩展", reader_text)
+        self.assertIn("derived_writes", reader_text)
+        self.assertIn("supersession_writes", reader_text)
 
 
 if __name__ == "__main__":
