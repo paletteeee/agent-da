@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "title": "TxnMem：面向多 Agent 共享记忆的策略感知事务运行时",
+  "anonymous": true,
+  "drafting_mode": true,
+  "claim_ledger_path": "configs/paper_claims.json",
+  "claim_audit_path": "results/paper_evidence/claim_audit.json",
+  "supersession_index_path": "results/paper_evidence/supersession_index.json",
+  "paper_source_path": "docs/paper/txnmem_ccfa_draft_zh.md",
+  "target_output_path": "/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿.docx",
+  "required_sections": [
+    "摘要",
+    "1 引言",
+    "2 背景与动机",
+    "3 系统模型与正确性",
+    "4 TxnMem 设计",
+    "5 实现",
+    "6 评估",
+    "7 讨论与局限性",
+    "8 相关工作",
+    "9 结论",
+    "参考文献",
+    "附录"
+  ],
+  "drafting_optional_sections": [
+    "6 评估",
+    "7 讨论与局限性",
+    "8 相关工作",
+    "9 结论",
+    "参考文献",
+    "附录"
+  ],
+  "active_claim_ids": [
+    "controlled_correctness_400x5",
+    "causal_schedule_vs_random",
+    "native_qwen_repetitions_5x10",
+    "tau_bench_native_50",
+    "appworld_prompt_profile_pair",
+    "locomo_prompt_profile_repetitions",
+    "toxiproxy_fault_matrix_5x30",
+    "qwen_vector_graph_e2e_5",
+    "cross_host_model_load_v8",
+    "joint_realism_tau",
+    "joint_realism_locomo",
+    "appworld_projection_regeneration",
+    "joint_realism_appworld",
+    "minimal_mutant_witnesses_4"
+  ],
+  "forbidden_artifacts": [
+    "results/remaining_tasks/final_status.json",
+    "results/remaining_tasks/production_evidence_status.json",
+    "results/real_backend_performance_reps30_v2/results/backend_performance.json"
+  ],
+  "required_claim_boundaries": [
+    "deterministic controlled simulator evidence against an independent reference semantics; not a public-task accuracy claim",
+    "schedule detection in the controlled simulator; random baseline consists of ten seeded schedules per instance",
+    "mechanism-level model tool-loop and differential-oracle evidence; not end-user task success or production quality",
+    "official τ-bench workflow reward with native memory events; reward is not memory accuracy",
+    "descriptive 20-task paired result; tuned token total is an observed lower bound and no population-significance claim is made",
+    "three fixed paired repetitions; descriptive effect only, with no population-significance or universal-improvement claim",
+    "single-host real-service fault injection through Toxiproxy; not production availability, distributed 2PC, or production latency",
+    "single-host five-task end-to-end smoke including model, services, and evaluator; not production latency",
+    "three independently attested Agent-client-to-model-server repetitions; not multi-host Agent workers, one continuous 30-minute tunnel, or production latency",
+    "joint-distribution diagnostic on a held-out trace split; rejection indicates mismatch and does not establish equivalence",
+    "joint-distribution diagnostic with only two held-out conversations; low-power and not evidence of equivalence",
+    "method/URL-only trace-grounded projection from official API calls; not native Agent memory ground truth",
+    "joint-distribution diagnostic over a redacted projection with two held-out tasks; not native memory ground truth or distributional equivalence",
+    "one deterministic operation-prefix-minimal witness per major mutant; minimality is with respect to suffix removal"
+  ],
+  "body_figure_ids": [
+    "motivation_timeline",
+    "architecture",
+    "commit_protocol",
+    "provenance_repair",
+    "controlled_results",
+    "evidence_layers"
+  ],
+  "body_table_ids": [
+    "requirements_gap",
+    "system_invariants",
+    "workload_family",
+    "experimental_setup",
+    "controlled_results",
+    "runtime_results"
+  ],
+  "appendix_figure_ids": [],
+  "appendix_table_ids": [
+    "claim_ledger",
+    "workload_schema"
+  ]
+}

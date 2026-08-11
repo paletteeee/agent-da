@@ -1,0 +1,352 @@
+"""Fail-closed checks for the evidence used in the TxnMem manuscript."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from typing import Any
+
+
+_CLAIM_MARKER = re.compile(r"\[\[CLAIM:([A-Za-z0-9_-]+)\]\]")
+_HEADING_LINE = re.compile(r"^\s{0,3}#{1,6}\s+.*$", re.MULTILINE)
+_VERSION_NUMBER = re.compile(r"(?<![\w.])\d+(?:\.\d+){2,}(?![\w.])")
+_NUMBER = re.compile(r"(?<![\w.])\d{1,3}(?:,\d{3})+(?:\.\d+)?|(?<![\w.])\d+(?:\.\d+)?(?![\w.])")
+
+
+def _finding(code: str, message: str, **details: Any) -> dict[str, Any]:
+    finding: dict[str, Any] = {"code": code, "message": message}
+    finding.update({key: value for key, value in details.items() if value is not None})
+    return finding
+
+
+def load_paper_config(path: Path) -> dict[str, Any]:
+    """Load the versioned manuscript contract and reject malformed JSON."""
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("paper config must be a JSON object")
+    return payload
+
+
+def _check_required_sections(text: str, config: dict[str, Any]) -> list[dict[str, Any]]:
+    required_sections = config.get("required_sections")
+    if not isinstance(required_sections, list) or not all(
+        isinstance(section, str) and section for section in required_sections
+    ):
+        return [_finding("paper_config_invalid", "required_sections must be a string array")]
+
+    optional_sections = config.get("drafting_optional_sections", [])
+    if not isinstance(optional_sections, list) or not all(
+        isinstance(section, str) and section for section in optional_sections
+    ):
+        return [
+            _finding(
+                "paper_config_invalid",
+                "drafting_optional_sections must be a string array",
+            )
+        ]
+    if config.get("drafting_mode") is not True:
+        optional_sections = []
+    elif optional_sections and required_sections[-len(optional_sections) :] != optional_sections:
+        return [
+            _finding(
+                "paper_config_invalid",
+                "drafting_optional_sections must be a suffix of required_sections",
+            )
+        ]
+
+    findings: list[dict[str, Any]] = []
+    for section in required_sections:
+        if section in optional_sections:
+            continue
+        pattern = re.compile(rf"^\s{{0,3}}#{{1,6}}\s+{re.escape(section)}\s*$", re.MULTILINE)
+        if not pattern.search(text):
+            findings.append(
+                _finding(
+                    "missing_required_section",
+                    f"required manuscript section is absent: {section}",
+                    section=section,
+                )
+            )
+    return findings
+
+
+def _superseded_artifacts(root: Path, config: dict[str, Any]) -> tuple[set[str], list[dict[str, Any]]]:
+    index_value = config.get("supersession_index_path")
+    if not isinstance(index_value, str) or not index_value:
+        return set(), [
+            _finding(
+                "paper_config_invalid",
+                "supersession_index_path is required",
+            )
+        ]
+    index_path = root / index_value
+    if not index_path.is_file():
+        return set(), [
+            _finding(
+                "supersession_index_missing",
+                f"supersession index not found: {index_value}",
+            )
+        ]
+    try:
+        payload = json.loads(index_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return set(), [
+            _finding("supersession_index_invalid", f"cannot parse supersession index: {exc}")
+        ]
+    entries = payload.get("superseded_artifacts") if isinstance(payload, dict) else None
+    if not isinstance(entries, list):
+        return set(), [
+            _finding(
+                "supersession_index_invalid",
+                "superseded_artifacts must be an array",
+            )
+        ]
+    artifacts = {
+        str(entry["artifact_path"])
+        for entry in entries
+        if isinstance(entry, dict) and isinstance(entry.get("artifact_path"), str)
+    }
+    if len(artifacts) != len(entries):
+        return artifacts, [
+            _finding(
+                "supersession_index_invalid",
+                "every supersession entry must declare artifact_path",
+            )
+        ]
+    return artifacts, []
+
+
+def _check_forbidden_artifacts(text: str, root: Path, config: dict[str, Any]) -> list[dict[str, Any]]:
+    configured = config.get("forbidden_artifacts")
+    if not isinstance(configured, list) or not all(
+        isinstance(artifact, str) and artifact for artifact in configured
+    ):
+        return [_finding("paper_config_invalid", "forbidden_artifacts must be a string array")]
+    superseded, findings = _superseded_artifacts(root, config)
+    forbidden = superseded | set(configured)
+    for artifact in sorted(forbidden):
+        if artifact in text:
+            findings.append(
+                _finding(
+                    "superseded_artifact",
+                    f"manuscript cites a superseded artifact: {artifact}",
+                    artifact_path=artifact,
+                )
+            )
+    return findings
+
+
+def _check_required_boundaries(text: str, boundaries: Any) -> list[dict[str, Any]]:
+    if not isinstance(boundaries, list) or not all(
+        isinstance(boundary, str) and boundary for boundary in boundaries
+    ):
+        return [
+            _finding(
+                "paper_config_invalid",
+                "required_claim_boundaries must be a string array",
+            )
+        ]
+    return [
+        _finding(
+            "missing_claim_boundary",
+            "required claim boundary is absent from manuscript",
+            claim_boundary=boundary,
+        )
+        for boundary in boundaries
+        if boundary not in text
+    ]
+
+
+def _check_claim_audit(root: Path, config: dict[str, Any]) -> list[dict[str, Any]]:
+    audit_value = config.get("claim_audit_path")
+    if not isinstance(audit_value, str) or not audit_value:
+        return [_finding("paper_config_invalid", "claim_audit_path is required")]
+    audit_path = root / audit_value
+    if not audit_path.is_file():
+        return [
+            _finding("claim_audit_missing", f"claim audit not found: {audit_value}")
+        ]
+    try:
+        payload = json.loads(audit_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return [_finding("claim_audit_invalid", f"cannot parse claim audit: {exc}")]
+    if not isinstance(payload, dict):
+        return [_finding("claim_audit_invalid", "claim audit must be a JSON object")]
+    if payload.get("status") != "passed" or payload.get("finding_count") != 0:
+        return [
+            _finding(
+                "claim_audit_failed",
+                "manuscript evidence is unavailable until the claim audit passes",
+            )
+        ]
+    configured_ids = config.get("active_claim_ids")
+    if isinstance(configured_ids, list) and payload.get("active_claim_count") != len(
+        configured_ids
+    ):
+        return [
+            _finding(
+                "claim_audit_count_mismatch",
+                "claim audit active count does not match the manuscript contract",
+            )
+        ]
+    return []
+
+
+def _active_claims(root: Path, config: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    ledger_value = config.get("claim_ledger_path", "configs/paper_claims.json")
+    if not isinstance(ledger_value, str) or not ledger_value:
+        return [], [_finding("paper_config_invalid", "claim_ledger_path is required")]
+    ledger_path = root / ledger_value
+    if not ledger_path.is_file():
+        return [], [_finding("claim_ledger_missing", f"claim ledger not found: {ledger_value}")]
+    try:
+        payload = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return [], [_finding("claim_ledger_invalid", f"cannot parse claim ledger: {exc}")]
+    claims = payload.get("claims") if isinstance(payload, dict) else None
+    if not isinstance(claims, list):
+        return [], [_finding("claim_ledger_invalid", "claims must be an array")]
+    active = [claim for claim in claims if isinstance(claim, dict) and claim.get("status") == "active"]
+    if len(active) != sum(isinstance(claim, dict) and claim.get("status") == "active" for claim in claims):
+        return [], [_finding("claim_ledger_invalid", "active claims must be objects")]
+    return active, []
+
+
+def _collect_numbers(value: Any) -> set[Decimal]:
+    if isinstance(value, bool):
+        return set()
+    if isinstance(value, (int, float)):
+        return {Decimal(str(value))}
+    if isinstance(value, list):
+        return set().union(*(_collect_numbers(item) for item in value)) if value else set()
+    return set()
+
+
+def _numeric_tokens(text: str) -> list[tuple[str, Decimal]]:
+    without_markers = _CLAIM_MARKER.sub("", text)
+    without_headings = _HEADING_LINE.sub("", without_markers)
+    without_versions = _VERSION_NUMBER.sub("", without_headings)
+    tokens: list[tuple[str, Decimal]] = []
+    for match in _NUMBER.finditer(without_versions):
+        literal = match.group(0)
+        try:
+            tokens.append((literal, Decimal(literal.replace(",", ""))))
+        except InvalidOperation:
+            continue
+    return tokens
+
+
+def _check_claim_values(text: str, root: Path, config: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    claims, findings = _active_claims(root, config)
+    if findings:
+        return findings, [], []
+    configured_ids = config.get("active_claim_ids")
+    if not isinstance(configured_ids, list) or not all(
+        isinstance(claim_id, str) and claim_id for claim_id in configured_ids
+    ):
+        return [
+            _finding("paper_config_invalid", "active_claim_ids must be a string array")
+        ], [], []
+
+    ledger_ids = [str(claim.get("claim_id", "")) for claim in claims]
+    if set(configured_ids) != set(ledger_ids) or len(configured_ids) != len(set(configured_ids)):
+        findings.append(
+            _finding(
+                "active_claim_configuration_mismatch",
+                "active_claim_ids must exactly match the ledger's active claim IDs",
+            )
+        )
+
+    referenced_ids = _CLAIM_MARKER.findall(text)
+    active_id_set = set(ledger_ids)
+    for claim_id in referenced_ids:
+        if claim_id not in active_id_set:
+            findings.append(
+                _finding(
+                    "inactive_claim_id",
+                    f"manuscript references a claim that is not active: {claim_id}",
+                    claim_id=claim_id,
+                )
+            )
+
+    allowed_numbers: set[Decimal] = set()
+    for claim in claims:
+        for assertion in claim.get("assertions", []):
+            if isinstance(assertion, dict):
+                allowed_numbers.update(_collect_numbers(assertion.get("expected")))
+    for literal, value in _numeric_tokens(text):
+        if value not in allowed_numbers:
+            findings.append(
+                _finding(
+                    "uncovered_claim_value",
+                    f"manuscript number is not covered by an active claim: {literal}",
+                    value=literal,
+                )
+            )
+
+    return findings, ledger_ids, [str(value) for value in sorted(allowed_numbers)]
+
+
+def audit_text(text: str, root: Path, config: dict[str, Any]) -> dict[str, Any]:
+    """Return every manuscript-contract violation without silently widening scope."""
+
+    root = Path(root).resolve()
+    findings: list[dict[str, Any]] = []
+    findings.extend(_check_required_sections(text, config))
+    findings.extend(_check_claim_audit(root, config))
+    findings.extend(_check_forbidden_artifacts(text, root, config))
+    findings.extend(_check_required_boundaries(text, config.get("required_claim_boundaries")))
+    claim_findings, allowed_ids, allowed_numbers = _check_claim_values(text, root, config)
+    findings.extend(claim_findings)
+    return {
+        "schema_version": 1,
+        "evidence_id": "txnmem_manuscript_audit",
+        "finding_count": len(findings),
+        "findings": findings,
+        "allowed_claim_ids": allowed_ids,
+        "allowed_numeric_values": allowed_numbers,
+        "required_claim_boundaries": config.get("required_claim_boundaries", []),
+        "status": "passed" if not findings else "failed",
+    }
+
+
+def audit_manuscript(source: Path, root: Path, config: dict[str, Any]) -> dict[str, Any]:
+    """Audit a UTF-8 Markdown source file using the frozen manuscript contract."""
+
+    return audit_text(source.read_text(encoding="utf-8"), root, config)
+
+
+def _write_json(payload: dict[str, Any], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Audit TxnMem manuscript evidence")
+    parser.add_argument("--root", type=Path, default=Path("."))
+    parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True)
+    args = parser.parse_args(argv)
+
+    root = args.root.resolve()
+    config_path = args.config if args.config.is_absolute() else root / args.config
+    source_path = args.source if args.source.is_absolute() else root / args.source
+    out_path = args.out if args.out.is_absolute() else root / args.out
+    report = audit_manuscript(source_path, root, load_paper_config(config_path))
+    _write_json(report, out_path)
+    print(
+        f"manuscript audit {report['status']}: {report['finding_count']} findings -> {out_path}"
+    )
+    return 0 if report["status"] == "passed" else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
