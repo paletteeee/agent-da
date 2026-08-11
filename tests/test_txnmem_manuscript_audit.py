@@ -23,6 +23,14 @@ CONFIG = load_paper_config(ROOT / "configs" / "txnmem_ccfa_paper.json")
 
 
 class ManuscriptAuditTests(unittest.TestCase):
+    TASK_THREE_MARKERS = (
+        "[[FIG:motivation_timeline]]",
+        "[[TABLE:requirements_gap]]",
+        "[[FIG:architecture]]",
+        "[[FIG:commit_protocol]]",
+        "[[FIG:provenance_repair]]",
+    )
+
     def _claim_blocks(self) -> str:
         return "\n\n".join(
             f"[[CLAIM:{claim_id}]]\n{boundary}"
@@ -34,6 +42,12 @@ class ManuscriptAuditTests(unittest.TestCase):
     def _valid_manuscript_text(self) -> str:
         sections = "\n\n".join(f"# {section}" for section in CONFIG["required_sections"])
         return f"{sections}\n\n{self._claim_blocks()}\n"
+
+    def _assert_task_three_markers(self, reader_text: str) -> None:
+        self.assertEqual(
+            re.findall(r"\[\[(?:FIG|TABLE):[^]]+\]\]", reader_text),
+            list(self.TASK_THREE_MARKERS),
+        )
 
     def test_rejects_superseded_artifact(self):
         report = audit_text(
@@ -176,16 +190,7 @@ class ManuscriptAuditTests(unittest.TestCase):
         )
         self.assertEqual(len(re.findall(r"^- ", introduction, re.MULTILINE)), 4)
         self.assertTrue(all(term in introduction for term in ("地址", "订单", "崩溃", "撤回", "源记录")))
-        self.assertEqual(
-            set(re.findall(r"\[\[(?:FIG|TABLE):[^]]+\]\]", reader_text)),
-            {
-                "[[FIG:motivation_timeline]]",
-                "[[FIG:architecture]]",
-                "[[FIG:commit_protocol]]",
-                "[[FIG:provenance_repair]]",
-                "[[TABLE:requirements_gap]]",
-            },
-        )
+        self._assert_task_three_markers(reader_text)
         self.assertTrue(
             all(
                 term in reader_text
@@ -213,6 +218,14 @@ class ManuscriptAuditTests(unittest.TestCase):
         self.assertIn("stale/recompute 是未来扩展", reader_text)
         self.assertIn("derived_writes", reader_text)
         self.assertIn("supersession_writes", reader_text)
+
+    def test_task_three_marker_contract_rejects_duplicate_marker(self):
+        reader_text = "\n".join(
+            (*self.TASK_THREE_MARKERS, "[[FIG:architecture]]")
+        )
+
+        with self.assertRaises(AssertionError):
+            self._assert_task_three_markers(reader_text)
 
 
 if __name__ == "__main__":
