@@ -2,7 +2,7 @@
 
 ## 范围与方法
 
-本审计对应 `configs/txnmem_paper_references.json`（32 条，稳定编号 `R01`--`R32`）。每条的 `verified_source` 是唯一的元数据核验入口：原始 arXiv 条目、官方 USENIX proceedings、PVLDB 论文 PDF，或 DOI landing page。未使用 DBLP、Semantic Scholar、新闻、博客或课程材料来确认题名、作者、年份或 venue。编号按工作稿预计首次出现的顺序预分配；新增文献应追加编号，不能重排既有 ID。
+本审计对应 `configs/txnmem_paper_references.json`（32 条，稳定编号 `R01`--`R32`）。每条以 `source_class` 声明核验边界，并以 `verified_source` 保存该类唯一的 primary source：`arxiv_preprint` 只把 arXiv 的题名、作者、提交年份和 arXiv 编号写入 catalog；`arxiv_record_with_journal_reference` 仅在该记录明确给出 journal reference 时保留正式 venue（R11）；`official_proceedings`、`official_publication` 和 `doi_landing` 则分别指向正式 proceedings、官方出版页或 DOI landing page。未使用 DBLP、Semantic Scholar、新闻、博客或课程材料来确认题名、作者、年份或 venue。编号按工作稿预计首次出现的顺序预分配；新增文献应追加编号，不能重排既有 ID。
 
 现有 worktree 中尚无 `docs/paper/txnmem_ccfa_draft_zh.md`，因此没有待删除或待更正的正文书目条目。后续写作只能使用本 catalog；若某工作稿引文的 venue/年份与 catalog 不一致，应以本 catalog 及其 primary source 为准。
 
@@ -29,5 +29,5 @@
 ## 使用规则
 
 1. 正文引用写为 `[Rxx]`，并且只引用本 catalog 中已核验的 ID。
-2. `url` 与 `verified_source` 当前相同，确保引用落到可核验 primary source；不以搜索结果页或二手 bibliography 代替。
+2. `url` 与 `verified_source` 当前相同，并受 `source_class` 的 HTTPS primary-host 规则约束；arXiv source 不能支撑的正式 conference/journal venue 不写入 catalog，不以搜索结果页或二手 bibliography 代替。
 3. 任何“优于”“支持”“保证”的表述必须回到 TxnMem 的 evidence map 与 claim boundary，不从本相关工作 catalog 推导实验事实。
