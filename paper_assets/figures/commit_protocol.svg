@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="500" viewBox="0 0 1120 500" role="img" aria-labelledby="title desc">
+<title id="title">TxnMem 提交协议</title>
+<desc id="desc">从 begin 到 buffer、最新策略重验证和原子持久化的协议图，策略拒绝分支指向 abort，崩溃恢复只有完整提交或未提交两种结果。</desc>
+<style>text { font-family: Arial Unicode MS, Hiragino Sans GB, Noto Sans CJK SC, sans-serif; } .struct { stroke: #68737D; stroke-width: 1.4; fill: none; } .flow { stroke: #1F4E79; stroke-width: 2; fill: none; } .muted { stroke: #68737D; stroke-width: 1.2; fill: none; } .future { stroke: #A63D40; stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; }</style>
+<text x="50" y="46" font-size="25" font-weight="700" fill="#1F4E79">提交协议：最新策略下重验证，再原子决议</text>
+<line x1="80" y1="244" x2="1030" y2="244" stroke="#68737D" stroke-width="1.4"/>
+<rect x="84.0" y="168.0" width="150.0" height="146.0" rx="7" fill="none" stroke="#1F4E79" stroke-width="1.4"/>
+<text x="159.0" y="205.0" text-anchor="middle" font-size="18" font-weight="700" fill="#1F4E79">begin</text>
+<text x="159.0" y="234.0" text-anchor="middle" font-size="14" font-weight="400" fill="#263238">记录 policy version</text>
+<rect x="290.0" y="168.0" width="205.0" height="146.0" rx="7" fill="none" stroke="#1F4E79" stroke-width="1.4"/>
+<text x="392.5" y="205.0" text-anchor="middle" font-size="18" font-weight="700" fill="#1F4E79">buffer</text>
+<text x="392.5" y="234.0" text-anchor="middle" font-size="14" font-weight="400" fill="#263238">write / derive / propagate</text>
+<text x="392.5" y="254.0" text-anchor="middle" font-size="14" font-weight="400" fill="#263238">仅事务缓冲区可见</text>
+<rect x="550.0" y="168.0" width="244.0" height="146.0" rx="7" fill="none" stroke="#1F4E79" stroke-width="1.4"/>
+<text x="672.0" y="205.0" text-anchor="middle" font-size="18" font-weight="700" fill="#1F4E79">最新策略重验证</text>
+<text x="672.0" y="234.0" text-anchor="middle" font-size="14" font-weight="400" fill="#263238">read / write / propagation set</text>
+<text x="672.0" y="254.0" text-anchor="middle" font-size="14" font-weight="400" fill="#263238">使用 commit 时策略</text>
+<rect x="852.0" y="168.0" width="172.0" height="146.0" rx="7" fill="none" stroke="#1F4E79" stroke-width="1.4"/>
+<text x="938.0" y="205.0" text-anchor="middle" font-size="18" font-weight="700" fill="#1F4E79">原子 persist</text>
+<text x="938.0" y="234.0" text-anchor="middle" font-size="14" font-weight="400" fill="#263238">公开整个 write set</text>
+<line x1="234.0" y1="244.0" x2="286.0" y2="244.0" stroke="#1F4E79" stroke-width="2"/>
+<polygon points="286.0,244.0 276.0,239.0 276.0,249.0" fill="#1F4E79"/>
+<line x1="499.0" y1="244.0" x2="546.0" y2="244.0" stroke="#1F4E79" stroke-width="2"/>
+<polygon points="546.0,244.0 536.0,239.0 536.0,249.0" fill="#1F4E79"/>
+<line x1="798.0" y1="244.0" x2="848.0" y2="244.0" stroke="#1F4E79" stroke-width="2"/>
+<polygon points="848.0,244.0 838.0,239.0 838.0,249.0" fill="#1F4E79"/>
+<rect x="573.0" y="354.0" width="194.0" height="68.0" rx="7" fill="none" stroke="#A63D40" stroke-width="1.4"/>
+<text x="670.0" y="382.0" text-anchor="middle" font-size="16" font-weight="700" fill="#A63D40">策略拒绝 / 冲突 → abort</text>
+<text x="670.0" y="405.0" text-anchor="middle" font-size="14" font-weight="400" fill="#263238">丢弃缓冲写集</text>
+<line x1="670.0" y1="315.0" x2="670.0" y2="350.0" stroke="#A63D40" stroke-width="2"/>
+<polygon points="670.0,350.0 665.0,340.0 675.0,340.0" fill="#A63D40"/>
+<text x="935.0" y="388.0" text-anchor="middle" font-size="17" font-weight="700" fill="#263238">崩溃恢复可见结果：</text>
+<text x="935.0" y="416.0" text-anchor="middle" font-size="18" font-weight="700" fill="#1F4E79">完整提交 / 未提交</text>
+<text x="50.0" y="470.0" text-anchor="start" font-size="14" font-weight="400" fill="#263238">恢复判定只接受一个原子决议；写集的真子集不属于合法观察结果。</text>
+</svg>

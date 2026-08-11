@@ -240,6 +240,12 @@ class PaperClaimLedgerTests(unittest.TestCase):
         ledger = json.loads((ROOT / "configs" / "paper_claims.json").read_text())
         claims = {claim["claim_id"]: claim for claim in ledger["claims"]}
         expected = {
+            "controlled_correctness_400x5": {
+                "/variants/Naive/oracle_match_count": 50,
+                "/variants/TxnMem-NoTxn/oracle_match_count": 200,
+                "/variants/TxnMem-NoPolicyCommit/oracle_match_count": 350,
+                "/variants/TxnMem-NoRepair/oracle_match_count": 300,
+            },
             "controlled_mutation_matrix_350": {
                 "/mutation_cases": 350,
                 "/mutation_killed": 300,

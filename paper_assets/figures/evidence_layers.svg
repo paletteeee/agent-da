@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="650" viewBox="0 0 1160 650" role="img" aria-labelledby="title desc">
+<title id="title">TxnMem 分层证据</title>
+<desc id="desc">五层证据图依次为受控正确性、原生模型、公共 runtime、真实服务和跨主机；每层显示证据对象以及明确的非结论边界。</desc>
+<style>text { font-family: Arial Unicode MS, Hiragino Sans GB, Noto Sans CJK SC, sans-serif; } .struct { stroke: #68737D; stroke-width: 1.4; fill: none; } .flow { stroke: #1F4E79; stroke-width: 2; fill: none; } .muted { stroke: #68737D; stroke-width: 1.2; fill: none; } .future { stroke: #A63D40; stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; }</style>
+<text x="50" y="46" font-size="25" font-weight="700" fill="#1F4E79">分层证据：每层回答不同问题，不能互换</text>
+<text x="50" y="75" font-size="15" fill="#68737D">图层按证据对象组织，而非系统“完成状态”；所有结论受各自 claim boundary 约束。</text>
+<rect x="70.0" y="112.0" width="1020.0" height="72.0" rx="8" fill="none" stroke="#1F4E79" stroke-width="2"/>
+<rect x="88.0" y="127.0" width="150.0" height="42.0" rx="5" fill="#E8ECEF" stroke="#1F4E79" stroke-width="1.4"/>
+<text x="163.0" y="154.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">受控正确性</text>
+<text x="265.0" y="144.0" text-anchor="start" font-size="16" font-weight="600" fill="#263238">400 instances；4 个最小 witness；独立 oracle</text>
+<text x="265.0" y="167.0" text-anchor="start" font-size="14" font-weight="400" fill="#68737D">边界：只证明受控语义，不是 public-task accuracy</text>
+<rect x="70.0" y="206.0" width="1020.0" height="72.0" rx="8" fill="none" stroke="#68737D" stroke-width="1.4"/>
+<rect x="88.0" y="221.0" width="150.0" height="42.0" rx="5" fill="#E8ECEF" stroke="#68737D" stroke-width="1.4"/>
+<text x="163.0" y="248.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">原生模型</text>
+<text x="265.0" y="238.0" text-anchor="start" font-size="16" font-weight="600" fill="#263238">Qwen tool loop：5×10 tasks；逐事件 contract / oracle</text>
+<text x="265.0" y="261.0" text-anchor="start" font-size="14" font-weight="400" fill="#68737D">边界：机制接线，不是 end-user quality</text>
+<rect x="70.0" y="300.0" width="1020.0" height="72.0" rx="8" fill="none" stroke="#68737D" stroke-width="1.4"/>
+<rect x="88.0" y="315.0" width="150.0" height="42.0" rx="5" fill="#E8ECEF" stroke="#68737D" stroke-width="1.4"/>
+<text x="163.0" y="342.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">公共 runtime</text>
+<text x="265.0" y="332.0" text-anchor="start" font-size="16" font-weight="600" fill="#263238">τ-bench / AppWorld / LoCoMo：workflow 与适配边界</text>
+<text x="265.0" y="355.0" text-anchor="start" font-size="14" font-weight="400" fill="#68737D">边界：workflow reward / F1 不是 memory accuracy</text>
+<rect x="70.0" y="394.0" width="1020.0" height="72.0" rx="8" fill="none" stroke="#68737D" stroke-width="1.4"/>
+<rect x="88.0" y="409.0" width="150.0" height="42.0" rx="5" fill="#E8ECEF" stroke="#68737D" stroke-width="1.4"/>
+<text x="163.0" y="436.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">真实服务</text>
+<text x="265.0" y="426.0" text-anchor="start" font-size="16" font-weight="600" fill="#263238">Toxiproxy：5 scenarios × 30；0 partial commits</text>
+<text x="265.0" y="449.0" text-anchor="start" font-size="14" font-weight="400" fill="#68737D">边界：单机故障注入；不是 production availability 或 2PC</text>
+<rect x="70.0" y="488.0" width="1020.0" height="72.0" rx="8" fill="none" stroke="#A63D40" stroke-width="1.4"/>
+<rect x="88.0" y="503.0" width="150.0" height="42.0" rx="5" fill="none" stroke="#A63D40" stroke-width="1.4"/>
+<text x="163.0" y="530.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">跨主机</text>
+<text x="265.0" y="520.0" text-anchor="start" font-size="16" font-weight="600" fill="#263238">3 次 client→model-server attested repetitions</text>
+<text x="265.0" y="543.0" text-anchor="start" font-size="14" font-weight="400" fill="#A63D40">边界：不是多 host Agent workers、连续 tunnel 或 production latency</text>
+<text x="70.0" y="599.0" text-anchor="start" font-size="14" font-weight="400" fill="#68737D">设计配置声明的正文图：motivation_timeline、architecture、commit_protocol、provenance_repair、controlled_results、evidence_layers</text>
+<text x="70.0" y="623.0" text-anchor="start" font-size="15" font-weight="400" fill="#263238">证据链强调：controlled correctness → 接线/服务/拓扑的外部相关性；后者不改写前者的语义结论。</text>
+</svg>

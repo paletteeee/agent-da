@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="540" viewBox="0 0 1120 540" role="img" aria-labelledby="title desc">
+<title id="title">TxnMem 来源修复边界</title>
+<desc id="desc">地址源失效后，发货建议、订单更新、客服副本和下游计划组成的依赖图被后代失效闭包处理；下方虚线框将 stale、重算和新来源 repair 标为未来扩展。</desc>
+<style>text { font-family: Arial Unicode MS, Hiragino Sans GB, Noto Sans CJK SC, sans-serif; } .struct { stroke: #68737D; stroke-width: 1.4; fill: none; } .flow { stroke: #1F4E79; stroke-width: 2; fill: none; } .muted { stroke: #68737D; stroke-width: 1.2; fill: none; } .future { stroke: #A63D40; stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; }</style>
+<text x="50" y="46" font-size="25" font-weight="700" fill="#1F4E79">Provenance repair：当前为后代失效闭包</text>
+<text x="50" y="77" font-size="15" fill="#68737D">地址源被撤销或取代后，沿已记录的反向依赖使后代退出默认可见集合。</text>
+<rect x="105.0" y="180.0" width="150.0" height="70.0" rx="7" fill="none" stroke="#A63D40" stroke-width="2"/>
+<text x="180.0" y="210.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">地址 v1</text>
+<text x="180.0" y="233.0" text-anchor="middle" font-size="13" font-weight="400" fill="#68737D">source</text>
+<rect x="380.0" y="180.0" width="150.0" height="70.0" rx="7" fill="none" stroke="#1F4E79" stroke-width="1.4"/>
+<text x="455.0" y="210.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">发货建议</text>
+<text x="455.0" y="233.0" text-anchor="middle" font-size="13" font-weight="400" fill="#68737D">derived</text>
+<rect x="655.0" y="116.0" width="150.0" height="70.0" rx="7" fill="none" stroke="#1F4E79" stroke-width="1.4"/>
+<text x="730.0" y="146.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">订单更新</text>
+<text x="730.0" y="169.0" text-anchor="middle" font-size="13" font-weight="400" fill="#68737D">derived</text>
+<rect x="655.0" y="244.0" width="150.0" height="70.0" rx="7" fill="none" stroke="#1F4E79" stroke-width="1.4"/>
+<text x="730.0" y="274.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">客服副本</text>
+<text x="730.0" y="297.0" text-anchor="middle" font-size="13" font-weight="400" fill="#68737D">propagated</text>
+<rect x="918.0" y="180.0" width="150.0" height="70.0" rx="7" fill="none" stroke="#1F4E79" stroke-width="1.4"/>
+<text x="993.0" y="210.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">下游计划</text>
+<text x="993.0" y="233.0" text-anchor="middle" font-size="13" font-weight="400" fill="#68737D">descendant</text>
+<line x1="255.0" y1="215.0" x2="376.0" y2="215.0" stroke="#1F4E79" stroke-width="2"/>
+<polygon points="376.0,215.0 366.0,210.0 366.0,220.0" fill="#1F4E79"/>
+<line x1="530.0" y1="207.0" x2="651.0" y2="151.0" stroke="#1F4E79" stroke-width="2"/>
+<polygon points="651.0,151.0 641.0,146.0 641.0,156.0" fill="#1F4E79"/>
+<line x1="530.0" y1="223.0" x2="651.0" y2="279.0" stroke="#1F4E79" stroke-width="2"/>
+<polygon points="651.0,279.0 641.0,274.0 641.0,284.0" fill="#1F4E79"/>
+<line x1="805.0" y1="151.0" x2="914.0" y2="207.0" stroke="#1F4E79" stroke-width="2"/>
+<polygon points="914.0,207.0 904.0,202.0 904.0,212.0" fill="#1F4E79"/>
+<line x1="805.0" y1="279.0" x2="914.0" y2="223.0" stroke="#1F4E79" stroke-width="2"/>
+<polygon points="914.0,223.0 904.0,218.0 904.0,228.0" fill="#1F4E79"/>
+<text x="180.0" y="142.0" text-anchor="middle" font-size="15" font-weight="700" fill="#A63D40">source invalidated</text>
+<line x1="180.0" y1="156.0" x2="180.0" y2="176.0" stroke="#A63D40" stroke-width="2"/>
+<polygon points="180.0,176.0 175.0,166.0 185.0,166.0" fill="#A63D40"/>
+<rect x="355.0" y="342.0" width="540.0" height="78.0" rx="7" fill="none" stroke="#1F4E79" stroke-width="1.4"/>
+<text x="625.0" y="373.0" text-anchor="middle" font-size="19" font-weight="700" fill="#1F4E79">当前：仅后代失效</text>
+<text x="625.0" y="399.0" text-anchor="middle" font-size="15" font-weight="400" fill="#263238">发货建议、订单更新、客服副本与下游计划 → invalid / 不再默认可见</text>
+<line x1="180.0" y1="252.0" x2="450.0" y2="338.0" stroke="#1F4E79" stroke-width="2" stroke-dasharray="5 3"/>
+<polygon points="450.0,338.0 440.0,333.0 440.0,343.0" fill="#1F4E79"/>
+<line x1="730.0" y1="316.0" x2="730.0" y2="338.0" stroke="#1F4E79" stroke-width="2" stroke-dasharray="5 3"/>
+<polygon points="730.0,338.0 725.0,328.0 735.0,328.0" fill="#1F4E79"/>
+<rect x="355.0" y="448.0" width="540.0" height="58.0" rx="7" fill="none" stroke="#A63D40" stroke-width="1.4" stroke-dasharray="6 4"/>
+<text x="625.0" y="473.0" text-anchor="middle" font-size="16" font-weight="700" fill="#A63D40">未来扩展（不属于当前路径）：stale / 重算 / 新来源 repair</text>
+<text x="625.0" y="494.0" text-anchor="middle" font-size="14" font-weight="400" fill="#263238">需要额外状态、授权条件与证据</text>
+</svg>

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="520" viewBox="0 0 1100 520" role="img" aria-labelledby="title desc">
+<title id="title">TxnMem 动机时间线</title>
+<desc id="desc">从读取地址到写订单的时间线，标出三个红色风险点：写入中崩溃、提交时撤权、地址源失效。</desc>
+<style>text { font-family: Arial Unicode MS, Hiragino Sans GB, Noto Sans CJK SC, sans-serif; } .struct { stroke: #68737D; stroke-width: 1.4; fill: none; } .flow { stroke: #1F4E79; stroke-width: 2; fill: none; } .muted { stroke: #68737D; stroke-width: 1.2; fill: none; } .future { stroke: #A63D40; stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; }</style>
+<text x="50" y="46" font-size="25" font-weight="700" fill="#1F4E79">地址—订单协作：三个状态错误发生点</text>
+<line x1="86" y1="166" x2="1022" y2="166" stroke="#68737D" stroke-width="1.5"/>
+<circle cx="100" cy="166" r="7" fill="#1F4E79"/>
+<text x="100.0" y="128.0" text-anchor="middle" font-size="18" font-weight="600" fill="#263238">读地址</text>
+<text x="100.0" y="194.0" text-anchor="middle" font-size="14" font-weight="400" fill="#68737D">客服 Agent</text>
+<circle cx="310" cy="166" r="7" fill="#1F4E79"/>
+<text x="310.0" y="128.0" text-anchor="middle" font-size="18" font-weight="600" fill="#263238">派生建议</text>
+<text x="310.0" y="194.0" text-anchor="middle" font-size="14" font-weight="400" fill="#68737D">物流 Agent</text>
+<circle cx="520" cy="166" r="7" fill="#1F4E79"/>
+<text x="520.0" y="128.0" text-anchor="middle" font-size="18" font-weight="600" fill="#263238">写订单</text>
+<text x="520.0" y="194.0" text-anchor="middle" font-size="14" font-weight="400" fill="#68737D">订单 Agent</text>
+<circle cx="730" cy="166" r="7" fill="#1F4E79"/>
+<text x="730.0" y="128.0" text-anchor="middle" font-size="18" font-weight="600" fill="#263238">后继读取</text>
+<text x="730.0" y="194.0" text-anchor="middle" font-size="14" font-weight="400" fill="#68737D">协作链</text>
+<line x1="114.0" y1="166.0" x2="296.0" y2="166.0" stroke="#68737D" stroke-width="2"/>
+<polygon points="296.0,166.0 286.0,161.0 286.0,171.0" fill="#68737D"/>
+<line x1="324.0" y1="166.0" x2="506.0" y2="166.0" stroke="#68737D" stroke-width="2"/>
+<polygon points="506.0,166.0 496.0,161.0 496.0,171.0" fill="#68737D"/>
+<line x1="534.0" y1="166.0" x2="716.0" y2="166.0" stroke="#68737D" stroke-width="2"/>
+<polygon points="716.0,166.0 706.0,161.0 706.0,171.0" fill="#68737D"/>
+<rect x="105.0" y="227.0" width="290.0" height="104.0" rx="7" fill="none" stroke="#A63D40" stroke-width="1.4"/>
+<circle cx="131" cy="251" r="11" fill="#A63D40"/>
+<text x="131.0" y="257.0" text-anchor="middle" font-size="15" font-weight="700" fill="white">!</text>
+<text x="150.0" y="255.0" text-anchor="start" font-size="17" font-weight="700" fill="#A63D40">风险 1：写入中崩溃</text>
+<text x="150.0" y="278.0" text-anchor="start" font-size="15" font-weight="400" fill="#263238">地址已写、订单未写</text>
+<text x="150.0" y="298.0" text-anchor="start" font-size="15" font-weight="400" fill="#263238">半更新对后继可见</text>
+<line x1="250.0" y1="225.0" x2="250.0" y2="171.0" stroke="#A63D40" stroke-width="2" stroke-dasharray="4 3"/>
+<polygon points="250.0,171.0 245.0,181.0 255.0,181.0" fill="#A63D40"/>
+<rect x="415.0" y="317.0" width="290.0" height="104.0" rx="7" fill="none" stroke="#A63D40" stroke-width="1.4"/>
+<circle cx="441" cy="341" r="11" fill="#A63D40"/>
+<text x="441.0" y="347.0" text-anchor="middle" font-size="15" font-weight="700" fill="white">!</text>
+<text x="460.0" y="345.0" text-anchor="start" font-size="17" font-weight="700" fill="#A63D40">风险 2：提交时撤权</text>
+<text x="460.0" y="368.0" text-anchor="start" font-size="15" font-weight="400" fill="#263238">begin 时允许</text>
+<text x="460.0" y="388.0" text-anchor="start" font-size="15" font-weight="400" fill="#263238">commit 时旧授权仍写入</text>
+<line x1="560.0" y1="313.0" x2="560.0" y2="171.0" stroke="#A63D40" stroke-width="2" stroke-dasharray="4 3"/>
+<polygon points="560.0,171.0 555.0,181.0 565.0,181.0" fill="#A63D40"/>
+<rect x="685.0" y="227.0" width="290.0" height="104.0" rx="7" fill="none" stroke="#A63D40" stroke-width="1.4"/>
+<circle cx="711" cy="251" r="11" fill="#A63D40"/>
+<text x="711.0" y="257.0" text-anchor="middle" font-size="15" font-weight="700" fill="white">!</text>
+<text x="730.0" y="255.0" text-anchor="start" font-size="17" font-weight="700" fill="#A63D40">风险 3：来源失效</text>
+<text x="730.0" y="278.0" text-anchor="start" font-size="15" font-weight="400" fill="#263238">地址源被更正</text>
+<text x="730.0" y="298.0" text-anchor="start" font-size="15" font-weight="400" fill="#263238">派生建议仍被读取</text>
+<line x1="830.0" y1="225.0" x2="830.0" y2="171.0" stroke="#A63D40" stroke-width="2" stroke-dasharray="4 3"/>
+<polygon points="830.0,171.0 825.0,181.0 835.0,181.0" fill="#A63D40"/>
+<text x="50.0" y="485.0" text-anchor="start" font-size="14" font-weight="400" fill="#263238">问题不是检索排序：共享 memory 必须同时覆盖原子公开、提交时策略与来源闭包。</text>
+</svg>
