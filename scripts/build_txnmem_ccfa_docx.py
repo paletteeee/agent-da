@@ -140,13 +140,16 @@ def _set_cell_shading(cell, fill: str) -> None:
     shd.set(qn("w:fill"), fill)
 
 
-def _set_cell_margins(cell) -> None:
+def _set_cell_margins(cell, *, compact: bool = False) -> None:
     tc_pr = cell._tc.get_or_add_tcPr()
     tc_mar = tc_pr.first_child_found_in("w:tcMar")
     if tc_mar is None:
         tc_mar = OxmlElement("w:tcMar")
         tc_pr.append(tc_mar)
-    for side, value in DESIGN["tables"]["cell_margins_dxa"].items():
+    margins = DESIGN["tables"]["cell_margins_dxa"].copy()
+    if compact:
+        margins.update({"top": 0, "bottom": 0})
+    for side, value in margins.items():
         node = tc_mar.find(qn(f"w:{side}"))
         if node is None:
             node = OxmlElement(f"w:{side}")
@@ -162,7 +165,15 @@ def _set_repeat_header(row) -> None:
     tr_pr.append(header)
 
 
-def _set_table_geometry(table, widths: list[int]) -> None:
+def _prevent_row_split(row) -> None:
+    """Keep each table row intact when a multi-page table is laid out."""
+    tr_pr = row._tr.get_or_add_trPr()
+    cant_split = OxmlElement("w:cantSplit")
+    cant_split.set(qn("w:val"), "true")
+    tr_pr.append(cant_split)
+
+
+def _set_table_geometry(table, widths: list[int], *, compact: bool = False) -> None:
     table.autofit = False
     tbl_pr = table._tbl.tblPr
     tbl_w = tbl_pr.first_child_found_in("w:tblW")
@@ -183,12 +194,13 @@ def _set_table_geometry(table, widths: list[int]) -> None:
     for col, width in zip(grid.gridCol_lst, widths):
         col.set(qn("w:w"), str(width))
     for row in table.rows:
+        _prevent_row_split(row)
         for cell, width in zip(row.cells, widths):
             cell.width = width
             tc_w = cell._tc.get_or_add_tcPr().first_child_found_in("w:tcW")
             tc_w.set(qn("w:w"), str(width))
             tc_w.set(qn("w:type"), "dxa")
-            _set_cell_margins(cell)
+            _set_cell_margins(cell, compact=compact)
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 
 
@@ -201,17 +213,25 @@ def _column_widths(headers: list[str], rows: list[list[str]]) -> list[int]:
     return widths
 
 
-def _add_table(doc: Document, title: str, headers: list[str], rows: list[list[str]]) -> None:
+def _add_table(doc: Document, title: str, headers: list[str], rows: list[list[str]], *,
+               compact: bool = False) -> None:
     caption = doc.add_paragraph(style="Caption")
-    caption.add_run(f"表 {len([p for p in doc.paragraphs if p.style.name == 'Caption' and p.text.startswith('表')]) + 1}  {title}")
+    caption_run = caption.add_run(
+        f"表 {len([p for p in doc.paragraphs if p.style.name == 'Caption' and p.text.startswith('表')]) + 1}  {title}"
+    )
+    if compact:
+        _set_run_font(caption_run, size=9.0, color="404040")
+        _spacing(caption.paragraph_format, 0, 0, 220)
     table = doc.add_table(rows=1, cols=len(headers))
     table.style = "Table Grid"
     for cell, value in zip(table.rows[0].cells, headers):
         cell.text = value
         _set_cell_shading(cell, DESIGN["tables"]["header_fill"])
         for run in cell.paragraphs[0].runs:
-            _set_run_font(run, size=9.5, bold=True)
+            _set_run_font(run, size=9.0 if compact else 9.5, bold=True)
             cell.paragraphs[0].paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            if compact:
+                cell.paragraphs[0].paragraph_format.line_spacing = 1.0
     _set_repeat_header(table.rows[0])
     for values in rows:
         cells = table.add_row().cells
@@ -220,9 +240,11 @@ def _add_table(doc: Document, title: str, headers: list[str], rows: list[list[st
             paragraph.add_run(value)
             paragraph.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
             paragraph.paragraph_format.space_after = Pt(0)
+            if compact:
+                paragraph.paragraph_format.line_spacing = 1.0
             for run in paragraph.runs:
-                _set_run_font(run, size=9.25)
-    _set_table_geometry(table, _column_widths(headers, rows))
+                _set_run_font(run, size=9.0 if compact else 9.25)
+    _set_table_geometry(table, _column_widths(headers, rows), compact=compact)
 
 
 def _add_page_field(paragraph) -> None:
@@ -324,7 +346,7 @@ def _rasterize_svg(svg: Path, destination: Path) -> tuple[Path, float]:
     # Quick Look thumbnail canvas that clipped wide diagrams.
     digest = hashlib.sha256(svg.read_bytes()).hexdigest()[:16]
     shared = Path("/private/tmp/txnmem-docx-svg-cache") / (
-        f"{svg.stem}-{digest}-{pixel_width}x{pixel_height}-v2.png"
+        f"{svg.stem}-{digest}-{pixel_width}x{pixel_height}-v3.png"
     )
     target = destination / f"{svg.stem}.png"
     if shared.is_file() and _is_expected_raster(shared, pixel_width, pixel_height):
@@ -338,7 +360,8 @@ def _rasterize_svg(svg: Path, destination: Path) -> tuple[Path, float]:
     shared.parent.mkdir(parents=True, exist_ok=True)
     completed = subprocess.run(
         [str(CHROME), "--headless", "--disable-gpu", "--hide-scrollbars",
-         "--force-device-scale-factor=1", f"--window-size={pixel_width},{pixel_height}",
+         f"--force-device-scale-factor={SVG_RASTER_SCALE}",
+         f"--window-size={round(svg_width)},{round(svg_height)}",
          f"--screenshot={shared}", svg.resolve().as_uri()],
         text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
     )
@@ -356,9 +379,12 @@ def _add_figure(doc: Document, figure_id: str, manifest: dict, root: Path, cache
     manifest_ratio = item["dimensions"]["height"] / item["dimensions"]["width"]
     if abs(ratio - manifest_ratio) > 0.002:
         raise ValueError(f"{figure_id} SVG viewBox does not match manifest dimensions")
-    width = min(6.25, 6.0 / max(ratio, 0.5))
+    # Leave room for the caption on dense manuscript pages while retaining
+    # readable type from the now full-canvas SVG raster.
+    width = min(5.5, 6.0 / max(ratio, 0.5))
     paragraph = doc.add_paragraph()
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.paragraph_format.keep_with_next = True
     shape = paragraph.add_run().add_picture(
         str(png), width=Inches(width), height=Inches(width * ratio)
     )
@@ -367,6 +393,10 @@ def _add_figure(doc: Document, figure_id: str, manifest: dict, root: Path, cache
     shape._inline.docPr.set("descr", item["alt_text"])
     shape._inline.docPr.set("title", f"图：{figure_id}")
     caption = doc.add_paragraph(style="Caption")
+    # The figure paragraph already keeps this caption with the artwork.  Break
+    # the Caption style's generic keep-next chain so the following heading does
+    # not force an otherwise fitting figure/caption pair onto the next page.
+    caption.paragraph_format.keep_with_next = False
     number = len([p for p in doc.paragraphs if p.style.name == "Caption" and p.text.startswith("图")]) + 1
     caption.add_run(f"图 {number}  {item['caption']}")
 
@@ -382,11 +412,23 @@ def _controlled_rows(root: Path) -> tuple[list[str], list[list[str]]]:
     return ["变体", "违规 instance", "oracle 一致 instance", "机制解释"], rows
 
 
+def _publication_evidence_id(claim: dict, root: Path) -> str:
+    """Return a reader-safe, stable label without exposing repository paths."""
+    artifact_path = root / claim["artifact_path"]
+    if artifact_path.is_file():
+        payload = _load(artifact_path)
+        evidence_id = payload.get("evidence_id") if isinstance(payload, dict) else None
+        if isinstance(evidence_id, str) and evidence_id.strip() and "/" not in evidence_id:
+            return evidence_id.strip()
+    return f"E-{claim['claim_id']}"
+
+
 def _claim_ledger_rows(root: Path) -> tuple[list[str], list[list[str]]]:
     claims = _load(root / "configs/paper_claims.json")["claims"]
     active = [claim for claim in claims if claim.get("status") == "active"]
-    return ["active claim", "evidence artifact", "claim boundary"], [
-        [claim["claim_id"], claim["artifact_path"], claim["claim_boundary"]] for claim in active
+    return ["active claim", "public evidence ID", "claim boundary"], [
+        [claim["claim_id"], _publication_evidence_id(claim, root), claim["claim_boundary"]]
+        for claim in active
     ]
 
 
@@ -409,7 +451,13 @@ def _add_configured_table(doc: Document, table_id: str, markdown: dict[str, tupl
         headers, rows = _claim_ledger_rows(root)
     else:
         headers, rows = markdown[table_id]
-    _add_table(doc, TABLE_TITLES[table_id], headers, rows)
+    _add_table(
+        doc,
+        TABLE_TITLES[table_id],
+        headers,
+        rows,
+        compact=table_id in {"claim_ledger", "workload_schema"},
+    )
 
 
 def _collect_markdown_tables(lines: list[str]) -> dict[str, tuple[list[str], list[list[str]]]]:
@@ -526,6 +574,10 @@ def _add_markdown(doc: Document, text: str, root: Path, manifest: dict, config: 
         index += 1
 
 
+def _local_name(name: str) -> str:
+    return name.rsplit("}", 1)[-1]
+
+
 def _scrub_metadata(path: Path) -> None:
     """Strip creator/custom/revision identifiers while preserving generated OOXML."""
     with zipfile.ZipFile(path) as source:
@@ -541,13 +593,21 @@ def _scrub_metadata(path: Path) -> None:
             app.remove(element)
     members["docProps/app.xml"] = ET.tostring(app, encoding="utf-8", xml_declaration=True)
     for name, content in list(members.items()):
-        if name.startswith("word/") and name.endswith(".xml"):
+        if name.endswith(".xml"):
             root = ET.fromstring(content)
+            changed = False
+            for parent in root.iter():
+                for child in list(parent):
+                    if _local_name(child.tag).casefold() in {"rsids", "rsidroot", "rsid"}:
+                        parent.remove(child)
+                        changed = True
             for element in root.iter():
                 for attribute in list(element.attrib):
-                    if attribute.startswith(f"{{{W_NS}}}rsid"):
+                    if _local_name(attribute).casefold().startswith("rsid"):
                         del element.attrib[attribute]
-            members[name] = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                        changed = True
+            if changed:
+                members[name] = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as target:
         for name in sorted(members):
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))

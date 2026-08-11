@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from pathlib import Path
 import re
 import sys
@@ -10,6 +11,7 @@ from xml.etree import ElementTree as ET
 
 from docx import Document
 from docx.oxml.ns import qn
+from PIL import Image, ImageChops
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +37,7 @@ MARKERS = (
     "\\)",
     "configs/txnmem_paper_references.json",
 )
+LOCAL_ARTIFACT_PATH = re.compile(r"(?i)(?:results/|file:/+|(?:^|[\\s(])[a-z]:[\\\\/]|/Users/)")
 
 
 class TxnMemCcfaDocxTests(unittest.TestCase):
@@ -79,10 +82,20 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
         self.assertNotIn("Prepared for", self.document_xml)
 
     def test_reader_facing_text_contains_no_source_handoff_or_annotation_markers(self) -> None:
-        text = "\n".join(p.text for p in self.document.paragraphs)
+        text = "\n".join(
+            [p.text for p in self.document.paragraphs]
+            + [cell.text for table in self.document.tables for row in table.rows for cell in row.cells]
+        )
         for marker in MARKERS:
             self.assertNotIn(marker, text)
         self.assertNotIn("图：", "\n".join(p.text for p in self.document.paragraphs if "图：" in p.text))
+        self.assertIsNone(LOCAL_ARTIFACT_PATH.search(text))
+
+    def test_final_package_contains_no_rsid_session_identifiers(self) -> None:
+        """External DOCX must not retain Word revision-session IDs in any XML part."""
+        for name, payload in self.parts.items():
+            if name.endswith(".xml"):
+                self.assertNotIn(b"rsid", payload.lower(), name)
 
     def test_styles_lists_and_captions_are_word_native(self) -> None:
         normal = self.document.styles["Normal"]
@@ -116,6 +129,35 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
              for number, figure_id in enumerate(self.figure_ids, start=1)],
         )
 
+    def test_figure_rasters_fill_their_declared_canvas(self) -> None:
+        """Catch 1× SVG content inside a 2× screenshot canvas before it becomes unreadable."""
+        for name, payload in self.parts.items():
+            if not name.startswith("word/media/") or not name.endswith(".png"):
+                continue
+            with Image.open(BytesIO(payload)).convert("RGB") as image:
+                background = Image.new("RGB", image.size, "white")
+                bbox = ImageChops.difference(image, background).getbbox()
+            self.assertIsNotNone(bbox, name)
+            content_width = bbox[2] - bbox[0]
+            content_height = bbox[3] - bbox[1]
+            self.assertGreaterEqual(content_width / image.width, 0.85, name)
+            self.assertGreaterEqual(content_height / image.height, 0.85, name)
+
+    def test_figure_paragraphs_keep_their_captions_together(self) -> None:
+        document_root = ET.fromstring(self.parts["word/document.xml"])
+        paragraphs = document_root.findall(".//w:p", NS)
+        figure_paragraphs = [
+            (index, paragraph) for index, paragraph in enumerate(paragraphs)
+            if paragraph.find(".//w:drawing", NS) is not None
+        ]
+        self.assertEqual(len(figure_paragraphs), len(self.figure_ids))
+        for index, paragraph in figure_paragraphs:
+            keep_next = paragraph.find("./w:pPr/w:keepNext", NS)
+            self.assertIsNotNone(keep_next)
+            caption_keep_next = paragraphs[index + 1].find("./w:pPr/w:keepNext", NS)
+            self.assertIsNotNone(caption_keep_next)
+            self.assertEqual(caption_keep_next.attrib[f"{{{W_NS}}}val"], "0")
+
     def test_tables_have_fixed_geometry_repeating_headers_and_titles(self) -> None:
         document_root = ET.fromstring(self.parts["word/document.xml"])
         tables = document_root.findall(".//w:tbl", NS)
@@ -138,6 +180,10 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
             self.assertIsNotNone(first_row)
             if first_row.find("./w:trPr/w:tblHeader", NS) is not None:
                 repeated_headers += 1
+            self.assertTrue(all(
+                row.find("./w:trPr/w:cantSplit", NS) is not None
+                for row in table.findall("./w:tr", NS)
+            ))
         self.assertEqual(repeated_headers, len(tables))
         captions = [p.text for p in self.document.paragraphs if p.style.name == "Caption"]
         self.assertEqual(
@@ -146,6 +192,49 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
              for number, table_id in enumerate(self.table_ids, start=1)],
         )
         self.assertEqual(len(captions), len(self.figure_ids) + len(self.table_ids))
+
+    def test_appendix_schema_table_uses_compact_readable_type(self) -> None:
+        """Keep the final appendix table and its explanatory paragraph on one page flow."""
+        for number, appendix_table in ((7, self.document.tables[-2]), (8, self.document.tables[-1])):
+            caption = next(
+                paragraph for paragraph in self.document.paragraphs
+                if paragraph.style.name == "Caption" and paragraph.text.startswith(f"表 {number}")
+            )
+            header_sizes = [
+                run.font.size.pt
+                for cell in appendix_table.rows[0].cells
+                for paragraph in cell.paragraphs
+                for run in paragraph.runs
+            ]
+            body_sizes = [
+                run.font.size.pt
+                for row in appendix_table.rows[1:]
+                for cell in row.cells
+                for paragraph in cell.paragraphs
+                for run in paragraph.runs
+            ]
+            self.assertTrue(header_sizes and body_sizes)
+            self.assertGreaterEqual(min(run.font.size.pt for run in caption.runs), 9.0)
+            self.assertLessEqual(max(run.font.size.pt for run in caption.runs), 9.0)
+            self.assertLessEqual(caption.paragraph_format.space_before.pt, 2.0)
+            self.assertLessEqual(caption.paragraph_format.space_after.pt, 2.0)
+            self.assertAlmostEqual(caption.paragraph_format.line_spacing, 220 / 240)
+            self.assertGreaterEqual(min(header_sizes), 9.0)
+            self.assertLessEqual(max(header_sizes), 9.0)
+            self.assertGreaterEqual(min(body_sizes), 8.75)
+            self.assertLessEqual(max(body_sizes), 9.0)
+            for cell in [cell for row in appendix_table.rows for cell in row.cells]:
+                cell_margins = cell._tc.get_or_add_tcPr().first_child_found_in("w:tcMar")
+                self.assertIsNotNone(cell_margins)
+                self.assertEqual(cell_margins.find(qn("w:top")).get(qn("w:w")), "0")
+                self.assertEqual(cell_margins.find(qn("w:bottom")).get(qn("w:w")), "0")
+                self.assertEqual(cell_margins.find(qn("w:start")).get(qn("w:w")), "120")
+                self.assertEqual(cell_margins.find(qn("w:end")).get(qn("w:w")), "120")
+            for cell in appendix_table.rows[0].cells:
+                self.assertEqual(cell.paragraphs[0].paragraph_format.line_spacing, 1.0)
+            for row in appendix_table.rows[1:]:
+                for cell in row.cells:
+                    self.assertEqual(cell.paragraphs[0].paragraph_format.line_spacing, 1.0)
 
     def test_references_are_complete_and_stably_ordered(self) -> None:
         text = "\n".join(p.text for p in self.document.paragraphs)
