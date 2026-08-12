@@ -1,6 +1,6 @@
 # TxnMem 正式论文任务状态
 
-更新时间：2026-08-11。以下状态区分“代码/实验接口已完成”“已完成正式 batch”“仍不足以支撑生产级论文结论”，避免把环境验证误写成 benchmark accuracy。
+更新时间：2026-08-12。以下状态区分“代码/实验接口已完成”“已完成正式 batch”“仍不足以支撑生产级论文结论”，避免把环境验证误写成 benchmark accuracy。
 
 | 序号 | 正式任务 | 状态 | 已完成证据 | 仍需补强 |
 |---:|---|---|---|---|
@@ -14,8 +14,8 @@
 | 8 | τ-bench native runtime | 已完成（50-task batch + retry 合并） | official runtime；50 个唯一 task ID；最终合并 497 events、50/50 evaluator available、reward sum 15、mean 0.3000；manifest/hash、模型/runtime identity、retry 归并、source artifact hash 与运行命令均已固化 | 官方 reward 非 accuracy，需避免将失败 episode 写成任务成功或 memory 结论 |
 | 9 | AppWorld native runtime | 已完成（20-task baseline/tuned 配对） | 同 manifest/condition/tool attestation；baseline 0/20 success、17/112 assertions、517,564 exact tokens；tuned 1/20、53/112，13 task 改善、7 不变；20/20 evaluator available | tuned 有 4 个 unauthorized-tool 和 2 个 model-HTTP execution failure；2,171,632 observed tokens 为下界；n=20 不支持总体显著性声称 |
 | 10 | LoCoMo executable Agent | 已完成（10-conversation native + paired official QA + 3 repetitions） | Qwen2.5-7B native contextual batch；paired QA baseline/tuned 各 3 次、每次 1,986 问题、相同 seeds/condition；baseline mean F1=0.13836，tuned=0.13998，平均差值 +0.00162；token 精确增加 40,539 | 仅 3 次描述性 paired repetition，增益很小且一次回退，不能声称总体显著提升 |
-| 11 | 论文初稿与结果同步 | 已完成（含 render/视觉 QA） | `outputs/TxnMem_论文初稿.docx` 已写入三 benchmark、AppWorld/LoCoMo paired 结果、joint realism、真实服务/E2E 与最终 v8 cross-host 证据；已生成 21 页 PNG/PDF，完成逐页视觉检查；DOCX accessibility audit 为 high=0、medium=0、low=0 | 正式投稿前仍需按目标会议模板排版 |
-| 12 | Claim ledger 与历史结果作废 | 已完成 | 14 条 active claim、107 个字段断言、0 findings；artifact/hash、命令、manifest/hash、source commit、claim boundary 全部关联；3 个历史 artifact 已进入 supersession index | 新增论文数字时必须同步更新 ledger 并重跑 fail-closed audit |
+| 11 | 论文初稿与结果同步 | 已完成（最终复验关闭） | `outputs/TxnMem_CCF-A中文论文初稿.docx`，SHA-256 `870feaf210bf3a7b9507795988aaf242ae6d759f69a65b2c0fef54b40fe04e6b`；精确 `render_final_v4` 为 27 页 PNG/PDF，6 图、8 表、32 条已核验参考文献；a11y 为 0/0/0，OOXML 无 rsid/批注/追踪/custom props/个人元数据或绝对工作站路径 | 仅待选定 venue 后按其匿名、版式与投稿系统字段进行模板适配 |
+| 12 | Claim ledger 与历史结果作废 | 已完成 | 15 条 active claim、132 个字段断言、0 findings；ledger digest `56e985fa4947b54fdc01c3ab4044dd16358d3b8c9078c39b931bae504792a198`，manuscript/artifact audit 均为 0 findings；artifact/hash、命令、manifest/hash、source commit、claim boundary 全部关联；3 个历史 artifact 已进入 supersession index | 新增论文数字时必须同步更新 ledger 并重跑 fail-closed audit |
 | 13 | Git 备份与远端推送 | 本地备份已完成；远端推送阻塞 | 投稿前证据代码与脱敏 aggregate 已在隔离分支逐项提交；`git remote -v` 为空 | 用户提供远端 URL 后才能 `git remote add origin` / push |
 
 ## 论文目前可以正式声称的内容
@@ -36,6 +36,6 @@
 - AppWorld tuned 将官方 success 从 0/20 提至 1/20、断言从 17/112 提至 53/112，但有 6 个 execution failure，token usage 也有 2 次响应缺失；必须按全 20 task 分母报告，并将 tuned token 总量标为观测下界。
 - joint realism 已完成，但 τ/LoCoMo/AppWorld 的结果显示分布差异；LoCoMo/AppWorld holdout 均为 2，不支持分布等价性或强推断。
 - v8 的跨主机范围为 1 Agent-worker host + 1 model-server host、3 条独立 tunnel；生产级多主机 Agent workers、单一连续 30 分钟 tunnel、跨主机 Qdrant/Neo4j 和有明确定价率的成本核算均为 future work/claim boundary，不能伪装成已完成。
-- Claim audit 当前覆盖 14 条正式主张和 107 个字段断言，0 findings；`results/remaining_tasks/final_status.json`、`results/remaining_tasks/production_evidence_status.json` 和旧 backend fault artifact 仅保留作历史审计，不得再被正文引用为当前状态。
+- Claim audit 当前覆盖 15 条正式主张和 132 个字段断言，ledger digest 为 `56e985fa4947b54fdc01c3ab4044dd16358d3b8c9078c39b931bae504792a198`，0 findings；manuscript/artifact audit 同为 0 findings。`results/remaining_tasks/final_status.json`、`results/remaining_tasks/production_evidence_status.json` 和旧 backend fault artifact 仅保留作历史审计，不得再被正文引用为当前状态。
 - Git 远端推送仍阻塞：仓库没有配置 remote URL，无法在没有用户提供 URL 的情况下安全 push。
-- DOCX 视觉 render 已通过；LibreOffice 使用显式 Fontconfig 配置、可写字体缓存和系统 CJK 字体完成渲染，生成 21 页 PNG/PDF 并逐页检查；accessibility audit 无 high/medium/low findings。
+- 最终 DOCX 已关闭复验：`outputs/TxnMem_CCF-A中文论文初稿.docx` 的 SHA-256 为 `870feaf210bf3a7b9507795988aaf242ae6d759f69a65b2c0fef54b40fe04e6b`，对应 `render_final_v4` 的 27 页 PNG/PDF；6 图、8 表、32 条已核验参考文献，a11y=0/0/0。全量测试后 hash/size/mtime 不变；OOXML 和新增 diff 的通用凭据扫描均为 0，未发现 SSH 密码、私有 token、个人 author/company 或绝对工作站路径。论文交付仅剩选定 venue 后的模板适配。

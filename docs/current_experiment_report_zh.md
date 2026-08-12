@@ -1,6 +1,6 @@
 # TxnMem 当前实验报告
 
-更新时间：2026-08-11
+更新时间：2026-08-12
 模型：Qwen2.5-7B-Instruct  
 实验仓库：`remote_staging/txnmem`  
 
@@ -112,11 +112,12 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 
 ## 8. 可复现性与文档 QA
 
-- 全量单元测试：280 tests，3 个 skipped，0 failures。
+- 全量单元测试：320 tests，3 个 skipped（仅 `appworld` 与 `tau-bench` 可选运行时未安装），0 failures；`PYTHONPYCACHEPREFIX=/private/tmp/txnmem_pycache PYTHONPATH=src:scripts python3 -m unittest discover -s tests -p 'test*.py' -v` 不会写入交付 DOCX。
 - 本地 process concurrency smoke：2 workers、3 operations、线性化序号完整，无未确认 operation。
-- DOCX 初稿已生成 21 页 PNG/PDF 并逐页视觉检查；accessibility audit 为 high=0、medium=0、low=0。
+- 最终中文 CCF-A 初稿为 `outputs/TxnMem_CCF-A中文论文初稿.docx`，SHA-256 为 `870feaf210bf3a7b9507795988aaf242ae6d759f69a65b2c0fef54b40fe04e6b`。该文件对应精确 render `outputs/TxnMem_CCF-A中文论文初稿_render_final_v4`：27 页 PNG 与 27 页 PDF；文档含 6 张图、8 张表、32 条已核验参考文献，accessibility audit 为 high=0、medium=0、low=0。
 - artifact audit：0 findings。
-- claim audit：14 条 active claim、107 个字段断言、0 findings；每条正式数字关联 artifact/hash、运行命令、manifest/hash、source commit 与 claim boundary。历史状态和旧故障结果由 `results/paper_evidence/supersession_index.json` 标记，不再作为当前结论来源。
+- claim audit：15 条 active claim、132 个字段断言、0 findings，ledger digest 为 `56e985fa4947b54fdc01c3ab4044dd16358d3b8c9078c39b931bae504792a198`；manuscript audit 亦为 0 findings。每条正式数字关联 artifact/hash、运行命令、manifest/hash、source commit 与 claim boundary。历史状态和旧故障结果由 `results/paper_evidence/supersession_index.json` 标记，不再作为当前结论来源。
+- 最终 OOXML 隐私闭环：无 rsid、批注/人员部分、追踪修订、custom properties、creator、lastModifiedBy、company 或绝对工作站路径；新 Git diff 与交付包的凭据模式扫描均为 0。上述最终 hash 在全量测试、审计和只读核验前后均保持一致，后续未重写 DOCX。
 - 最终 attestation 代码修复提交为 `4669a01`；脱敏 v8 aggregate、per-repetition summaries、endpoint/transport analyses 与 v7 作废标记已由本地结果提交 `9785a48` 保存。
 
 ## 9. 当前状态、claim boundary 与后续工作
@@ -127,6 +128,6 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 2. AppWorld tuned 有 6 个 execution failure，且 n=20；token 总量为观测下界，不能作总体显著性结论。
 3. joint realism 显示 synthetic 与 holdout trace 存在分布差异，特别是 LoCoMo/AppWorld holdout n=2；该结果不支持等价性。
 4. cross-host v8 证据仅覆盖 1 Agent-worker host 与 1 model-server host 的三次独立运行；不包含生产级多主机 Agent workers、连续 30 分钟 tunnel 或跨主机 Qdrant/Neo4j。货币成本未计算，原因是没有显式 pricing rate。
-5. Git 远端推送仍是唯一明确外部阻塞：`git remote -v` 为空，必须由用户提供 remote URL 后才能安全 push。
+5. 中文论文初稿本身仅剩选定 venue 后的模板适配（版式、匿名要求和投稿系统字段）；这不改变上述实验边界。Git 远端推送仍是唯一明确外部阻塞：`git remote -v` 为空，必须由用户提供 remote URL 后才能安全 push。
 
 未来 production-grade 扩展应固定 manifest/evaluator 并保持脱敏 aggregate 口径：增加多主机 Agent workers、连续 tunnel、跨主机 Qdrant/Neo4j 与有明确定价率的成本核算；这些是 future work，不是当前已完成的主张。

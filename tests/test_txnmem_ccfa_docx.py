@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 import re
 import sys
+from tempfile import TemporaryDirectory
 import unittest
 import zipfile
 from xml.etree import ElementTree as ET
@@ -43,9 +44,13 @@ LOCAL_ARTIFACT_PATH = re.compile(r"(?i)(?:results/|file:/+|(?:^|[\\s(])[a-z]:[\\
 class TxnMemCcfaDocxTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.path = build_document(ROOT, OUT)
-        cls.document = Document(cls.path)
         cls.config = json.loads((ROOT / "configs/txnmem_ccfa_paper.json").read_text(encoding="utf-8"))
+        cls.temporary_directory = TemporaryDirectory()
+        cls.path = build_document(
+            ROOT,
+            Path(cls.temporary_directory.name) / Path(cls.config["target_output_path"]).name,
+        )
+        cls.document = Document(cls.path)
         cls.manifest = json.loads(
             (ROOT / "paper_assets/figures/manifest.json").read_text(encoding="utf-8")
         )["figures"]
@@ -58,6 +63,15 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
         with zipfile.ZipFile(cls.path) as archive:
             cls.parts = {name: archive.read(name) for name in archive.namelist()}
         cls.document_xml = cls.parts["word/document.xml"].decode("utf-8")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temporary_directory.cleanup()
+
+    def test_configured_target_path_is_authoritative_but_never_test_output(self) -> None:
+        self.assertEqual(Path(self.config["target_output_path"]), OUT)
+        self.assertNotEqual(self.path, OUT)
+        self.assertTrue(self.path.is_relative_to(Path(self.temporary_directory.name)))
 
     def test_generated_docx_has_paper_structure(self) -> None:
         self.assertTrue(self.path.is_file())
@@ -92,7 +106,7 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
         self.assertIsNone(LOCAL_ARTIFACT_PATH.search(text))
 
     def test_final_package_contains_no_rsid_session_identifiers(self) -> None:
-        """External DOCX must not retain Word revision-session IDs in any XML part."""
+        """Generated DOCX must not retain Word revision-session IDs in any XML part."""
         for name, payload in self.parts.items():
             if name.endswith(".xml"):
                 self.assertNotIn(b"rsid", payload.lower(), name)
