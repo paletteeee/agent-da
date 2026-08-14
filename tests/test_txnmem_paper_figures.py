@@ -92,6 +92,21 @@ class PaperFigureBuilderTests(unittest.TestCase):
         self.assertIn("未来扩展", repair)
         self.assertIn("stale / 重算 / 新来源", repair)
 
+    def test_evidence_figure_downgrades_legacy_toxiproxy_state_claim(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "figures"
+            manifest = build_all(ROOT, out_dir)
+            evidence = (
+                out_dir / manifest["figures"]["evidence_layers"]["file"]
+            ).read_text(encoding="utf-8")
+            item = manifest["figures"]["evidence_layers"]
+
+        self.assertNotIn("0 partial", evidence)
+        self.assertIn("仅故障/响应路径", evidence)
+        self.assertIn("未独立核验双存储状态", evidence)
+        self.assertNotIn("partial commit", item["alt_text"])
+        self.assertIn("状态未独立核验", item["caption"])
+
     def test_architecture_svg_encodes_revalidation_before_persist(self):
         with TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "figures"

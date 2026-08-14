@@ -2,6 +2,8 @@
   "schema_version": 1,
   "ledger_scope": "formal experimental claims in the TxnMem draft and current experiment report",
   "supersession_index": "results/paper_evidence/supersession_index.json",
+  "expected_active_claim_count": 15,
+  "expected_assertion_count": 131,
   "claims": [
     {
       "claim_id": "controlled_correctness_400x5",
@@ -93,7 +95,7 @@
       "paper_location": ["Experiments/Public benchmark evidence/τ-bench", "docs/current_experiment_report_zh.md#51"],
       "artifact_path": "results/submission_evidence/tau_bench_50/aggregate.json",
       "artifact_format": "json",
-      "artifact_sha256": "f714ec70a86ed6f15b34bf9679a7ef4d6271b27c1fc64c9c1c61db09ed7fc7a6",
+      "artifact_sha256": "631fd1884a25f2b65dfb318f35b54df7c03d6d38aa93ef38e36e98ee73cfd50a",
       "validation_profile": "tau_bench_50",
       "assertions": [
         {"pointer": "/status", "operator": "equals", "expected": "complete"},
@@ -105,8 +107,8 @@
         {"pointer": "/reward_mean", "operator": "equals", "expected": 0.3},
         {"pointer": "/manifest_sha256", "operator": "equals", "expected": "b794d7578aeaacf5efdcd3a9ebe708fcbd52f54d3a5f64a142c13371057e012e"}
       ],
-      "run_command": "cd /data/txnmem_run_20260806 && PYTHONPATH=/data/txnmem_run_20260806/src:/data/tau-bench /data/venvs/tau-bench/bin/python src/txnmem_experiment.py benchmark-native-batch --benchmark tau-bench --manifest results/native_scale/manifests/tau_bench.json --tau-domain airline --tau-split test --tau-user-strategy scripted --out-dir results/native_scale/runs/tau_bench_full --memory-backend sqlite --endpoint http://127.0.0.1:8000/v1 --model qwen2.5-7b-instruct --timeout 180",
-      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "e611b0d773b4445aff4292f5f3a1e3f543cccb9ab3d2b281237c203b5dc899f3"},
+      "run_command": "cd <remote-run-dir> && PYTHONPATH=<remote-run-dir>/src:<tau-bench-root> <runtime>/bin/python src/txnmem_experiment.py benchmark-native-batch --benchmark tau-bench --manifest results/native_scale/manifests/tau_bench.json --tau-domain airline --tau-split test --tau-user-strategy scripted --out-dir results/native_scale/runs/tau_bench_full --memory-backend sqlite --endpoint http://127.0.0.1:8000/v1 --model qwen2.5-7b-instruct --timeout 180",
+      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "5bf4be2c7571e78443b6bddb2108ed28ff4c625d3dc176244be529befcf1ea6e"},
       "source_commit": "ff4d739f24a9f7c64304c96a6d57a0bc5bc1f8df",
       "claim_boundary": "official τ-bench workflow reward with native memory events; reward is not memory accuracy"
     },
@@ -132,7 +134,7 @@
         {"pointer": "/tuned_status_counts/failed", "operator": "equals", "expected": 6}
       ],
       "run_command": "PYTHONPATH=src python3 src/txnmem_prompt_comparison.py --kind appworld --baseline results/prompt_profile_formal_v4/appworld_baseline/native_batch_summary.json --tuned results/prompt_profile_formal_v4/appworld_tuned/native_batch_summary.json --out results/prompt_profile_formal_v4/appworld_prompt_comparison.json",
-      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "e611b0d773b4445aff4292f5f3a1e3f543cccb9ab3d2b281237c203b5dc899f3"},
+      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "5bf4be2c7571e78443b6bddb2108ed28ff4c625d3dc176244be529befcf1ea6e"},
       "source_commit": "79ef8c2f6d3e3d80a5a85c0b642aa3eb726511c5",
       "claim_boundary": "descriptive 20-task paired result; tuned token total is an observed lower bound and no population-significance claim is made"
     },
@@ -155,7 +157,7 @@
         {"pointer": "/token_delta", "operator": "equals", "expected": 40539}
       ],
       "run_command": "PYTHONPATH=src python3 src/txnmem_prompt_comparison.py --kind locomo --baseline results/prompt_profile_formal_v4/locomo_baseline/locomo_paired_repetition_summary.json --tuned results/prompt_profile_formal_v4/locomo_tuned/locomo_paired_repetition_summary.json --out results/prompt_profile_formal_v4/locomo_prompt_comparison.json",
-      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "e611b0d773b4445aff4292f5f3a1e3f543cccb9ab3d2b281237c203b5dc899f3"},
+      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "5bf4be2c7571e78443b6bddb2108ed28ff4c625d3dc176244be529befcf1ea6e"},
       "source_commit": "ebecba86f9588fdb8c22f9d7a28e420be2ca3857",
       "claim_boundary": "three fixed paired repetitions; descriptive effect only, with no population-significance or universal-improvement claim"
     },
@@ -165,15 +167,14 @@
       "paper_location": ["Experiments/Real backend faults", "docs/current_experiment_report_zh.md#6"],
       "artifact_path": "results/submission_evidence/toxiproxy_faults_30/aggregate.json",
       "artifact_format": "json",
-      "artifact_sha256": "94dd588d1309c065fd7cfdd76e071d9955a59e5830254ed652c15722a492df00",
-      "validation_profile": "toxiproxy_fault_matrix",
+      "artifact_sha256": "aa5f700dcf080bf323ce1b9d72ed59a1f4ac3ca5ab15df1b8569849da8b741e4",
+      "validation_profile": "toxiproxy_fault_path",
       "assertions": [
-        {"pointer": "/status", "operator": "equals", "expected": "complete"},
+        {"pointer": "/status", "operator": "equals", "expected": "complete_fault_path_observations"},
         {"pointer": "/scenario_count", "operator": "equals", "expected": 5},
         {"pointer": "/repetitions_per_scenario", "operator": "equals", "expected": 30},
         {"pointer": "/total_repetitions", "operator": "equals", "expected": 150},
         {"pointer": "/all_scenarios_evidence_valid", "operator": "equals", "expected": true},
-        {"pointer": "/total_partial_commit_count", "operator": "equals", "expected": 0},
         {"pointer": "/scenarios/retry_success/retry_success_count", "operator": "equals", "expected": 30},
         {"pointer": "/scenarios/timeout/abort_count", "operator": "equals", "expected": 30},
         {"pointer": "/scenarios/connection_drop/abort_count", "operator": "equals", "expected": 30},
@@ -192,9 +193,9 @@
         {"pointer": "/scenarios/delay/proxy_path_verified_count", "operator": "equals", "expected": 30}
       ],
       "run_command": "TXNMEM_NEO4J_URI=bolt://127.0.0.1:27687 TXNMEM_TOXIPROXY_URL=http://127.0.0.1:8474 PYTHONPATH=src python3 src/txnmem_experiment.py backend-performance --backend vector-graph --service-url http://127.0.0.1:26333 --events 2 --repetitions 30 --out-dir results/toxiproxy_formal30",
-      "manifest": {"path": "configs/submission_evidence/toxiproxy_faults_30.json", "sha256": "206f2096709d52901504e16ecc2b233348c3d2b06e9bc96c9990e5b6aa6ed0d7"},
+      "manifest": {"path": "configs/submission_evidence/toxiproxy_faults_30.json", "sha256": "43d874a70201d33d4d55f991d8bf2ba98027b1b14a7e2a0ecba54d0c11e01797"},
       "source_commit": "c299fdd64188874c1d39222a9d9a4e9dc5fd0566",
-      "claim_boundary": "single-host real-service fault injection through Toxiproxy; not production availability, distributed 2PC, or production latency"
+      "claim_boundary": "single-host proxy/fault-response observations; post-fault Qdrant/Neo4j persistent state was not independently verified; not atomicity/availability/latency evidence"
     },
     {
       "claim_id": "qwen_vector_graph_e2e_5",
@@ -202,7 +203,7 @@
       "paper_location": ["Experiments/Real backend E2E", "docs/current_experiment_report_zh.md#6"],
       "artifact_path": "results/submission_evidence/qwen_vector_graph_e2e_5/aggregate.json",
       "artifact_format": "json",
-      "artifact_sha256": "d58ee041a644f989492bf0ac590f47ecd9f080dbf4b815d04917b444ede50c13",
+      "artifact_sha256": "5bbb1da9580877bbf03f2c17d31c2d026d606d85c3391965971d2ba0d7a4bd3f",
       "validation_profile": "qwen_vector_graph_e2e_5",
       "assertions": [
         {"pointer": "/status", "operator": "equals", "expected": "complete"},
@@ -216,7 +217,7 @@
         {"pointer": "/production_latency_claim", "operator": "equals", "expected": false}
       ],
       "run_command": "TXNMEM_RUN_ID=20260811-formal-v2 TXNMEM_E2E_LIMIT=5 TXNMEM_ENDPOINT=http://127.0.0.1:8000/v1 TXNMEM_MODEL=qwen2.5-7b-instruct PYTHONPATH=src python3 scripts/run_e2e_real_backend.py",
-      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "e611b0d773b4445aff4292f5f3a1e3f543cccb9ab3d2b281237c203b5dc899f3"},
+      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "5bf4be2c7571e78443b6bddb2108ed28ff4c625d3dc176244be529befcf1ea6e"},
       "source_commit": "c0cae6d84d4c0766ca4ab2fbb850a8a37a5731c3",
       "claim_boundary": "single-host five-task end-to-end smoke including model, services, and evaluator; not production latency"
     },
@@ -241,7 +242,7 @@
         {"pointer": "/production_latency_claim", "operator": "equals", "expected": false}
       ],
       "run_command": "PYTHONPATH=src python3 src/txnmem_model_load_repetitions.py --summaries results/cross_host_model_load_formal_v8_rep1/results/model_load_summary.json results/cross_host_model_load_formal_v8_rep2/results/model_load_summary.json results/cross_host_model_load_formal_v8_rep3/results/model_load_summary.json --out results/cross_host_model_load_formal_v8_aggregate/results/model_load_repetition_summary.json",
-      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "e611b0d773b4445aff4292f5f3a1e3f543cccb9ab3d2b281237c203b5dc899f3"},
+      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "5bf4be2c7571e78443b6bddb2108ed28ff4c625d3dc176244be529befcf1ea6e"},
       "source_commit": "9785a48a2ac0ce76c40b16d6e08fcadf4fa1f5cc",
       "claim_boundary": "three independently attested Agent-client-to-model-server repetitions; not multi-host Agent workers, one continuous 30-minute tunnel, or production latency"
     },
@@ -261,7 +262,7 @@
         {"pointer": "/multivariate_test/permutations", "operator": "equals", "expected": 999}
       ],
       "run_command": "PYTHONPATH=src python3 src/txnmem_experiment.py trace-replay --events external_data/normalized/tau_bench_events.jsonl --synthetic-instances results/final_controlled/data/generated_instances.jsonl --adapter tau-bench --source tau-bench --out-dir results/joint_realism/tau_bench --seed 17 --joint-permutations 999 --joint-rff-dimensions 128",
-      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "e611b0d773b4445aff4292f5f3a1e3f543cccb9ab3d2b281237c203b5dc899f3"},
+      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "5bf4be2c7571e78443b6bddb2108ed28ff4c625d3dc176244be529befcf1ea6e"},
       "source_commit": "eb079c8d604c08fbda31d32c6dce3620cc7881c9",
       "claim_boundary": "joint-distribution diagnostic on a held-out trace split; rejection indicates mismatch and does not establish equivalence"
     },
@@ -281,7 +282,7 @@
         {"pointer": "/multivariate_test/permutations", "operator": "equals", "expected": 1999}
       ],
       "run_command": "PYTHONPATH=src python3 src/txnmem_experiment.py trace-replay --events external_data/normalized/locomo_events.jsonl --synthetic-instances results/final_controlled/data/generated_instances.jsonl --adapter locomo --source locomo --out-dir results/joint_realism/locomo --seed 17 --joint-permutations 1999 --joint-rff-dimensions 128",
-      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "e611b0d773b4445aff4292f5f3a1e3f543cccb9ab3d2b281237c203b5dc899f3"},
+      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "5bf4be2c7571e78443b6bddb2108ed28ff4c625d3dc176244be529befcf1ea6e"},
       "source_commit": "eb079c8d604c08fbda31d32c6dce3620cc7881c9",
       "claim_boundary": "joint-distribution diagnostic with only two held-out conversations; low-power and not evidence of equivalence"
     },
@@ -301,7 +302,7 @@
         {"pointer": "/trace_ground_truth_native", "operator": "equals", "expected": false}
       ],
       "run_command": "PYTHONPATH=src python3 src/txnmem_appworld_projection.py --appworld-root external_data/deps/appworld-data --task-ids 07b42fd_2 07bb666_1 099174d_1 09ac073_1 09b0ee6_1 --output external_data/normalized/appworld_projection_regenerated.jsonl --inventory results/appworld_projection_regenerated/projection_inventory.json",
-      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "e611b0d773b4445aff4292f5f3a1e3f543cccb9ab3d2b281237c203b5dc899f3"},
+      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "5bf4be2c7571e78443b6bddb2108ed28ff4c625d3dc176244be529befcf1ea6e"},
       "source_commit": "eb079c8d604c08fbda31d32c6dce3620cc7881c9",
       "claim_boundary": "method/URL-only trace-grounded projection from official API calls; not native Agent memory ground truth"
     },
@@ -321,7 +322,7 @@
         {"pointer": "/multivariate_test/permutations", "operator": "equals", "expected": 1999}
       ],
       "run_command": "PYTHONPATH=src python3 src/txnmem_experiment.py trace-replay --events external_data/normalized/appworld_projection_regenerated.jsonl --synthetic-instances results/final_controlled/data/generated_instances.jsonl --adapter appworld --source appworld --out-dir results/appworld_projection_regenerated --seed 17 --joint-permutations 1999 --joint-rff-dimensions 128",
-      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "e611b0d773b4445aff4292f5f3a1e3f543cccb9ab3d2b281237c203b5dc899f3"},
+      "manifest": {"path": "configs/submission_evidence/remote_runs.json", "sha256": "5bf4be2c7571e78443b6bddb2108ed28ff4c625d3dc176244be529befcf1ea6e"},
       "source_commit": "eb079c8d604c08fbda31d32c6dce3620cc7881c9",
       "claim_boundary": "joint-distribution diagnostic over a redacted projection with two held-out tasks; not native memory ground truth or distributional equivalence"
     },

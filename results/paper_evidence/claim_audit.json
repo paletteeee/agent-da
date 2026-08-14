@@ -51,24 +51,27 @@
     },
     {
       "path": "results/submission_evidence/qwen_vector_graph_e2e_5/aggregate.json",
-      "sha256": "d58ee041a644f989492bf0ac590f47ecd9f080dbf4b815d04917b444ede50c13"
+      "sha256": "5bbb1da9580877bbf03f2c17d31c2d026d606d85c3391965971d2ba0d7a4bd3f"
     },
     {
       "path": "results/submission_evidence/tau_bench_50/aggregate.json",
-      "sha256": "f714ec70a86ed6f15b34bf9679a7ef4d6271b27c1fc64c9c1c61db09ed7fc7a6"
+      "sha256": "631fd1884a25f2b65dfb318f35b54df7c03d6d38aa93ef38e36e98ee73cfd50a"
     },
     {
       "path": "results/submission_evidence/toxiproxy_faults_30/aggregate.json",
-      "sha256": "94dd588d1309c065fd7cfdd76e071d9955a59e5830254ed652c15722a492df00"
+      "sha256": "aa5f700dcf080bf323ce1b9d72ed59a1f4ac3ca5ab15df1b8569849da8b741e4"
     }
   ],
-  "checked_assertion_count": 132,
+  "checked_assertion_count": 131,
   "claim_count": 15,
+  "declared_assertion_count": 131,
   "evidence_id": "paper_claim_audit",
+  "expected_active_claim_count": 15,
+  "expected_assertion_count": 131,
   "finding_count": 0,
   "findings": [],
   "ledger_path": "configs/paper_claims.json",
-  "ledger_sha256": "56e985fa4947b54fdc01c3ab4044dd16358d3b8c9078c39b931bae504792a198",
+  "ledger_sha256": "596ef06eaf6a107e27c82fda1a9c520a9c064c5049e5e8be3af114ad126d664f",
   "schema_version": 1,
   "status": "passed",
   "superseded_artifact_count": 3

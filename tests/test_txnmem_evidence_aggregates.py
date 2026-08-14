@@ -23,7 +23,7 @@ SOURCE_COMMIT = "a" * 40
 
 
 class SubmissionEvidenceAggregateTests(unittest.TestCase):
-    def test_toxiproxy_aggregate_requires_every_real_trigger_and_zero_partial_commit(self):
+    def test_toxiproxy_aggregate_projects_only_fault_and_response_path_observations(self):
         scenarios = {}
         for name in ("normal", "delay", "timeout", "connection_drop", "retry_success"):
             non_normal = name != "normal"
@@ -44,8 +44,10 @@ class SubmissionEvidenceAggregateTests(unittest.TestCase):
                 "error_count": int(abort),
                 "retry_success_count": int(retry),
                 "abort_count": int(abort),
-                "partial_commit_count": 0,
-                "oracle_match_count": 1,
+                # Legacy runner fields are deliberately contradictory: they are
+                # not persisted-state evidence and must not enter the projection.
+                "partial_commit_count": 7,
+                "oracle_match_count": 0,
                 "retry_count": int(retry),
                 "fault_evidence_count": 1,
                 "trigger_fired_count": int(non_normal),
@@ -65,7 +67,7 @@ class SubmissionEvidenceAggregateTests(unittest.TestCase):
             },
             "fault_matrix": {
                 "all_scenarios_evidence_valid": True,
-                "all_scenarios_no_partial_commit": True,
+                "all_scenarios_no_partial_commit": False,
                 "scenarios": scenarios,
             },
             "production_latency_claim": False,
@@ -80,12 +82,65 @@ class SubmissionEvidenceAggregateTests(unittest.TestCase):
                 run_command="python txnmem_experiment.py backend-performance",
             )
 
-        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["status"], "complete_fault_path_observations")
         self.assertEqual(result["scenario_count"], 5)
         self.assertEqual(result["total_repetitions"], 5)
-        self.assertEqual(result["total_partial_commit_count"], 0)
+        self.assertNotIn("total_partial_commit_count", result)
+        self.assertNotIn("partial_commit_count", result["scenarios"]["normal"])
         self.assertEqual(result["scenarios"]["retry_success"]["retry_success_count"], 1)
-        self.assertEqual(result["scenarios"]["delay"]["p50_trigger_elapsed_ms"], 10.0)
+        self.assertNotIn("p50_trigger_elapsed_ms", result["scenarios"]["delay"])
+        self.assertIn("not atomicity/availability/latency evidence", result["claim_boundary"])
+
+    def test_toxiproxy_aggregate_rejects_missing_response_count(self):
+        source = {
+            "backend": "vector-graph",
+            "backend_health": {
+                "qdrant": {"available": True, "version": "1"},
+                "neo4j": {"available": True, "version": "1"},
+            },
+            "fault_matrix": {
+                "all_scenarios_evidence_valid": True,
+                "scenarios": {
+                    name: {
+                        "repetitions": 1,
+                        "success_count": int(
+                            name not in {"timeout", "connection_drop"}
+                        ),
+                        "error_count": int(name in {"timeout", "connection_drop"}),
+                        "abort_count": int(name in {"timeout", "connection_drop"}),
+                        "retry_count": int(name == "retry_success"),
+                        "retry_success_count": int(name == "retry_success"),
+                        "fault_evidence_count": 1,
+                        "proxy_path_verified_count": 1,
+                        "evidence_valid_count": 1,
+                        "trigger_fired_count": int(name != "normal"),
+                        "toxic_installed_count": int(name != "normal"),
+                        "toxic_cleared_count": int(name != "normal"),
+                        "fault_observed_count": int(name != "normal"),
+                        "evidence_valid": True,
+                        "repetition_evidence": [{"evidence_valid": True}],
+                    }
+                    for name in (
+                        "normal",
+                        "delay",
+                        "timeout",
+                        "connection_drop",
+                        "retry_success",
+                    )
+                },
+            },
+        }
+        del source["fault_matrix"]["scenarios"]["normal"]["success_count"]
+        with TemporaryDirectory() as tmp:
+            path = self._write(Path(tmp), "toxiproxy.json", source)
+            with self.assertRaisesRegex(ValueError, "normal/success_count"):
+                aggregate_toxiproxy_submission_evidence(
+                    path,
+                    expected_repetitions=1,
+                    toxiproxy_version="2.5.0",
+                    source_commit=SOURCE_COMMIT,
+                    run_command="python txnmem_experiment.py backend-performance",
+                )
 
     def _write(self, root: Path, name: str, payload: dict) -> Path:
         path = root / name

@@ -439,7 +439,7 @@ class AppWorldAdapterTest(unittest.TestCase):
 class ManifestGeneratorTest(unittest.TestCase):
     def test_locomo_manifest_from_sample(self):
         manifest = generate_locomo_manifest(
-            source=Path("external_data/raw/locomo10.json"), max_tasks=2
+            source=Path("tests/fixtures/locomo_redacted_minimal.json"), max_tasks=2
         )
         self.assertEqual(manifest["manifest_version"], 1)
         self.assertEqual(len(manifest["tasks"]), 2)

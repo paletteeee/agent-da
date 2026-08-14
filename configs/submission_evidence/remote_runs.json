@@ -2,7 +2,7 @@
   "schema_version": 1,
   "evidence_boundary": "sanitized run manifest; task prompts and model messages are intentionally excluded",
   "source_manifest": {
-    "remote_path": "/data/txnmem_run_20260806/results/native_scale/manifests/tau_bench.json",
+    "remote_path": "<remote-run-dir>/results/native_scale/manifests/tau_bench.json",
     "file_sha256": "748835fbe87ff6a66a289ec87f98c1fbdadca192299b7d726dd8a815baa1419a",
     "canonical_manifest_hash": "b794d7578aeaacf5efdcd3a9ebe708fcbd52f54d3a5f64a142c13371057e012e",
     "benchmark_source_sha256": "1b288c5c6dc91655abdae3474cbf42b538161efeb662d6a532048a74937c0a94",

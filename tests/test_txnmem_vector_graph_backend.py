@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from txnmem_vector_graph_backend import (
+    VectorGraphBackendError,
     VectorGraphMemoryBackend,
     _Neo4jBoltClient,
     _qdrant_point_id,
@@ -63,6 +64,31 @@ class _FakeNeo4j:
 
     def delete_memory(self, namespace, memory_id, idempotency_key):
         self.memories.pop((namespace, memory_id), None)
+
+    def retrieve_memory(self, namespace, memory_id):
+        row = self.memories.get((namespace, memory_id))
+        if row is None:
+            return None
+        return {
+            "status": row.get("status"),
+            "source_ids": sorted(
+                source_id
+                for edge_namespace, source_id, target_id, kind in self.edges
+                if edge_namespace == namespace
+                and target_id == memory_id
+                and kind == "DERIVED_FROM"
+            ),
+            "supersedes_id": next(
+                (
+                    target_id
+                    for edge_namespace, source_id, target_id, kind in self.edges
+                    if edge_namespace == namespace
+                    and source_id == memory_id
+                    and kind == "SUPERSEDES"
+                ),
+                None,
+            ),
+        }
 
     def healthcheck(self):
         return {"available": True, "version": "fake-neo4j"}
@@ -149,6 +175,68 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertNotIn("m0", self.backend.memories)
         self.assertEqual(self.backend.validated_events(), [])
         self.assertEqual(self.backend.metrics()["rollback_count"], 1)
+
+    def test_commit_then_client_exception_compensates_and_verifies_both_stores_absent(self):
+        original = self.neo4j.upsert_memory
+
+        def commit_then_raise(*args, **kwargs):
+            original(*args, **kwargs)
+            raise ConnectionResetError("response lost after commit")
+
+        self.neo4j.upsert_memory = commit_then_raise
+
+        with self.assertRaises(ConnectionResetError):
+            self.backend.write("m-ambiguous", value="source")
+
+        verification = self.backend.verify_persistent_state(
+            [{"type": "write", "memory_id": "m-ambiguous", "value": "source"}]
+        )
+        self.assertEqual(verification["classification"], "absent")
+        self.assertEqual(
+            verification["items"],
+            [
+                {
+                    "memory_id": "m-ambiguous",
+                    "classification": "absent",
+                    "qdrant": {"read_ok": True, "present": False, "matches": False},
+                    "neo4j": {"read_ok": True, "present": False, "matches": False},
+                }
+            ],
+        )
+
+    def test_ambiguous_commit_recovery_fails_closed_when_absence_cannot_be_read(self):
+        original = self.neo4j.upsert_memory
+
+        def commit_then_raise(*args, **kwargs):
+            original(*args, **kwargs)
+            raise ConnectionResetError("response lost after commit")
+
+        def unreadable_after_compensation(*_args, **_kwargs):
+            raise TimeoutError("graph read unavailable")
+
+        self.neo4j.upsert_memory = commit_then_raise
+        self.neo4j.retrieve_memory = unreadable_after_compensation
+
+        with self.assertRaisesRegex(
+            VectorGraphBackendError,
+            "persistent state is unknown after compensation",
+        ):
+            self.backend.write("m-unknown", value="source")
+
+    def test_persistent_state_read_failure_is_unknown_not_absent(self):
+        self.backend.write("m0", value="source")
+
+        def fail_read(*_args, **_kwargs):
+            raise TimeoutError("qdrant read unavailable")
+
+        self.qdrant.retrieve = fail_read
+        verification = self.backend.verify_persistent_state(
+            [{"type": "write", "memory_id": "m0", "value": "source"}]
+        )
+
+        self.assertEqual(verification["classification"], "unknown")
+        self.assertFalse(verification["items"][0]["qdrant"]["read_ok"])
+        self.assertNotIn("present", verification["items"][0]["qdrant"])
 
     def test_healthcheck_and_invalidation_are_reported(self):
         health = self.backend.healthcheck()

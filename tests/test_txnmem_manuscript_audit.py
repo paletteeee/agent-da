@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
+import shutil
 import sys
 import unittest
 from collections import Counter
@@ -18,6 +20,7 @@ from txnmem_manuscript_audit import (  # noqa: E402
     load_paper_config,
     strip_author_annotations,
 )
+from txnmem_claim_audit import audit_claim_ledger  # noqa: E402
 
 
 CONFIG = load_paper_config(ROOT / "configs" / "txnmem_ccfa_paper.json")
@@ -56,6 +59,66 @@ class ManuscriptAuditTests(unittest.TestCase):
     def _valid_manuscript_text(self) -> str:
         sections = "\n\n".join(f"# {section}" for section in CONFIG["required_sections"])
         return f"{sections}\n\n{self._claim_blocks()}\n"
+
+    def _isolated_evidence_root(self, destination: Path) -> dict:
+        ledger_rel = Path(CONFIG["claim_ledger_path"])
+        ledger = json.loads((ROOT / ledger_rel).read_text(encoding="utf-8"))
+        ledger["expected_active_claim_count"] = sum(
+            claim.get("status") == "active" for claim in ledger["claims"]
+        )
+        ledger["expected_assertion_count"] = sum(
+            len(claim["assertions"])
+            for claim in ledger["claims"]
+            if claim.get("status") == "active"
+        )
+
+        paths = {
+            Path(CONFIG["supersession_index_path"]),
+            Path("paper_assets/figures/manifest.json"),
+        }
+        for claim in ledger["claims"]:
+            paths.add(Path(claim["artifact_path"]))
+            paths.add(Path(claim["manifest"]["path"]))
+        figure_manifest = json.loads(
+            (ROOT / "paper_assets/figures/manifest.json").read_text(encoding="utf-8")
+        )
+        for figure in figure_manifest["figures"].values():
+            paths.add(Path("paper_assets/figures") / figure["file"])
+            paths.update(Path(source["path"]) for source in figure["sources"])
+        for relative in sorted(paths):
+            source = ROOT / relative
+            target = destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
+        target_ledger = destination / ledger_rel
+        target_ledger.parent.mkdir(parents=True, exist_ok=True)
+        target_ledger.write_text(
+            json.dumps(ledger, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        ledger_hash = hashlib.sha256(target_ledger.read_bytes()).hexdigest()
+        target_figure_manifest = destination / "paper_assets/figures/manifest.json"
+        figure_manifest = json.loads(target_figure_manifest.read_text(encoding="utf-8"))
+        for figure in figure_manifest["figures"].values():
+            for source in figure["sources"]:
+                if source["path"] == str(ledger_rel):
+                    source["sha256"] = ledger_hash
+        target_figure_manifest.write_text(
+            json.dumps(figure_manifest, ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
+
+        report = audit_claim_ledger(destination, ledger_rel)
+        self.assertEqual(report["status"], "passed", report["findings"])
+        claim_audit = destination / CONFIG["claim_audit_path"]
+        claim_audit.parent.mkdir(parents=True, exist_ok=True)
+        claim_audit.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return figure_manifest
 
     def _assert_task_three_markers(self, reader_text: str) -> None:
         self.assertEqual(
@@ -174,6 +237,77 @@ class ManuscriptAuditTests(unittest.TestCase):
             {item["code"] for item in missing["findings"]},
         )
 
+    def test_rejects_stale_passed_claim_report_even_with_current_ledger_digest(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._isolated_evidence_root(root)
+            audit_path = root / CONFIG["claim_audit_path"]
+            payload = json.loads(audit_path.read_text(encoding="utf-8"))
+            payload["checked_assertion_count"] -= 1
+            payload["status"] = "passed"
+            payload["finding_count"] = 0
+            audit_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            report = audit_text(self._valid_manuscript_text(), root, CONFIG)
+
+        self.assertIn(
+            "claim_audit_stale_report", {item["code"] for item in report["findings"]}
+        )
+
+    def test_rejects_active_artifact_byte_drift(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._isolated_evidence_root(root)
+            artifact = root / "results/paper_evidence/controlled_suite.json"
+            artifact.write_bytes(artifact.read_bytes() + b"\n")
+
+            report = audit_text(self._valid_manuscript_text(), root, CONFIG)
+
+        self.assertIn(
+            "fresh_claim_audit_failed", {item["code"] for item in report["findings"]}
+        )
+
+    def test_rejects_active_claim_manifest_byte_drift(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._isolated_evidence_root(root)
+            manifest = root / "configs/workload_families.yaml"
+            manifest.write_bytes(manifest.read_bytes() + b"\n")
+
+            report = audit_text(self._valid_manuscript_text(), root, CONFIG)
+
+        self.assertIn(
+            "fresh_claim_audit_failed", {item["code"] for item in report["findings"]}
+        )
+
+    def test_rejects_figure_source_byte_drift(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._isolated_evidence_root(root)
+            source = root / CONFIG["paper_source_path"]
+            source.write_bytes(source.read_bytes() + b"\n")
+
+            report = audit_text(self._valid_manuscript_text(), root, CONFIG)
+
+        self.assertIn(
+            "figure_source_hash_mismatch",
+            {item["code"] for item in report["findings"]},
+        )
+
+    def test_rejects_figure_output_byte_drift(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._isolated_evidence_root(root)
+            output = root / "paper_assets/figures/architecture.svg"
+            output.write_bytes(output.read_bytes() + b"\n")
+
+            report = audit_text(self._valid_manuscript_text(), root, CONFIG)
+
+        self.assertIn(
+            "figure_output_hash_mismatch",
+            {item["code"] for item in report["findings"]},
+        )
+
     def test_drafting_mode_only_allows_deferred_sections_to_be_absent(self):
         config = dict(CONFIG)
         config["drafting_mode"] = True
@@ -194,6 +328,31 @@ class ManuscriptAuditTests(unittest.TestCase):
         report = audit_manuscript(ROOT / CONFIG["paper_source_path"], ROOT, CONFIG)
 
         self.assertEqual(report["finding_count"], 0)
+
+    def test_toxiproxy_reader_and_status_surfaces_make_no_state_or_atomicity_claim(self):
+        paths = (
+            ROOT / CONFIG["paper_source_path"],
+            ROOT / "docs/current_experiment_report_zh.md",
+            ROOT / "docs/formal_paper_task_status_zh.md",
+        )
+        forbidden = (
+            "0 partial commit",
+            "partial commit 为 0",
+            "无 partial-commit",
+            "均无 partial commit",
+            "未观察到部分提交",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                text = path.read_text(encoding="utf-8")
+                for phrase in forbidden:
+                    self.assertNotIn(phrase, text)
+        boundary = (
+            "single-host proxy/fault-response observations; post-fault Qdrant/Neo4j "
+            "persistent state was not independently verified; "
+            "not atomicity/availability/latency evidence"
+        )
+        self.assertIn(boundary, CONFIG["required_claim_boundaries"])
 
     def test_reader_projection_strips_delimited_author_annotations(self):
         source = (ROOT / CONFIG["paper_source_path"]).read_text(encoding="utf-8")
@@ -297,8 +456,8 @@ class ManuscriptAuditTests(unittest.TestCase):
                     "6 个 execution failure",
                     "+0.0016169580043333333",
                     "5×30",
-                    "150 次",
-                    "0 partial commit",
+                    "仅记录经代理的故障与响应路径",
+                    "持久双存储状态留待重新核验",
                     "5/5",
                     "30 个 native event",
                     "MMD²",
@@ -307,6 +466,7 @@ class ManuscriptAuditTests(unittest.TestCase):
             )
         )
         self.assertIn("四个 non-normal 路径", evaluation)
+        self.assertIn("不是原子性、可用性或延迟证据", evaluation)
         self.assertIn("一个 Agent-worker host 到一个 model-server host", evaluation)
         self.assertTrue(
             all(term in related_work for term in ("Agent memory", "governed memory/access control", "transaction/provenance", "distributed-system testing"))

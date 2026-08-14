@@ -16,7 +16,7 @@
 - AppWorld、LoCoMo、realism 和 cross-host 结果按设计规格中的 claim boundary 描述，不写成总体显著提升或生产性能。
 - 所有外部技术引用只使用原论文、正式 proceedings、作者/项目官方页面等 primary sources；题名、作者、年份和 venue 必须核验。
 - 新 DOCX 采用 `narrative_proposal` 预设的克制学术变体，使用真实 Heading/Caption/List 样式、显式表格几何和连续页码。
-- 最终 DOCX 固定输出到 `/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿.docx`。
+- 最终 DOCX 固定输出到 `<output-dir>/TxnMem_CCF-A中文论文初稿.docx`。
 - 每个有意义的 DOCX 修改批次都必须重新 render 并检查全部页面；最终 a11y high/medium/low findings 均为 0。
 
 ---
@@ -215,7 +215,7 @@ git commit -m "paper: draft system model and TxnMem design"
 
 - [ ] **Step 5: 写 RQ4 真实服务与跨主机边界**
 
-报告 Toxiproxy 5×30、四个 non-normal 路径证据 30/30、150 次 0 partial commit，以及 5-task E2E 5/5、30 events。cross-host v8 只用于证明 client-to-model-server 拓扑与 token accounting，不写成生产性能。
+报告 Toxiproxy 5×30 的四个 non-normal 路径证据 30/30，并明确旧 runner 未独立核验故障后 Qdrant/Neo4j 状态；不报告 atomicity、availability 或 latency。5-task E2E 报告 5/5、30 events；cross-host v8 只用于证明 client-to-model-server 拓扑与 token accounting，不写成生产性能。
 
 - [ ] **Step 6: 写 RQ5 realism 负结果**
 
@@ -296,7 +296,7 @@ git commit -m "paper: add evidence-backed manuscript figures"
 - Create: `scripts/build_txnmem_ccfa_docx.py`
 - Create: `tests/test_txnmem_ccfa_docx.py`
 - Modify: `scripts/fontconfig-macos.conf`
-- Create: `/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿.docx`
+- Create: `<output-dir>/TxnMem_CCF-A中文论文初稿.docx`
 
 **Interfaces:**
 - Consumes: Markdown 正文、paper config、reference catalog、figure manifest、active result JSON。
@@ -321,7 +321,7 @@ def test_generated_docx_has_paper_structure(self):
 
 - [ ] **Step 3: 运行测试并确认构建器缺失**
 
-Run: `/Users/xiaoyan_zhu/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 -m unittest tests.test_txnmem_ccfa_docx -v`
+Run: `<runtime>/python/bin/python3 -m unittest tests.test_txnmem_ccfa_docx -v`
 
 Expected: FAIL，提示 builder 不存在。
 
@@ -335,9 +335,9 @@ Expected: FAIL，提示 builder 不存在。
 
 - [ ] **Step 6: 生成 DOCX 并运行结构测试**
 
-Run: `/Users/xiaoyan_zhu/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 scripts/build_txnmem_ccfa_docx.py --root . --output /Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿.docx`
+Run: `<runtime>/python/bin/python3 scripts/build_txnmem_ccfa_docx.py --root . --output <output-dir>/TxnMem_CCF-A中文论文初稿.docx`
 
-Run: `/Users/xiaoyan_zhu/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 -m unittest tests.test_txnmem_ccfa_docx -v`
+Run: `<runtime>/python/bin/python3 -m unittest tests.test_txnmem_ccfa_docx -v`
 
 Expected: PASS，DOCX 非空且结构满足配置。
 
@@ -351,8 +351,8 @@ git commit -m "paper: build reproducible CCF-A manuscript DOCX"
 ### Task 7: 文档渲染、可访问性与隐私 QA
 
 **Files:**
-- Create: `/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿_render_<version>/page-*.png`
-- Create: `/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿_a11y.json`
+- Create: `<output-dir>/TxnMem_CCF-A中文论文初稿_render_<version>/page-*.png`
+- Create: `<output-dir>/TxnMem_CCF-A中文论文初稿_a11y.json`
 - Create: `docs/paper/txnmem_ccfa_docx_qa_zh.md`
 - Modify: `scripts/build_txnmem_ccfa_docx.py`（仅在视觉缺陷修正时）
 
@@ -362,7 +362,7 @@ git commit -m "paper: build reproducible CCF-A manuscript DOCX"
 
 - [ ] **Step 1: 渲染 DOCX 为 PNG/PDF**
 
-Run: `scripts/render_docx_with_bundled_libs.sh /Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿.docx --output_dir /Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿_render_v1 --emit_pdf`
+Run: `scripts/render_docx_with_bundled_libs.sh <output-dir>/TxnMem_CCF-A中文论文初稿.docx --output_dir <output-dir>/TxnMem_CCF-A中文论文初稿_render_v1 --emit_pdf`
 
 Expected: 每页一个 PNG，PDF 非空。
 
@@ -378,7 +378,7 @@ Expected: 每页一个 PNG，PDF 非空。
 
 先用 `privacy_scrub.py` 生成脱敏临时文件并原子替换最终输出；然后重新 render 脱敏后的最终 DOCX，逐页复查，再运行：
 
-Run: `/Users/xiaoyan_zhu/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 /Users/xiaoyan_zhu/.codex/plugins/cache/openai-primary-runtime/documents/26.805.11740/skills/documents/scripts/a11y_audit.py /Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿.docx --out_json /Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿_a11y.json`
+Run: `<runtime>/python/bin/python3 <documents-skill>/scripts/a11y_audit.py <output-dir>/TxnMem_CCF-A中文论文初稿.docx --out_json <output-dir>/TxnMem_CCF-A中文论文初稿_a11y.json`
 
 Expected: high=0、medium=0、low=0，最终 render 对应的正是隐私清理后的交付文件。
 
@@ -394,7 +394,7 @@ git commit -m "docs: verify CCF-A manuscript rendering"
 **Files:**
 - Modify: `docs/current_experiment_report_zh.md`
 - Modify: `docs/formal_paper_task_status_zh.md`
-- Final output: `/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿.docx`
+- Final output: `<output-dir>/TxnMem_CCF-A中文论文初稿.docx`
 
 **Interfaces:**
 - Consumes: 全部论文源、构建器、图表、audit 和最终 DOCX。
@@ -433,4 +433,4 @@ git commit -m "paper: finalize CCF-A Chinese draft"
 
 - [ ] **Step 6: 交付 DOCX**
 
-最终回复只交付 `/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿.docx`，说明正文已按系统论文主线重写并通过逐页视觉、a11y、claim、artifact 和全量测试验收；不链接内部 PNG/PDF QA 文件。
+最终回复只交付 `<output-dir>/TxnMem_CCF-A中文论文初稿.docx`，说明正文已按系统论文主线重写并通过逐页视觉、a11y、claim、artifact 和全量测试验收；不链接内部 PNG/PDF QA 文件。

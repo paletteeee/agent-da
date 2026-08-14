@@ -58,7 +58,7 @@ def run_fault_matrix(
     workload: Iterable[Mapping[str, Any]],
     repetitions: int = 1,
 ) -> dict[str, Any]:
-    """Run deterministic fault scenarios and classify retries/partial commits."""
+    """Run fault scenarios and classify recovered persistent state explicitly."""
 
     if repetitions < 1:
         raise ValueError("repetitions must be positive")
@@ -73,8 +73,13 @@ def run_fault_matrix(
             "error_count": 0,
             "retry_success_count": 0,
             "abort_count": 0,
-            "partial_commit_count": 0,
-            "oracle_match_count": 0,
+            "persistent_state_classification_counts": {
+                "complete": 0,
+                "absent": 0,
+                "partial": 0,
+                "unknown": 0,
+            },
+            "persistent_state_verifications": [],
             "retry_count": 0,
             "fault_evidence_count": 0,
             "trigger_fired_count": 0,
@@ -115,12 +120,42 @@ def run_fault_matrix(
                         break
                 if not failed:
                     row["success_count"] += 1
-                events = getattr(backend, "validated_events", lambda: [])()
-                metrics = getattr(backend, "metrics", lambda: {})()
-                partial = int(metrics.get("partial_commit_count", 0) or 0)
-                partial += int(metrics.get("rollback_violation_count", 0) or 0)
-                row["partial_commit_count"] += partial
-                row["oracle_match_count"] += int(partial == 0)
+                verifier = getattr(backend, "verify_persistent_state", None)
+                if not callable(verifier):
+                    state_verification: dict[str, Any] = {
+                        "classification": "unknown",
+                        "items": [],
+                        "reason": "persistent_state_verifier_unavailable",
+                    }
+                else:
+                    try:
+                        raw_verification = verifier(actions)
+                    except Exception as exc:
+                        state_verification = {
+                            "classification": "unknown",
+                            "items": [],
+                            "reason": "persistent_state_verification_failed",
+                            "error": type(exc).__name__,
+                        }
+                    else:
+                        if (
+                            not isinstance(raw_verification, Mapping)
+                            or raw_verification.get("classification")
+                            not in {"complete", "absent", "partial", "unknown"}
+                            or not isinstance(raw_verification.get("items"), list)
+                        ):
+                            state_verification = {
+                                "classification": "unknown",
+                                "items": [],
+                                "reason": "persistent_state_verification_malformed",
+                            }
+                        else:
+                            state_verification = copy.deepcopy(
+                                dict(raw_verification)
+                            )
+                classification = str(state_verification["classification"])
+                row["persistent_state_classification_counts"][classification] += 1
+                row["persistent_state_verifications"].append(state_verification)
                 evidence_provider = getattr(backend, "fault_evidence", None)
                 evidence = evidence_provider() if callable(evidence_provider) else None
                 if isinstance(evidence, Mapping):
@@ -152,7 +187,15 @@ def run_fault_matrix(
     return {
         "benchmark": "backend_fault_matrix",
         "scenarios": scenario_rows,
-        "all_scenarios_no_partial_commit": all(row["partial_commit_count"] == 0 for row in scenario_rows.values()),
+        "all_scenarios_state_verified": all(
+            row["persistent_state_classification_counts"]["unknown"] == 0
+            for row in scenario_rows.values()
+        ),
+        "all_observed_states_consistent": all(
+            row["persistent_state_classification_counts"]["partial"] == 0
+            and row["persistent_state_classification_counts"]["unknown"] == 0
+            for row in scenario_rows.values()
+        ),
         "all_scenarios_evidence_valid": all(
             bool(row["evidence_valid"]) for row in scenario_rows.values()
         ),
@@ -220,7 +263,6 @@ def benchmark_backend(
                 "throughput_ops_per_second": (size * repetitions) / total_seconds if total_seconds else 0.0,
                 "error_count": errors,
                 "retry_count": retries,
-                "partial_commit_count": 0,
             }
         )
     return {

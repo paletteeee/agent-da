@@ -10,70 +10,75 @@
       "version": "1.11.5"
     }
   },
-  "claim_boundary": "single-host service fault injection; not production availability",
-  "evidence_id": "toxiproxy_fault_matrix_30",
+  "claim_boundary": "single-host proxy/fault-response observations; post-fault Qdrant/Neo4j persistent state was not independently verified; not atomicity/availability/latency evidence",
+  "evidence_id": "toxiproxy_fault_path_30",
   "production_latency_claim": false,
   "repetitions_per_scenario": 30,
-  "run_command": "TXNMEM_NEO4J_URI=bolt://127.0.0.1:27687 TXNMEM_TOXIPROXY_URL=http://127.0.0.1:8474 TXNMEM_QDRANT_PROXY_NAME=qdrant TXNMEM_QDRANT_PROXY_LISTEN=127.0.0.1:26333 TXNMEM_QDRANT_PROXY_UPSTREAM=127.0.0.1:6333 TXNMEM_NEO4J_PROXY_NAME=neo4j TXNMEM_NEO4J_PROXY_LISTEN=127.0.0.1:27687 TXNMEM_NEO4J_PROXY_UPSTREAM=127.0.0.1:7687 PYTHONPATH=/data/txnmem_submission_20260811/src /data/venvs/txnmem/bin/python /data/txnmem_submission_20260811/src/txnmem_experiment.py backend-performance --backend vector-graph --service-url http://127.0.0.1:26333 --events 2 --repetitions 30 --out-dir /data/txnmem_submission_20260811/results/toxiproxy_formal30",
+  "run_command": "TXNMEM_NEO4J_URI=bolt://127.0.0.1:27687 TXNMEM_TOXIPROXY_URL=http://127.0.0.1:8474 PYTHONPATH=<remote-run-dir>/src <runtime>/bin/python <remote-run-dir>/src/txnmem_experiment.py backend-performance --backend vector-graph --service-url http://127.0.0.1:26333 --events 2 --repetitions 30 --out-dir <remote-run-dir>/results/toxiproxy_formal30",
   "scenario_count": 5,
   "scenarios": {
     "connection_drop": {
       "abort_count": 30,
-      "p50_trigger_elapsed_ms": 1.5958063304424286,
-      "partial_commit_count": 0,
+      "error_count": 30,
+      "fault_observed_count": 30,
       "proxy_path_verified_count": 30,
       "repetitions": 30,
       "retry_count": 0,
       "retry_success_count": 0,
       "success_count": 0,
+      "toxic_cleared_count": 30,
       "toxic_installed_count": 30,
       "trigger_fired_count": 30
     },
     "delay": {
       "abort_count": 0,
-      "p50_trigger_elapsed_ms": 204.86251637339592,
-      "partial_commit_count": 0,
+      "error_count": 0,
+      "fault_observed_count": 30,
       "proxy_path_verified_count": 30,
       "repetitions": 30,
       "retry_count": 0,
       "retry_success_count": 0,
       "success_count": 30,
+      "toxic_cleared_count": 30,
       "toxic_installed_count": 30,
       "trigger_fired_count": 30
     },
     "normal": {
       "abort_count": 0,
-      "p50_trigger_elapsed_ms": null,
-      "partial_commit_count": 0,
+      "error_count": 0,
+      "fault_observed_count": 0,
       "proxy_path_verified_count": 30,
       "repetitions": 30,
       "retry_count": 0,
       "retry_success_count": 0,
       "success_count": 30,
+      "toxic_cleared_count": 0,
       "toxic_installed_count": 0,
       "trigger_fired_count": 0
     },
     "retry_success": {
       "abort_count": 0,
-      "p50_trigger_elapsed_ms": 4.54171746969223,
-      "partial_commit_count": 0,
+      "error_count": 0,
+      "fault_observed_count": 30,
       "proxy_path_verified_count": 30,
       "repetitions": 30,
       "retry_count": 30,
       "retry_success_count": 30,
       "success_count": 30,
+      "toxic_cleared_count": 30,
       "toxic_installed_count": 30,
       "trigger_fired_count": 30
     },
     "timeout": {
       "abort_count": 30,
-      "p50_trigger_elapsed_ms": 1.625116914510727,
-      "partial_commit_count": 0,
+      "error_count": 30,
+      "fault_observed_count": 30,
       "proxy_path_verified_count": 30,
       "repetitions": 30,
       "retry_count": 0,
       "retry_success_count": 0,
       "success_count": 0,
+      "toxic_cleared_count": 30,
       "toxic_installed_count": 30,
       "trigger_fired_count": 30
     }
@@ -84,8 +89,7 @@
     "sha256": "b8b9f4a56223a6db38f9d43bbc7d90ecd265e2fe8facf6f84362d81cbcc98cff"
   },
   "source_commit": "c299fdd64188874c1d39222a9d9a4e9dc5fd0566",
-  "status": "complete",
-  "total_partial_commit_count": 0,
+  "status": "complete_fault_path_observations",
   "total_repetitions": 150,
   "toxiproxy_version": "2.5.0"
 }

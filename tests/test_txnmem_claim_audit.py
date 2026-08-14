@@ -118,6 +118,8 @@ class PaperClaimLedgerTests(unittest.TestCase):
                 {
                     "schema_version": 1,
                     "supersession_index": "results/supersession.json",
+                    "expected_active_claim_count": 1,
+                    "expected_assertion_count": 1,
                     "claims": [
                         {
                             "claim_id": "e2e_task_count",
@@ -236,6 +238,123 @@ class PaperClaimLedgerTests(unittest.TestCase):
             {"run_command", "manifest", "source_commit", "claim_boundary"},
         )
 
+    def test_audit_rejects_truthy_wrong_active_claim_containers(self):
+        replacements = {
+            "assertions": "truthy-but-not-a-list",
+            "manifest": "truthy-but-not-an-object",
+            "paper_location": "truthy-but-not-a-list",
+        }
+        for field, replacement in replacements.items():
+            with self.subTest(field=field), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger, _ = self._fixture(root)
+                payload = json.loads(ledger.read_text())
+                payload["claims"][0][field] = replacement
+                ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+                report = audit_claim_ledger(root, ledger)
+
+            self.assertEqual(report["status"], "failed")
+            self.assertIn(
+                field,
+                {
+                    finding.get("field")
+                    for finding in report["findings"]
+                    if finding["code"] == "claim_schema_invalid"
+                },
+            )
+
+    def test_audit_rejects_malformed_assertion_objects(self):
+        malformed = (
+            "not-an-object",
+            {"operator": "equals", "expected": 5},
+            {"pointer": "/task_count", "operator": "unknown", "expected": 5},
+            {"pointer": "/task_count", "operator": "equals"},
+        )
+        for assertion in malformed:
+            with self.subTest(assertion=assertion), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger, _ = self._fixture(root)
+                payload = json.loads(ledger.read_text())
+                payload["claims"][0]["assertions"] = [assertion]
+                ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+                report = audit_claim_ledger(root, ledger)
+
+            self.assertEqual(report["status"], "failed")
+            self.assertIn(
+                "assertion_invalid", {item["code"] for item in report["findings"]}
+            )
+
+    def test_audit_rejects_unknown_claim_status_and_validation_profile(self):
+        for field, value in (
+            ("status", "archived"),
+            ("validation_profile", "unregistered-profile"),
+        ):
+            with self.subTest(field=field), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger, _ = self._fixture(root)
+                payload = json.loads(ledger.read_text())
+                payload["claims"][0][field] = value
+                ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+                report = audit_claim_ledger(root, ledger)
+
+            self.assertEqual(report["status"], "failed")
+            self.assertIn(
+                "claim_schema_invalid", {item["code"] for item in report["findings"]}
+            )
+
+    def test_audit_rejects_assertion_count_drop(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger, _ = self._fixture(root)
+            payload = json.loads(ledger.read_text())
+            payload["claims"][0]["assertions"] = [
+                {"pointer": "/status", "operator": "equals", "expected": "complete"},
+                {"pointer": "/task_count", "operator": "equals", "expected": 5},
+            ]
+            payload["expected_assertion_count"] = 2
+            ledger.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(audit_claim_ledger(root, ledger)["status"], "passed")
+
+            payload["claims"][0]["assertions"].pop()
+            ledger.write_text(json.dumps(payload), encoding="utf-8")
+            report = audit_claim_ledger(root, ledger)
+
+        self.assertIn(
+            "assertion_count_mismatch", {item["code"] for item in report["findings"]}
+        )
+
+    def test_audit_rejects_wrong_scalar_field_types(self):
+        replacements = {
+            "artifact_path": ["results/evidence.json"],
+            "artifact_format": ["json"],
+            "artifact_sha256": {"digest": "0" * 64},
+            "run_command": ["python", "run.py"],
+            "source_commit": 1,
+            "claim_boundary": ["not production latency"],
+        }
+        for field, replacement in replacements.items():
+            with self.subTest(field=field), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger, _ = self._fixture(root)
+                payload = json.loads(ledger.read_text())
+                payload["claims"][0][field] = replacement
+                ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+                report = audit_claim_ledger(root, ledger)
+
+            self.assertEqual(report["status"], "failed")
+            self.assertIn(
+                field,
+                {
+                    finding.get("field")
+                    for finding in report["findings"]
+                    if finding["code"] == "claim_schema_invalid"
+                },
+            )
+
     def test_task_four_ledger_extensions_cover_the_reviewed_artifact_values(self):
         ledger = json.loads((ROOT / "configs" / "paper_claims.json").read_text())
         claims = {claim["claim_id"]: claim for claim in ledger["claims"]}
@@ -285,6 +404,16 @@ class PaperClaimLedgerTests(unittest.TestCase):
                 {pointer: assertions.get(pointer) for pointer in expected_assertions},
                 expected_assertions,
             )
+        toxiproxy = claims["toxiproxy_fault_matrix_5x30"]
+        self.assertEqual(toxiproxy["validation_profile"], "toxiproxy_fault_path")
+        self.assertNotIn(
+            "/total_partial_commit_count",
+            {assertion["pointer"] for assertion in toxiproxy["assertions"]},
+        )
+        self.assertIn(
+            "post-fault Qdrant/Neo4j persistent state was not independently verified",
+            toxiproxy["claim_boundary"],
+        )
 
     def test_audit_rejects_incomplete_tau_task_set(self):
         with TemporaryDirectory() as tmp:
@@ -316,7 +445,21 @@ class PaperClaimLedgerTests(unittest.TestCase):
             "tau_task_set_incomplete", {item["code"] for item in report["findings"]}
         )
 
-    def test_audit_rejects_untriggered_toxiproxy_scenario(self):
+    def test_audit_rejects_legacy_toxiproxy_atomicity_profile(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger, _ = self._fixture(root)
+            payload = json.loads(ledger.read_text())
+            payload["claims"][0]["validation_profile"] = "toxiproxy_fault_matrix"
+            ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+            report = audit_claim_ledger(root, ledger)
+
+        self.assertIn(
+            "claim_schema_invalid", {item["code"] for item in report["findings"]}
+        )
+
+    def test_audit_rejects_untriggered_toxiproxy_fault_path(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             ledger, _ = self._fixture(root)
@@ -325,7 +468,6 @@ class PaperClaimLedgerTests(unittest.TestCase):
                 json.dumps(
                     {
                         "repetitions_per_scenario": 30,
-                        "total_partial_commit_count": 0,
                         "scenarios": {
                             "normal": {},
                             "delay": {
@@ -343,12 +485,12 @@ class PaperClaimLedgerTests(unittest.TestCase):
             claim["artifact_sha256"] = self._sha256(artifact)
             claim["assertions"] = [
                 {
-                    "pointer": "/total_partial_commit_count",
+                    "pointer": "/repetitions_per_scenario",
                     "operator": "equals",
-                    "expected": 0,
+                    "expected": 30,
                 }
             ]
-            claim["validation_profile"] = "toxiproxy_fault_matrix"
+            claim["validation_profile"] = "toxiproxy_fault_path"
             ledger.write_text(json.dumps(payload), encoding="utf-8")
             report = audit_claim_ledger(root, ledger)
 

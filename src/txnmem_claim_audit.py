@@ -12,6 +12,37 @@ from pathlib import Path
 from typing import Any
 
 
+_KNOWN_CLAIM_STATUSES = {"active"}
+_KNOWN_ARTIFACT_FORMATS = {"json"}
+_KNOWN_ASSERTION_OPERATORS = {
+    "equals",
+    "not_equals",
+    "greater_equal",
+    "less_equal",
+    "length_equals",
+}
+_KNOWN_VALIDATION_PROFILES = {
+    "tau_bench_50",
+    "toxiproxy_fault_path",
+    "qwen_vector_graph_e2e_5",
+    "minimal_mutant_witnesses",
+}
+_ACTIVE_CLAIM_FIELDS = {
+    "claim_id",
+    "status",
+    "paper_location",
+    "artifact_path",
+    "artifact_format",
+    "artifact_sha256",
+    "assertions",
+    "run_command",
+    "manifest",
+    "source_commit",
+    "claim_boundary",
+    "validation_profile",
+}
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -211,17 +242,11 @@ def _semantic_findings(
     document: dict[str, Any],
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
-    if profile == "toxiproxy_fault_matrix":
+    if profile == "toxiproxy_fault_path":
         scenarios = document.get("scenarios", {})
         repetitions = document.get("repetitions_per_scenario")
-        if document.get("total_partial_commit_count") != 0:
-            findings.append(
-                _finding(
-                    "toxiproxy_partial_commit",
-                    "fault matrix contains a partial commit",
-                    claim_id=claim_id,
-                )
-            )
+        if not isinstance(scenarios, dict):
+            scenarios = {}
         for name, row in scenarios.items():
             if name == "normal":
                 continue
@@ -298,6 +323,148 @@ def _semantic_findings(
                     claim_id=claim_id,
                 )
             )
+    return findings
+
+
+def _active_claim_schema_findings(
+    claim: dict[str, Any], claim_id: str
+) -> list[dict[str, Any]]:
+    """Validate active-claim containers and scalar types before content checks."""
+
+    findings: list[dict[str, Any]] = []
+
+    def invalid(field: str, message: str) -> None:
+        findings.append(
+            _finding(
+                "claim_schema_invalid",
+                message,
+                claim_id=claim_id,
+                field=field,
+            )
+        )
+
+    unknown_fields = sorted(set(claim) - _ACTIVE_CLAIM_FIELDS)
+    if unknown_fields:
+        invalid(
+            "claim",
+            f"active claim contains unknown fields: {', '.join(unknown_fields)}",
+        )
+    if not isinstance(claim.get("claim_id"), str) or not claim.get("claim_id"):
+        invalid("claim_id", "claim_id must be a nonempty string")
+    status = claim.get("status")
+    if not isinstance(status, str) or status not in _KNOWN_CLAIM_STATUSES:
+        invalid("status", f"unknown or malformed claim status: {status!r}")
+
+    paper_location = claim.get("paper_location")
+    if (
+        not isinstance(paper_location, list)
+        or not paper_location
+        or not all(isinstance(item, str) and item for item in paper_location)
+    ):
+        invalid("paper_location", "paper_location must be a nonempty string list")
+
+    for field in ("artifact_path", "run_command", "claim_boundary"):
+        if not isinstance(claim.get(field), str) or not claim.get(field):
+            invalid(field, f"{field} must be a nonempty string")
+
+    artifact_format = claim.get("artifact_format")
+    if (
+        not isinstance(artifact_format, str)
+        or artifact_format not in _KNOWN_ARTIFACT_FORMATS
+    ):
+        invalid(
+            "artifact_format",
+            f"unknown or malformed artifact_format: {artifact_format!r}",
+        )
+
+    artifact_hash = claim.get("artifact_sha256")
+    if (
+        not isinstance(artifact_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", artifact_hash) is None
+    ):
+        invalid("artifact_sha256", "artifact_sha256 must be a lowercase SHA-256")
+
+    source_commit = claim.get("source_commit")
+    if (
+        not isinstance(source_commit, str)
+        or re.fullmatch(r"[0-9a-f]{40}", source_commit) is None
+    ):
+        invalid("source_commit", "source_commit must be a lowercase 40-hex Git id")
+
+    manifest = claim.get("manifest")
+    if not isinstance(manifest, dict):
+        invalid("manifest", "manifest must be an object with path and sha256")
+    else:
+        if set(manifest) != {"path", "sha256"}:
+            invalid("manifest", "manifest must contain exactly path and sha256")
+        if not isinstance(manifest.get("path"), str) or not manifest.get("path"):
+            invalid("manifest", "manifest.path must be a nonempty string")
+        manifest_hash = manifest.get("sha256")
+        if (
+            not isinstance(manifest_hash, str)
+            or re.fullmatch(r"[0-9a-f]{64}", manifest_hash) is None
+        ):
+            invalid("manifest", "manifest.sha256 must be a lowercase SHA-256")
+
+    assertions = claim.get("assertions")
+    if not isinstance(assertions, list) or not assertions:
+        invalid("assertions", "assertions must be a nonempty object list")
+    else:
+        for index, assertion in enumerate(assertions):
+            if not isinstance(assertion, dict):
+                findings.append(
+                    _finding(
+                        "assertion_invalid",
+                        f"assertion {index} must be an object",
+                        claim_id=claim_id,
+                        field="assertions",
+                    )
+                )
+                continue
+            if set(assertion) != {"pointer", "operator", "expected"}:
+                findings.append(
+                    _finding(
+                        "assertion_invalid",
+                        f"assertion {index} must contain exactly pointer/operator/expected",
+                        claim_id=claim_id,
+                        field="assertions",
+                    )
+                )
+                continue
+            pointer = assertion.get("pointer")
+            if not isinstance(pointer, str) or (
+                pointer != "" and not pointer.startswith("/")
+            ):
+                findings.append(
+                    _finding(
+                        "assertion_invalid",
+                        f"assertion {index} has a malformed JSON pointer",
+                        claim_id=claim_id,
+                        field="assertions",
+                    )
+                )
+            operator = assertion.get("operator")
+            if (
+                not isinstance(operator, str)
+                or operator not in _KNOWN_ASSERTION_OPERATORS
+            ):
+                findings.append(
+                    _finding(
+                        "assertion_invalid",
+                        f"assertion {index} has an unknown operator",
+                        claim_id=claim_id,
+                        field="assertions",
+                    )
+                )
+
+    profile = claim.get("validation_profile")
+    if profile is not None and (
+        not isinstance(profile, str) or profile not in _KNOWN_VALIDATION_PROFILES
+    ):
+        invalid(
+            "validation_profile",
+            f"unknown or malformed validation_profile: {profile!r}",
+        )
     return findings
 
 
@@ -403,6 +570,20 @@ def audit_claim_ledger(
         "source_commit",
         "claim_boundary",
     )
+    expected_active_claim_count = ledger.get("expected_active_claim_count")
+    expected_assertion_count = ledger.get("expected_assertion_count")
+    for field, value in (
+        ("expected_active_claim_count", expected_active_claim_count),
+        ("expected_assertion_count", expected_assertion_count),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            findings.append(
+                _finding(
+                    "ledger_schema_invalid",
+                    f"{field} must be a positive integer",
+                    field=field,
+                )
+            )
     for index, claim in enumerate(claims):
         if not isinstance(claim, dict):
             findings.append(
@@ -420,6 +601,7 @@ def audit_claim_ledger(
                         field=field,
                     )
                 )
+        findings.extend(_active_claim_schema_findings(claim, claim_id))
         if claim_id in claim_ids:
             findings.append(
                 _finding(
@@ -433,7 +615,7 @@ def audit_claim_ledger(
             continue
 
         artifact_value = claim.get("artifact_path")
-        if artifact_value in superseded:
+        if isinstance(artifact_value, str) and artifact_value in superseded:
             findings.append(
                 _finding(
                     "active_claim_uses_superseded_artifact",
@@ -583,7 +765,7 @@ def audit_claim_ledger(
                             )
                         )
         source_commit = claim.get("source_commit")
-        if source_commit and not re.fullmatch(r"[0-9a-f]{40}", str(source_commit)):
+        if isinstance(source_commit, str) and source_commit and not re.fullmatch(r"[0-9a-f]{40}", source_commit):
             findings.append(
                 _finding(
                     "source_commit_invalid",
@@ -591,6 +773,39 @@ def audit_claim_ledger(
                     claim_id=claim_id,
                 )
             )
+
+    active_claim_count = sum(
+        1
+        for claim in claims
+        if isinstance(claim, dict) and claim.get("status") == "active"
+    )
+    declared_assertion_count = sum(
+        len(claim.get("assertions", []))
+        for claim in claims
+        if isinstance(claim, dict)
+        and claim.get("status") == "active"
+        and isinstance(claim.get("assertions"), list)
+    )
+    if isinstance(expected_active_claim_count, int) and not isinstance(
+        expected_active_claim_count, bool
+    ) and active_claim_count != expected_active_claim_count:
+        findings.append(
+            _finding(
+                "active_claim_count_mismatch",
+                f"expected {expected_active_claim_count} active claims, found {active_claim_count}",
+                field="expected_active_claim_count",
+            )
+        )
+    if isinstance(expected_assertion_count, int) and not isinstance(
+        expected_assertion_count, bool
+    ) and declared_assertion_count != expected_assertion_count:
+        findings.append(
+            _finding(
+                "assertion_count_mismatch",
+                f"expected {expected_assertion_count} active assertions, found {declared_assertion_count}",
+                field="expected_assertion_count",
+            )
+        )
 
     unique_checked_artifacts = {
         item["path"]: item["sha256"] for item in checked_artifacts
@@ -601,9 +816,10 @@ def audit_claim_ledger(
         "ledger_path": str(ledger_path.relative_to(root)),
         "ledger_sha256": _sha256(ledger_path),
         "claim_count": len(claims),
-        "active_claim_count": sum(
-            1 for claim in claims if isinstance(claim, dict) and claim.get("status") == "active"
-        ),
+        "active_claim_count": active_claim_count,
+        "expected_active_claim_count": expected_active_claim_count,
+        "declared_assertion_count": declared_assertion_count,
+        "expected_assertion_count": expected_assertion_count,
         "checked_assertion_count": checked_assertions,
         "checked_artifacts": [
             {"path": path, "sha256": sha256}

@@ -1,0 +1,28 @@
+[
+  {
+    "sample_id": "redacted_sample_001",
+    "conversation": {
+      "session_1_date_time": "2025-01-01T09:00:00Z",
+      "session_1": [
+        {
+          "speaker": "user",
+          "text": "[redacted fixture utterance]"
+        }
+      ]
+    },
+    "qa": []
+  },
+  {
+    "sample_id": "redacted_sample_002",
+    "conversation": {
+      "session_1_date_time": "2025-01-02T10:00:00Z",
+      "session_1": [
+        {
+          "speaker": "user",
+          "text": "[redacted fixture utterance]"
+        }
+      ]
+    },
+    "qa": []
+  }
+]

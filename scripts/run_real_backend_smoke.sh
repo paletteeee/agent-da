@@ -119,7 +119,7 @@ TXNMEM_NEO4J_PASSWORD="$TXNMEM_NEO4J_PASSWORD" \
 
 TXNMEM_REPORT="$TXNMEM_OUT_DIR/results/backend_performance.json"
 "$TXNMEM_PYTHON" -c \
-  'import json,sys; r=json.load(open(sys.argv[1])); f=r["fault_matrix"]; assert f["all_scenarios_evidence_valid"] and f["all_scenarios_no_partial_commit"]' \
+  'import json,sys; r=json.load(open(sys.argv[1])); f=r["fault_matrix"]; assert f["all_scenarios_evidence_valid"] and f["all_scenarios_state_verified"] and f["all_observed_states_consistent"]' \
   "$TXNMEM_REPORT"
 
 echo "real backend fault run completed: $TXNMEM_REPORT"

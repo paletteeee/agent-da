@@ -10,6 +10,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from txnmem_claim_audit import audit_claim_ledger
+
 
 _CLAIM_MARKER = re.compile(r"\[\[CLAIM:([A-Za-z0-9_-]+)\]\]")
 _AUTHOR_ANNOTATION_BEGIN = "<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->"
@@ -225,15 +227,36 @@ def _check_claim_audit(root: Path, config: dict[str, Any]) -> list[dict[str, Any
                 "claim audit ledger SHA-256 does not match the current claim ledger",
             )
         ]
-    if payload.get("status") != "passed" or payload.get("finding_count") != 0:
+    try:
+        fresh_payload = audit_claim_ledger(root, ledger_value)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
         return [
             _finding(
-                "claim_audit_failed",
-                "manuscript evidence is unavailable until the claim audit passes",
+                "fresh_claim_audit_failed",
+                f"current evidence could not be audited: {exc}",
+            )
+        ]
+    if fresh_payload.get("status") != "passed" or fresh_payload.get("finding_count") != 0:
+        return [
+            _finding(
+                "fresh_claim_audit_failed",
+                "current evidence bytes do not pass the claim audit",
+                claim_audit_finding_codes=[
+                    item.get("code")
+                    for item in fresh_payload.get("findings", [])
+                    if isinstance(item, dict)
+                ],
+            )
+        ]
+    if payload != fresh_payload:
+        return [
+            _finding(
+                "claim_audit_stale_report",
+                "stored claim audit does not equal a fresh audit of current evidence",
             )
         ]
     configured_ids = config.get("active_claim_ids")
-    if isinstance(configured_ids, list) and payload.get("active_claim_count") != len(
+    if isinstance(configured_ids, list) and fresh_payload.get("active_claim_count") != len(
         configured_ids
     ):
         return [
@@ -243,6 +266,134 @@ def _check_claim_audit(root: Path, config: dict[str, Any]) -> list[dict[str, Any
             )
         ]
     return []
+
+
+def _check_figure_manifest(root: Path, config: dict[str, Any]) -> list[dict[str, Any]]:
+    manifest_value = config.get(
+        "figure_manifest_path", "paper_assets/figures/manifest.json"
+    )
+    if not isinstance(manifest_value, str) or not manifest_value:
+        return [_finding("paper_config_invalid", "figure_manifest_path is required")]
+    manifest_path = root / manifest_value
+    if not manifest_path.is_file():
+        return [
+            _finding(
+                "figure_manifest_missing",
+                f"figure manifest not found: {manifest_value}",
+            )
+        ]
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [
+            _finding("figure_manifest_invalid", f"cannot parse figure manifest: {exc}")
+        ]
+    figures = payload.get("figures") if isinstance(payload, dict) else None
+    if not isinstance(figures, dict) or not figures:
+        return [
+            _finding("figure_manifest_invalid", "figures must be a nonempty object")
+        ]
+
+    findings: list[dict[str, Any]] = []
+    for figure_id, figure in sorted(figures.items()):
+        if not isinstance(figure_id, str) or not isinstance(figure, dict):
+            findings.append(
+                _finding(
+                    "figure_manifest_invalid",
+                    "each figure entry must be a named object",
+                )
+            )
+            continue
+        sources = figure.get("sources")
+        if not isinstance(sources, list) or not sources:
+            findings.append(
+                _finding(
+                    "figure_manifest_invalid",
+                    "figure sources must be a nonempty array",
+                    figure_id=figure_id,
+                )
+            )
+        else:
+            for source in sources:
+                if not isinstance(source, dict):
+                    findings.append(
+                        _finding(
+                            "figure_manifest_invalid",
+                            "figure source must be an object",
+                            figure_id=figure_id,
+                        )
+                    )
+                    continue
+                source_value = source.get("path")
+                expected_hash = source.get("sha256")
+                if not isinstance(source_value, str) or not source_value or not isinstance(
+                    expected_hash, str
+                ):
+                    findings.append(
+                        _finding(
+                            "figure_manifest_invalid",
+                            "figure source requires string path and sha256",
+                            figure_id=figure_id,
+                        )
+                    )
+                    continue
+                try:
+                    source_path = (root / source_value).resolve()
+                    source_path.relative_to(root)
+                    actual_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+                except (OSError, ValueError):
+                    findings.append(
+                        _finding(
+                            "figure_source_unreadable",
+                            f"figure source cannot be read: {source_value}",
+                            figure_id=figure_id,
+                        )
+                    )
+                    continue
+                if actual_hash != expected_hash:
+                    findings.append(
+                        _finding(
+                            "figure_source_hash_mismatch",
+                            f"figure source SHA-256 mismatch: {source_value}",
+                            figure_id=figure_id,
+                        )
+                    )
+
+        output_value = figure.get("file")
+        expected_output_hash = figure.get("output_sha256")
+        if not isinstance(output_value, str) or not output_value or not isinstance(
+            expected_output_hash, str
+        ):
+            findings.append(
+                _finding(
+                    "figure_manifest_invalid",
+                    "figure output requires string file and output_sha256",
+                    figure_id=figure_id,
+                )
+            )
+            continue
+        try:
+            output_path = (manifest_path.parent / output_value).resolve()
+            output_path.relative_to(root)
+            actual_output_hash = hashlib.sha256(output_path.read_bytes()).hexdigest()
+        except (OSError, ValueError):
+            findings.append(
+                _finding(
+                    "figure_output_unreadable",
+                    f"figure output cannot be read: {output_value}",
+                    figure_id=figure_id,
+                )
+            )
+            continue
+        if actual_output_hash != expected_output_hash:
+            findings.append(
+                _finding(
+                    "figure_output_hash_mismatch",
+                    f"figure output SHA-256 mismatch: {output_value}",
+                    figure_id=figure_id,
+                )
+            )
+    return findings
 
 
 def _active_claims(root: Path, config: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -396,6 +547,7 @@ def audit_text(text: str, root: Path, config: dict[str, Any]) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     findings.extend(_check_required_sections(text, config))
     findings.extend(_check_claim_audit(root, config))
+    findings.extend(_check_figure_manifest(root, config))
     findings.extend(_check_forbidden_artifacts(text, root, config))
     findings.extend(_check_required_boundaries(text, config.get("required_claim_boundaries")))
     claim_findings, allowed_ids, allowed_numbers = _check_claim_values(text, root, config)

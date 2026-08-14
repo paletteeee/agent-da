@@ -6,7 +6,7 @@
 
 ## 1. 报告口径
 
-本报告只使用仓库中可审计的脱敏 aggregate 结果。TxnMem 的 expected outcome 由独立 serial reference executor 计算，不由 TxnMem、LLM 或 workload generator 生成。公开 benchmark 的结果分成四层：官方 evaluator、native memory event contract、TxnMem 独立 oracle、backend consistency/performance；四者不互相替代。
+本报告只使用仓库中可审计的脱敏 aggregate 结果。TxnMem 的 expected outcome 由独立 serial reference executor 计算，不由 TxnMem、LLM 或 workload generator 生成。公开 benchmark 与服务证据分成四层：官方 evaluator、native memory event contract、TxnMem 独立 oracle、proxy/fault-response observation；四者不互相替代。
 
 τ-bench、AppWorld 和 LoCoMo 的 native 运行证明的是官方 workflow/runtime 边界可以接入 TxnMem memory backend，不等于这些 benchmark 原生提供了 memory transaction 或 provenance ground truth。因此本文不把它们命名为公开 benchmark 的原生 memory accuracy。
 
@@ -78,13 +78,13 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 
 ## 6. 真实 vector/graph backend、网络故障与跨主机模型负载
 
-`VectorGraphMemoryBackend` 已在单机真实 Qdrant 1.11.5、Neo4j 5.22.0 和 Toxiproxy 2.5.0 上完成正式故障矩阵。客户端只连接两个代理 listen port，Toxiproxy management API 在指定 Qdrant `write` 或 Neo4j `commit` ordinal 前安装 toxic。normal、delay、timeout、connection-drop 和 retry-success 各执行 30 次，共 150 次；四个非 normal 场景的 `trigger_fired`、`toxic_installed`、`proxy_path_verified` 均为 30/30，全部场景 partial commit 为 0。
+`VectorGraphMemoryBackend` 的旧单机 Qdrant 1.11.5、Neo4j 5.22.0 和 Toxiproxy 2.5.0 矩阵记录了 fault/response 路径。客户端只连接两个代理 listen port，Toxiproxy management API 在指定 Qdrant `write` 或 Neo4j `commit` ordinal 前安装 toxic。normal、delay、timeout、connection-drop 和 retry-success 各执行 30 次；四个非 normal 场景的 `trigger_fired`、`toxic_installed`、`proxy_path_verified` 均为 30/30。旧 runner 没有在 toxic 清除后独立读取 Qdrant 与 Neo4j 状态，因此这些数据不是双存储持久状态、原子性、可用性或延迟证据。
 
-- normal 与 delay 均为 30/30 success；delay 的 trigger request P50 为 204.863 ms。
-- timeout 与 connection-drop 均为 30/30 abort；trigger request P50 分别为 1.625 ms 和 1.596 ms。
-- retry-success 为 30/30 首次故障、清除 toxic 后 30/30 单次重试成功；trigger request P50 为 4.542 ms。
+- normal 与 delay 均记录 30/30 success response。
+- timeout 与 connection-drop 均记录 30/30 client error/abort response。
+- retry-success 记录 30/30 首次故障、清除 toxic 后 30/30 单次重试成功 response。
 
-旧的 `results/real_backend_performance_reps30_v2/results/backend_performance.json` 没有证明请求实际穿过已激活的 toxic，已在 supersession index 中标为历史结果，不再承担正式故障或性能结论。当前故障证据路径为 `results/submission_evidence/toxiproxy_faults_30/aggregate.json`；其边界是单机服务故障注入，`production_latency_claim=false`，不能推出生产吞吐、跨主机一致性或生产级 2PC。
+旧的 `results/real_backend_performance_reps30_v2/results/backend_performance.json` 没有证明请求实际穿过已激活的 toxic，已在 supersession index 中标为历史结果，不再承担正式故障或性能结论。当前 active aggregate 为 `results/submission_evidence/toxiproxy_faults_30/aggregate.json`，只投影 proxy/fault-response 字段；新的 verifier 会在恢复后分别读取 Qdrant 与 Neo4j，将状态分类为 complete/absent/partial/unknown，并在读取失败或缺失时 fail closed。由于本会话没有可用 Docker/真实服务，state-verified 5×30 尚未运行，仍是投稿阻塞实验。
 
 另有 5 个 τ-bench task 的 Qwen2.5-7B + Qdrant + Neo4j 端到端 smoke：5/5 completed，记录 30 个 native events，mean 18,851.6 ms，P50 15,497.0 ms。模型 revision 为 `7b44…26b4`，vLLM 为 `0.8.5.post1`，运行时健康检查确认 Qdrant 1.11.5 与 Neo4j 5.22.0 可用。该结果包含模型、backend 和 evaluator 的端到端开销，不应当被当作 backend-only 或生产 latency。证据路径：`results/submission_evidence/qwen_vector_graph_e2e_5/aggregate.json`。
 
@@ -112,22 +112,24 @@ failure schedule 使用“触发条件 → 注入动作”形式，而不是只�
 
 ## 8. 可复现性与文档 QA
 
-- 全量单元测试：320 tests，3 个 skipped（仅 `appworld` 与 `tau-bench` 可选运行时未安装），0 failures；`PYTHONPYCACHEPREFIX=/private/tmp/txnmem_pycache PYTHONPATH=src:scripts python3 -m unittest discover -s tests -p 'test*.py' -v` 不会写入交付 DOCX。
+- 工作树全量单元测试：346 tests，3 个 skipped（仅可选 runtime 未安装），0 failures；index-derived clean archive 亦为 346 tests、4 个 skipped（额外一个 skip 是 archive 不含 `.git` metadata，无法执行 Git-range 集成扫描）、0 failures。两者均以 bundled Python、`<temp-dir>` pycache/TMPDIR 和临时输出运行，不写入仓库或交付 DOCX。
 - 本地 process concurrency smoke：2 workers、3 operations、线性化序号完整，无未确认 operation。
-- 最终中文 CCF-A 初稿为 `outputs/TxnMem_CCF-A中文论文初稿.docx`，SHA-256 为 `870feaf210bf3a7b9507795988aaf242ae6d759f69a65b2c0fef54b40fe04e6b`。该文件对应精确 render `outputs/TxnMem_CCF-A中文论文初稿_render_final_v4`：27 页 PNG 与 27 页 PDF；文档含 6 张图、8 张表、32 条已核验参考文献，accessibility audit 为 high=0、medium=0、low=0。
+- 最终中文 CCF-A 初稿由正式命令直接写入 `<external-output-dir>/TxnMem_CCF-A中文论文初稿.docx`，SHA-256 为 `6673155ad304ab39f59d6455a1c6ff546f6459735f00dacdc31b617819227714`。连续两次正式构建逐字节一致，最终外部交付物与第二次构建相同；工作树中的 `outputs/...` 仅作可重建的临时 QA 副本，验收后删除。该文件对应工作树外精确 render `render_final_v6`：27 页 PNG 与 27 页 PDF；文档含 6 张图、8 张表、32 条已核验参考文献，accessibility audit 为 high=0、medium=0、low=0。
 - artifact audit：0 findings。
-- claim audit：15 条 active claim、132 个字段断言、0 findings，ledger digest 为 `56e985fa4947b54fdc01c3ab4044dd16358d3b8c9078c39b931bae504792a198`；manuscript audit 亦为 0 findings。每条正式数字关联 artifact/hash、运行命令、manifest/hash、source commit 与 claim boundary。历史状态和旧故障结果由 `results/paper_evidence/supersession_index.json` 标记，不再作为当前结论来源。
+- claim audit：15 条 active claim、131 个字段断言、0 findings，ledger digest 为 `596ef06eaf6a107e27c82fda1a9c520a9c064c5049e5e8be3af114ad126d664f`；manuscript audit 亦为 0 findings。每条正式数字关联 artifact/hash、运行命令、manifest/hash、source commit 与 claim boundary。历史状态和旧故障结果由 `results/paper_evidence/supersession_index.json` 标记，不再作为当前结论来源。
 - 最终 OOXML 隐私闭环：无 rsid、批注/人员部分、追踪修订、custom properties、creator、lastModifiedBy、company 或绝对工作站路径；新 Git diff 与交付包的凭据模式扫描均为 0。上述最终 hash 在全量测试、审计和只读核验前后均保持一致，后续未重写 DOCX。
 - 最终 attestation 代码修复提交为 `4669a01`；脱敏 v8 aggregate、per-repetition summaries、endpoint/transport analyses 与 v7 作废标记已由本地结果提交 `9785a48` 保存。
 
 ## 9. 当前状态、claim boundary 与后续工作
 
-投稿前六项证据闭环均已完成：controlled 400/2,000 统一口径、真实 Toxiproxy 5×30 故障路径、τ-bench 50-task 严格聚合、5-task Qwen+Qdrant+Neo4j E2E 聚合、四类前缀最小 mutant witness，以及覆盖正式实验数字的 claim ledger/supersession audit。其余已完成实验的限制应作为 claim boundary，而不是被误写为未完成实验：
+本分支已完成 controlled 400/2,000 统一口径、τ-bench 50-task 严格聚合、5-task Qwen+Qdrant+Neo4j E2E 聚合、四类前缀最小 mutant witness，以及覆盖正式实验数字的 claim ledger/supersession audit。Toxiproxy 旧数据仅保留 fault/response-path 观察，state-verified 5×30 尚未完成，因此当前是 CCF-A 质量工作稿而非 submission-ready evidence：
 
 1. LoCoMo 只有 3 次描述性 paired repetition，平均 F1 增益很小且有一次回退；不能作统计显著性或普适改进结论。
 2. AppWorld tuned 有 6 个 execution failure，且 n=20；token 总量为观测下界，不能作总体显著性结论。
 3. joint realism 显示 synthetic 与 holdout trace 存在分布差异，特别是 LoCoMo/AppWorld holdout n=2；该结果不支持等价性。
 4. cross-host v8 证据仅覆盖 1 Agent-worker host 与 1 model-server host 的三次独立运行；不包含生产级多主机 Agent workers、连续 30 分钟 tunnel 或跨主机 Qdrant/Neo4j。货币成本未计算，原因是没有显式 pricing rate。
-5. 中文论文初稿本身仅剩选定 venue 后的模板适配（版式、匿名要求和投稿系统字段）；这不改变上述实验边界。Git 远端推送仍是唯一明确外部阻塞：`git remote -v` 为空，必须由用户提供 remote URL 后才能安全 push。
+5. Manuscript readiness blockers 是 state-verified Qdrant/Neo4j/Toxiproxy 5×30 rerun、选定 venue 后的模板适配，以及正常作者修订。
+
+Repository operations note：仓库未配置 remote，本任务未执行 push；该状态不属于 manuscript readiness blocker。
 
 未来 production-grade 扩展应固定 manifest/evaluator 并保持脱敏 aggregate 口径：增加多主机 Agent workers、连续 tunnel、跨主机 Qdrant/Neo4j 与有明确定价率的成本核算；这些是 future work，不是当前已完成的主张。

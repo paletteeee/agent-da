@@ -48,5 +48,5 @@
       "recovery_action": "retry_once"
     }
   ],
-  "claim_boundary": "single-host service fault injection; not production availability or production latency"
+  "claim_boundary": "single-host proxy/fault-response observations; post-fault Qdrant/Neo4j persistent state was not independently verified; not atomicity/availability/latency evidence"
 }

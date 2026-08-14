@@ -11,12 +11,15 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
 import zipfile
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 from xml.etree import ElementTree as ET
 
 from docx import Document
@@ -26,6 +29,10 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from txnmem_paper_projection import controlled_result_rows
 
 
 # Task-6-auditable approved design data: narrative_proposal_academic.
@@ -57,7 +64,6 @@ W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS = {"w": W_NS}
 MARKER = re.compile(r"^`?\[\[(FIG|TABLE):([a-z_]+)\]\]`?$")
 HEADING = re.compile(r"^(#{1,3})\s+(.+?)\s*$")
-CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 SVG_RASTER_SCALE = 2
 
 
@@ -335,7 +341,35 @@ def _is_expected_raster(path: Path, pixel_width: int, pixel_height: int) -> bool
         return False
 
 
-def _rasterize_svg(svg: Path, destination: Path) -> tuple[Path, float]:
+def _find_browser_executable(configured: Path | None = None) -> Path:
+    candidates: list[Path] = []
+    if configured is not None:
+        candidates.append(Path(configured))
+    env_value = os.environ.get("TXNMEM_BROWSER_EXECUTABLE")
+    if env_value:
+        candidates.append(Path(env_value))
+    for name in ("google-chrome", "chromium", "chromium-browser", "chrome"):
+        resolved = shutil.which(name)
+        if resolved:
+            candidates.append(Path(resolved))
+    candidates.append(
+        Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise RuntimeError(
+        "Exact-aspect SVG rasterization requires a browser executable; set "
+        "TXNMEM_BROWSER_EXECUTABLE or pass browser_executable."
+    )
+
+
+def _rasterize_svg(
+    svg: Path,
+    destination: Path,
+    *,
+    browser_executable: Path | None = None,
+) -> tuple[Path, float]:
     """Render SVG into an exact-aspect 2× PNG canvas for python-docx embedding."""
     destination.mkdir(parents=True, exist_ok=True)
     svg_width, svg_height = _svg_viewbox_dimensions(svg)
@@ -345,37 +379,68 @@ def _rasterize_svg(svg: Path, destination: Path) -> tuple[Path, float]:
     # Cache keys include geometry/version, preventing reuse of the legacy square
     # Quick Look thumbnail canvas that clipped wide diagrams.
     digest = hashlib.sha256(svg.read_bytes()).hexdigest()[:16]
-    shared = Path("/private/tmp/txnmem-docx-svg-cache") / (
-        f"{svg.stem}-{digest}-{pixel_width}x{pixel_height}-v3.png"
+    target = destination / (
+        f"{svg.stem}-{digest}-{pixel_width}x{pixel_height}-v4.png"
     )
-    target = destination / f"{svg.stem}.png"
-    if shared.is_file() and _is_expected_raster(shared, pixel_width, pixel_height):
-        shutil.copyfile(shared, target)
+    if target.is_file() and _is_expected_raster(target, pixel_width, pixel_height):
         return target, ratio
-    if not CHROME.is_file():
+    if target.exists():
+        target.unlink()
+    browser = _find_browser_executable(browser_executable)
+    profile = destination / "browser-profile"
+    profile.mkdir(parents=True, exist_ok=True)
+    completed = None
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as error_log:
+        command = [
+            str(browser), "--headless=new", "--disable-gpu", "--hide-scrollbars",
+            "--no-first-run", "--disable-background-networking",
+            f"--user-data-dir={profile}",
+            f"--force-device-scale-factor={SVG_RASTER_SCALE}",
+            f"--window-size={round(svg_width)},{round(svg_height)}",
+            f"--screenshot={target}", svg.resolve().as_uri(),
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                text=True, stdout=subprocess.DEVNULL, stderr=error_log,
+                check=False, timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            # Current Chrome builds can leave the headless parent alive after
+            # writing the screenshot. subprocess.run kills and reaps that
+            # process on timeout; only a complete exact-size PNG is accepted.
+            pass
+        error_log.seek(0)
+        stderr = error_log.read().strip()
+    if (
+        (completed is not None and completed.returncode != 0)
+        or not _is_expected_raster(target, pixel_width, pixel_height)
+    ):
         raise RuntimeError(
-            "Exact-aspect SVG rasterization requires headless Google Chrome; "
-            f"missing {CHROME} and no valid cached raster exists for {svg.name}."
+            f"Exact-aspect SVG rasterization failed for {svg.name}: {stderr}"
         )
-    shared.parent.mkdir(parents=True, exist_ok=True)
-    completed = subprocess.run(
-        [str(CHROME), "--headless", "--disable-gpu", "--hide-scrollbars",
-         f"--force-device-scale-factor={SVG_RASTER_SCALE}",
-         f"--window-size={round(svg_width)},{round(svg_height)}",
-         f"--screenshot={shared}", svg.resolve().as_uri()],
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
-    )
-    if completed.returncode != 0 or not _is_expected_raster(shared, pixel_width, pixel_height):
-        raise RuntimeError(
-            f"Exact-aspect SVG rasterization failed for {svg.name}: {completed.stderr.strip()}"
-        )
-    shutil.copyfile(shared, target)
     return target, ratio
 
 
-def _add_figure(doc: Document, figure_id: str, manifest: dict, root: Path, cache: Path) -> None:
+def _add_figure(
+    doc: Document,
+    figure_id: str,
+    manifest: dict,
+    root: Path,
+    cache: Path,
+    browser_executable: Path | None,
+    rasterizer: Callable[[Path, Path], tuple[Path, float]] | None,
+) -> None:
     item = manifest["figures"][figure_id]
-    png, ratio = _rasterize_svg(root / "paper_assets/figures" / item["file"], cache)
+    svg = root / "paper_assets/figures" / item["file"]
+    if rasterizer is None:
+        png, ratio = _rasterize_svg(
+            svg,
+            cache,
+            browser_executable=browser_executable,
+        )
+    else:
+        png, ratio = rasterizer(svg, cache)
     manifest_ratio = item["dimensions"]["height"] / item["dimensions"]["width"]
     if abs(ratio - manifest_ratio) > 0.002:
         raise ValueError(f"{figure_id} SVG viewBox does not match manifest dimensions")
@@ -402,12 +467,12 @@ def _add_figure(doc: Document, figure_id: str, manifest: dict, root: Path, cache
 
 
 def _controlled_rows(root: Path) -> tuple[list[str], list[list[str]]]:
-    data = _load(root / "results/paper_evidence/controlled_suite.json")["variants"]
     rows = []
-    for name in ("TxnMem", "Naive", "TxnMem-NoTxn", "TxnMem-NoPolicyCommit", "TxnMem-NoRepair"):
-        item = data[name]
-        oracle = f"{item['oracle_match_count']}/400" if name != "TxnMem-NoRepair" else "未在此表报告"
-        rows.append([name, f"{item['violation_count']}/400", oracle,
+    for item in controlled_result_rows(root):
+        name = item["variant"]
+        denominator = item["instance_count"]
+        rows.append([name, f"{item['violation_count']}/{denominator}",
+                     f"{item['oracle_match_count']}/{denominator}",
                      "受控套件的机制对照（详见正文）"])
     return ["变体", "违规 instance", "oracle 一致 instance", "机制解释"], rows
 
@@ -501,11 +566,19 @@ def _append_title_block(doc: Document) -> None:
     _set_run_font(anonymous.add_run("匿名稿"), size=10.5, color="4B5563")
 
 
-def _add_markdown(doc: Document, text: str, root: Path, manifest: dict, config: dict) -> None:
+def _add_markdown(
+    doc: Document,
+    text: str,
+    root: Path,
+    manifest: dict,
+    config: dict,
+    raster_cache: Path,
+    browser_executable: Path | None,
+    rasterizer: Callable[[Path, Path], tuple[Path, float]] | None,
+) -> None:
     lines = text.splitlines()
     markdown_tables = _collect_markdown_tables(lines)
     configured_tables = set(config["body_table_ids"] + config["appendix_table_ids"])
-    cache = root / ".superpowers" / "sdd" / "2026-08-11-ccfa-paper-draft" / "docx_png_cache"
     index = 0
     in_references = False
     last_heading_level = 0
@@ -546,7 +619,15 @@ def _add_markdown(doc: Document, text: str, root: Path, manifest: dict, config: 
         if marker:
             kind, marker_id = marker.groups()
             if kind == "FIG":
-                _add_figure(doc, marker_id, manifest, root, cache)
+                _add_figure(
+                    doc,
+                    marker_id,
+                    manifest,
+                    root,
+                    raster_cache,
+                    browser_executable,
+                    rasterizer,
+                )
             elif marker_id in configured_tables:
                 _add_configured_table(doc, marker_id, markdown_tables, root)
             index += 1
@@ -615,7 +696,14 @@ def _scrub_metadata(path: Path) -> None:
             target.writestr(info, members[name])
 
 
-def build_document(root: Path, output: Path) -> Path:
+def build_document(
+    root: Path,
+    output: Path,
+    *,
+    raster_cache: Path | None = None,
+    browser_executable: Path | None = None,
+    rasterizer: Callable[[Path, Path], tuple[Path, float]] | None = None,
+) -> Path:
     """Build the final reader projection; author annotations are stripped first."""
     # This must remain the first operation on manuscript text: author claims never enter DOCX.
     from txnmem_manuscript_audit import strip_author_annotations
@@ -626,31 +714,59 @@ def build_document(root: Path, output: Path) -> Path:
     reader_text = strip_author_annotations(raw_source)
     manifest = _load(root / "paper_assets/figures/manifest.json")
 
-    doc = Document()
-    _configure_page(doc)
-    _configure_styles(doc)
-    _append_title_block(doc)
-    _add_markdown(doc, reader_text, root, manifest, config)
-    properties = doc.core_properties
-    properties.title = TITLE
-    properties.subject = "Anonymous manuscript"
-    properties.author = ""
-    properties.last_modified_by = ""
-    properties.company = ""
-    properties.comments = ""
-    properties.keywords = "TxnMem; multi-agent systems; shared memory; transactions"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(output)
-    _scrub_metadata(output)
-    return output
+    temporary_cache = None
+    if raster_cache is None:
+        temporary_cache = tempfile.TemporaryDirectory(prefix="txnmem-docx-raster-")
+        raster_cache = Path(temporary_cache.name)
+    else:
+        raster_cache = Path(raster_cache)
+    try:
+        doc = Document()
+        _configure_page(doc)
+        _configure_styles(doc)
+        _append_title_block(doc)
+        _add_markdown(
+            doc,
+            reader_text,
+            root,
+            manifest,
+            config,
+            raster_cache,
+            browser_executable,
+            rasterizer,
+        )
+        properties = doc.core_properties
+        properties.title = TITLE
+        properties.subject = "Anonymous manuscript"
+        properties.author = ""
+        properties.last_modified_by = ""
+        properties.company = ""
+        properties.comments = ""
+        properties.keywords = "TxnMem; multi-agent systems; shared memory; transactions"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        doc.save(output)
+        _scrub_metadata(output)
+        return output
+    finally:
+        if temporary_cache is not None:
+            temporary_cache.cleanup()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--raster-cache", type=Path)
+    parser.add_argument("--browser-executable", type=Path)
     args = parser.parse_args()
-    print(build_document(args.root, args.output))
+    print(
+        build_document(
+            args.root,
+            args.output,
+            raster_cache=args.raster_cache,
+            browser_executable=args.browser_executable,
+        )
+    )
 
 
 if __name__ == "__main__":

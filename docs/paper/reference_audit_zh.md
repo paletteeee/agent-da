@@ -2,9 +2,9 @@
 
 ## 范围与方法
 
-本审计对应 `configs/txnmem_paper_references.json`（32 条，稳定编号 `R01`--`R32`）。每条以 `source_class` 声明核验边界，并以 `verified_source` 保存该类唯一的 primary source：`arxiv_preprint` 只把 arXiv 的题名、作者、提交年份和 arXiv 编号写入 catalog；`arxiv_record_with_journal_reference` 仅在该记录明确给出 journal reference 时保留正式 venue（R11）；`official_proceedings`、`official_publication` 和 `doi_landing` 则分别指向正式 proceedings、官方出版页或 DOI landing page。未使用 DBLP、Semantic Scholar、新闻、博客或课程材料来确认题名、作者、年份或 venue。编号按工作稿预计首次出现的顺序预分配；新增文献应追加编号，不能重排既有 ID。
+本审计对应 `configs/txnmem_paper_references.json`（32 条，稳定编号 `R01`--`R32`）。每条以 `source_class` 声明核验边界，并以 `verified_source` 保存该类唯一的 primary source：`arxiv_preprint` 只把 arXiv 的题名、作者、提交年份和 arXiv 编号写入 catalog；`arxiv_record_with_journal_reference` 仅在该记录明确给出 journal reference 时保留正式 venue（R11）；`official_proceedings`、`official_publication` 和 `doi_landing` 则分别指向正式 proceedings、官方出版页或 DOI landing page。未使用 DBLP、Semantic Scholar、新闻、博客或课程材料来确认题名、作者、年份或 venue。编号按完整初稿中的首次出现顺序保持稳定；新增文献应追加编号，不能重排既有 ID。
 
-现有 worktree 中尚无 `docs/paper/txnmem_ccfa_draft_zh.md`，因此没有待删除或待更正的正文书目条目。后续写作只能使用本 catalog；若某工作稿引文的 venue/年份与 catalog 不一致，应以本 catalog 及其 primary source 为准。
+已对完整中文初稿及 reader DOCX 的 R01--R32 handoff 进行核验：正文引用均来自本 catalog，reader 参考文献连续且与 catalog 的作者、题名、venue、年份和 URL 一致。后续修订只能使用本 catalog；若新增引文或 venue/年份与 catalog 不一致，应先更新 primary-source 审计再改稿。
 
 ## 分组、相关性与比较边界
 

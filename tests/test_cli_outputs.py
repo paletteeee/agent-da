@@ -54,7 +54,8 @@ class TxnMemCliOutputTests(unittest.TestCase):
             return {
                 "benchmark": "backend_fault_matrix",
                 "scenarios": {},
-                "all_scenarios_no_partial_commit": True,
+                "all_scenarios_state_verified": True,
+                "all_observed_states_consistent": True,
                 "all_scenarios_evidence_valid": True,
                 "production_latency_claim": False,
             }

@@ -36,6 +36,9 @@ class RealBackendScriptTests(unittest.TestCase):
         self.assertIn("--service-url http://127.0.0.1:19000", script)
         self.assertIn("TXNMEM_NEO4J_URI=bolt://127.0.0.1:19001", script)
         self.assertIn("TXNMEM_TOXIPROXY_URL=http://127.0.0.1:8474", script)
+        self.assertIn('f["all_scenarios_state_verified"]', script)
+        self.assertIn('f["all_observed_states_consistent"]', script)
+        self.assertNotIn("all_scenarios_no_partial_commit", script)
 
     def test_compose_does_not_publish_direct_qdrant_or_neo4j_data_ports(self):
         compose = (ROOT / "infra" / "real_backend" / "docker-compose.yml").read_text(

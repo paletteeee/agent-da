@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from io import BytesIO
 from pathlib import Path
 import re
+import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 import zipfile
 from xml.etree import ElementTree as ET
 
@@ -16,10 +19,14 @@ from PIL import Image, ImageChops
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT.parent.parent.parent.parent / "outputs" / "TxnMem_CCF-A中文论文初稿.docx"
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from build_txnmem_ccfa_docx import TABLE_TITLES, build_document  # noqa: E402
+from build_txnmem_ccfa_docx import (  # noqa: E402
+    TABLE_TITLES,
+    _rasterize_svg,
+    _scrub_metadata,
+    build_document,
+)
 
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -38,7 +45,25 @@ MARKERS = (
     "\\)",
     "configs/txnmem_paper_references.json",
 )
-LOCAL_ARTIFACT_PATH = re.compile(r"(?i)(?:results/|file:/+|(?:^|[\\s(])[a-z]:[\\\\/]|/Users/)")
+LOCAL_ARTIFACT_PATH = re.compile(
+    r"(?i)(?:results/|file:/+|(?:^|[\\s(])[a-z]:[\\\\/]|/" + "Users/)"
+)
+
+
+def _test_rasterizer(svg: Path, cache: Path) -> tuple[Path, float]:
+    root = ET.parse(svg).getroot()
+    _, _, width, height = [float(value) for value in root.attrib["viewBox"].split()]
+    target = cache / f"{svg.stem}-test.png"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    image = Image.new("RGB", (round(width * 2), round(height * 2)), "white")
+    for x in range(image.width):
+        image.putpixel((x, 0), (0, 0, 0))
+        image.putpixel((x, image.height - 1), (0, 0, 0))
+    for y in range(image.height):
+        image.putpixel((0, y), (0, 0, 0))
+        image.putpixel((image.width - 1, y), (0, 0, 0))
+    image.save(target)
+    return target, height / width
 
 
 class TxnMemCcfaDocxTests(unittest.TestCase):
@@ -49,6 +74,8 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
         cls.path = build_document(
             ROOT,
             Path(cls.temporary_directory.name) / Path(cls.config["target_output_path"]).name,
+            raster_cache=Path(cls.temporary_directory.name) / "raster-cache",
+            rasterizer=_test_rasterizer,
         )
         cls.document = Document(cls.path)
         cls.manifest = json.loads(
@@ -69,13 +96,32 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
         cls.temporary_directory.cleanup()
 
     def test_configured_target_path_is_authoritative_but_never_test_output(self) -> None:
-        self.assertEqual(Path(self.config["target_output_path"]), OUT)
-        self.assertNotEqual(self.path, OUT)
+        self.assertFalse(Path(self.config["target_output_path"]).is_absolute())
         self.assertTrue(self.path.is_relative_to(Path(self.temporary_directory.name)))
+
+    def test_full_release_build_is_deterministic_and_privacy_normalization_idempotent(self) -> None:
+        root = Path(self.temporary_directory.name)
+        first = root / "release-first.docx"
+        second = root / "release-second.docx"
+        cache = root / "raster-cache"
+        build_document(ROOT, first, raster_cache=cache, rasterizer=_test_rasterizer)
+        build_document(ROOT, second, raster_cache=cache, rasterizer=_test_rasterizer)
+        first_hash = hashlib.sha256(first.read_bytes()).hexdigest()
+        self.assertEqual(first_hash, hashlib.sha256(second.read_bytes()).hexdigest())
+
+        _scrub_metadata(second)
+        once = hashlib.sha256(second.read_bytes()).hexdigest()
+        _scrub_metadata(second)
+        self.assertEqual(once, hashlib.sha256(second.read_bytes()).hexdigest())
+        self.assertEqual(first_hash, once)
 
     def test_generated_docx_has_paper_structure(self) -> None:
         self.assertTrue(self.path.is_file())
-        self.assertGreater(self.path.stat().st_size, 100_000)
+        self.assertTrue(zipfile.is_zipfile(self.path))
+        self.assertEqual(
+            len([name for name in self.parts if name.startswith("word/media/")]),
+            6,
+        )
         self.assertEqual(len(self.figure_ids), 6)
         self.assertEqual(set(self.figure_ids), set(self.manifest))
         self.assertEqual(len(self.table_ids), 8)
@@ -276,6 +322,96 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
         self.assertIsNone(modified_by)
         app = ET.fromstring(self.parts["docProps/app.xml"])
         self.assertIsNone(app.find("{http://schemas.openxmlformats.org/officeDocument/2006/extended-properties}Company"))
+
+
+class DocxRasterPortabilityTests(unittest.TestCase):
+    def test_render_wrapper_requires_injected_version_independent_runtime_paths(self) -> None:
+        script = (ROOT / "scripts/render_docx_with_bundled_libs.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('TXNMEM_CODEX_DEPS="${TXNMEM_CODEX_DEPS:-}"', script)
+        self.assertIn('TXNMEM_RENDERER="${TXNMEM_RENDERER:-}"', script)
+        self.assertNotIn("/" + "Users/", script)
+        self.assertNotRegex(script, r"documents/\d+\.\d+\.\d+")
+
+    def test_browser_and_raster_cache_are_injected_without_repo_writes(self) -> None:
+        with TemporaryDirectory() as tmp:
+            temp = Path(tmp)
+            svg = temp / "figure.svg"
+            svg.write_text(
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 5"></svg>',
+                encoding="utf-8",
+            )
+            browser = temp / "browser"
+            browser.write_text("fixture", encoding="utf-8")
+            cache = temp / "cache"
+            observed: dict[str, object] = {}
+
+            def fake_run(command, **kwargs):
+                observed["command"] = command
+                observed["kwargs"] = kwargs
+                screenshot = next(
+                    Path(item.split("=", 1)[1])
+                    for item in command
+                    if item.startswith("--screenshot=")
+                )
+                screenshot.parent.mkdir(parents=True, exist_ok=True)
+                Image.new("RGB", (20, 10), "white").save(screenshot)
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with patch("build_txnmem_ccfa_docx.subprocess.run", side_effect=fake_run):
+                raster, ratio = _rasterize_svg(
+                    svg, cache, browser_executable=browser
+                )
+
+        self.assertEqual(raster.parent, cache)
+        self.assertEqual(ratio, 0.5)
+        self.assertIn("--headless=new", observed["command"])
+        self.assertEqual(observed["kwargs"]["stdout"], subprocess.DEVNULL)
+        self.assertNotEqual(observed["kwargs"]["stderr"], subprocess.PIPE)
+
+    def test_browser_timeout_accepts_only_a_complete_exact_raster(self) -> None:
+        with TemporaryDirectory() as tmp:
+            temp = Path(tmp)
+            svg = temp / "figure.svg"
+            svg.write_text(
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 5"></svg>',
+                encoding="utf-8",
+            )
+            browser = temp / "browser"
+            browser.write_text("fixture", encoding="utf-8")
+
+            def timed_out_after_screenshot(command, **kwargs):
+                screenshot = next(
+                    Path(item.split("=", 1)[1])
+                    for item in command
+                    if item.startswith("--screenshot=")
+                )
+                screenshot.parent.mkdir(parents=True, exist_ok=True)
+                Image.new("RGB", (20, 10), "white").save(screenshot)
+                raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+            with patch(
+                "build_txnmem_ccfa_docx.subprocess.run",
+                side_effect=timed_out_after_screenshot,
+            ):
+                raster, ratio = _rasterize_svg(
+                    svg, temp / "complete", browser_executable=browser
+                )
+            self.assertTrue(raster.is_file())
+            self.assertEqual(ratio, 0.5)
+
+            def timed_out_without_screenshot(command, **kwargs):
+                raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+            with patch(
+                "build_txnmem_ccfa_docx.subprocess.run",
+                side_effect=timed_out_without_screenshot,
+            ):
+                with self.assertRaises(RuntimeError):
+                    _rasterize_svg(
+                        svg, temp / "missing", browser_executable=browser
+                    )
 
 
 if __name__ == "__main__":

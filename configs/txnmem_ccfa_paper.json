@@ -7,7 +7,8 @@
   "claim_audit_path": "results/paper_evidence/claim_audit.json",
   "supersession_index_path": "results/paper_evidence/supersession_index.json",
   "paper_source_path": "docs/paper/txnmem_ccfa_draft_zh.md",
-  "target_output_path": "/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿.docx",
+  "figure_manifest_path": "paper_assets/figures/manifest.json",
+  "target_output_path": "outputs/TxnMem_CCF-A中文论文初稿.docx",
   "required_sections": [
     "摘要",
     "1 引言",
@@ -68,7 +69,7 @@
     "official τ-bench workflow reward with native memory events; reward is not memory accuracy",
     "descriptive 20-task paired result; tuned token total is an observed lower bound and no population-significance claim is made",
     "three fixed paired repetitions; descriptive effect only, with no population-significance or universal-improvement claim",
-    "single-host real-service fault injection through Toxiproxy; not production availability, distributed 2PC, or production latency",
+    "single-host proxy/fault-response observations; post-fault Qdrant/Neo4j persistent state was not independently verified; not atomicity/availability/latency evidence",
     "single-host five-task end-to-end smoke including model, services, and evaluator; not production latency",
     "three independently attested Agent-client-to-model-server repetitions; not multi-host Agent workers, one continuous 30-minute tunnel, or production latency",
     "joint-distribution diagnostic on a held-out trace split; rejection indicates mismatch and does not establish equivalence",

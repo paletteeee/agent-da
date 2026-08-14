@@ -7,8 +7,13 @@ import argparse
 import hashlib
 import html
 import json
+import sys
 from pathlib import Path
 from typing import Any, Callable, Iterable
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from txnmem_paper_projection import controlled_result_rows
 
 
 REQUIRED_FIGURE_IDS = (
@@ -268,35 +273,34 @@ def _provenance_repair(_: Path) -> tuple[str, str, str, list[str], tuple[int, in
 
 def _controlled_results(root: Path) -> tuple[str, str, str, list[str], tuple[int, int]]:
     artifact = "results/paper_evidence/controlled_suite.json"
-    evidence = _load_json(root, artifact)
-    variants = evidence["variants"]
-    order = ["Naive", "TxnMem-NoTxn", "TxnMem-NoPolicyCommit", "TxnMem-NoRepair", "TxnMem"]
+    rows = controlled_result_rows(root)
+    instance_count = rows[0]["instance_count"]
     width, height = 1100, 570
     parts: list[str] = [
         f'<text x="50" y="46" font-size="25" font-weight="700" fill="{BLUE}">受控套件：违规数与独立 oracle 一致性</text>',
-        f'<text x="50" y="75" font-size="15" fill="{GRAY}">{evidence["instance_count"]} instances × {evidence["variant_count"]} variants；横条为目标违规数（分母 {evidence["instance_count"]}）。</text>',
+        f'<text x="50" y="75" font-size="15" fill="{GRAY}">{instance_count} instances × {len(rows)} variants；横条为目标违规数（分母 {instance_count}）。</text>',
         f'<line x1="250" y1="112" x2="950" y2="112" stroke="{GRAY}" stroke-width="1.2"/>',
     ]
-    for tick in range(0, evidence["instance_count"] + 1, 100):
-        x = 250 + 700 * tick / evidence["instance_count"]
+    for tick in range(0, instance_count + 1, 100):
+        x = 250 + 700 * tick / instance_count
         parts.append(f'<line x1="{x:.1f}" y1="112" x2="{x:.1f}" y2="470" stroke="{LIGHT_GRAY}" stroke-width="1"/>')
         _note(parts, x, 100, str(tick), anchor="middle")
     _lines(parts, 50, 126, ["variant"], size=15, fill=GRAY, weight="700")
     _lines(parts, 978, 126, ["oracle match"], size=15, fill=GRAY, anchor="middle", weight="700")
-    for index, name in enumerate(order):
+    for index, row in enumerate(rows):
         y = 160 + index * 64
-        item = variants[name]
-        violations = int(item["violation_count"])
-        matches = int(item["oracle_match_count"])
+        name = row["variant"]
+        violations = row["violation_count"]
+        matches = row["oracle_match_count"]
         color = BLUE if name == "TxnMem" else (RED if name == "Naive" else GRAY)
         _lines(parts, 50, y + 22, [name], size=17, fill=DARK, weight="700" if name == "TxnMem" else "400")
         parts.append(f'<rect x="250" y="{y:.1f}" width="700" height="30" fill="none" stroke="{GRAY}" stroke-width="1"/>')
         if violations:
-            parts.append(f'<rect x="250" y="{y:.1f}" width="{700 * violations / evidence["instance_count"]:.1f}" height="30" fill="{color}"/>')
+            parts.append(f'<rect x="250" y="{y:.1f}" width="{700 * violations / instance_count:.1f}" height="30" fill="{color}"/>')
         else:
             parts.append(f'<rect x="250" y="{y:.1f}" width="4" height="30" fill="{BLUE}"/>')
-        _lines(parts, 250 + max(7, 700 * violations / evidence["instance_count"]) + 10, y + 22, [f"{violations}"], size=16, fill=color, weight="700")
-        _lines(parts, 1005, y + 22, [f"{matches}/{evidence['instance_count']}"], size=17, fill=BLUE if matches == evidence["instance_count"] else DARK, anchor="middle", weight="700" if matches == evidence["instance_count"] else "400")
+        _lines(parts, 250 + max(7, 700 * violations / instance_count) + 10, y + 22, [f"{violations}"], size=16, fill=color, weight="700")
+        _lines(parts, 1005, y + 22, [f"{matches}/{instance_count}"], size=17, fill=BLUE if matches == instance_count else DARK, anchor="middle", weight="700" if matches == instance_count else "400")
     _lines(parts, 50, 515, ["解释：这是确定性 controlled simulator 对独立 reference semantics 的结果，不是公开任务 accuracy。"], size=15, fill=DARK)
     caption = "受控套件主结果：五个实现变体的目标违规数和独立 oracle match 数；完整 TxnMem 为 0/400 与 400/400。"
     alt = "五条横向违规条显示 Naive 350、TxnMem-NoTxn 200、TxnMem-NoPolicyCommit 50、TxnMem-NoRepair 100、TxnMem 0；右侧 oracle match 分别为 50、200、350、300、400（分母均为 400）。"
@@ -328,7 +332,7 @@ def _evidence_layers(root: Path) -> tuple[str, str, str, list[str], tuple[int, i
         (112, "受控正确性", f"{schedule['causal_case_count']} instances；{witnesses['witness_count']} 个最小 witness；独立 oracle", "只证明受控语义，不是 public-task accuracy", BLUE),
         (206, "原生模型", f"Qwen tool loop：{native['repetitions']}×10 tasks；逐事件 contract / oracle", "机制接线，不是 end-user quality", GRAY),
         (300, "公共 runtime", "τ-bench / AppWorld / LoCoMo：workflow 与适配边界", "workflow reward / F1 不是 memory accuracy", GRAY),
-        (394, "真实服务", f"Toxiproxy：{toxiproxy['scenario_count']} scenarios × {toxiproxy['repetitions_per_scenario']}；0 partial commits", "单机故障注入；不是 production availability 或 2PC", GRAY),
+        (394, "真实服务", f"Toxiproxy：{toxiproxy['scenario_count']}×{toxiproxy['repetitions_per_scenario']}；仅故障/响应路径", "未独立核验双存储状态；非原子性/可用性/延迟证据", GRAY),
         (488, "跨主机", f"{cross_host['repetition_count']} 次 client→model-server attested repetitions", "不是多 host Agent workers、连续 tunnel 或 production latency", RED),
     ]
     for y, label, evidence, boundary, color in layers:
@@ -339,8 +343,8 @@ def _evidence_layers(root: Path) -> tuple[str, str, str, list[str], tuple[int, i
         _lines(parts, 265, y + 55, ["边界：" + boundary], size=15, fill=RED if color == RED else GRAY)
     _lines(parts, 70, 599, ["设计配置声明的正文图：" + "、".join(config["body_figure_ids"])], size=15, fill=GRAY)
     _lines(parts, 70, 623, ["证据链强调：controlled correctness → 接线/服务/拓扑的外部相关性；后者不改写前者的语义结论。"], size=15, fill=DARK)
-    caption = "TxnMem 的分层证据链：从受控正确性到模型、公共 runtime、真实服务和跨主机证据；每层均附有简洁 claim boundary。"
-    alt = "五层证据图依次为受控正确性、原生模型、公共 runtime、真实服务和跨主机；每层显示证据对象以及明确的非结论边界。"
+    caption = "TxnMem 的分层证据链：从受控正确性到模型、公共 runtime、真实服务和跨主机证据；Toxiproxy 层仅覆盖故障/响应路径，状态未独立核验。"
+    alt = "五层证据图依次为受控正确性、原生模型、公共 runtime、真实服务和跨主机；Toxiproxy 层明确标注只观察代理故障与响应路径，未独立核验双存储状态。"
     sources = [config_path, claims_path, schedule_path, witnesses_path, toxiproxy_path, cross_host_path, native_path]
     # Access the claim ledger as part of construction, rather than presenting an unbound status view.
     if "controlled_correctness_400x5" not in active_claims:

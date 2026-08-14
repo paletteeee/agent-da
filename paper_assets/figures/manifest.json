@@ -12,11 +12,11 @@
       "sources": [
         {
           "path": "docs/paper/txnmem_ccfa_draft_zh.md",
-          "sha256": "7606fb0606faad01a36f81dfdf215740a51d38755995ffa344f9281ff3d3fa0c"
+          "sha256": "ef85b445170fa785075a5e080d7bf4106285d9cff3ee2e44cb8e581a7642cca6"
         },
         {
           "path": "configs/txnmem_ccfa_paper.json",
-          "sha256": "9056863a14a5c0172583aad0a3e65f504c33750faf03c82cee10e32ff4edfaf5"
+          "sha256": "aa6ab0650b947e972b04fed76f5a154d0baf2440209c95284bd2b6ca0b278f8f"
         }
       ]
     },
@@ -32,7 +32,7 @@
       "sources": [
         {
           "path": "docs/paper/txnmem_ccfa_draft_zh.md",
-          "sha256": "7606fb0606faad01a36f81dfdf215740a51d38755995ffa344f9281ff3d3fa0c"
+          "sha256": "ef85b445170fa785075a5e080d7bf4106285d9cff3ee2e44cb8e581a7642cca6"
         },
         {
           "path": "results/final_controlled/results/schedule_baseline.json",
@@ -48,7 +48,7 @@
         "width": 1100
       },
       "file": "controlled_results.svg",
-      "output_sha256": "5596e7a62775f7a2f0aa5e264fac296ad00e8bf8cbaf7265cd8ae6b86eab575a",
+      "output_sha256": "3b716af178b3247a9ea9f0949465a65baeeb5666779056243007df6eae3065bf",
       "sources": [
         {
           "path": "results/paper_evidence/controlled_suite.json",
@@ -57,22 +57,22 @@
       ]
     },
     "evidence_layers": {
-      "alt_text": "五层证据图依次为受控正确性、原生模型、公共 runtime、真实服务和跨主机；每层显示证据对象以及明确的非结论边界。",
-      "caption": "TxnMem 的分层证据链：从受控正确性到模型、公共 runtime、真实服务和跨主机证据；每层均附有简洁 claim boundary。",
+      "alt_text": "五层证据图依次为受控正确性、原生模型、公共 runtime、真实服务和跨主机；Toxiproxy 层明确标注只观察代理故障与响应路径，未独立核验双存储状态。",
+      "caption": "TxnMem 的分层证据链：从受控正确性到模型、公共 runtime、真实服务和跨主机证据；Toxiproxy 层仅覆盖故障/响应路径，状态未独立核验。",
       "dimensions": {
         "height": 650,
         "width": 1160
       },
       "file": "evidence_layers.svg",
-      "output_sha256": "8645741e2bb9b0fffe738a71e00a712b87945594eb2c37d7b7a6f446c4a344e0",
+      "output_sha256": "52130544b2d01f7f2a8d00ceea3be4e6ac7082c21983bdee456507f26d06050a",
       "sources": [
         {
           "path": "configs/txnmem_ccfa_paper.json",
-          "sha256": "9056863a14a5c0172583aad0a3e65f504c33750faf03c82cee10e32ff4edfaf5"
+          "sha256": "aa6ab0650b947e972b04fed76f5a154d0baf2440209c95284bd2b6ca0b278f8f"
         },
         {
           "path": "configs/paper_claims.json",
-          "sha256": "56e985fa4947b54fdc01c3ab4044dd16358d3b8c9078c39b931bae504792a198"
+          "sha256": "596ef06eaf6a107e27c82fda1a9c520a9c064c5049e5e8be3af114ad126d664f"
         },
         {
           "path": "results/final_controlled/results/schedule_baseline.json",
@@ -84,7 +84,7 @@
         },
         {
           "path": "results/submission_evidence/toxiproxy_faults_30/aggregate.json",
-          "sha256": "94dd588d1309c065fd7cfdd76e071d9955a59e5830254ed652c15722a492df00"
+          "sha256": "aa5f700dcf080bf323ce1b9d72ed59a1f4ac3ca5ab15df1b8569849da8b741e4"
         },
         {
           "path": "results/cross_host_model_load_formal_v8_aggregate/results/model_load_repetition_summary.json",
@@ -108,7 +108,7 @@
       "sources": [
         {
           "path": "docs/paper/txnmem_ccfa_draft_zh.md",
-          "sha256": "7606fb0606faad01a36f81dfdf215740a51d38755995ffa344f9281ff3d3fa0c"
+          "sha256": "ef85b445170fa785075a5e080d7bf4106285d9cff3ee2e44cb8e581a7642cca6"
         },
         {
           "path": "results/final_controlled/results/schedule_baseline.json",
@@ -132,7 +132,7 @@
       "sources": [
         {
           "path": "docs/paper/txnmem_ccfa_draft_zh.md",
-          "sha256": "7606fb0606faad01a36f81dfdf215740a51d38755995ffa344f9281ff3d3fa0c"
+          "sha256": "ef85b445170fa785075a5e080d7bf4106285d9cff3ee2e44cb8e581a7642cca6"
         },
         {
           "path": "results/final_controlled/results/minimal_mutant_witnesses.json",

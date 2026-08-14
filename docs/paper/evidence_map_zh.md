@@ -24,11 +24,11 @@
 | `appworld_prompt_profile_pair` | 20 paired task、0/1 official success、17/53 of 112 official assertions、13 improved、0 regressed、517564/2171632 observed tokens | `results/prompt_profile_formal_v4/appworld_prompt_comparison.json` | paired task、official assertion、observed token | descriptive 20-task paired result; tuned token total is an observed lower bound and no population-significance claim is made | 6 评估 / 外部有效性 |
 | `locomo_prompt_profile_repetitions` | 3 paired repetition、1986 question per repetition、0.0016169580043333333 mean F1 delta、0.001921336312006298 delta std、40539 token delta | `results/prompt_profile_formal_v4/locomo_prompt_comparison.json` | repetition、question、token | three fixed paired repetitions; descriptive effect only, with no population-significance or universal-improvement claim | 6 评估 / 外部有效性 |
 
-## RQ4：真实服务故障下是否保持事务边界？
+## RQ4：真实服务故障下记录了哪些路径？
 
 | 可使用 claim | 正文可使用数字 | artifact | 统计单位 | claim boundary | 预定章节 |
 | --- | --- | --- | --- | --- | --- |
-| `toxiproxy_fault_matrix_5x30` | 5 scenario、30 repetition per scenario、150 total repetition、0 partial commit；retry-success/timeout/connection-drop 各 30 | `results/submission_evidence/toxiproxy_faults_30/aggregate.json` | fault scenario、repetition | single-host real-service fault injection through Toxiproxy; not production availability, distributed 2PC, or production latency | 6 评估 / RQ4 |
+| `toxiproxy_fault_matrix_5x30` | 5 scenario、30 repetition per scenario；四个 non-normal 场景的 trigger/toxic/proxy-path 均为 30/30，并记录客户端 success/error/abort/retry 响应 | `results/submission_evidence/toxiproxy_faults_30/aggregate.json` | fault scenario、repetition | single-host proxy/fault-response observations; post-fault Qdrant/Neo4j persistent state was not independently verified; not atomicity/availability/latency evidence | 6 评估 / RQ4 |
 | `qwen_vector_graph_e2e_5` | 5 task、5 completed、30 native event；mean 18851.635056734085 ms、P50 15496.98719382286 ms | `results/submission_evidence/qwen_vector_graph_e2e_5/aggregate.json` | task、native event、end-to-end latency | single-host five-task end-to-end smoke including model, services, and evaluator; not production latency | 6 评估 / RQ4 |
 | `cross_host_model_load_v8` | 3 repetition、204 completed cycle、1632 attempt/contract success、3251506 token | `results/cross_host_model_load_formal_v8_aggregate/results/model_load_repetition_summary.json` | attested repetition、cycle、attempt、token | three independently attested Agent-client-to-model-server repetitions; not multi-host Agent workers, one continuous 30-minute tunnel, or production latency | 6 评估 / RQ4 |
 

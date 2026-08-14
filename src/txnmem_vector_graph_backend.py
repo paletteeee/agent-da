@@ -154,6 +154,32 @@ class _Neo4jBoltClient:
                 memory_id=memory_id,
             ).consume()
 
+    def retrieve_memory(self, namespace, memory_id):
+        """Read the persisted node and provenance edges after fault recovery."""
+
+        with self.driver.session() as session:
+            record = session.run(
+                "MATCH (m:Memory {namespace:$namespace, memory_id:$memory_id}) "
+                "OPTIONAL MATCH (m)-[:DERIVED_FROM]->(s:Memory {namespace:$namespace}) "
+                "OPTIONAL MATCH (m)-[:SUPERSEDES]->(o:Memory {namespace:$namespace}) "
+                "RETURN m.status AS status, "
+                "collect(DISTINCT s.memory_id) AS source_ids, "
+                "head(collect(DISTINCT o.memory_id)) AS supersedes_id",
+                namespace=namespace,
+                memory_id=memory_id,
+            ).single()
+        if record is None:
+            return None
+        return {
+            "status": record.get("status"),
+            "source_ids": sorted(
+                str(source_id)
+                for source_id in (record.get("source_ids") or [])
+                if source_id is not None
+            ),
+            "supersedes_id": record.get("supersedes_id"),
+        }
+
     def healthcheck(self):
         with self.driver.session() as session:
             record = session.run(
@@ -237,6 +263,43 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         self._metrics["timing_ms"].setdefault(operation, []).append(elapsed)
         return result
 
+    def _compensate_failed_commit(
+        self,
+        memory_id: str,
+        key: str,
+        action: Mapping[str, Any],
+    ) -> None:
+        """Delete both possible writes and require readable proof of absence."""
+
+        for service, operation, function in (
+            (
+                "qdrant",
+                "delete_compensation",
+                lambda: self.qdrant.delete(self.db_namespace, memory_id, key),
+            ),
+            (
+                "neo4j",
+                "delete_compensation",
+                lambda: self.neo4j.delete_memory(self.db_namespace, memory_id, key),
+            ),
+        ):
+            try:
+                self._call(service, operation, function, key)
+            except Exception:
+                # A lost delete response is also ambiguous.  The persisted reads
+                # below, rather than the response, decide whether compensation
+                # completed safely.
+                continue
+
+        verification = self.verify_persistent_state([action])
+        classification = verification.get("classification")
+        if classification != "absent":
+            if classification == "unknown":
+                detail = "persistent state is unknown after compensation"
+            else:
+                detail = f"persistent state is {classification} after compensation"
+            raise VectorGraphBackendError(detail)
+
     def write(self, memory_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
         memory_id = str(memory_id)
         source_ids = list(fields.get("source_ids", []))
@@ -271,11 +334,18 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 )
             except Exception:
                 self._metrics["rollback_count"] += 1
-                self._call(
-                    "qdrant",
-                    "delete_compensation",
-                    lambda: self.qdrant.delete(self.db_namespace, memory_id, key),
+                self._compensate_failed_commit(
+                    memory_id,
                     key,
+                    {
+                        "type": "write",
+                        "memory_id": memory_id,
+                        "value": memory["value"],
+                        "agent_id": memory["agent_id"],
+                        "scope": memory["scope"],
+                        "source_ids": source_ids,
+                        "supersedes_id": supersedes_id,
+                    },
                 )
                 raise
         except Exception as exc:
@@ -376,6 +446,107 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
 
     def snapshot(self) -> dict[str, dict[str, Any]]:
         return copy.deepcopy(self.memories)
+
+    def verify_persistent_state(
+        self, actions: Iterable[Mapping[str, Any]]
+    ) -> dict[str, Any]:
+        """Classify post-fault Qdrant/Neo4j state without optimistic defaults."""
+
+        items: list[dict[str, Any]] = []
+        for action in actions:
+            if str(action.get("type", action.get("kind", ""))) != "write":
+                continue
+            memory_id = str(action.get("memory_id", ""))
+            source_ids = sorted(str(item) for item in action.get("source_ids", []))
+            expected_qdrant = {
+                "memory_id": memory_id,
+                "value": action.get("value", memory_id),
+                "status": "active",
+                "agent_id": action.get("agent_id", "agent_1"),
+                "scope": action.get("scope", "tenant:user_001"),
+                "derived_from": source_ids,
+            }
+            expected_neo4j = {
+                "status": "active",
+                "source_ids": source_ids,
+                "supersedes_id": action.get("supersedes_id"),
+            }
+            item: dict[str, Any] = {"memory_id": memory_id}
+            try:
+                qdrant_state = self.qdrant.retrieve(self.db_namespace, memory_id)
+            except Exception as exc:
+                item["qdrant"] = {
+                    "read_ok": False,
+                    "error": type(exc).__name__,
+                }
+            else:
+                qdrant_present = qdrant_state is not None
+                item["qdrant"] = {
+                    "read_ok": True,
+                    "present": qdrant_present,
+                    "matches": bool(
+                        qdrant_present
+                        and isinstance(qdrant_state, Mapping)
+                        and all(
+                            qdrant_state.get(field) == value
+                            for field, value in expected_qdrant.items()
+                        )
+                    ),
+                }
+            try:
+                neo4j_state = self.neo4j.retrieve_memory(
+                    self.db_namespace, memory_id
+                )
+            except Exception as exc:
+                item["neo4j"] = {
+                    "read_ok": False,
+                    "error": type(exc).__name__,
+                }
+            else:
+                neo4j_present = neo4j_state is not None
+                item["neo4j"] = {
+                    "read_ok": True,
+                    "present": neo4j_present,
+                    "matches": bool(
+                        neo4j_present
+                        and isinstance(neo4j_state, Mapping)
+                        and all(
+                            neo4j_state.get(field) == value
+                            for field, value in expected_neo4j.items()
+                        )
+                    ),
+                }
+
+            qdrant = item["qdrant"]
+            neo4j = item["neo4j"]
+            if not qdrant["read_ok"] or not neo4j["read_ok"]:
+                classification = "unknown"
+            elif not qdrant["present"] and not neo4j["present"]:
+                classification = "absent"
+            elif (
+                qdrant["present"]
+                and neo4j["present"]
+                and qdrant["matches"]
+                and neo4j["matches"]
+            ):
+                classification = "complete"
+            else:
+                classification = "partial"
+            item["classification"] = classification
+            items.append(item)
+
+        classifications = [item["classification"] for item in items]
+        if not classifications or "unknown" in classifications:
+            overall = "unknown"
+        elif "partial" in classifications:
+            overall = "partial"
+        elif all(value == "complete" for value in classifications):
+            overall = "complete"
+        elif all(value == "absent" for value in classifications):
+            overall = "absent"
+        else:
+            overall = "partial"
+        return {"classification": overall, "items": items}
 
     def healthcheck(self) -> dict[str, Any]:
         return {

@@ -18,30 +18,30 @@
 <text x="950.0" y="100.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">400</text>
 <text x="50.0" y="126.0" text-anchor="start" font-size="15" font-weight="700" fill="#68737D">variant</text>
 <text x="978.0" y="126.0" text-anchor="middle" font-size="15" font-weight="700" fill="#68737D">oracle match</text>
-<text x="50.0" y="182.0" text-anchor="start" font-size="17" font-weight="400" fill="#263238">Naive</text>
+<text x="50.0" y="182.0" text-anchor="start" font-size="17" font-weight="700" fill="#263238">TxnMem</text>
 <rect x="250" y="160.0" width="700" height="30" fill="none" stroke="#68737D" stroke-width="1"/>
-<rect x="250" y="160.0" width="612.5" height="30" fill="#A63D40"/>
-<text x="872.5" y="182.0" text-anchor="start" font-size="16" font-weight="700" fill="#A63D40">350</text>
-<text x="1005.0" y="182.0" text-anchor="middle" font-size="17" font-weight="400" fill="#263238">50/400</text>
-<text x="50.0" y="246.0" text-anchor="start" font-size="17" font-weight="400" fill="#263238">TxnMem-NoTxn</text>
+<rect x="250" y="160.0" width="4" height="30" fill="#1F4E79"/>
+<text x="267.0" y="182.0" text-anchor="start" font-size="16" font-weight="700" fill="#1F4E79">0</text>
+<text x="1005.0" y="182.0" text-anchor="middle" font-size="17" font-weight="700" fill="#1F4E79">400/400</text>
+<text x="50.0" y="246.0" text-anchor="start" font-size="17" font-weight="400" fill="#263238">Naive</text>
 <rect x="250" y="224.0" width="700" height="30" fill="none" stroke="#68737D" stroke-width="1"/>
-<rect x="250" y="224.0" width="350.0" height="30" fill="#68737D"/>
-<text x="610.0" y="246.0" text-anchor="start" font-size="16" font-weight="700" fill="#68737D">200</text>
-<text x="1005.0" y="246.0" text-anchor="middle" font-size="17" font-weight="400" fill="#263238">200/400</text>
-<text x="50.0" y="310.0" text-anchor="start" font-size="17" font-weight="400" fill="#263238">TxnMem-NoPolicyCommit</text>
+<rect x="250" y="224.0" width="612.5" height="30" fill="#A63D40"/>
+<text x="872.5" y="246.0" text-anchor="start" font-size="16" font-weight="700" fill="#A63D40">350</text>
+<text x="1005.0" y="246.0" text-anchor="middle" font-size="17" font-weight="400" fill="#263238">50/400</text>
+<text x="50.0" y="310.0" text-anchor="start" font-size="17" font-weight="400" fill="#263238">TxnMem-NoTxn</text>
 <rect x="250" y="288.0" width="700" height="30" fill="none" stroke="#68737D" stroke-width="1"/>
-<rect x="250" y="288.0" width="87.5" height="30" fill="#68737D"/>
-<text x="347.5" y="310.0" text-anchor="start" font-size="16" font-weight="700" fill="#68737D">50</text>
-<text x="1005.0" y="310.0" text-anchor="middle" font-size="17" font-weight="400" fill="#263238">350/400</text>
-<text x="50.0" y="374.0" text-anchor="start" font-size="17" font-weight="400" fill="#263238">TxnMem-NoRepair</text>
+<rect x="250" y="288.0" width="350.0" height="30" fill="#68737D"/>
+<text x="610.0" y="310.0" text-anchor="start" font-size="16" font-weight="700" fill="#68737D">200</text>
+<text x="1005.0" y="310.0" text-anchor="middle" font-size="17" font-weight="400" fill="#263238">200/400</text>
+<text x="50.0" y="374.0" text-anchor="start" font-size="17" font-weight="400" fill="#263238">TxnMem-NoPolicyCommit</text>
 <rect x="250" y="352.0" width="700" height="30" fill="none" stroke="#68737D" stroke-width="1"/>
-<rect x="250" y="352.0" width="175.0" height="30" fill="#68737D"/>
-<text x="435.0" y="374.0" text-anchor="start" font-size="16" font-weight="700" fill="#68737D">100</text>
-<text x="1005.0" y="374.0" text-anchor="middle" font-size="17" font-weight="400" fill="#263238">300/400</text>
-<text x="50.0" y="438.0" text-anchor="start" font-size="17" font-weight="700" fill="#263238">TxnMem</text>
+<rect x="250" y="352.0" width="87.5" height="30" fill="#68737D"/>
+<text x="347.5" y="374.0" text-anchor="start" font-size="16" font-weight="700" fill="#68737D">50</text>
+<text x="1005.0" y="374.0" text-anchor="middle" font-size="17" font-weight="400" fill="#263238">350/400</text>
+<text x="50.0" y="438.0" text-anchor="start" font-size="17" font-weight="400" fill="#263238">TxnMem-NoRepair</text>
 <rect x="250" y="416.0" width="700" height="30" fill="none" stroke="#68737D" stroke-width="1"/>
-<rect x="250" y="416.0" width="4" height="30" fill="#1F4E79"/>
-<text x="267.0" y="438.0" text-anchor="start" font-size="16" font-weight="700" fill="#1F4E79">0</text>
-<text x="1005.0" y="438.0" text-anchor="middle" font-size="17" font-weight="700" fill="#1F4E79">400/400</text>
+<rect x="250" y="416.0" width="175.0" height="30" fill="#68737D"/>
+<text x="435.0" y="438.0" text-anchor="start" font-size="16" font-weight="700" fill="#68737D">100</text>
+<text x="1005.0" y="438.0" text-anchor="middle" font-size="17" font-weight="400" fill="#263238">300/400</text>
 <text x="50.0" y="515.0" text-anchor="start" font-size="15" font-weight="400" fill="#263238">解释：这是确定性 controlled simulator 对独立 reference semantics 的结果，不是公开任务 accuracy。</text>
 </svg>

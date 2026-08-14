@@ -54,7 +54,7 @@
       "task_id": "tau-airline-test-0004"
     }
   ],
-  "run_command": "TXNMEM_RUN_ID=20260811-formal-v2 TXNMEM_E2E_LIMIT=5 TXNMEM_ENDPOINT=http://127.0.0.1:8000/v1 TXNMEM_MODEL=qwen2.5-7b-instruct TXNMEM_MODEL_REVISION=7b44fc9c62f21ea990dc4290f251f127c53a06eb1b9f170f75a20f1cd29f26b4 TXNMEM_MODEL_SERVER_BUILD=vllm:0.8.5.post1 TXNMEM_SOURCE_COMMIT=c0cae6d84d4c0766ca4ab2fbb850a8a37a5731c3 PYTHONPATH=/data/txnmem_submission_20260811/src /data/venvs/tau-bench/bin/python /data/txnmem_submission_20260811/scripts/run_e2e_real_backend.py",
+  "run_command": "TXNMEM_RUN_ID=20260811-formal-v2 TXNMEM_E2E_LIMIT=5 TXNMEM_ENDPOINT=http://127.0.0.1:8000/v1 TXNMEM_MODEL=qwen2.5-7b-instruct TXNMEM_MODEL_REVISION=7b44fc9c62f21ea990dc4290f251f127c53a06eb1b9f170f75a20f1cd29f26b4 TXNMEM_MODEL_SERVER_BUILD=vllm:0.8.5.post1 TXNMEM_SOURCE_COMMIT=c0cae6d84d4c0766ca4ab2fbb850a8a37a5731c3 PYTHONPATH=<remote-run-dir>/src <runtime>/bin/python <remote-run-dir>/scripts/run_e2e_real_backend.py",
   "schema_version": 1,
   "source_artifact": {
     "path": "results/submission_evidence/source_summaries/qwen_vector_graph_e2e5.source.json",

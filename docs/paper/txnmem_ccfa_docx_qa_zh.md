@@ -2,18 +2,20 @@
 
 ## 交付物与可复现边界
 
-- 最终 DOCX（已脱敏）：`/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿.docx`
-- SHA-256：`870feaf210bf3a7b9507795988aaf242ae6d759f69a65b2c0fef54b40fe04e6b`
-- 文件大小：`1,160,752` bytes
+- 最终 DOCX（已脱敏）：`<output-dir>/TxnMem_CCF-A中文论文初稿.docx`
+- SHA-256：`6673155ad304ab39f59d6455a1c6ff546f6459735f00dacdc31b617819227714`
+- 文件大小：`1,163,774` bytes
 - 最终页数：27（最终渲染 PNG 的 `page-1.png` 至 `page-27.png`）
 - 内容计数：标题样式为 Heading 1/2/3 = 12/18/4；表格 8；图片/图 6；参考文献 32（严格连续的 `[R01]`—`[R32]`）。
-- 渲染器：工作树中的 `scripts/render_docx_with_bundled_libs.sh`，通过指定的 bundled Python `/Users/xiaoyan_zhu/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3` 调用。渲染结论只覆盖该 LibreOffice/系统字体环境；shell 中没有 `fc-match`，因此不对其他机器的字体替代作额外保证。
+- 渲染器：工作树中的 `scripts/render_docx_with_bundled_libs.sh`，通过 `TXNMEM_CODEX_DEPS=<runtime>` 和 `TXNMEM_RENDERER=<documents-skill>/render_docx.py` 注入版本无关的 bundled runtime。渲染结论只覆盖该 LibreOffice/系统字体环境；shell 中没有 `fc-match`，因此不对其他机器的字体替代作额外保证。
 
 渲染目录（均在 Git 工作树外）：
 
-- 首次基线（含 PDF）：`/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿_render_v1`
-- 迭代目录：`/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿_render_v2`、`..._v3`、`..._v4`、`..._v5`、`..._v6`、`..._v7`、`..._v8`
-- 当前最终、已脱敏 DOCX 的 PDF/PNG（由上述 SHA-256 文件直接渲染）：`/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿_render_final_v4`
+- 首次基线（含 PDF）：`<output-dir>/TxnMem_CCF-A中文论文初稿_render_v1`
+- 迭代目录：`<output-dir>/TxnMem_CCF-A中文论文初稿_render_v2`、`..._v3`、`..._v4`、`..._v5`、`..._v6`、`..._v7`、`..._v8`
+- 当前最终、已脱敏 DOCX 的 PDF/PNG（由上述 SHA-256 文件直接渲染）：工作树外 `<temp-dir>/render_final_v6`
+
+配置中的 `outputs/TxnMem_CCF-A中文论文初稿.docx` 是 repo-relative 默认逻辑路径；测试始终改写到临时目录。正式发布命令必须显式传入 `<external-output-dir>/TxnMem_CCF-A中文论文初稿.docx`。本次连续两次正式构建 hash 相同，外部交付文件与第二次构建逐字节相同；工作树 QA 副本在验收后删除，不作为隐式仓库依赖。
 
 ## 逐页人工渲染检查
 
@@ -52,7 +54,7 @@
 | 27 | 表 7/表 8 及结尾说明；末页内容过少的风险被记录。 |
 | 28 | 仅残留稀疏结尾内容；记录为必须消除的孤立末页。 |
 
-### 最终检查：render_final_v4（27 页，当前已脱敏 DOCX，SHA-256 `870feaf2…04e6b`）
+### 最终检查：render_final_v6（27 页，当前已脱敏 DOCX，SHA-256 `6673155a…714`）
 
 | 页 | 已检查内容与结论 |
 | --- | --- |
@@ -118,29 +120,29 @@ table_geometry.py <docx>                -> 8/8 表的 tblW、tblGrid 与 tcW 全
 脱敏命令：
 
 ```text
-privacy_scrub.py <final-docx> --out /Users/xiaoyan_zhu/Desktop/agent-db/outputs/.TxnMem_CCF-A中文论文初稿.privacy.tmp.docx
-mv -f <temporary-docx> /Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿.docx
+python scripts/build_txnmem_ccfa_docx.py --root . --output <output-dir>/TxnMem_CCF-A中文论文初稿.docx
 ```
 
-`privacy_scrub.py` 的结果为 `rsid_attrs_removed=0, core_props_scrubbed=0, custom_props_removed=0`：输入已匿名化；最终核心属性不含 creator/lastModifiedBy，且无 custom properties、批注、人员或修订部分。保留的题名、`Anonymous manuscript` 主题和关键词是论文公开内容，不含个人标识。严格 rsid 清理由构建器的全 XML package sanitation 完成，最终 OOXML 审计确认所有 XML part 的 `rsid` 字符串数为 0。完整测试会重建默认外部 DOCX，故在测试结束后再次以临时文件原子替换执行最终脱敏；第一次 `render_final_v3` 暴露出错误地重序列化未修改 XML part 的 LibreOffice 兼容问题，修复后重新跑完整测试，再以相同原子流程得到 `render_final_v4`。该目录由 SHA-256 `870feaf210bf3a7b9507795988aaf242ae6d759f69a65b2c0fef54b40fe04e6b` 的交付文件直接渲染；后续 a11y、隐私和哈希检查均为只读，未再修改 DOCX，因此上述逐页检查严格对应当前交付文件。
+构建器直接生成已匿名化的最终包；最终核心属性不含 creator/lastModifiedBy，且无 custom properties、批注、人员或修订部分。保留的题名、`Anonymous manuscript` 主题和关键词是论文公开内容，不含个人标识。严格 rsid 清理由构建器的全 XML package sanitation 完成，最终 OOXML 审计确认所有 XML part 的 `rsid` 字符串数为 0。测试只在临时目录构建，不触碰 repo-relative 默认路径或外部交付物。正式命令连续运行两次，两个 SHA-256 均为 `6673155ad304ab39f59d6455a1c6ff546f6459735f00dacdc31b617819227714`，且外部交付物与第二次构建逐字节相同。`render_final_v6` 由这些精确字节直接渲染；后续 a11y、隐私和哈希检查均为只读。
 
 最终 a11y 命令及结果：
 
 ```text
-a11y_audit.py --out_json /Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿_a11y.json <final-docx>
+a11y_audit.py --out_json <output-dir>/TxnMem_CCF-A中文论文初稿_a11y.json <final-docx>
 # high=0 medium=0 low=0
 ```
 
-JSON 路径：`/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿_a11y.json`。六张图均保留有意义的中文替代文字，分别说明：地址—订单风险时间线、TxnMem 架构、提交协议、来源闭包修复、受控套件结果条形图和五层证据链。
+JSON 路径：`<output-dir>/TxnMem_CCF-A中文论文初稿_a11y.json`。六张图均保留有意义的中文替代文字，分别说明：地址—订单风险时间线、TxnMem 架构、提交协议、来源闭包修复、受控套件结果条形图和五层证据链。
 
 ## 测试与剩余模板工作
 
 ```text
-PYTHONPATH=src:scripts <bundled-python> -m unittest tests.test_txnmem_ccfa_docx tests.test_document_render_config -v
-# Ran 13 tests ... OK
+PYTHONPATH=src:scripts <bundled-python> -m unittest tests.test_txnmem_ccfa_docx -v
+# Ran 18 tests ... OK
 
-PYTHONPATH=src:scripts <bundled-python> -m unittest discover -s tests -v
-# Ran 319 tests ... OK (skipped=3: 可选 appworld/tau-bench 依赖未安装)
+PYTHONPYCACHEPREFIX=<temp-dir>/pycache PYTHONPATH=src:scripts TMPDIR=<temp-dir>/outputs <bundled-python> -m unittest discover -s tests -p 'test*.py'
+# 工作树：Ran 346 tests ... OK (skipped=3)
+# index-derived clean archive：Ran 346 tests ... OK (skipped=4；额外 skip 为无 .git metadata 的 Git-range 集成扫描)
 ```
 
 尚未执行、且只能在拿到目标会议信息后进行的工作：将内容导入官方 CCF-A/目标会议模板、按模板处理作者/匿名审稿页、版心和 bibliography 样式，以及在最终投稿环境中再次渲染。当前 DOCX 不声称等同于某一尚未提供的 venue 模板。

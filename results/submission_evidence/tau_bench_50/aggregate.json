@@ -27,7 +27,7 @@
   ],
   "reward_mean": 0.3,
   "reward_sum": 15.0,
-  "run_command": "cd /data/txnmem_run_20260806 && PYTHONPATH=/data/txnmem_run_20260806/src:/data/tau-bench /data/venvs/tau-bench/bin/python src/txnmem_experiment.py benchmark-native-batch --benchmark tau-bench --manifest results/native_scale/manifests/tau_bench.json --tau-domain airline --tau-split test --tau-user-strategy scripted --out-dir results/native_scale/runs/tau_bench_full --memory-backend sqlite --endpoint http://127.0.0.1:8000/v1 --model qwen2.5-7b-instruct --timeout 180",
+  "run_command": "cd <remote-run-dir> && PYTHONPATH=<remote-run-dir>/src:<tau-bench-root> <runtime>/bin/python src/txnmem_experiment.py benchmark-native-batch --benchmark tau-bench --manifest results/native_scale/manifests/tau_bench.json --tau-domain airline --tau-split test --tau-user-strategy scripted --out-dir results/native_scale/runs/tau_bench_full --memory-backend sqlite --endpoint http://127.0.0.1:8000/v1 --model qwen2.5-7b-instruct --timeout 180",
   "runtime_attestation": {
     "attested_at_utc": "2026-08-10T17:37:32Z",
     "continuity_basis": "The same live PID and vLLM command began before the primary and retry-merged artifacts were completed and remained live during the submission audit.",

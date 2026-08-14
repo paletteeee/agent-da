@@ -332,24 +332,17 @@ def aggregate_toxiproxy_submission_evidence(
         raise ValueError("Toxiproxy fault matrix is missing")
     if matrix.get("all_scenarios_evidence_valid") is not True:
         raise ValueError("Toxiproxy matrix contains invalid trigger evidence")
-    if matrix.get("all_scenarios_no_partial_commit") is not True:
-        raise ValueError("Toxiproxy matrix contains a partial commit")
     raw_scenarios = matrix.get("scenarios")
     expected_names = {"normal", "delay", "timeout", "connection_drop", "retry_success"}
     if not isinstance(raw_scenarios, Mapping) or set(raw_scenarios) != expected_names:
         raise ValueError("Toxiproxy matrix must contain the five fixed scenarios")
 
     scenarios: dict[str, dict[str, Any]] = {}
-    total_partial = 0
     for name in sorted(expected_names):
         row = raw_scenarios[name]
         if not isinstance(row, Mapping) or row.get("repetitions") != expected_repetitions:
             raise ValueError(f"Toxiproxy scenario repetition mismatch: {name}")
         repetitions = expected_repetitions
-        partial = int(row.get("partial_commit_count", 0) or 0)
-        total_partial += partial
-        if partial != 0 or row.get("oracle_match_count") != repetitions:
-            raise ValueError(f"Toxiproxy scenario violates atomicity/oracle: {name}")
         if row.get("evidence_valid") is not True:
             raise ValueError(f"Toxiproxy scenario lacks valid evidence: {name}")
         for field in (
@@ -372,26 +365,24 @@ def aggregate_toxiproxy_submission_evidence(
         evidence_rows = row.get("repetition_evidence")
         if not isinstance(evidence_rows, list) or len(evidence_rows) != repetitions:
             raise ValueError(f"Toxiproxy repetition evidence missing: {name}")
-        elapsed: list[float] = []
-        for evidence in evidence_rows:
-            if not isinstance(evidence, Mapping) or evidence.get("evidence_valid") is not True:
-                raise ValueError(f"Toxiproxy invalid repetition evidence: {name}")
-            for event in evidence.get("events", []):
-                if isinstance(event, Mapping) and event.get("operation_elapsed_ms") is not None:
-                    elapsed.append(
-                        _finite_number(
-                            event["operation_elapsed_ms"],
-                            "operation_elapsed_ms",
-                            positive=True,
-                        )
-                    )
-        if non_normal and len(elapsed) != repetitions:
-            raise ValueError(f"Toxiproxy trigger latency evidence missing: {name}")
+        if any(
+            not isinstance(evidence, Mapping)
+            or evidence.get("evidence_valid") is not True
+            for evidence in evidence_rows
+        ):
+            raise ValueError(f"Toxiproxy invalid repetition evidence: {name}")
 
-        success_count = int(row.get("success_count", 0) or 0)
-        abort_count = int(row.get("abort_count", 0) or 0)
-        retry_count = int(row.get("retry_count", 0) or 0)
-        retry_success_count = int(row.get("retry_success_count", 0) or 0)
+        def required_count(field: str) -> int:
+            value = row.get(field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"Toxiproxy response count missing: {name}/{field}")
+            return value
+
+        success_count = required_count("success_count")
+        error_count = required_count("error_count")
+        abort_count = required_count("abort_count")
+        retry_count = required_count("retry_count")
+        retry_success_count = required_count("retry_success_count")
         if name in {"timeout", "connection_drop"}:
             if success_count != 0 or abort_count != repetitions:
                 raise ValueError(f"Toxiproxy abort semantics mismatch: {name}")
@@ -404,6 +395,7 @@ def aggregate_toxiproxy_submission_evidence(
         scenarios[name] = {
             "repetitions": repetitions,
             "success_count": success_count,
+            "error_count": error_count,
             "abort_count": abort_count,
             "retry_count": retry_count,
             "retry_success_count": retry_success_count,
@@ -412,18 +404,17 @@ def aggregate_toxiproxy_submission_evidence(
             "proxy_path_verified_count": int(
                 row.get("proxy_path_verified_count", 0) or 0
             ),
-            "partial_commit_count": partial,
-            "p50_trigger_elapsed_ms": statistics.median(elapsed) if elapsed else None,
+            "toxic_cleared_count": int(row.get("toxic_cleared_count", 0) or 0),
+            "fault_observed_count": int(row.get("fault_observed_count", 0) or 0),
         }
 
     return {
         "schema_version": 1,
-        "evidence_id": "toxiproxy_fault_matrix_30",
-        "status": "complete",
+        "evidence_id": "toxiproxy_fault_path_30",
+        "status": "complete_fault_path_observations",
         "scenario_count": len(scenarios),
         "repetitions_per_scenario": expected_repetitions,
         "total_repetitions": expected_repetitions * len(scenarios),
-        "total_partial_commit_count": total_partial,
         "all_scenarios_evidence_valid": True,
         "backend_health": normalized_health,
         "toxiproxy_version": version,
@@ -431,6 +422,9 @@ def aggregate_toxiproxy_submission_evidence(
         "source_commit": commit,
         "run_command": command,
         "source_artifact": {"path": str(source), "sha256": _sha256(source)},
-        "claim_boundary": "single-host service fault injection; not production availability",
+        "claim_boundary": (
+            "single-host proxy/fault-response observations; post-fault Qdrant/Neo4j "
+            "persistent state was not independently verified; not atomicity/availability/latency evidence"
+        ),
         "production_latency_claim": False,
     }

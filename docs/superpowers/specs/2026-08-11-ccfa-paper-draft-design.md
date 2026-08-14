@@ -27,7 +27,7 @@
 
 ### 4.1 摘要
 
-摘要控制在 450--650 个中文字符，按“问题--洞见--设计--方法--关键结果--边界”展开。只保留最能支持中心命题的数字：400 个受控实例/2,000 条结果、完整 TxnMem 0/400 目标违规与 400/400 oracle match、四类最小 mutant witness、Toxiproxy 5×30 且 0 partial commit、真实 Qwen2.5-7B 接入。AppWorld/LoCoMo 的弱增益、详细 token 数和跨主机拓扑限制不进入摘要。
+摘要控制在 450--650 个中文字符，按“问题--洞见--设计--方法--关键结果--边界”展开。只保留最能支持中心命题的数字：400 个受控实例/2,000 条结果、完整 TxnMem 0/400 目标违规与 400/400 oracle match、四类最小 mutant witness，以及真实 Qwen2.5-7B 接入。Toxiproxy 旧矩阵仅作为 fault/response-path 观察，不进入摘要的原子性结论；AppWorld/LoCoMo 的弱增益、详细 token 数和跨主机拓扑限制同样不进入摘要。
 
 ### 4.2 引言
 
@@ -62,7 +62,7 @@
 - RQ1 正确性：三个核心机制是否分别阻止目标违规？使用 8 workload × 50 seed × 5 variant 的 controlled suite。
 - RQ2 测试有效性：因果 schedule 是否优于随机 schedule，benchmark 是否能杀死目标 mutant，并给出最小 witness？
 - RQ3 真实模型与公开 runtime：真实 Qwen tool call 能否生成合法 event，TxnMem 是否能在 τ-bench/AppWorld/LoCoMo runtime 边界执行？
-- RQ4 真实服务故障：请求经过 Toxiproxy 时是否仍保持无 partial commit，Qwen+Qdrant+Neo4j E2E 是否闭环？
+- RQ4 真实服务故障：请求经过 Toxiproxy 时记录了哪些 fault/response 路径，Qwen+Qdrant+Neo4j E2E 是否闭环？故障后双存储一致性只由新的 state-verified rerun 回答。
 - RQ5 外部相关性：synthetic workload 与 trace-grounded holdout 的联合分布是否匹配，结果对 generator 校准意味着什么？
 
 正文主结果使用 controlled suite、schedule/mutation、真实故障和 Qwen native evidence。τ-bench 的 reward、AppWorld 0/20→1/20、LoCoMo +0.00162 以及 realism mismatch 放在“外部有效性与负结果”小节，以诚实的描述性证据呈现，不作为 TxnMem 优越性的 headline。
@@ -100,7 +100,7 @@
 - AppWorld 始终使用全 20 task 分母；6 个 execution failure 不从分母删除。
 - LoCoMo 三次 repetition 只作描述性结果，不声称统计显著。
 - native event count 只表示过程记录，不充当 benchmark 样本量。
-- Toxiproxy 结果写成单机真实服务故障注入，不写成生产 2PC 或 availability。
+- Toxiproxy 旧结果只写成单机 proxy/fault-response 路径观察；明确未独立核验故障后双存储状态，也不写成 atomicity、latency、production 2PC 或 availability。
 - E2E timing 与 cross-host load 均标记 `production_latency_claim=false`。
 - realism test 的拒绝结果解释为 generator 仍需校准，不解释为分布等价。
 
@@ -112,7 +112,7 @@
 
 DOCX 采用 `narrative_proposal` 设计预设的克制学术变体：单栏、匿名、可编辑、以黑色正文和深蓝标题建立层级。标题页不做商业报告式封面；第一页直接包含中英文标题、匿名标记、中文摘要和关键词。正文使用真实 Heading/Caption/List 样式、显式表格几何、连续页码和统一图表题注。
 
-目标文件为 `/Users/xiaoyan_zhu/Desktop/agent-db/outputs/TxnMem_CCF-A中文论文初稿.docx`。同时在仓库保存可版本控制的中文正文源和可重复生成脚本。最终交付只提供 DOCX；PDF 和逐页 PNG 仅用于内部视觉 QA。
+目标文件为 `<output-dir>/TxnMem_CCF-A中文论文初稿.docx`。同时在仓库保存可版本控制的中文正文源和可重复生成脚本。最终交付只提供 DOCX；PDF 和逐页 PNG 仅用于内部视觉 QA。
 
 ## 9. 验收标准
 
