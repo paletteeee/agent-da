@@ -23,6 +23,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from build_txnmem_ccfa_docx import (  # noqa: E402
     TABLE_TITLES,
+    _is_expected_raster,
     _rasterize_svg,
     _scrub_metadata,
     build_document,
@@ -150,6 +151,17 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
             self.assertNotIn(marker, text)
         self.assertNotIn("图：", "\n".join(p.text for p in self.document.paragraphs if "图：" in p.text))
         self.assertIsNone(LOCAL_ARTIFACT_PATH.search(text))
+
+    def test_display_math_is_one_centered_formula_without_delimiter_paragraphs(self) -> None:
+        paragraphs = [paragraph for paragraph in self.document.paragraphs if paragraph.text.strip()]
+        self.assertNotIn("[", [paragraph.text.strip() for paragraph in paragraphs])
+        self.assertNotIn("]", [paragraph.text.strip() for paragraph in paragraphs])
+        formulas = [
+            paragraph for paragraph in paragraphs
+            if paragraph.text == "m=(id, tenant, owner, scope, key, value, status, version, policy, supersedes, provenance)."
+        ]
+        self.assertEqual(len(formulas), 1)
+        self.assertEqual(formulas[0].alignment, 1)
 
     def test_final_package_contains_no_rsid_session_identifiers(self) -> None:
         """Generated DOCX must not retain Word revision-session IDs in any XML part."""
@@ -298,7 +310,7 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
         claim_ledger_grid = self.document.tables[-2]._tbl.tblGrid.gridCol_lst
         self.assertEqual(
             [int(column.get(qn("w:w"))) for column in claim_ledger_grid],
-            [1440, 1440, 6480],
+            [2300, 2300, 4760],
         )
         appendix_note = self.document.paragraphs[-1]
         self.assertEqual(appendix_note.style.name, "TxnMem Appendix Note")
@@ -306,6 +318,32 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
         self.assertEqual(appendix_note_style.font.size.pt, 9.5)
         self.assertEqual(appendix_note_style.paragraph_format.space_after.pt, 0)
         self.assertAlmostEqual(appendix_note_style.paragraph_format.line_spacing, 1.0)
+
+    def test_targeted_table_layouts_use_readable_widths_and_breaks(self) -> None:
+        grids = {
+            number: [int(column.get(qn("w:w"))) for column in self.document.tables[number - 1]._tbl.tblGrid.gridCol_lst]
+            for number in (4, 6, 7)
+        }
+        self.assertEqual(grids[4], [1600, 2700, 3150, 1910])
+        self.assertEqual(grids[6], [1800, 2800, 3000, 1760])
+        self.assertEqual(grids[7], [2300, 2300, 4760])
+        table_text = "\n".join(
+            cell.text for number in (4, 6, 7)
+            for row in self.document.tables[number - 1].rows
+            for cell in row.cells
+        )
+        for fragmented in ("simulato\nr", "AppWorl\nd", "Q\ndrant+Ne\no4j"):
+            self.assertNotIn(fragmented, table_text)
+        self.assertIn("Qwen +\nQdrant +\nNeo4j", table_text)
+        claim_cells = [row.cells[0].text for row in self.document.tables[6].rows[1:]]
+        expected_claim_ids = [
+            claim["claim_id"]
+            for claim in json.loads((ROOT / "configs/paper_claims.json").read_text(encoding="utf-8"))["claims"]
+            if claim.get("status") == "active"
+        ]
+        self.assertEqual([value.replace("\n", "") for value in claim_cells], expected_claim_ids)
+        self.assertTrue(all("\n" in value for value in claim_cells if len(value.replace("\n", "")) > 18))
+        self.assertIn("controlled_\ncorrectness_400x5", claim_cells)
 
     def test_references_are_complete_and_stably_ordered(self) -> None:
         text = "\n".join(p.text for p in self.document.paragraphs)
@@ -336,6 +374,15 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
 
 
 class DocxRasterPortabilityTests(unittest.TestCase):
+    def test_truncated_png_is_never_accepted_as_a_raster_cache_entry(self) -> None:
+        with TemporaryDirectory() as tmp:
+            target = Path(tmp) / "truncated.png"
+            image = Image.new("RGB", (20, 10), "white")
+            buffer = BytesIO()
+            image.save(buffer, format="PNG")
+            target.write_bytes(buffer.getvalue()[:-12])
+            self.assertFalse(_is_expected_raster(target, 20, 10))
+
     def test_render_wrapper_requires_injected_version_independent_runtime_paths(self) -> None:
         script = (ROOT / "scripts/render_docx_with_bundled_libs.sh").read_text(
             encoding="utf-8"

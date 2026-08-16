@@ -337,13 +337,23 @@ def _svg_viewbox_dimensions(svg: Path) -> tuple[float, float]:
 
 
 def _is_expected_raster(path: Path, pixel_width: int, pixel_height: int) -> bool:
-    """Validate cache reuse so old square Quick Look thumbnails cannot re-enter Word."""
+    """Accept only a complete exact-size PNG for cache reuse or browser termination."""
     try:
         from PIL import Image
 
         with Image.open(path) as image:
-            return image.size == (pixel_width, pixel_height)
-    except OSError:
+            if image.format != "PNG" or image.size != (pixel_width, pixel_height):
+                return False
+            image.verify()
+        # ``verify`` checks chunk integrity but intentionally does not decode pixels.
+        # Reopen and load fully so an incomplete screenshot can never satisfy the
+        # cache gate merely by exposing a plausible IHDR.
+        with Image.open(path) as image:
+            if image.format != "PNG" or image.size != (pixel_width, pixel_height):
+                return False
+            image.load()
+        return True
+    except (OSError, ValueError):
         return False
 
 
@@ -535,6 +545,39 @@ def _claim_ledger_rows(root: Path) -> tuple[list[str], list[list[str]]]:
     ]
 
 
+def _reader_identifier(value: str, *, maximum_line_length: int = 18) -> str:
+    """Insert visual-only breaks between identifier components, never inside one."""
+    parts = value.split("_")
+    if len(parts) == 1:
+        return value
+    lines = [parts[0]]
+    for part in parts[1:]:
+        candidate = f"{lines[-1]}_{part}"
+        if len(candidate) > maximum_line_length:
+            lines[-1] += "_"
+            lines.append(part)
+        else:
+            lines[-1] = candidate
+    return "\n".join(lines)
+
+
+def _reader_facing_rows(table_id: str, rows: list[list[str]]) -> list[list[str]]:
+    """Apply only the local presentation adjustments needed for narrow tables."""
+    rendered = [list(row) for row in rows]
+    if table_id == "runtime_results":
+        labels = {
+            "Qwen 原生工具循环": "Qwen 原生\n工具循环",
+            "Qwen+Qdrant+Neo4j": "Qwen +\nQdrant +\nNeo4j",
+        }
+        for row in rendered:
+            row[0] = labels.get(row[0], row[0])
+    elif table_id == "claim_ledger":
+        for row in rendered:
+            row[0] = _reader_identifier(row[0])
+            row[1] = _reader_identifier(row[1])
+    return rendered
+
+
 TABLE_TITLES = {
     "requirements_gap": "设计需求与现有能力的缺口",
     "system_invariants": "TxnMem 的可检查不变量与主要机制",
@@ -554,15 +597,20 @@ def _add_configured_table(doc: Document, table_id: str, markdown: dict[str, tupl
         headers, rows = _claim_ledger_rows(root)
     else:
         headers, rows = markdown[table_id]
+    rows = _reader_facing_rows(table_id, rows)
     _add_table(
         doc,
         TABLE_TITLES[table_id],
         headers,
         rows,
         compact=table_id in {"claim_ledger", "workload_schema"},
-        # Prevent the public IDs from wrapping into several tiny fragments on
-        # the final appendix pages while retaining the required 9360-DXA table.
-        widths=[1440, 1440, 6480] if table_id == "claim_ledger" else None,
+        # These only correct reader-facing wrapping faults in Tables 4, 6, and 7.
+        # Each retains the required fixed 9360-DXA table geometry.
+        widths={
+            "experimental_setup": [1600, 2700, 3150, 1910],
+            "runtime_results": [1800, 2800, 3000, 1760],
+            "claim_ledger": [2300, 2300, 4760],
+        }.get(table_id),
     )
 
 
@@ -655,6 +703,21 @@ def _add_markdown(
             index += 1
             continue
         if in_references or stripped == "匿名稿":
+            index += 1
+            continue
+        if stripped == r"\[":
+            formula_lines: list[str] = []
+            index += 1
+            while index < len(lines) and lines[index].strip() != r"\]":
+                if lines[index].strip():
+                    formula_lines.append(lines[index].strip())
+                index += 1
+            if index == len(lines):
+                raise ValueError("Display-math block is missing its closing delimiter")
+            formula = doc.add_paragraph()
+            formula.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _spacing(formula.paragraph_format, 2, 6, 240)
+            _set_run_font(formula.add_run(_plain(" ".join(formula_lines))), size=10.5)
             index += 1
             continue
         marker = MARKER.match(stripped)
