@@ -920,9 +920,19 @@ class TxnMemRealExperimentTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "missing_model")
 
     def test_manifest_writes_local_raw_trace_and_sanitized_summary(self):
+        sensitive_value = "SENSITIVE_PAYLOAD_DO_NOT_SERIALIZE_7F5C"
         model = _ScriptedModel(
             [
-                ModelResponse("", [ToolCall("c1", "memory_write", {"memory_id": "m1", "value": "private"})]),
+                ModelResponse(
+                    "",
+                    [
+                        ToolCall(
+                            "c1",
+                            "memory_write",
+                            {"memory_id": "m1", "value": sensitive_value},
+                        )
+                    ],
+                ),
                 ModelResponse("done", []),
             ]
         )
@@ -934,9 +944,14 @@ class TxnMemRealExperimentTests(unittest.TestCase):
             )
             raw = (Path(tmp) / "data" / "native_model_traces.jsonl").read_text(encoding="utf-8")
             summary = (Path(tmp) / "results" / "native_model_summary.json").read_text(encoding="utf-8")
+            parsed_summary = json.loads(summary)
         self.assertIn("native_event_count", result)
-        self.assertIn("private", raw)
-        self.assertNotIn("private", summary)
+        self.assertIn(sensitive_value, raw)
+        self.assertNotIn(sensitive_value, summary)
+        self.assertEqual(
+            parsed_summary["raw_trace_path"],
+            str(Path(tmp) / "data" / "native_model_traces.jsonl"),
+        )
         self.assertNotIn("events", result)
 
     def test_benchmark_manifest_can_use_persistent_memory_backend_factory(self):

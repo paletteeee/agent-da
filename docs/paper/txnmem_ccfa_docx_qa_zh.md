@@ -142,7 +142,7 @@ PYTHONPATH=src:scripts <bundled-python> -m unittest tests.test_txnmem_ccfa_docx 
 
 PYTHONPYCACHEPREFIX=<temp-dir>/pycache PYTHONPATH=src:scripts TMPDIR=<temp-dir>/outputs <bundled-python> -m unittest discover -s tests -p 'test*.py'
 # 工作树：Ran 346 tests ... OK (skipped=3)
-# index-derived clean archive：Ran 346 tests ... OK (skipped=4；额外 skip 为无 .git metadata 的 Git-range 集成扫描)
+# index-derived clean archive：Ran 346 tests ... OK (skipped=5；archive 不含 .git metadata，且不打包被忽略的本地 AppWorld 数据)
 ```
 
 尚未执行、且只能在拿到目标会议信息后进行的工作：将内容导入官方 CCF-A/目标会议模板、按模板处理作者/匿名审稿页、版心和 bibliography 样式，以及在最终投稿环境中再次渲染。当前 DOCX 不声称等同于某一尚未提供的 venue 模板。

@@ -51,14 +51,14 @@ New persisted-state behavior fails closed: a result is accepted only after both 
 - Made paper output repo-relative by default and forced tests to use temporary outputs/cache.
 - Injected raster cache, browser executable, bundled runtime, and documents renderer paths.
 - Removed repo-depth and author-layout assumptions.
-- The index-derived clean archive passed all 346 tests with four skips: the same three optional-runtime skips as the worktree plus one explicit no-`.git` skip for the Git-range integration test.
-- The clean archive contained 273 source files; tests left zero output files and a fresh-extraction comparison found no source mutation.
+- The index-derived clean archive passed all 346 tests with five skips: the same three optional-runtime skips as the worktree, one AppWorld-data skip because ignored local benchmark data is not part of the archive, and one explicit no-`.git` skip for the Git-range integration test.
+- The clean archive contained 274 source files; tests left zero output files and a fresh-extraction comparison found no source mutation.
 
 ### Important 5 — diff/package path privacy
 
 - Replaced personal, version-pinned cache, and remote run paths with repo-relative paths or stable placeholders.
 - Expanded `scan_git_range` from publication-only pathspecs to the complete added Git diff.
-- Added macOS user-home, Linux user-home, Windows drive, file-URI, and project run-root regressions.
+- Added macOS user-home, Linux user-home, project run-root, and versioned-cache regressions.
 - Final full-added-diff path scan: 0 findings.
 - Final high-confidence credential scan over all added lines: 0 findings (AWS access key, GitHub token, OpenAI key, PEM private key, and JWT patterns all zero).
 
@@ -115,9 +115,15 @@ Result: `Ran 346 ... OK (skipped=3)`.
 
 Index-derived clean-archive gate used `git write-tree` plus `git archive`, extracted outside the repository, and the same bundled-Python command with archive-local `PYTHONPATH`, pycache, TMPDIR, and outputs.
 
-Result: `Ran 346 ... OK (skipped=4)`. The additional skip is the explicit Git-range integration skip because a source archive has no `.git` metadata. The scanner remains mandatory and passed in the real worktree. The archive contained 274 source files; fresh-extraction comparison found no differences. Archive test outputs: 0 files.
+Result: `Ran 346 ... OK (skipped=5)`. The two archive-only skips are the explicit Git-range integration skip because a source archive has no `.git` metadata and the AppWorld-data skip because ignored local benchmark data is not packaged. The scanner remains mandatory and passed in the real worktree. The archive contained 274 source files; fresh-extraction comparison found no differences. Archive test outputs: 0 files.
 
 No full-suite, archive, audit, build, or render process remained active at handoff. No test/release artifacts remain in the committed worktree.
+
+### User-authorized residual portability wave (2026-08-16)
+
+The scoped re-review exposed one location-sensitive test contract: a raw-payload assertion rejected the substring `private` anywhere in a serialized summary, so a legitimate `/private/tmp/...` `raw_trace_path` caused a false failure. RED reproduced that exact failure. GREEN uses a unique sensitive-payload sentinel and independently checks raw retention, sanitized removal, and trace-path preservation.
+
+Fresh index-derived archives under `/tmp` and `/private/tmp` each contain 274 source files and pass `Ran 346 ... OK (skipped=5)`. For each extraction, the complete file-set SHA-256 computed before and after the test run is identical, proving the gate does not mutate the archive. The documented skips are the three optional-runtime skips from the worktree plus archive-only AppWorld-data and no-`.git` Git-range skips.
 
 ## Evidence, audit, and figure regeneration
 
