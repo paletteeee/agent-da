@@ -114,7 +114,7 @@ backend-only 两事件诊断为 p50 25.748 ms、p95 32.029 ms、p99 42.234 ms、
 
 ## 8. 可复现性与文档 QA
 
-- 工作树全量单元测试：346 tests，3 个 skipped（仅可选 runtime 未安装），0 failures；index-derived clean archive 亦为 346 tests、5 个 skipped（archive 不含 `.git` metadata，无法执行 Git-range 集成扫描；同时不打包被忽略的本地 AppWorld 数据）、0 failures。两者均以 bundled Python、`<temp-dir>` pycache/TMPDIR 和临时输出运行，不写入仓库或交付 DOCX。
+- 工作树全量单元测试：357 tests passed，3 个 optional-runtime skips，0 failures。该命令使用 bundled Python、`<temp-dir>` pycache/TMPDIR 和临时输出，不写入仓库或交付 DOCX。
 - 本地 process concurrency smoke：2 workers、3 operations、线性化序号完整，无未确认 operation。
 - 最终中文 CCF-A 初稿由正式命令直接写入 `<external-output-dir>/TxnMem_CCF-A中文论文初稿.docx`，SHA-256 为 `6673155ad304ab39f59d6455a1c6ff546f6459735f00dacdc31b617819227714`。连续两次正式构建逐字节一致，最终外部交付物与第二次构建相同；工作树中的 `outputs/...` 仅作可重建的临时 QA 副本，验收后删除。该文件对应工作树外精确 render `render_final_v6`：27 页 PNG 与 27 页 PDF；文档含 6 张图、8 张表、32 条已核验参考文献，accessibility audit 为 high=0、medium=0、low=0。
 - artifact audit：0 findings。

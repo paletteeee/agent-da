@@ -356,12 +356,40 @@ class ManuscriptAuditTests(unittest.TestCase):
         old_boundary = (
             "post-fault Qdrant/Neo4j persistent state was not independently verified"
         )
+        forbidden = (
+            "0 partial commit",
+            "partial commit 为 0",
+            "无 partial-commit",
+            "均无 partial commit",
+            "未观察到部分提交",
+            "atomicity proven",
+            "atomicity is proven",
+            "proves atomicity",
+            "原子性已证明",
+            "证明了原子性",
+            "原子性得到证明",
+            "availability proven",
+            "可用性已证明",
+            "证明了可用性",
+            "linearizability proven",
+            "线性一致性已证明",
+            "证明了线性一致性",
+            "cross-host fault tolerance proven",
+            "跨主机容错已证明",
+            "跨主机容错已验证",
+            "production latency proven",
+            "生产延迟已证明",
+            "生产延迟已验证",
+        )
         for path in paths:
             with self.subTest(path=path):
                 text = path.read_text(encoding="utf-8")
                 for phrase in required:
                     self.assertIn(phrase, text)
                 self.assertNotIn(old_boundary, text)
+                for phrase in forbidden:
+                    self.assertNotIn(phrase, text)
+                self.assertNotRegex(text, r"(?<!\d)346(?!\d)")
         boundary = (
             "single-host real Qdrant/Neo4j with deterministic Toxiproxy fault injection "
             "and post-operation readback for the tested workload and five scenarios; "
@@ -372,6 +400,14 @@ class ManuscriptAuditTests(unittest.TestCase):
         for path in paths:
             with self.subTest(path=path, check="claim_boundary"):
                 self.assertIn(boundary, path.read_text(encoding="utf-8"))
+
+        report = (ROOT / "docs/current_experiment_report_zh.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "工作树全量单元测试：357 tests passed，3 个 optional-runtime skips，0 failures。",
+            report,
+        )
 
     def test_reader_projection_strips_delimited_author_annotations(self):
         source = (ROOT / CONFIG["paper_source_path"]).read_text(encoding="utf-8")
