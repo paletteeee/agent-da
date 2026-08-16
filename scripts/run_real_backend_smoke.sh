@@ -48,6 +48,9 @@ fi
 if ! docker compose version >/dev/null 2>&1; then
   write_blocked "docker_compose_unavailable"
 fi
+if ! command -v curl >/dev/null 2>&1; then
+  write_blocked "curl_not_installed"
+fi
 
 docker compose -f "$TXNMEM_COMPOSE_FILE" up -d
 

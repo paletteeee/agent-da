@@ -40,6 +40,14 @@ class RealBackendScriptTests(unittest.TestCase):
         self.assertIn('f["all_observed_states_consistent"]', script)
         self.assertNotIn("all_scenarios_no_partial_commit", script)
 
+    def test_smoke_script_fails_fast_when_curl_is_missing(self):
+        script = (ROOT / "scripts" / "run_real_backend_smoke.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("if ! command -v curl", script)
+        self.assertIn('write_blocked "curl_not_installed"', script)
+
     def test_compose_does_not_publish_direct_qdrant_or_neo4j_data_ports(self):
         compose = (ROOT / "infra" / "real_backend" / "docker-compose.yml").read_text(
             encoding="utf-8"
@@ -49,6 +57,15 @@ class RealBackendScriptTests(unittest.TestCase):
         self.assertNotIn('"7687:7687"', compose)
         self.assertIn('"19000:19000"', compose)
         self.assertIn('"19001:19001"', compose)
+
+    def test_qdrant_healthcheck_uses_tools_present_in_the_pinned_image(self):
+        compose = (ROOT / "infra" / "real_backend" / "docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn('["CMD", "wget"', compose)
+        self.assertIn("/dev/tcp/127.0.0.1/6333", compose)
+        self.assertIn("GET /readyz HTTP/1.0", compose)
 
 
 if __name__ == "__main__":
