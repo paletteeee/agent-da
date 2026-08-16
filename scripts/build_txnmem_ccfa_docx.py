@@ -14,9 +14,11 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 from typing import Callable, Iterable
@@ -136,6 +138,10 @@ def _configure_styles(doc: Document) -> None:
     references.paragraph_format.first_line_indent = Inches(-0.32)
     _spacing(references.paragraph_format, 0, 4, 260)
 
+    appendix_note = doc.styles.add_style("TxnMem Appendix Note", WD_STYLE_TYPE.PARAGRAPH)
+    _set_style_font(appendix_note, size=9.5)
+    _spacing(appendix_note.paragraph_format, 0, 0, 240)
+
 
 def _set_cell_shading(cell, fill: str) -> None:
     tc_pr = cell._tc.get_or_add_tcPr()
@@ -220,7 +226,7 @@ def _column_widths(headers: list[str], rows: list[list[str]]) -> list[int]:
 
 
 def _add_table(doc: Document, title: str, headers: list[str], rows: list[list[str]], *,
-               compact: bool = False) -> None:
+               compact: bool = False, widths: list[int] | None = None) -> None:
     caption = doc.add_paragraph(style="Caption")
     caption_run = caption.add_run(
         f"表 {len([p for p in doc.paragraphs if p.style.name == 'Caption' and p.text.startswith('表')]) + 1}  {title}"
@@ -250,7 +256,7 @@ def _add_table(doc: Document, title: str, headers: list[str], rows: list[list[st
                 paragraph.paragraph_format.line_spacing = 1.0
             for run in paragraph.runs:
                 _set_run_font(run, size=9.0 if compact else 9.25)
-    _set_table_geometry(table, _column_widths(headers, rows), compact=compact)
+    _set_table_geometry(table, widths or _column_widths(headers, rows), compact=compact)
 
 
 def _add_page_field(paragraph) -> None:
@@ -390,6 +396,7 @@ def _rasterize_svg(
     profile = destination / "browser-profile"
     profile.mkdir(parents=True, exist_ok=True)
     completed = None
+    process = None
     with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as error_log:
         command = [
             str(browser), "--headless=new", "--disable-gpu", "--hide-scrollbars",
@@ -399,21 +406,52 @@ def _rasterize_svg(
             f"--window-size={round(svg_width)},{round(svg_height)}",
             f"--screenshot={target}", svg.resolve().as_uri(),
         ]
-        try:
-            completed = subprocess.run(
-                command,
-                text=True, stdout=subprocess.DEVNULL, stderr=error_log,
-                check=False, timeout=10,
-            )
-        except subprocess.TimeoutExpired:
-            # Current Chrome builds can leave the headless parent alive after
-            # writing the screenshot. subprocess.run kills and reaps that
-            # process on timeout; only a complete exact-size PNG is accepted.
-            pass
+        process = subprocess.Popen(
+            command,
+            text=True, stdout=subprocess.DEVNULL, stderr=error_log,
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if _is_expected_raster(target, pixel_width, pixel_height):
+                # Some macOS Chrome builds keep the headless parent and its
+                # helpers alive after the screenshot has been written. End
+                # our isolated process group promptly rather than waiting
+                # for the full timeout once the exact output is available.
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=2)
+                return target, ratio
+            completed = process.poll()
+            if completed is not None:
+                break
+            time.sleep(0.05)
+        if completed is None:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                completed = process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                completed = process.wait(timeout=2)
         error_log.seek(0)
         stderr = error_log.read().strip()
     if (
-        (completed is not None and completed.returncode != 0)
+        (completed is not None and completed != 0)
         or not _is_expected_raster(target, pixel_width, pixel_height)
     ):
         raise RuntimeError(
@@ -522,6 +560,9 @@ def _add_configured_table(doc: Document, table_id: str, markdown: dict[str, tupl
         headers,
         rows,
         compact=table_id in {"claim_ledger", "workload_schema"},
+        # Prevent the public IDs from wrapping into several tiny fragments on
+        # the final appendix pages while retaining the required 9360-DXA table.
+        widths=[1440, 1440, 6480] if table_id == "claim_ledger" else None,
     )
 
 
@@ -581,6 +622,7 @@ def _add_markdown(
     configured_tables = set(config["body_table_ids"] + config["appendix_table_ids"])
     index = 0
     in_references = False
+    appendix_note_next = False
     last_heading_level = 0
     while index < len(lines):
         raw = lines[index]
@@ -635,6 +677,8 @@ def _add_markdown(
                 index += 1
             if kind == "TABLE" and index < len(lines) and lines[index].lstrip().startswith("|"):
                 _, _, index = _parse_table(lines, index)
+            if kind == "TABLE" and marker_id == "workload_schema":
+                appendix_note_next = True
             continue
         if stripped.startswith("图："):
             index += 1
@@ -651,7 +695,11 @@ def _add_markdown(
             index += 1
             continue
         if stripped:
-            doc.add_paragraph(_plain(stripped))
+            doc.add_paragraph(
+                _plain(stripped),
+                style="TxnMem Appendix Note" if appendix_note_next else None,
+            )
+            appendix_note_next = False
         index += 1
 
 

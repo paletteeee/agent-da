@@ -295,6 +295,17 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
             for row in appendix_table.rows[1:]:
                 for cell in row.cells:
                     self.assertEqual(cell.paragraphs[0].paragraph_format.line_spacing, 1.0)
+        claim_ledger_grid = self.document.tables[-2]._tbl.tblGrid.gridCol_lst
+        self.assertEqual(
+            [int(column.get(qn("w:w"))) for column in claim_ledger_grid],
+            [1440, 1440, 6480],
+        )
+        appendix_note = self.document.paragraphs[-1]
+        self.assertEqual(appendix_note.style.name, "TxnMem Appendix Note")
+        appendix_note_style = appendix_note.style
+        self.assertEqual(appendix_note_style.font.size.pt, 9.5)
+        self.assertEqual(appendix_note_style.paragraph_format.space_after.pt, 0)
+        self.assertAlmostEqual(appendix_note_style.paragraph_format.line_spacing, 1.0)
 
     def test_references_are_complete_and_stably_ordered(self) -> None:
         text = "\n".join(p.text for p in self.document.paragraphs)
@@ -347,7 +358,16 @@ class DocxRasterPortabilityTests(unittest.TestCase):
             cache = temp / "cache"
             observed: dict[str, object] = {}
 
-            def fake_run(command, **kwargs):
+            class FakeProcess:
+                pid = 1234
+
+                def poll(self):
+                    return None
+
+                def wait(self, timeout=None):
+                    return 0
+
+            def fake_popen(command, **kwargs):
                 observed["command"] = command
                 observed["kwargs"] = kwargs
                 screenshot = next(
@@ -357,9 +377,11 @@ class DocxRasterPortabilityTests(unittest.TestCase):
                 )
                 screenshot.parent.mkdir(parents=True, exist_ok=True)
                 Image.new("RGB", (20, 10), "white").save(screenshot)
-                return subprocess.CompletedProcess(command, 0, "", "")
+                return FakeProcess()
 
-            with patch("build_txnmem_ccfa_docx.subprocess.run", side_effect=fake_run):
+            with patch("build_txnmem_ccfa_docx.subprocess.Popen", side_effect=fake_popen), patch(
+                "build_txnmem_ccfa_docx.os.killpg"
+            ):
                 raster, ratio = _rasterize_svg(
                     svg, cache, browser_executable=browser
                 )
@@ -369,6 +391,7 @@ class DocxRasterPortabilityTests(unittest.TestCase):
         self.assertIn("--headless=new", observed["command"])
         self.assertEqual(observed["kwargs"]["stdout"], subprocess.DEVNULL)
         self.assertNotEqual(observed["kwargs"]["stderr"], subprocess.PIPE)
+        self.assertTrue(observed["kwargs"]["start_new_session"])
 
     def test_browser_timeout_accepts_only_a_complete_exact_raster(self) -> None:
         with TemporaryDirectory() as tmp:
@@ -381,7 +404,16 @@ class DocxRasterPortabilityTests(unittest.TestCase):
             browser = temp / "browser"
             browser.write_text("fixture", encoding="utf-8")
 
-            def timed_out_after_screenshot(command, **kwargs):
+            class ReadyProcess:
+                pid = 1234
+
+                def poll(self):
+                    return None
+
+                def wait(self, timeout=None):
+                    return 0
+
+            def ready_after_screenshot(command, **kwargs):
                 screenshot = next(
                     Path(item.split("=", 1)[1])
                     for item in command
@@ -389,11 +421,10 @@ class DocxRasterPortabilityTests(unittest.TestCase):
                 )
                 screenshot.parent.mkdir(parents=True, exist_ok=True)
                 Image.new("RGB", (20, 10), "white").save(screenshot)
-                raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+                return ReadyProcess()
 
-            with patch(
-                "build_txnmem_ccfa_docx.subprocess.run",
-                side_effect=timed_out_after_screenshot,
+            with patch("build_txnmem_ccfa_docx.subprocess.Popen", side_effect=ready_after_screenshot), patch(
+                "build_txnmem_ccfa_docx.os.killpg"
             ):
                 raster, ratio = _rasterize_svg(
                     svg, temp / "complete", browser_executable=browser
@@ -401,17 +432,66 @@ class DocxRasterPortabilityTests(unittest.TestCase):
             self.assertTrue(raster.is_file())
             self.assertEqual(ratio, 0.5)
 
-            def timed_out_without_screenshot(command, **kwargs):
-                raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+            class FailedProcess:
+                pid = 5678
 
-            with patch(
-                "build_txnmem_ccfa_docx.subprocess.run",
-                side_effect=timed_out_without_screenshot,
-            ):
+                def poll(self):
+                    return 1
+
+                def wait(self, timeout=None):
+                    return 1
+
+            with patch("build_txnmem_ccfa_docx.subprocess.Popen", return_value=FailedProcess()):
                 with self.assertRaises(RuntimeError):
                     _rasterize_svg(
                         svg, temp / "missing", browser_executable=browser
                     )
+
+    def test_rasterizer_stops_an_isolated_browser_after_exact_raster_is_ready(self) -> None:
+        """A headless browser that leaves children alive must not cost 10 s per figure."""
+        with TemporaryDirectory() as tmp:
+            temp = Path(tmp)
+            svg = temp / "figure.svg"
+            svg.write_text(
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 5"></svg>',
+                encoding="utf-8",
+            )
+            browser = temp / "browser"
+            browser.write_text("fixture", encoding="utf-8")
+            observed: dict[str, object] = {}
+
+            class FakeProcess:
+                pid = 4321
+
+                def poll(self):
+                    return None
+
+                def wait(self, timeout=None):
+                    observed["wait_timeout"] = timeout
+                    return 0
+
+            def fake_popen(command, **kwargs):
+                observed["command"] = command
+                observed["kwargs"] = kwargs
+                screenshot = next(
+                    Path(item.split("=", 1)[1])
+                    for item in command
+                    if item.startswith("--screenshot=")
+                )
+                screenshot.parent.mkdir(parents=True, exist_ok=True)
+                Image.new("RGB", (20, 10), "white").save(screenshot)
+                return FakeProcess()
+
+            with patch("build_txnmem_ccfa_docx.subprocess.Popen", side_effect=fake_popen), patch(
+                "build_txnmem_ccfa_docx.os.killpg"
+            ) as killpg:
+                raster, ratio = _rasterize_svg(
+                    svg, temp / "cache", browser_executable=browser
+                )
+                self.assertTrue(raster.is_file())
+                self.assertEqual(ratio, 0.5)
+                self.assertTrue(observed["kwargs"]["start_new_session"])
+                killpg.assert_called_once()
 
 
 if __name__ == "__main__":
