@@ -14,7 +14,7 @@
 - Preserve the raw source bytes at `results/real_backend_faults_state_verified_30_v2/results/backend_performance.json`; do not normalize or rewrite them.
 - Track the raw JSON result but exclude transient `pid` and `run.log` files from formal evidence and commits.
 - Treat `33a334dc7c4e6d2e0250bb54cd25f0e2f080ed5d` as the experiment source commit and verify it is present in the local repository.
-- Never store a password, SSH invocation containing a password, full hostname, IP address, user name, or secret-bearing environment variable in an artifact.
+- Never store a password, SSH invocation containing a password, full hostname, routable IP address, user name, or secret-bearing environment variable in an artifact. The immutable raw result may retain `127.0.0.1` loopback endpoints because they describe only the tested local proxy path and cannot identify the remote host; run commands and attestations receive no such exception.
 - Keep the claim boundary narrow: single-host real Qdrant/Neo4j, deterministic Toxiproxy injection, and post-operation readback for the tested workload/scenarios only. Do not claim general distributed transactions, cross-host fault tolerance, availability, linearizability, or production latency.
 - Follow red-green-refactor for all Python behavior changes and run focused tests before each commit.
 - Before any completion claim, run the full test suite, clean archive verification, claim/manuscript audits, DOCX structure/privacy/accessibility checks, and page-by-page PNG visual inspection.
@@ -449,7 +449,7 @@ python3 -m unittest discover -s tests
 - [ ] Recompute hashes for raw result, environment attestation, manifest, aggregate, claim ledger, claim audit, manuscript source, and final DOCX.
 - [ ] Verify every active claim artifact exists and matches its ledger hash.
 - [ ] Verify no active claim or paper config points to any artifact listed in the supersession index.
-- [ ] Verify no password, token, IP address, SSH command, user name, or unhashed host identity occurs in newly tracked artifacts.
+- [ ] Verify no password, token, routable IP address, SSH command, user name, or unhashed host identity occurs in newly tracked artifacts; permit `127.0.0.1` only inside the immutable raw result's local proxy-path fields.
 
 ### Step 3: Verify repository state
 
