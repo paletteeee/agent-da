@@ -631,13 +631,30 @@ def _collect_markdown_tables(lines: list[str]) -> dict[str, tuple[list[str], lis
     return found
 
 
+def _reader_safe_url_chunks(url: str) -> list[str]:
+    """Keep scheme+host visible and expose meaningful path wrap boundaries."""
+    scheme, separator, remainder = url.partition("://")
+    host, path_separator, path = remainder.partition("/")
+    if not separator or not host or not path_separator:
+        return [url]
+    chunks = [f"{scheme}://{host}/"]
+    path_parts = path.split("/")
+    chunks.extend(
+        f"{part}/" if index < len(path_parts) - 1 else part
+        for index, part in enumerate(path_parts)
+    )
+    return chunks
+
+
 def _add_references(doc: Document, catalog: dict) -> None:
     for item in sorted(catalog["references"], key=lambda entry: entry["id"]):
         p = doc.add_paragraph(style="TxnMem Reference")
         p.add_run(
             f"[{item['id']}] " + "; ".join(item["authors"]) + ". "
-            f"{item['title']}. {item['venue']}, {item['year']}. {item['url']}"
+            f"{item['title']}. {item['venue']}, {item['year']}. "
         )
+        for chunk in _reader_safe_url_chunks(item["url"]):
+            p.add_run(chunk)
 
 
 def _append_title_block(doc: Document) -> None:

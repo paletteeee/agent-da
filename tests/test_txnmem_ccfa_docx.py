@@ -356,6 +356,44 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
         actual = [p.text for p in self.document.paragraphs if p.text.startswith("[R")]
         self.assertEqual(actual, expected)
 
+    def test_long_reference_urls_have_reader_safe_protocol_and_path_runs(self) -> None:
+        expected = {
+            "[R27]": (
+                "https://www.usenix.org/conference/osdi14/technical-sessions/presentation/yuan",
+                [
+                    "https://www.usenix.org/",
+                    "conference/",
+                    "osdi14/",
+                    "technical-sessions/",
+                    "presentation/",
+                    "yuan",
+                ],
+            ),
+            "[R28]": (
+                "https://www.usenix.org/conference/osdi14/technical-sessions/presentation/zheng_mai",
+                [
+                    "https://www.usenix.org/",
+                    "conference/",
+                    "osdi14/",
+                    "technical-sessions/",
+                    "presentation/",
+                    "zheng_mai",
+                ],
+            ),
+        }
+        for reference_id, (url, expected_url_runs) in expected.items():
+            paragraph = next(
+                item for item in self.document.paragraphs
+                if item.text.startswith(reference_id)
+            )
+            self.assertTrue(paragraph.text.endswith(url))
+            self.assertEqual(
+                [run.text for run in paragraph.runs[1:]],
+                expected_url_runs,
+            )
+            self.assertEqual("".join(run.text for run in paragraph.runs[1:]), url)
+            self.assertEqual(paragraph.runs[1].text, "https://www.usenix.org/")
+
     def test_page_field_and_anonymous_metadata_are_present(self) -> None:
         footer_xml = b"".join(content for name, content in self.parts.items() if name.startswith("word/footer"))
         self.assertIn(b"PAGE", footer_xml)
