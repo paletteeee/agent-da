@@ -101,6 +101,103 @@ class SubmissionEvidenceAggregateTests(unittest.TestCase):
                         runtime_attestation=attestation,
                     )
 
+    def test_toxiproxy_aggregate_rejects_contradictory_raw_proxy_evidence(self):
+        cases = {
+            "unverified target route": lambda source: source["fault_matrix"]["scenarios"]["delay"]
+            ["repetition_evidence"][0]["proxy_routes"]["qdrant"].__setitem__("verified", False),
+            "mismatched target upstream": lambda source: source["fault_matrix"]["scenarios"]["delay"]
+            ["repetition_evidence"][0]["proxy_routes"]["qdrant"].__setitem__("upstream", "wrong:6333"),
+            "wrong trigger ordinal": lambda source: source["fault_matrix"]["scenarios"]["delay"]
+            ["repetition_evidence"][0]["events"][0].__setitem__("request_ordinal", 2),
+            "truthy trigger flag": lambda source: source["fault_matrix"]["scenarios"]["delay"]
+            ["repetition_evidence"][0].__setitem__("trigger_fired", 1),
+            "contradictory event fault flag": lambda source: source["fault_matrix"]["scenarios"]["delay"]
+            ["repetition_evidence"][0]["events"][0].__setitem__("fault_observed", False),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(name=name), TemporaryDirectory() as tmp:
+                source = self._state_verified_toxiproxy_source()
+                mutate(source)
+                path = self._write(Path(tmp), "toxiproxy.json", source)
+                with self.assertRaises(ValueError):
+                    aggregate_toxiproxy_submission_evidence(
+                        path, expected_repetitions=2, toxiproxy_version="2.5.0",
+                        source_commit=SOURCE_COMMIT,
+                        run_command="python txnmem_experiment.py backend-performance",
+                        runtime_attestation=self._runtime_attestation(path),
+                    )
+
+    def test_toxiproxy_aggregate_reconciles_every_summary_counter(self):
+        cases = {
+            "success_count": ("normal", "success_count"),
+            "error_count": ("timeout", "error_count"),
+            "abort_count": ("timeout", "abort_count"),
+            "retry_count": ("retry_success", "retry_count"),
+            "retry_success_count": ("retry_success", "retry_success_count"),
+            "fault_evidence_count": ("normal", "fault_evidence_count"),
+            "trigger_fired_count": ("delay", "trigger_fired_count"),
+            "toxic_installed_count": ("delay", "toxic_installed_count"),
+            "toxic_cleared_count": ("delay", "toxic_cleared_count"),
+            "proxy_path_verified_count": ("normal", "proxy_path_verified_count"),
+            "fault_observed_count": ("delay", "fault_observed_count"),
+            "evidence_valid_count": ("normal", "evidence_valid_count"),
+        }
+        for name, (scenario, field) in cases.items():
+            with self.subTest(name=name), TemporaryDirectory() as tmp:
+                source = self._state_verified_toxiproxy_source()
+                source["fault_matrix"]["scenarios"][scenario][field] -= 1
+                path = self._write(Path(tmp), "toxiproxy.json", source)
+                with self.assertRaises(ValueError):
+                    aggregate_toxiproxy_submission_evidence(
+                        path, expected_repetitions=2, toxiproxy_version="2.5.0",
+                        source_commit=SOURCE_COMMIT,
+                        run_command="python txnmem_experiment.py backend-performance",
+                        runtime_attestation=self._runtime_attestation(path),
+                    )
+
+    def test_toxiproxy_aggregate_rejects_extra_state_classifications(self):
+        with TemporaryDirectory() as tmp:
+            source = self._state_verified_toxiproxy_source()
+            source["fault_matrix"]["scenarios"]["normal"][
+                "persistent_state_classification_counts"
+            ]["unrecognized"] = 0
+            path = self._write(Path(tmp), "toxiproxy.json", source)
+            with self.assertRaises(ValueError):
+                aggregate_toxiproxy_submission_evidence(
+                    path, expected_repetitions=2, toxiproxy_version="2.5.0",
+                    source_commit=SOURCE_COMMIT,
+                    run_command="python txnmem_experiment.py backend-performance",
+                    runtime_attestation=self._runtime_attestation(path),
+                )
+
+    def test_toxiproxy_aggregate_rejects_private_run_commands_and_output_paths(self):
+        unsafe_commands = (
+            "python " + str(Path.home() / "private" / "runner.py"),
+            "curl http://" + ".".join(("192", "0", "2", "1")) + "/run",
+            "ssh " + "audit" + "@" + "host" + " python runner.py",
+            "python " + "runner" + "." + "internal",
+            "curl https://" + "name" + ":" + "value" + "@" + "site" + ".test/run",
+        )
+        for command in unsafe_commands:
+            with self.subTest(command_type=command.split()[0]), TemporaryDirectory() as tmp:
+                path = self._write(Path(tmp), "toxiproxy.json", self._state_verified_toxiproxy_source())
+                with self.assertRaises(ValueError):
+                    aggregate_toxiproxy_submission_evidence(
+                        path, expected_repetitions=2, toxiproxy_version="2.5.0",
+                        source_commit=SOURCE_COMMIT, run_command=command,
+                        runtime_attestation=self._runtime_attestation(path, run_command=command),
+                    )
+        with TemporaryDirectory() as tmp:
+            path = self._write(Path(tmp), "toxiproxy.json", self._state_verified_toxiproxy_source())
+            result = aggregate_toxiproxy_submission_evidence(
+                path, expected_repetitions=2, toxiproxy_version="2.5.0",
+                source_commit=SOURCE_COMMIT,
+                run_command="python txnmem_experiment.py backend-performance",
+                runtime_attestation=self._runtime_attestation(path),
+            )
+        self.assertEqual(result["source_artifact"]["basename"], path.name)
+        self.assertFalse(str(Path.home()) in json.dumps(result, sort_keys=True))
+
     def test_toxiproxy_cli_requires_runtime_attestation(self):
         command = [
             sys.executable,
@@ -121,12 +218,20 @@ class SubmissionEvidenceAggregateTests(unittest.TestCase):
         self.assertIn("--runtime-attestation", result.stderr)
 
     def _state_verified_toxiproxy_source(self, repetitions: int = 2) -> dict:
+        scenario_specs = {
+            "normal": ("none", "none", "none"),
+            "delay": ("qdrant", "write", "delay"),
+            "timeout": ("qdrant", "write", "timeout"),
+            "connection_drop": ("neo4j", "commit", "connection_drop"),
+            "retry_success": ("qdrant", "write", "connection_drop"),
+        }
         scenarios = {}
         for name in ("normal", "delay", "timeout", "connection_drop", "retry_success"):
             non_normal = name != "normal"
             retry = name == "retry_success"
             abort = name in {"timeout", "connection_drop"}
             expected_state = "absent" if abort else "complete"
+            service, operation, action = scenario_specs[name]
             verification = {
                 "classification": expected_state,
                 "items": [
@@ -145,6 +250,32 @@ class SubmissionEvidenceAggregateTests(unittest.TestCase):
                     "toxic_cleared": non_normal, "proxy_path_verified": True,
                     "fault_observed": non_normal, "evidence_valid": True,
                     "retry_count": int(retry), "retry_success_count": int(retry),
+                    "scenario": name,
+                    "request_ordinals": {
+                        "qdrant:write": 2 if retry else 1,
+                        "neo4j:commit": 1,
+                    },
+                    "proxy_routes": {
+                        route_service: {
+                            "service": route_service,
+                            "proxy_name": f"txnmem-{route_service}",
+                            "client_endpoint": f"proxy://{route_service}:1900{int(route_service == 'neo4j')}",
+                            "listen": f":1900{int(route_service == 'neo4j')}",
+                            "upstream": f"{route_service}:{'6333' if route_service == 'qdrant' else '7687'}",
+                            "verified": True,
+                        }
+                        for route_service in ("qdrant", "neo4j")
+                    },
+                    "events": [] if not non_normal else [{
+                        "scenario": name, "service": service, "operation": operation,
+                        "request_ordinal": 1, "action": action,
+                        "recovery_action": "retry_once" if retry else ("abort" if abort else "continue"),
+                        "proxy_name": f"txnmem-{service}",
+                        "toxic_installed": True, "toxic_cleared": True,
+                        "proxy_path_verified": True, "fault_observed": True,
+                        **({"retry_success": True} if retry else {}),
+                        **({"observed_exception": "Fault"} if abort or retry else {}),
+                    }],
                 }
                 for _ in range(repetitions)
             ]
@@ -161,6 +292,11 @@ class SubmissionEvidenceAggregateTests(unittest.TestCase):
                     "complete": repetitions * int(expected_state == "complete"),
                     "absent": repetitions * int(expected_state == "absent"), "partial": 0, "unknown": 0,
                 },
+                "name": name, "service": service, "trigger_operation": operation,
+                "trigger_ordinal": 1, "action": action,
+                "recovery_action": "none" if not non_normal else (
+                    "retry_once" if retry else ("abort" if abort else "continue")
+                ),
             }
         return {
             "backend": "vector-graph",
@@ -173,12 +309,14 @@ class SubmissionEvidenceAggregateTests(unittest.TestCase):
             "production_latency_claim": False,
         }
 
-    def _runtime_attestation(self, source_path: Path) -> dict:
+    def _runtime_attestation(
+        self, source_path: Path, *, run_command: str = "python txnmem_experiment.py backend-performance"
+    ) -> dict:
         return {
             "schema_version": 1, "captured_at": "2026-08-16T00:00:00Z",
             "execution_scope": "single_host_real_services", "source_commit": SOURCE_COMMIT,
             "source_artifact_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
-            "exit_code": 0, "run_command": "python txnmem_experiment.py backend-performance",
+            "exit_code": 0, "run_command": run_command,
             "runtime": {"python": "3.12.0", "docker": "29.1.3", "compose": "2.40.3", "kernel": "test-kernel"},
             "services": {
                 "qdrant": {"version": "1.11.5", "tag": "qdrant/qdrant:v1.11.5", "image_digest": "1" * 64, "pull_source": "registry/qdrant"},

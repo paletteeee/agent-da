@@ -15,6 +15,22 @@ from typing import Any
 
 _HEX = re.compile(r"^[0-9a-f]+$")
 _SECRET_TEXT = re.compile(r"password|api[_-]?key|access[_-]?token|secret", re.I)
+_ABSOLUTE_PATH = re.compile(r"(?:^|[\s=])/")
+_IP_LITERAL = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_HOSTNAME_TOKEN = re.compile(r"(?:^|\s)[a-z0-9-]+(?:\.[a-z0-9-]+)+(?=\s|$)", re.I)
+_SAFE_BASENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_STATE_CLASSIFICATIONS = ("complete", "absent", "partial", "unknown")
+_TOXIPROXY_SCENARIOS = {
+    "normal": ("none", "none", "none", "none"),
+    "delay": ("qdrant", "write", "delay", "continue"),
+    "timeout": ("qdrant", "write", "timeout", "abort"),
+    "connection_drop": ("neo4j", "commit", "connection_drop", "abort"),
+    "retry_success": ("qdrant", "write", "connection_drop", "retry_once"),
+}
+_TOXIPROXY_ROUTES = {
+    "qdrant": ("txnmem-qdrant", "qdrant:6333"),
+    "neo4j": ("txnmem-neo4j", "neo4j:7687"),
+}
 
 
 def _load(path: str | Path) -> tuple[Path, dict[str, Any]]:
@@ -306,9 +322,7 @@ def aggregate_toxiproxy_submission_evidence(
     if expected_repetitions <= 0:
         raise ValueError("expected_repetitions must be positive")
     commit = _hex_digest(source_commit, "source_commit", {40, 64})
-    command = str(run_command or "").strip()
-    if not command or _SECRET_TEXT.search(command):
-        raise ValueError("run_command is missing or contains a secret-bearing token")
+    command = _safe_run_command(run_command)
     version = str(toxiproxy_version or "").strip()
     if not version:
         raise ValueError("toxiproxy_version must be specified")
@@ -348,7 +362,7 @@ def aggregate_toxiproxy_submission_evidence(
     if matrix.get("all_observed_states_consistent") is not True:
         raise ValueError("Toxiproxy matrix does not attest consistent observed state")
     raw_scenarios = matrix.get("scenarios")
-    expected_names = {"normal", "delay", "timeout", "connection_drop", "retry_success"}
+    expected_names = set(_TOXIPROXY_SCENARIOS)
     if not isinstance(raw_scenarios, Mapping) or set(raw_scenarios) != expected_names:
         raise ValueError("Toxiproxy matrix must contain the five fixed scenarios")
     workload_events = _toxiproxy_workload_events(payload)
@@ -360,102 +374,24 @@ def aggregate_toxiproxy_submission_evidence(
         if not isinstance(row, Mapping) or row.get("repetitions") != expected_repetitions:
             raise ValueError(f"Toxiproxy scenario repetition mismatch: {name}")
         repetitions = expected_repetitions
-        if row.get("evidence_valid") is not True:
-            raise ValueError(f"Toxiproxy scenario lacks valid evidence: {name}")
-        for field in (
-            "fault_evidence_count",
-            "proxy_path_verified_count",
-            "evidence_valid_count",
-        ):
-            if row.get(field) != repetitions:
-                raise ValueError(f"Toxiproxy scenario evidence count mismatch: {name}/{field}")
-        non_normal = name != "normal"
-        for field in (
-            "trigger_fired_count",
-            "toxic_installed_count",
-            "toxic_cleared_count",
-            "fault_observed_count",
-        ):
-            expected = repetitions if non_normal else 0
-            if row.get(field) != expected:
-                raise ValueError(f"Toxiproxy trigger count mismatch: {name}/{field}")
-        evidence_rows = row.get("repetition_evidence")
-        if not isinstance(evidence_rows, list) or len(evidence_rows) != repetitions:
-            raise ValueError(f"Toxiproxy repetition evidence missing: {name}")
-        if any(
-            not isinstance(evidence, Mapping)
-            or evidence.get("evidence_valid") is not True
-            for evidence in evidence_rows
-        ):
-            raise ValueError(f"Toxiproxy invalid repetition evidence: {name}")
-
-        def required_count(field: str) -> int:
-            value = row.get(field)
-            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise ValueError(f"Toxiproxy response count missing: {name}/{field}")
-            return value
-
-        success_count = required_count("success_count")
-        error_count = required_count("error_count")
-        abort_count = required_count("abort_count")
-        retry_count = required_count("retry_count")
-        retry_success_count = required_count("retry_success_count")
-        if name in {"timeout", "connection_drop"}:
-            if success_count != 0 or abort_count != repetitions:
-                raise ValueError(f"Toxiproxy abort semantics mismatch: {name}")
-        elif name == "retry_success":
-            if success_count != repetitions or retry_count != repetitions or retry_success_count != repetitions:
-                raise ValueError("Toxiproxy retry-success semantics mismatch")
-        elif success_count != repetitions or abort_count != 0:
-            raise ValueError(f"Toxiproxy success semantics mismatch: {name}")
-
-        expected_evidence_counts = {
-            "fault_evidence_count": repetitions,
-            "proxy_path_verified_count": repetitions,
-            "evidence_valid_count": repetitions,
-            "trigger_fired_count": repetitions if non_normal else 0,
-            "toxic_installed_count": repetitions if non_normal else 0,
-            "toxic_cleared_count": repetitions if non_normal else 0,
-            "fault_observed_count": repetitions if non_normal else 0,
-            "retry_count": repetitions if name == "retry_success" else 0,
-            "retry_success_count": repetitions if name == "retry_success" else 0,
-        }
-        for field, expected in expected_evidence_counts.items():
-            if field in {"fault_evidence_count", "retry_count", "retry_success_count"}:
-                continue
-            observed = sum(bool(evidence.get(field.removesuffix("_count"))) for evidence in evidence_rows)
-            if observed != expected:
-                raise ValueError(f"Toxiproxy repetition evidence mismatch: {name}/{field}")
-        for field in ("retry_count", "retry_success_count"):
-            observed = sum(_nonnegative_int(evidence.get(field, 0), f"{name}/{field}") for evidence in evidence_rows)
-            if observed != expected_evidence_counts[field]:
-                raise ValueError(f"Toxiproxy repetition evidence mismatch: {name}/{field}")
+        observed_counts = _recompute_toxiproxy_fault_counts(name, row, repetitions)
 
         scenario_states = _recompute_toxiproxy_states(
             name, row, repetitions=repetitions, workload_events=workload_events
         )
         declared_state_counts = row.get("persistent_state_classification_counts")
-        if not isinstance(declared_state_counts, Mapping):
+        if not isinstance(declared_state_counts, Mapping) or set(declared_state_counts) != set(
+            _STATE_CLASSIFICATIONS
+        ):
             raise ValueError(f"Toxiproxy state counts are missing: {name}")
         for field, expected in scenario_states.items():
-            if declared_state_counts.get(field) != expected:
+            if _nonnegative_int(declared_state_counts.get(field), f"{name}/{field}") != expected:
                 raise ValueError(f"Toxiproxy state count mismatch: {name}/{field}")
         state_totals.update(scenario_states)
 
         scenarios[name] = {
             "repetitions": repetitions,
-            "success_count": success_count,
-            "error_count": error_count,
-            "abort_count": abort_count,
-            "retry_count": retry_count,
-            "retry_success_count": retry_success_count,
-            "trigger_fired_count": int(row.get("trigger_fired_count", 0) or 0),
-            "toxic_installed_count": int(row.get("toxic_installed_count", 0) or 0),
-            "proxy_path_verified_count": int(
-                row.get("proxy_path_verified_count", 0) or 0
-            ),
-            "toxic_cleared_count": int(row.get("toxic_cleared_count", 0) or 0),
-            "fault_observed_count": int(row.get("fault_observed_count", 0) or 0),
+            **observed_counts,
             "state_counts": scenario_states,
         }
 
@@ -484,7 +420,7 @@ def aggregate_toxiproxy_submission_evidence(
             },
             "host_identity_sha256": attestation["host_identity_sha256"],
         },
-        "source_artifact": {"path": str(source), "sha256": _sha256(source)},
+        "source_artifact": {"basename": _safe_source_basename(source), "sha256": _sha256(source)},
         "claim_boundary": (
             "single-host real Qdrant/Neo4j with deterministic Toxiproxy fault injection and "
             "post-operation readback for the tested workload and five scenarios; not general "
@@ -499,6 +435,191 @@ def _nonnegative_int(value: Any, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{field} must be a non-negative integer")
     return value
+
+
+def _strict_bool(value: Any, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field} must be a boolean")
+    return value
+
+
+def _safe_run_command(value: Any) -> str:
+    command = str(value or "").strip()
+    if (
+        not command
+        or _SECRET_TEXT.search(command)
+        or _ABSOLUTE_PATH.search(command)
+        or _IP_LITERAL.search(command)
+        or _HOSTNAME_TOKEN.search(command)
+        or "://" in command
+        or "@" in command
+        or re.search(r"\b(?:ssh|scp|rsync)\b", command, re.I)
+    ):
+        raise ValueError("run_command is missing or contains private or secret-bearing text")
+    return command
+
+
+def _safe_source_basename(source: Path) -> str:
+    basename = source.name
+    if not _SAFE_BASENAME.fullmatch(basename):
+        raise ValueError("source artifact basename is unsafe")
+    return basename
+
+
+def _recompute_toxiproxy_fault_counts(
+    scenario: str, row: Mapping[str, Any], repetitions: int
+) -> dict[str, int]:
+    service, operation, action, recovery_action = _TOXIPROXY_SCENARIOS[scenario]
+    expected_metadata = {
+        "name": scenario,
+        "service": service,
+        "trigger_operation": operation,
+        "action": action,
+        "recovery_action": recovery_action,
+    }
+    for field, expected in expected_metadata.items():
+        if row.get(field) != expected:
+            raise ValueError(f"Toxiproxy scenario metadata mismatch: {scenario}/{field}")
+    if _nonnegative_int(row.get("trigger_ordinal"), f"{scenario}/trigger_ordinal") != 1:
+        raise ValueError(f"Toxiproxy scenario trigger ordinal mismatch: {scenario}")
+    if _strict_bool(row.get("evidence_valid"), f"{scenario}/evidence_valid") is not True:
+        raise ValueError(f"Toxiproxy scenario lacks valid evidence: {scenario}")
+    evidence_rows = row.get("repetition_evidence")
+    if not isinstance(evidence_rows, list) or len(evidence_rows) != repetitions:
+        raise ValueError(f"Toxiproxy repetition evidence missing: {scenario}")
+
+    fields = (
+        "success_count",
+        "error_count",
+        "abort_count",
+        "retry_count",
+        "retry_success_count",
+        "fault_evidence_count",
+        "trigger_fired_count",
+        "toxic_installed_count",
+        "toxic_cleared_count",
+        "proxy_path_verified_count",
+        "fault_observed_count",
+        "evidence_valid_count",
+    )
+    counts: Counter[str] = Counter()
+    for evidence in evidence_rows:
+        if not isinstance(evidence, Mapping) or evidence.get("scenario") != scenario:
+            raise ValueError(f"Toxiproxy repetition evidence is malformed: {scenario}")
+        if _strict_bool(evidence.get("evidence_valid"), f"{scenario}/evidence_valid") is not True:
+            raise ValueError(f"Toxiproxy repetition evidence is invalid: {scenario}")
+        routes = evidence.get("proxy_routes")
+        if not isinstance(routes, Mapping) or not routes:
+            raise ValueError(f"Toxiproxy proxy routes are missing: {scenario}")
+        required_routes = ("qdrant", "neo4j") if scenario == "normal" else (service,)
+        if any(route_name not in routes for route_name in required_routes):
+            raise ValueError(f"Toxiproxy required proxy route is missing: {scenario}")
+        for route_name, route in routes.items():
+            expected_route = _TOXIPROXY_ROUTES.get(route_name)
+            if (
+                expected_route is None
+                or not isinstance(route, Mapping)
+                or route.get("service") != route_name
+                or route.get("proxy_name") != expected_route[0]
+                or route.get("upstream") != expected_route[1]
+                or not str(route.get("client_endpoint", "")).strip()
+                or not str(route.get("listen", "")).strip()
+                or _strict_bool(route.get("verified"), f"{scenario}/{route_name}/verified") is not True
+            ):
+                raise ValueError(f"Toxiproxy proxy route is invalid: {scenario}/{route_name}")
+        if _strict_bool(evidence.get("proxy_path_verified"), f"{scenario}/proxy_path_verified") is not True:
+            raise ValueError(f"Toxiproxy proxy path is not verified: {scenario}")
+
+        ordinals = evidence.get("request_ordinals")
+        if not isinstance(ordinals, Mapping) or not ordinals:
+            raise ValueError(f"Toxiproxy request ordinals are missing: {scenario}")
+        for key, ordinal in ordinals.items():
+            if not isinstance(key, str) or key.count(":") != 1:
+                raise ValueError(f"Toxiproxy request ordinal key is invalid: {scenario}")
+            if _nonnegative_int(ordinal, f"{scenario}/request_ordinal") < 1:
+                raise ValueError(f"Toxiproxy request ordinal is invalid: {scenario}")
+
+        events = evidence.get("events")
+        if not isinstance(events, list):
+            raise ValueError(f"Toxiproxy events are missing: {scenario}")
+        non_normal = scenario != "normal"
+        expected_flags = {
+            "trigger_fired": non_normal,
+            "toxic_installed": non_normal,
+            "toxic_cleared": non_normal,
+            "fault_observed": non_normal,
+        }
+        for field, expected in expected_flags.items():
+            if _strict_bool(evidence.get(field), f"{scenario}/{field}") is not expected:
+                raise ValueError(f"Toxiproxy repetition flag mismatch: {scenario}/{field}")
+
+        counts["fault_evidence_count"] += 1
+        counts["proxy_path_verified_count"] += 1
+        counts["evidence_valid_count"] += 1
+        for field, expected in expected_flags.items():
+            counts[f"{field}_count"] += int(expected)
+        if not non_normal:
+            if events:
+                raise ValueError("Toxiproxy normal scenario must not contain fault events")
+            if any(_nonnegative_int(evidence.get(field), f"{scenario}/{field}") != 0 for field in ("retry_count", "retry_success_count")):
+                raise ValueError("Toxiproxy normal scenario must not retry")
+            counts["success_count"] += 1
+            continue
+
+        if len(events) != 1:
+            raise ValueError(f"Toxiproxy scenario must contain one fault event: {scenario}")
+        event = events[0]
+        if not isinstance(event, Mapping):
+            raise ValueError(f"Toxiproxy fault event is malformed: {scenario}")
+        expected_event = {
+            "scenario": scenario,
+            "service": service,
+            "operation": operation,
+            "action": action,
+            "recovery_action": recovery_action,
+        }
+        if any(event.get(field) != expected for field, expected in expected_event.items()):
+            raise ValueError(f"Toxiproxy fault event metadata mismatch: {scenario}")
+        if _nonnegative_int(event.get("request_ordinal"), f"{scenario}/event request_ordinal") != 1:
+            raise ValueError(f"Toxiproxy fault event trigger ordinal mismatch: {scenario}")
+        target_request = f"{service}:{operation}"
+        if target_request not in ordinals or _nonnegative_int(ordinals[target_request], target_request) < 1:
+            raise ValueError(f"Toxiproxy fault event request evidence is missing: {scenario}")
+        for field in ("toxic_installed", "toxic_cleared", "proxy_path_verified", "fault_observed"):
+            if _strict_bool(event.get(field), f"{scenario}/event {field}") is not True:
+                raise ValueError(f"Toxiproxy fault event flag mismatch: {scenario}/{field}")
+        if event.get("proxy_name") != _TOXIPROXY_ROUTES[service][0]:
+            raise ValueError(f"Toxiproxy fault event proxy mismatch: {scenario}")
+
+        if scenario == "delay":
+            if event.get("observed_exception") is not None:
+                raise ValueError("Toxiproxy delay event must complete without an exception")
+            retry_count = retry_success_count = 0
+            counts["success_count"] += 1
+        elif scenario in {"timeout", "connection_drop"}:
+            if not str(event.get("observed_exception", "")).strip():
+                raise ValueError(f"Toxiproxy abort event is missing an exception: {scenario}")
+            retry_count = retry_success_count = 0
+            counts["error_count"] += 1
+            counts["abort_count"] += 1
+        else:
+            if not str(event.get("observed_exception", "")).strip() or _strict_bool(
+                event.get("retry_success"), f"{scenario}/event retry_success"
+            ) is not True:
+                raise ValueError("Toxiproxy retry-success event is invalid")
+            retry_count = retry_success_count = 1
+            counts["success_count"] += 1
+        if _nonnegative_int(evidence.get("retry_count"), f"{scenario}/retry_count") != retry_count or _nonnegative_int(
+            evidence.get("retry_success_count"), f"{scenario}/retry_success_count"
+        ) != retry_success_count:
+            raise ValueError(f"Toxiproxy repetition retry count mismatch: {scenario}")
+        counts["retry_count"] += retry_count
+        counts["retry_success_count"] += retry_success_count
+
+    for field in fields:
+        if _nonnegative_int(row.get(field), f"{scenario}/{field}") != counts[field]:
+            raise ValueError(f"Toxiproxy scenario count mismatch: {scenario}/{field}")
+    return {field: counts[field] for field in fields}
 
 
 def _toxiproxy_workload_events(payload: Mapping[str, Any]) -> int:
@@ -588,9 +709,7 @@ def _validate_toxiproxy_runtime_attestation(
         raise ValueError("Toxiproxy runtime attestation source artifact hash mismatch")
     if attestation.get("exit_code") != 0:
         raise ValueError("Toxiproxy runtime attestation exit_code must equal 0")
-    attested_command = str(attestation.get("run_command", "")).strip()
-    if not attested_command or _SECRET_TEXT.search(attested_command):
-        raise ValueError("Toxiproxy runtime attestation command is missing or secret-bearing")
+    attested_command = _safe_run_command(attestation.get("run_command"))
     if attested_command != run_command:
         raise ValueError("Toxiproxy runtime attestation command mismatch")
     runtime = attestation.get("runtime")
