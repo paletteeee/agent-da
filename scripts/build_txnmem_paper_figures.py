@@ -312,7 +312,7 @@ def _evidence_layers(root: Path) -> tuple[str, str, str, list[str], tuple[int, i
     claims_path = "configs/paper_claims.json"
     schedule_path = "results/final_controlled/results/schedule_baseline.json"
     witnesses_path = "results/final_controlled/results/minimal_mutant_witnesses.json"
-    toxiproxy_path = "results/submission_evidence/toxiproxy_faults_30/aggregate.json"
+    toxiproxy_path = "results/submission_evidence/toxiproxy_state_verified_30/aggregate.json"
     cross_host_path = "results/cross_host_model_load_formal_v8_aggregate/results/model_load_repetition_summary.json"
     native_path = "results/remaining_tasks/native_repetitions5/repetition_report.json"
     config = _load_json(root, config_path)
@@ -332,7 +332,15 @@ def _evidence_layers(root: Path) -> tuple[str, str, str, list[str], tuple[int, i
         (112, "受控正确性", f"{schedule['causal_case_count']} instances；{witnesses['witness_count']} 个最小 witness；独立 oracle", "只证明受控语义，不是 public-task accuracy", BLUE),
         (206, "原生模型", f"Qwen tool loop：{native['repetitions']}×10 tasks；逐事件 contract / oracle", "机制接线，不是 end-user quality", GRAY),
         (300, "公共 runtime", "τ-bench / AppWorld / LoCoMo：workflow 与适配边界", "workflow reward / F1 不是 memory accuracy", GRAY),
-        (394, "真实服务", f"Toxiproxy：{toxiproxy['scenario_count']}×{toxiproxy['repetitions_per_scenario']}；仅故障/响应路径", "未独立核验双存储状态；非原子性/可用性/延迟证据", GRAY),
+        (
+            394,
+            "真实服务",
+            f"Toxiproxy：{toxiproxy['scenario_count']}×{toxiproxy['repetitions_per_scenario']}；"
+            f"{toxiproxy['state_totals']['complete']} complete / {toxiproxy['state_totals']['absent']} absent；"
+            f"{toxiproxy['state_totals']['partial']} partial / {toxiproxy['state_totals']['unknown']} unknown",
+            "五个单机场景；非一般分布式事务/可用性/线性一致性/生产延迟",
+            GRAY,
+        ),
         (488, "跨主机", f"{cross_host['repetition_count']} 次 client→model-server attested repetitions", "不是多 host Agent workers、连续 tunnel 或 production latency", RED),
     ]
     for y, label, evidence, boundary, color in layers:
@@ -343,8 +351,8 @@ def _evidence_layers(root: Path) -> tuple[str, str, str, list[str], tuple[int, i
         _lines(parts, 265, y + 55, ["边界：" + boundary], size=15, fill=RED if color == RED else GRAY)
     _lines(parts, 70, 599, ["设计配置声明的正文图：" + "、".join(config["body_figure_ids"])], size=15, fill=GRAY)
     _lines(parts, 70, 623, ["证据链强调：controlled correctness → 接线/服务/拓扑的外部相关性；后者不改写前者的语义结论。"], size=15, fill=DARK)
-    caption = "TxnMem 的分层证据链：从受控正确性到模型、公共 runtime、真实服务和跨主机证据；Toxiproxy 层仅覆盖故障/响应路径，状态未独立核验。"
-    alt = "五层证据图依次为受控正确性、原生模型、公共 runtime、真实服务和跨主机；Toxiproxy 层明确标注只观察代理故障与响应路径，未独立核验双存储状态。"
+    caption = "TxnMem 的分层证据链：从受控正确性到模型、公共 runtime、真实服务和跨主机证据；Toxiproxy 层给出五个单机场景的操作后双存储回读。"
+    alt = "五层证据图依次为受控正确性、原生模型、公共 runtime、真实服务和跨主机；Toxiproxy 层为 90 complete、60 absent、0 partial、0 unknown，不代表一般分布式事务。"
     sources = [config_path, claims_path, schedule_path, witnesses_path, toxiproxy_path, cross_host_path, native_path]
     # Access the claim ledger as part of construction, rather than presenting an unbound status view.
     if "controlled_correctness_400x5" not in active_claims:

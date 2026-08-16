@@ -4,7 +4,7 @@
 
 # 摘要
 
-多 Agent 系统中的记忆一旦被多个执行者读取、写入、传播和派生，就不再只是为语言模型提供上下文的检索缓存，而成为会影响后续行动的共享状态，并直接约束其他 Agent 的行动选择、外部工具调用与协作分工安排。本文的洞见是：相似度检索、对象级访问过滤或开始时的权限检查，均不能单独保证该状态在故障、撤权和来源更新后的正确性。为此，本文提出 TxnMem，一个将 Agent Memory Transaction、Policy-Consistent Commit 与 Provenance-Driven Repair 结合的策略感知事务运行时：前者把写入、取代、派生和传播纳入同一提交边界，中者在提交点按照最新策略重验证，后者沿来源依赖闭包使受影响对象退出默认可见集合。我们以独立的串行 reference semantics、因果故障调度和差分 oracle 检查可观察历史，而非以生成文本质量替代系统正确性；判定器把策略变更、来源撤销和崩溃恢复显式编码为状态转换，以区分系统保证的合法可见性与模型输出本身的内容质量，并使错误表现为可定位的不变量违反而非主观案例分析。受控套件覆盖 400 个实例和 2,000 条变体结果，完整 TxnMem 未出现目标违规且与 oracle 一致；四类主要缺陷均有前缀最小见证；真实服务实验仅记录经代理的故障与响应路径，持久双存储状态留待重新核验，并已接入真实 Qwen 的逐事件工具循环。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:controlled_correctness_400x5]] deterministic controlled simulator evidence against an independent reference semantics; not a public-task accuracy claim [[CLAIM:minimal_mutant_witnesses_4]] one deterministic operation-prefix-minimal witness per major mutant; minimality is with respect to suffix removal [[CLAIM:toxiproxy_fault_matrix_5x30]] single-host proxy/fault-response observations; post-fault Qdrant/Neo4j persistent state was not independently verified; not atomicity/availability/latency evidence [[CLAIM:native_qwen_repetitions_5x10]] mechanism-level model tool-loop and differential-oracle evidence; not end-user task success or production quality<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
+多 Agent 系统中的记忆一旦被多个执行者读取、写入、传播和派生，就不再只是为语言模型提供上下文的检索缓存，而成为会影响后续行动的共享状态，并直接约束其他 Agent 的行动选择、外部工具调用与协作分工安排。本文的洞见是：相似度检索、对象级访问过滤或开始时的权限检查，均不能单独保证该状态在故障、撤权和来源更新后的正确性。为此，本文提出 TxnMem，一个将 Agent Memory Transaction、Policy-Consistent Commit 与 Provenance-Driven Repair 结合的策略感知事务运行时：前者把写入、取代、派生和传播纳入同一提交边界，中者在提交点按照最新策略重验证，后者沿来源依赖闭包使受影响对象退出默认可见集合。我们以独立的串行 reference semantics、因果故障调度和差分 oracle 检查可观察历史，而非以生成文本质量替代系统正确性；判定器把策略变更、来源撤销和崩溃恢复显式编码为状态转换，以区分系统保证的合法可见性与模型输出本身的内容质量，并使错误表现为可定位的不变量违反而非主观案例分析。受控套件覆盖 400 个实例和 2,000 条变体结果，完整 TxnMem 未出现目标违规且与 oracle 一致；四类主要缺陷均有前缀最小见证；单机真实服务实验在确定性故障注入后完成双存储回读，并已接入真实 Qwen 的逐事件工具循环。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:controlled_correctness_400x5]] deterministic controlled simulator evidence against an independent reference semantics; not a public-task accuracy claim [[CLAIM:minimal_mutant_witnesses_4]] one deterministic operation-prefix-minimal witness per major mutant; minimality is with respect to suffix removal [[CLAIM:toxiproxy_fault_matrix_5x30]] single-host real Qdrant/Neo4j with deterministic Toxiproxy fault injection and post-operation readback for the tested workload and five scenarios; not general distributed transactions, cross-host fault tolerance, availability, linearizability, or production latency [[CLAIM:native_qwen_repetitions_5x10]] mechanism-level model tool-loop and differential-oracle evidence; not end-user task success or production quality<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
 
 本文的结论边界同样明确：事务提交、abort 与 invalidation-only repair 在确定性 TxnMem core/reference simulator 中实现并验证；真实 Qwen 与公开 runtime 适配器只提供逐事件接线，不提供 transactional tool execution；`stale`、受权重算和更丰富 repair 策略是形式目标中的未来扩展，内容层事实裁决、redact、scope downgrade、分布式两阶段提交或生产延迟同样不是现有能力。
 
@@ -195,7 +195,7 @@ procedure REPAIR(seed, reason):
 
 SQLite 后端为确定性 core 提供本地对象和 provenance 索引，适合差分执行与最小见证重放。VectorGraphMemoryBackend 将原生对象检索和依赖图分别映射到向量与图服务接口；该适配路径按单个事件立即写入，并不复用 deterministic core 的事务缓冲或 commit record。这样，语义检索可以服务于候选对象发现，但原生适配本身不构成 commit-time revalidation 的实现。
 
-真实服务接线用于验证模型、服务和 evaluator 能沿事件接口闭环，并在故障场景记录预期结果；它不把后端调用时间包装为生产性能，也不证明原生后端提供事务协调。跨独立服务的原子提交、恢复决议和两阶段提交均不在当前后端适配范围内。
+真实服务接线用于验证模型、服务和 evaluator 能沿事件接口闭环，并在故障场景记录代理、响应与操作后双存储回读；它不把后端调用时间包装为生产性能，也不证明原生后端提供事务协调。跨独立服务的原子提交、恢复决议和两阶段提交均不在当前后端适配范围内。
 
 ## 5.3 Qwen 工具循环与原型边界
 
@@ -205,9 +205,9 @@ Qwen 工具循环通过结构化工具调用产生逐个 memory event；模型�
 
 # 6 评估
 
-我们围绕五个问题组织评估。RQ1 检查三个机制是否阻止目标违规；RQ2 检查因果调度和 mutation witness 是否揭示这些违规；RQ3 检查真实模型及公开 runtime 是否能接入事件接口；RQ4 检查真实服务故障下的原子边界；RQ5 检查 synthetic workload 与 trace-grounded holdout 的失配程度。各问题只使用独立记录的分母：workload family 是生成规则类别，seed 是该规则下的随机化输入，instance 是一个受控 history，variant row 是 instance 与实现变体的一次组合；task episode、conversation、native event、服务重复和跨主机 repetition 则分别属于不同实验层，绝不合并为同一成功率。
+我们围绕五个问题组织评估。RQ1 检查三个机制是否阻止目标违规；RQ2 检查因果调度和 mutation witness 是否揭示这些违规；RQ3 检查真实模型及公开 runtime 是否能接入事件接口；RQ4 检查真实服务故障、响应与操作后状态回读；RQ5 检查 synthetic workload 与 trace-grounded holdout 的失配程度。各问题只使用独立记录的分母：workload family 是生成规则类别，seed 是该规则下的随机化输入，instance 是一个受控 history，variant row 是 instance 与实现变体的一次组合；task episode、conversation、native event、服务重复和跨主机 repetition 则分别属于不同实验层，绝不合并为同一成功率。
 
-判定也分为四层：官方 evaluator 判定公开任务工作流；TxnMem oracle 将候选可观察 history 与独立 serial reference semantics 比较；event contract 只验证逐个 memory event 的格式和路由；service-path observation 记录代理路由、故障触发与客户端响应。下层可为上层提供接线证据，却不替代上层的语义判定；当前服务路径证据尤其不承担持久双存储一致性判定。因此，workflow reward、QA 分数和端到端耗时均不被解释为 memory accuracy。
+判定也分为四层：官方 evaluator 判定公开任务工作流；TxnMem oracle 将候选可观察 history 与独立 serial reference semantics 比较；event contract 只验证逐个 memory event 的格式和路由；真实服务观察记录代理路由、故障触发、客户端响应与操作后 Qdrant/Neo4j 回读。下层可为上层提供接线证据，却不替代上层的语义判定；该服务观察只回答被测 workload 和五个单机场景的 complete-or-absent 结果。因此，workflow reward、QA 分数和端到端耗时均不被解释为 memory accuracy。
 
 `[[TABLE:system_invariants]]`
 
@@ -234,7 +234,7 @@ Qwen 工具循环通过结构化工具调用产生逐个 memory event；模型�
 | 受控 simulator | instance、variant row、schedule case、mutant witness | 独立 oracle 与不变量检查 | 事务、提交授权、修复语义 |
 | 原生模型接口 | task episode、native event、repetition | event contract 与 differential oracle | 工具循环能否接入事件层 |
 | 公开 runtime | task 或 conversation | official evaluator | workflow 可执行性与描述性外部有效性 |
-| 真实服务与跨主机 | 服务重复、故障场景、attested repetition | proxy/fault-response observation 与 transport attestation | 路径完整性和拓扑边界；不含故障后双存储状态结论 |
+| 真实服务与跨主机 | 服务重复、故障场景、attested repetition | proxy/fault/response 复算、操作后双存储回读与 transport attestation | 被测单机场景的回读结果与跨主机模型服务拓扑边界 |
 
 ## 6.1 RQ1：三个核心机制是否阻止目标违规？
 
@@ -275,9 +275,13 @@ AppWorld 使用完整的 20-task 配对分母：tuned 条件有 1/20 official su
 
 LoCoMo 的固定配对重复为三次；mean F1 delta 为 +0.0016169580043333333。这是少量固定 repetition 下的描述性变化，既不构成总体显著性结论，也不说明 LoCoMo 提供了原生 memory transaction ground truth。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:locomo_prompt_profile_repetitions]] three fixed paired repetitions; descriptive effect only, with no population-significance or universal-improvement claim<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
 
-## 6.4 RQ4：真实服务故障路径记录了什么？
+## 6.4 RQ4：真实服务故障后记录了什么状态？
 
-现有 Toxiproxy 故障矩阵包含五个场景、每个场景三十次重复。四个 non-normal 路径的 trigger、toxic 安装和 proxy-path 均为 30/30；retry-success 记录受控失败后的客户端重试响应，timeout 与 connection-drop 记录客户端 error/abort 响应，delay 记录带触发的成功响应。旧 runner 未在 toxic 清除后独立读取 Qdrant 与 Neo4j 的持久状态，因此该矩阵只支持单机 proxy/fault-response 路径观察，不是原子性、可用性或延迟证据；状态核验版 5×30 重跑仍是投稿阻塞实验。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:toxiproxy_fault_matrix_5x30]] single-host proxy/fault-response observations; post-fault Qdrant/Neo4j persistent state was not independently verified; not atomicity/availability/latency evidence<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
+状态核验 Toxiproxy 5×30 矩阵为 5 个场景 × 30 次重复 = 150 次观测：完整回读 90/90、缺失回读 60/60、`partial` 0/150、`unknown` 0/150，且 `retry_success` 30/30。每次重复在操作后针对两个唯一 memory ID 分别读取 Qdrant 与 Neo4j；聚合器从原始 repetition evidence 重新计算 state/proxy/response facts，不信任 runner summary flags。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->正式证据为 `results/submission_evidence/toxiproxy_state_verified_30/aggregate.json`。[[CLAIM:toxiproxy_fault_matrix_5x30]] single-host real Qdrant/Neo4j with deterministic Toxiproxy fault injection and post-operation readback for the tested workload and five scenarios; not general distributed transactions, cross-host fault tolerance, availability, linearizability, or production latency<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
+
+### Backend-only 两事件诊断：p50 25.748 ms，p95 32.029 ms，p99 42.234 ms，吞吐 76.256 operations/s
+
+这些数值只是本次 workload 的 backend-only 诊断，`production_latency_claim=false`。被测补偿与故障路径在五个场景中得到回读确认的 complete-or-absent 结果，但 TxnMem 不是一般分布式事务协议；该证据不支持跨主机容错、可用性、线性一致性或生产延迟结论。
 
 Qwen、Qdrant 和 Neo4j 的端到端 smoke 完成 5/5 task，并记录 30 个 native event。它确认模型、服务和 evaluator 能在单机闭环，但不把此 smoke 的端到端耗时解释为生产延迟，也不将其提升为原生 backend 的事务协调证明。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:qwen_vector_graph_e2e_5]] single-host five-task end-to-end smoke including model, services, and evaluator; not production latency<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
 
@@ -291,9 +295,9 @@ Qwen、Qdrant 和 Neo4j 的端到端 smoke 完成 5/5 task，并记录 30 个 na
 | τ-bench runtime | 50 evaluator-available task；497 event；reward 15、0.3 | 官方 workflow 可运行 | memory accuracy |
 | AppWorld 配对 | 20 task；1/20 success；53/112 assertion；6 failure | 固定条件下的描述性外部证据 | 去除失败后的总体提升 |
 | LoCoMo 配对 | 三次 repetition；delta +0.0016169580043333333 | 描述性差异 | 总体显著性或普适改进 |
-| Toxiproxy | 五场景各三十次；四个故障路径 trigger/toxic/proxy 均 30/30 | 单机 proxy/fault-response 路径观察 | 故障后双存储状态、原子性、可用性或延迟 |
+| Toxiproxy 状态核验 | 五场景各三十次；90/90 complete、60/60 absent；0/150 partial/unknown | 被测 workload 与五个单机场景的 readback-confirmed complete-or-absent 结果 | 一般分布式事务、跨主机容错、可用性、线性一致性或生产延迟 |
 | Qwen+Qdrant+Neo4j | 5/5 task；30 event | 单机端到端 smoke | 生产延迟 |
-<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:native_qwen_repetitions_5x10]] mechanism-level model tool-loop and differential-oracle evidence; not end-user task success or production quality [[CLAIM:tau_bench_native_50]] official τ-bench workflow reward with native memory events; reward is not memory accuracy [[CLAIM:appworld_prompt_profile_pair]] descriptive 20-task paired result; tuned token total is an observed lower bound and no population-significance claim is made [[CLAIM:locomo_prompt_profile_repetitions]] three fixed paired repetitions; descriptive effect only, with no population-significance or universal-improvement claim [[CLAIM:toxiproxy_fault_matrix_5x30]] single-host proxy/fault-response observations; post-fault Qdrant/Neo4j persistent state was not independently verified; not atomicity/availability/latency evidence [[CLAIM:qwen_vector_graph_e2e_5]] single-host five-task end-to-end smoke including model, services, and evaluator; not production latency<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
+<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:native_qwen_repetitions_5x10]] mechanism-level model tool-loop and differential-oracle evidence; not end-user task success or production quality [[CLAIM:tau_bench_native_50]] official τ-bench workflow reward with native memory events; reward is not memory accuracy [[CLAIM:appworld_prompt_profile_pair]] descriptive 20-task paired result; tuned token total is an observed lower bound and no population-significance claim is made [[CLAIM:locomo_prompt_profile_repetitions]] three fixed paired repetitions; descriptive effect only, with no population-significance or universal-improvement claim [[CLAIM:toxiproxy_fault_matrix_5x30]] single-host real Qdrant/Neo4j with deterministic Toxiproxy fault injection and post-operation readback for the tested workload and five scenarios; not general distributed transactions, cross-host fault tolerance, availability, linearizability, or production latency [[CLAIM:qwen_vector_graph_e2e_5]] single-host five-task end-to-end smoke including model, services, and evaluator; not production latency<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
 
 跨主机 v8 的作用更窄：三个相互独立、attested 的运行只覆盖一个 Agent-worker host 到一个 model-server host，并记录 3,251,506 个 endpoint-reported token。它佐证 client-to-model-server 拓扑和 token accounting；不覆盖多 Agent-worker topology、跨主机 memory backend、单一连续 tunnel 或生产延迟。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:cross_host_model_load_v8]] three independently attested Agent-client-to-model-server repetitions; not multi-host Agent workers, one continuous 30-minute tunnel, or production latency<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
 
@@ -313,7 +317,7 @@ TxnMemBench 的说服力来自机制可控、oracle 独立、可缩减 witness �
 
 确定性 policy 的语义范围同样需要谨慎解释。系统接受一个已由外部治理层给出的允许/拒绝决议及其版本，并在提交点重新检查它；它并不解决自然语言政策解释、主体身份归因、冲突政策合并或政策本身的正确性。原生 Qwen/public-runtime/backend 路径仅逐个事件接入，不能被误读为 Transaction Manager 已跨工具调用缓冲或提交。
 
-来源闭包不是内容事实裁决：它保证已记录依赖的对象在源撤销、取代或更正后不再静默保留在默认可见集合，却不能发现未记录的隐式依赖，也不能判断生成内容真伪。invalidation-only repair 是当前确定性 core/reference simulator 的行为；redact、scope downgrade、stale/recompute、人工复核和跨服务原子协调仍需额外状态转换、受权条件和证据。
+来源闭包不是内容事实裁决：它保证已记录依赖的对象在源撤销、取代或更正后不再静默保留在默认可见集合，却不能发现未记录的隐式依赖，也不能判断生成内容真伪。invalidation-only repair 是当前确定性 core/reference simulator 的行为；真实 backend 的五场景回读只表明被测补偿与故障路径产生 complete-or-absent 结果，不把 TxnMem 提升为通用跨服务事务协议。redact、scope downgrade、stale/recompute、人工复核和跨服务原子协调仍需额外状态转换、受权条件和证据。
 
 # 8 相关工作
 
@@ -335,7 +339,7 @@ Agent memory 与反思系统 [R01][R02][R03]，以及检索增强和自反思检
 
 # 9 结论
 
-当 memory 成为多 Agent 的共享状态时，问题不再只是是否召回相关内容，而是哪些状态可以合法公开、何时仍受授权以及源失效如何传播。TxnMem 以 Agent Memory Transaction、Policy-Consistent Commit 和 Provenance-Driven Repair 回答这三个问题，并把它们落实为独立 reference semantics 可检查的不变量。最强证据来自受控 core/reference simulator 的 oracle 一致性与因果 witness；真实服务结果仅保留为 proxy/fault-response 路径观察，模型和公开 runtime 证据则严格保留在逐事件接入与 workflow 边界内。
+当 memory 成为多 Agent 的共享状态时，问题不再只是是否召回相关内容，而是哪些状态可以合法公开、何时仍受授权以及源失效如何传播。TxnMem 以 Agent Memory Transaction、Policy-Consistent Commit 和 Provenance-Driven Repair 回答这三个问题，并把它们落实为独立 reference semantics 可检查的不变量。最强证据来自受控 core/reference simulator 的 oracle 一致性与因果 witness；真实服务结果增加了五个单机场景的操作后双存储回读，模型和公开 runtime 证据则严格保留在逐事件接入与 workflow 边界内。
 
 # 参考文献
 

@@ -329,30 +329,49 @@ class ManuscriptAuditTests(unittest.TestCase):
 
         self.assertEqual(report["finding_count"], 0)
 
-    def test_toxiproxy_reader_and_status_surfaces_make_no_state_or_atomicity_claim(self):
+    def test_state_verified_toxiproxy_surfaces_report_narrow_readback_claim(self):
         paths = (
             ROOT / CONFIG["paper_source_path"],
             ROOT / "docs/current_experiment_report_zh.md",
             ROOT / "docs/formal_paper_task_status_zh.md",
+            ROOT / "docs/paper/evidence_map_zh.md",
         )
-        forbidden = (
-            "0 partial commit",
-            "partial commit 为 0",
-            "无 partial-commit",
-            "均无 partial commit",
-            "未观察到部分提交",
+        required = (
+            "results/submission_evidence/toxiproxy_state_verified_30/aggregate.json",
+            "5 个场景 × 30 次重复 = 150 次观测",
+            "完整回读 90/90",
+            "缺失回读 60/60",
+            "`partial` 0/150",
+            "`unknown` 0/150",
+            "`retry_success` 30/30",
+            "两个唯一 memory ID",
+            "Qdrant 与 Neo4j",
+            "重新计算",
+            "p50 25.748 ms",
+            "p95 32.029 ms",
+            "p99 42.234 ms",
+            "76.256 operations/s",
+            "`production_latency_claim=false`",
+        )
+        old_boundary = (
+            "post-fault Qdrant/Neo4j persistent state was not independently verified"
         )
         for path in paths:
             with self.subTest(path=path):
                 text = path.read_text(encoding="utf-8")
-                for phrase in forbidden:
-                    self.assertNotIn(phrase, text)
+                for phrase in required:
+                    self.assertIn(phrase, text)
+                self.assertNotIn(old_boundary, text)
         boundary = (
-            "single-host proxy/fault-response observations; post-fault Qdrant/Neo4j "
-            "persistent state was not independently verified; "
-            "not atomicity/availability/latency evidence"
+            "single-host real Qdrant/Neo4j with deterministic Toxiproxy fault injection "
+            "and post-operation readback for the tested workload and five scenarios; "
+            "not general distributed transactions, cross-host fault tolerance, "
+            "availability, linearizability, or production latency"
         )
         self.assertIn(boundary, CONFIG["required_claim_boundaries"])
+        for path in paths:
+            with self.subTest(path=path, check="claim_boundary"):
+                self.assertIn(boundary, path.read_text(encoding="utf-8"))
 
     def test_reader_projection_strips_delimited_author_annotations(self):
         source = (ROOT / CONFIG["paper_source_path"]).read_text(encoding="utf-8")
@@ -456,8 +475,12 @@ class ManuscriptAuditTests(unittest.TestCase):
                     "6 个 execution failure",
                     "+0.0016169580043333333",
                     "5×30",
-                    "仅记录经代理的故障与响应路径",
-                    "持久双存储状态留待重新核验",
+                    "5 个场景 × 30 次重复 = 150 次观测",
+                    "完整回读 90/90",
+                    "缺失回读 60/60",
+                    "`partial` 0/150",
+                    "`unknown` 0/150",
+                    "`retry_success` 30/30",
                     "5/5",
                     "30 个 native event",
                     "MMD²",
@@ -465,8 +488,10 @@ class ManuscriptAuditTests(unittest.TestCase):
                 )
             )
         )
-        self.assertIn("四个 non-normal 路径", evaluation)
-        self.assertIn("不是原子性、可用性或延迟证据", evaluation)
+        self.assertIn("两个唯一 memory ID", evaluation)
+        self.assertIn("重新计算", evaluation)
+        self.assertIn("不是一般分布式事务协议", evaluation)
+        self.assertIn("不支持跨主机容错、可用性、线性一致性或生产延迟结论", evaluation)
         self.assertIn("一个 Agent-worker host 到一个 model-server host", evaluation)
         self.assertTrue(
             all(term in related_work for term in ("Agent memory", "governed memory/access control", "transaction/provenance", "distributed-system testing"))

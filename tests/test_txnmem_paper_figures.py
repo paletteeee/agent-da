@@ -92,7 +92,7 @@ class PaperFigureBuilderTests(unittest.TestCase):
         self.assertIn("未来扩展", repair)
         self.assertIn("stale / 重算 / 新来源", repair)
 
-    def test_evidence_figure_downgrades_legacy_toxiproxy_state_claim(self):
+    def test_evidence_figure_reports_state_verified_toxiproxy_boundary(self):
         with TemporaryDirectory() as tmp:
             out_dir = Path(tmp) / "figures"
             manifest = build_all(ROOT, out_dir)
@@ -101,11 +101,12 @@ class PaperFigureBuilderTests(unittest.TestCase):
             ).read_text(encoding="utf-8")
             item = manifest["figures"]["evidence_layers"]
 
-        self.assertNotIn("0 partial", evidence)
-        self.assertIn("仅故障/响应路径", evidence)
-        self.assertIn("未独立核验双存储状态", evidence)
-        self.assertNotIn("partial commit", item["alt_text"])
-        self.assertIn("状态未独立核验", item["caption"])
+        self.assertIn("90 complete / 60 absent", evidence)
+        self.assertIn("0 partial / 0 unknown", evidence)
+        self.assertIn("操作后双存储回读", item["caption"])
+        self.assertIn("五个单机场景", item["caption"])
+        self.assertIn("不代表一般分布式事务", item["alt_text"])
+        self.assertNotIn("未独立核验双存储状态", evidence)
 
     def test_architecture_svg_encodes_revalidation_before_persist(self):
         with TemporaryDirectory() as tmp:
@@ -168,7 +169,7 @@ class PaperFigureBuilderTests(unittest.TestCase):
                 "configs/paper_claims.json",
                 "results/final_controlled/results/schedule_baseline.json",
                 "results/final_controlled/results/minimal_mutant_witnesses.json",
-                "results/submission_evidence/toxiproxy_faults_30/aggregate.json",
+                "results/submission_evidence/toxiproxy_state_verified_30/aggregate.json",
                 "results/cross_host_model_load_formal_v8_aggregate/results/model_load_repetition_summary.json",
             }.issubset(evidence_sources)
         )

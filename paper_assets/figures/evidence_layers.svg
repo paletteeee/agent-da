@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1160" height="650" viewBox="0 0 1160 650" role="img" aria-labelledby="title desc">
 <title id="title">TxnMem 分层证据</title>
-<desc id="desc">五层证据图依次为受控正确性、原生模型、公共 runtime、真实服务和跨主机；Toxiproxy 层明确标注只观察代理故障与响应路径，未独立核验双存储状态。</desc>
+<desc id="desc">五层证据图依次为受控正确性、原生模型、公共 runtime、真实服务和跨主机；Toxiproxy 层为 90 complete、60 absent、0 partial、0 unknown，不代表一般分布式事务。</desc>
 <style>text { font-family: Arial Unicode MS, Hiragino Sans GB, Noto Sans CJK SC, sans-serif; } .struct { stroke: #68737D; stroke-width: 1.4; fill: none; } .flow { stroke: #1F4E79; stroke-width: 2; fill: none; } .muted { stroke: #68737D; stroke-width: 1.2; fill: none; } .future { stroke: #A63D40; stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; }</style>
 <text x="50" y="46" font-size="25" font-weight="700" fill="#1F4E79">分层证据：每层回答不同问题，不能互换</text>
 <text x="50" y="75" font-size="15" fill="#68737D">图层按证据对象组织，而非系统“完成状态”；所有结论受各自 claim boundary 约束。</text>
@@ -23,8 +23,8 @@
 <rect x="70.0" y="394.0" width="1020.0" height="72.0" rx="8" fill="none" stroke="#68737D" stroke-width="1.4"/>
 <rect x="88.0" y="409.0" width="150.0" height="42.0" rx="5" fill="#E8ECEF" stroke="#68737D" stroke-width="1.4"/>
 <text x="163.0" y="436.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">真实服务</text>
-<text x="265.0" y="426.0" text-anchor="start" font-size="16" font-weight="600" fill="#263238">Toxiproxy：5×30；仅故障/响应路径</text>
-<text x="265.0" y="449.0" text-anchor="start" font-size="15" font-weight="400" fill="#68737D">边界：未独立核验双存储状态；非原子性/可用性/延迟证据</text>
+<text x="265.0" y="426.0" text-anchor="start" font-size="16" font-weight="600" fill="#263238">Toxiproxy：5×30；90 complete / 60 absent；0 partial / 0 unknown</text>
+<text x="265.0" y="449.0" text-anchor="start" font-size="15" font-weight="400" fill="#68737D">边界：五个单机场景；非一般分布式事务/可用性/线性一致性/生产延迟</text>
 <rect x="70.0" y="488.0" width="1020.0" height="72.0" rx="8" fill="none" stroke="#A63D40" stroke-width="1.4"/>
 <rect x="88.0" y="503.0" width="150.0" height="42.0" rx="5" fill="none" stroke="#A63D40" stroke-width="1.4"/>
 <text x="163.0" y="530.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">跨主机</text>
