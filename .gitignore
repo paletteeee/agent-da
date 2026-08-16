@@ -35,3 +35,6 @@ results/**/locomo_paired_predictions.json
 results/**/native_model_traces.jsonl
 results/**/model_load_traces.jsonl
 results/remote_experiment_inputs/
+
+results/real_backend_faults_state_verified_30_v2/pid
+results/real_backend_faults_state_verified_30_v2/run.log
