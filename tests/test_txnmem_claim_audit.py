@@ -355,6 +355,40 @@ class PaperClaimLedgerTests(unittest.TestCase):
                 },
             )
 
+    def test_existing_ledger_assertions_cover_reviewed_artifact_values(self):
+        ledger = json.loads((ROOT / "configs" / "paper_claims.json").read_text())
+        claims = {claim["claim_id"]: claim for claim in ledger["claims"]}
+        expected = {
+            "controlled_correctness_400x5": {
+                "/variants/Naive/oracle_match_count": 50,
+                "/variants/TxnMem-NoTxn/oracle_match_count": 200,
+                "/variants/TxnMem-NoPolicyCommit/oracle_match_count": 350,
+                "/variants/TxnMem-NoRepair/oracle_match_count": 300,
+            },
+            "controlled_mutation_matrix_350": {
+                "/mutation_cases": 350,
+                "/mutation_killed": 300,
+                "/mutation_kill_rate": 0.8571428571428571,
+            },
+            "minimal_mutant_witnesses_4": {
+                "/witnesses/partial_commit/minimal_operation_count": 2,
+                "/witnesses/remove_commit_revalidation/minimal_operation_count": 1,
+                "/witnesses/disable_provenance_traversal/minimal_operation_count": 6,
+                "/witnesses/bypass_scope_check/minimal_operation_count": 1,
+            },
+            "appworld_prompt_profile_pair": {"/tuned_status_counts/failed": 6},
+        }
+
+        for claim_id, expected_assertions in expected.items():
+            assertions = {
+                row["pointer"]: row["expected"]
+                for row in claims[claim_id]["assertions"]
+            }
+            self.assertEqual(
+                {pointer: assertions.get(pointer) for pointer in expected_assertions},
+                expected_assertions,
+            )
+
     def test_state_verified_ledger_covers_the_reviewed_artifact_values(self):
         ledger = json.loads((ROOT / "configs" / "paper_claims.json").read_text())
         claims = {claim["claim_id"]: claim for claim in ledger["claims"]}
