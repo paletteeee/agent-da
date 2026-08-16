@@ -31,6 +31,18 @@ _TOXIPROXY_ROUTES = {
     "qdrant": ("txnmem-qdrant", "qdrant:6333"),
     "neo4j": ("txnmem-neo4j", "neo4j:7687"),
 }
+_TOXIPROXY_REQUEST_ORDINALS = {
+    "normal": {"qdrant:write": 2, "neo4j:commit": 2},
+    "delay": {"qdrant:write": 2, "neo4j:commit": 2},
+    "retry_success": {"qdrant:write": 2, "neo4j:commit": 2},
+    "timeout": {"qdrant:write": 1},
+    "connection_drop": {
+        "qdrant:write": 1,
+        "neo4j:commit": 1,
+        "qdrant:delete_compensation": 1,
+        "neo4j:delete_compensation": 1,
+    },
+}
 
 
 def _load(path: str | Path) -> tuple[Path, dict[str, Any]]:
@@ -445,15 +457,16 @@ def _strict_bool(value: Any, field: str) -> bool:
 
 def _safe_run_command(value: Any) -> str:
     command = str(value or "").strip()
+    privacy_view = command.replace("'", "").replace('"', "")
     if (
         not command
-        or _SECRET_TEXT.search(command)
-        or _ABSOLUTE_PATH.search(command)
-        or _IP_LITERAL.search(command)
-        or _HOSTNAME_TOKEN.search(command)
-        or "://" in command
-        or "@" in command
-        or re.search(r"\b(?:ssh|scp|rsync)\b", command, re.I)
+        or _SECRET_TEXT.search(privacy_view)
+        or _ABSOLUTE_PATH.search(privacy_view)
+        or _IP_LITERAL.search(privacy_view)
+        or _HOSTNAME_TOKEN.search(privacy_view)
+        or "://" in privacy_view
+        or "@" in privacy_view
+        or re.search(r"\b(?:ssh|scp|rsync)\b", privacy_view, re.I)
     ):
         raise ValueError("run_command is missing or contains private or secret-bearing text")
     return command
@@ -531,13 +544,12 @@ def _recompute_toxiproxy_fault_counts(
             raise ValueError(f"Toxiproxy proxy path is not verified: {scenario}")
 
         ordinals = evidence.get("request_ordinals")
-        if not isinstance(ordinals, Mapping) or not ordinals:
+        expected_ordinals = _TOXIPROXY_REQUEST_ORDINALS[scenario]
+        if not isinstance(ordinals, Mapping) or set(ordinals) != set(expected_ordinals):
             raise ValueError(f"Toxiproxy request ordinals are missing: {scenario}")
-        for key, ordinal in ordinals.items():
-            if not isinstance(key, str) or key.count(":") != 1:
-                raise ValueError(f"Toxiproxy request ordinal key is invalid: {scenario}")
-            if _nonnegative_int(ordinal, f"{scenario}/request_ordinal") < 1:
-                raise ValueError(f"Toxiproxy request ordinal is invalid: {scenario}")
+        for key, expected_ordinal in expected_ordinals.items():
+            if _nonnegative_int(ordinals.get(key), f"{scenario}/{key}") != expected_ordinal:
+                raise ValueError(f"Toxiproxy request ordinal mismatch: {scenario}/{key}")
 
         events = evidence.get("events")
         if not isinstance(events, list):

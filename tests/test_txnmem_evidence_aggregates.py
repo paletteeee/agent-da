@@ -155,6 +155,28 @@ class SubmissionEvidenceAggregateTests(unittest.TestCase):
                         runtime_attestation=self._runtime_attestation(path),
                     )
 
+    def test_toxiproxy_aggregate_rejects_unbound_request_ordinals(self):
+        cases = {
+            "wrong positive ordinal": lambda source: source["fault_matrix"]["scenarios"]["delay"]
+            ["repetition_evidence"][0]["request_ordinals"].__setitem__("qdrant:write", 999),
+            "extra ordinal key": lambda source: source["fault_matrix"]["scenarios"]["normal"]
+            ["repetition_evidence"][0]["request_ordinals"].__setitem__("qdrant:delete_compensation", 1),
+            "missing required ordinal": lambda source: source["fault_matrix"]["scenarios"]["connection_drop"]
+            ["repetition_evidence"][0]["request_ordinals"].pop("neo4j:delete_compensation"),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(name=name), TemporaryDirectory() as tmp:
+                source = self._state_verified_toxiproxy_source()
+                mutate(source)
+                path = self._write(Path(tmp), "toxiproxy.json", source)
+                with self.assertRaises(ValueError):
+                    aggregate_toxiproxy_submission_evidence(
+                        path, expected_repetitions=2, toxiproxy_version="2.5.0",
+                        source_commit=SOURCE_COMMIT,
+                        run_command="python txnmem_experiment.py backend-performance",
+                        runtime_attestation=self._runtime_attestation(path),
+                    )
+
     def test_toxiproxy_aggregate_rejects_extra_state_classifications(self):
         with TemporaryDirectory() as tmp:
             source = self._state_verified_toxiproxy_source()
@@ -177,6 +199,8 @@ class SubmissionEvidenceAggregateTests(unittest.TestCase):
             "ssh " + "audit" + "@" + "host" + " python runner.py",
             "python " + "runner" + "." + "internal",
             "curl https://" + "name" + ":" + "value" + "@" + "site" + ".test/run",
+            "python \"" + str(Path.home() / "private" / "runner.py") + "\"",
+            "python '" + "/" + "home" + "/private/runner.py'",
         )
         for command in unsafe_commands:
             with self.subTest(command_type=command.split()[0]), TemporaryDirectory() as tmp:
@@ -225,6 +249,18 @@ class SubmissionEvidenceAggregateTests(unittest.TestCase):
             "connection_drop": ("neo4j", "commit", "connection_drop"),
             "retry_success": ("qdrant", "write", "connection_drop"),
         }
+        request_ordinals = {
+            "normal": {"qdrant:write": 2, "neo4j:commit": 2},
+            "delay": {"qdrant:write": 2, "neo4j:commit": 2},
+            "retry_success": {"qdrant:write": 2, "neo4j:commit": 2},
+            "timeout": {"qdrant:write": 1},
+            "connection_drop": {
+                "qdrant:write": 1,
+                "neo4j:commit": 1,
+                "qdrant:delete_compensation": 1,
+                "neo4j:delete_compensation": 1,
+            },
+        }
         scenarios = {}
         for name in ("normal", "delay", "timeout", "connection_drop", "retry_success"):
             non_normal = name != "normal"
@@ -251,10 +287,7 @@ class SubmissionEvidenceAggregateTests(unittest.TestCase):
                     "fault_observed": non_normal, "evidence_valid": True,
                     "retry_count": int(retry), "retry_success_count": int(retry),
                     "scenario": name,
-                    "request_ordinals": {
-                        "qdrant:write": 2 if retry else 1,
-                        "neo4j:commit": 1,
-                    },
+                    "request_ordinals": copy.deepcopy(request_ordinals[name]),
                     "proxy_routes": {
                         route_service: {
                             "service": route_service,
