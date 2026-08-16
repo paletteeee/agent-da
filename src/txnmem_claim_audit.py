@@ -24,6 +24,7 @@ _KNOWN_ASSERTION_OPERATORS = {
 _KNOWN_VALIDATION_PROFILES = {
     "tau_bench_50",
     "toxiproxy_fault_path",
+    "toxiproxy_state_verified",
     "qwen_vector_graph_e2e_5",
     "minimal_mutant_witnesses",
 }
@@ -265,6 +266,96 @@ def _semantic_findings(
                         claim_id=claim_id,
                     )
                 )
+    elif profile == "toxiproxy_state_verified":
+        expected_states = {
+            "normal": {"complete": 30, "absent": 0},
+            "delay": {"complete": 30, "absent": 0},
+            "retry_success": {"complete": 30, "absent": 0},
+            "timeout": {"complete": 0, "absent": 30},
+            "connection_drop": {"complete": 0, "absent": 30},
+        }
+        expected_responses = {
+            "normal": {"success_count": 30, "error_count": 0, "abort_count": 0, "retry_count": 0, "retry_success_count": 0},
+            "delay": {"success_count": 30, "error_count": 0, "abort_count": 0, "retry_count": 0, "retry_success_count": 0},
+            "retry_success": {"success_count": 30, "error_count": 0, "abort_count": 0, "retry_count": 30, "retry_success_count": 30},
+            "timeout": {"success_count": 0, "error_count": 30, "abort_count": 30, "retry_count": 0, "retry_success_count": 0},
+            "connection_drop": {"success_count": 0, "error_count": 30, "abort_count": 30, "retry_count": 0, "retry_success_count": 0},
+        }
+        scenarios = document.get("scenarios")
+        state_totals = document.get("state_totals")
+        complete = (
+            document.get("scenario_count") == 5
+            and document.get("repetitions_per_scenario") == 30
+            and document.get("total_repetitions") == 150
+            and document.get("all_scenarios_evidence_valid") is True
+            and document.get("all_scenarios_state_verified") is True
+            and document.get("all_observed_states_consistent") is True
+            and document.get("production_latency_claim") is False
+            and isinstance(state_totals, dict)
+            and state_totals == {
+                "complete": 90,
+                "absent": 60,
+                "partial": 0,
+                "unknown": 0,
+            }
+            and isinstance(scenarios, dict)
+            and set(scenarios) == set(expected_states)
+        )
+        if complete:
+            for name, expected_state_counts in expected_states.items():
+                row = scenarios[name]
+                if not isinstance(row, dict):
+                    complete = False
+                    break
+                expected_counts = {
+                    **expected_state_counts,
+                    "partial": 0,
+                    "unknown": 0,
+                }
+                if (
+                    row.get("repetitions") != 30
+                    or row.get("evidence_valid_count") != 30
+                    or row.get("state_counts") != expected_counts
+                    or any(
+                        row.get(field) != value
+                        for field, value in expected_responses[name].items()
+                    )
+                ):
+                    complete = False
+                    break
+                if name == "normal":
+                    if any(
+                        row.get(field) != value
+                        for field, value in (
+                            ("fault_observed_count", 0),
+                            ("toxic_installed_count", 0),
+                            ("toxic_cleared_count", 0),
+                            ("trigger_fired_count", 0),
+                        )
+                    ):
+                        complete = False
+                        break
+                elif any(
+                    row.get(field) != 30
+                    for field in (
+                        "fault_evidence_count",
+                        "fault_observed_count",
+                        "trigger_fired_count",
+                        "toxic_installed_count",
+                        "toxic_cleared_count",
+                        "proxy_path_verified_count",
+                    )
+                ):
+                    complete = False
+                    break
+        if not complete:
+            findings.append(
+                _finding(
+                    "toxiproxy_state_evidence_incomplete",
+                    "state-verified Toxiproxy evidence lacks the complete five-scenario state and response contract",
+                    claim_id=claim_id,
+                )
+            )
     elif profile == "tau_bench_50":
         task_ids = document.get("task_ids", [])
         if (

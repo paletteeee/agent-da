@@ -18,6 +18,12 @@
       "replacement_path": "results/submission_evidence/toxiproxy_faults_30/aggregate.json",
       "reason": "the older fault rows did not prove that service requests traversed an active Toxiproxy toxic",
       "superseded_on": "2026-08-11"
+    },
+    {
+      "artifact_path": "results/submission_evidence/toxiproxy_faults_30/aggregate.json",
+      "replacement_path": "results/submission_evidence/toxiproxy_state_verified_30/aggregate.json",
+      "reason": "the replacement rerun verifies Qdrant and Neo4j persistent state after every repetition",
+      "superseded_on": "2026-08-16"
     }
   ]
 }

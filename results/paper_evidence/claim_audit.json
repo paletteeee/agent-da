@@ -58,21 +58,21 @@
       "sha256": "631fd1884a25f2b65dfb318f35b54df7c03d6d38aa93ef38e36e98ee73cfd50a"
     },
     {
-      "path": "results/submission_evidence/toxiproxy_faults_30/aggregate.json",
-      "sha256": "aa5f700dcf080bf323ce1b9d72ed59a1f4ac3ca5ab15df1b8569849da8b741e4"
+      "path": "results/submission_evidence/toxiproxy_state_verified_30/aggregate.json",
+      "sha256": "04de2a3c7da3b8c2dcda06d88afdb18e6f224d8f0e1fcaae4847f1277b3bbcad"
     }
   ],
-  "checked_assertion_count": 131,
+  "checked_assertion_count": 163,
   "claim_count": 15,
-  "declared_assertion_count": 131,
+  "declared_assertion_count": 163,
   "evidence_id": "paper_claim_audit",
   "expected_active_claim_count": 15,
-  "expected_assertion_count": 131,
+  "expected_assertion_count": 163,
   "finding_count": 0,
   "findings": [],
   "ledger_path": "configs/paper_claims.json",
-  "ledger_sha256": "596ef06eaf6a107e27c82fda1a9c520a9c064c5049e5e8be3af114ad126d664f",
+  "ledger_sha256": "c45def3dae8308d2f49a32490c354bcb77bd9d0ee4b7f1c53e1a0a565d6cb9b5",
   "schema_version": 1,
   "status": "passed",
-  "superseded_artifact_count": 3
+  "superseded_artifact_count": 4
 }

@@ -355,65 +355,172 @@ class PaperClaimLedgerTests(unittest.TestCase):
                 },
             )
 
-    def test_task_four_ledger_extensions_cover_the_reviewed_artifact_values(self):
+    def test_state_verified_ledger_covers_the_reviewed_artifact_values(self):
         ledger = json.loads((ROOT / "configs" / "paper_claims.json").read_text())
         claims = {claim["claim_id"]: claim for claim in ledger["claims"]}
-        expected = {
-            "controlled_correctness_400x5": {
-                "/variants/Naive/oracle_match_count": 50,
-                "/variants/TxnMem-NoTxn/oracle_match_count": 200,
-                "/variants/TxnMem-NoPolicyCommit/oracle_match_count": 350,
-                "/variants/TxnMem-NoRepair/oracle_match_count": 300,
-            },
-            "controlled_mutation_matrix_350": {
-                "/mutation_cases": 350,
-                "/mutation_killed": 300,
-                "/mutation_kill_rate": 0.8571428571428571,
-            },
-            "minimal_mutant_witnesses_4": {
-                "/witnesses/partial_commit/minimal_operation_count": 2,
-                "/witnesses/remove_commit_revalidation/minimal_operation_count": 1,
-                "/witnesses/disable_provenance_traversal/minimal_operation_count": 6,
-                "/witnesses/bypass_scope_check/minimal_operation_count": 1,
-            },
-            "appworld_prompt_profile_pair": {"/tuned_status_counts/failed": 6},
-            "toxiproxy_fault_matrix_5x30": {
-                "/scenarios/delay/success_count": 30,
-                **{
-                    f"/scenarios/{scenario}/{field}": 30
-                    for scenario in (
-                        "retry_success",
-                        "timeout",
-                        "connection_drop",
-                        "delay",
-                    )
-                    for field in (
-                        "trigger_fired_count",
-                        "toxic_installed_count",
-                        "proxy_path_verified_count",
-                    )
-                },
-            },
-        }
-
-        for claim_id, expected_assertions in expected.items():
-            assertions = {
-                row["pointer"]: row["expected"] for row in claims[claim_id]["assertions"]
-            }
-            self.assertEqual(
-                {pointer: assertions.get(pointer) for pointer in expected_assertions},
-                expected_assertions,
-            )
         toxiproxy = claims["toxiproxy_fault_matrix_5x30"]
-        self.assertEqual(toxiproxy["validation_profile"], "toxiproxy_fault_path")
-        self.assertNotIn(
-            "/total_partial_commit_count",
-            {assertion["pointer"] for assertion in toxiproxy["assertions"]},
+        self.assertEqual(toxiproxy["validation_profile"], "toxiproxy_state_verified")
+        self.assertEqual(
+            toxiproxy["artifact_path"],
+            "results/submission_evidence/toxiproxy_state_verified_30/aggregate.json",
         )
-        self.assertIn(
-            "post-fault Qdrant/Neo4j persistent state was not independently verified",
+        self.assertEqual(
+            toxiproxy["artifact_sha256"],
+            "04de2a3c7da3b8c2dcda06d88afdb18e6f224d8f0e1fcaae4847f1277b3bbcad",
+        )
+        self.assertEqual(
+            toxiproxy["manifest"],
+            {
+                "path": "configs/submission_evidence/toxiproxy_state_verified_30.json",
+                "sha256": "2301e650fc8ae02c25ca608bf161045db170f5b90ec08e9b74d8cda8d6d5dc11",
+            },
+        )
+        self.assertEqual(
+            toxiproxy["source_commit"],
+            "33a334dc7c4e6d2e0250bb54cd25f0e2f080ed5d",
+        )
+        self.assertEqual(
+            toxiproxy["run_command"],
+            "COMPOSE_PROGRESS=plain TXNMEM_PYTHON=.venv/bin/python "
+            "TXNMEM_REPETITIONS=30 TXNMEM_EVENTS=2 "
+            "TXNMEM_OUT_DIR=results/real_backend_faults_state_verified_30_v2 "
+            "bash scripts/run_real_backend_smoke.sh",
+        )
+        self.assertEqual(
             toxiproxy["claim_boundary"],
+            "single-host real Qdrant/Neo4j with deterministic Toxiproxy fault injection "
+            "and post-operation readback for the tested workload and five scenarios; "
+            "not general distributed transactions, cross-host fault tolerance, "
+            "availability, linearizability, or production latency",
         )
+        assertions = {
+            row["pointer"]: row["expected"] for row in toxiproxy["assertions"]
+        }
+        expected = {
+            "/schema_version": 2,
+            "/evidence_id": "toxiproxy_state_verified_30",
+            "/status": "complete_state_verified_fault_observations",
+            "/scenario_count": 5,
+            "/repetitions_per_scenario": 30,
+            "/total_repetitions": 150,
+            "/all_scenarios_evidence_valid": True,
+            "/all_scenarios_state_verified": True,
+            "/all_observed_states_consistent": True,
+            "/state_totals/complete": 90,
+            "/state_totals/absent": 60,
+            "/state_totals/partial": 0,
+            "/state_totals/unknown": 0,
+            "/production_latency_claim": False,
+            "/runtime_attestation/image_digests/neo4j": "9317a2941a9641169aa2ea8470cdda184ff7a9ee1914b5429126d0db4828edd2",
+            "/runtime_attestation/image_digests/qdrant": "7a4788934788a7ed9cbf6b8cc3ca1ee880dcd969cf8c6639dc7d0e446cbd4b47",
+            "/runtime_attestation/image_digests/toxiproxy": "927c797a2115a193ae3a527e5a36782b938419904ac6706ca0efa029ebea58cb",
+        }
+        expected.update(
+            {
+                f"/scenarios/{scenario}/state_counts/{state}": count
+                for scenario, complete, absent in (
+                    ("normal", 30, 0),
+                    ("delay", 30, 0),
+                    ("retry_success", 30, 0),
+                    ("timeout", 0, 30),
+                    ("connection_drop", 0, 30),
+                )
+                for state, count in (
+                    ("complete", complete),
+                    ("absent", absent),
+                    ("partial", 0),
+                    ("unknown", 0),
+                )
+            }
+        )
+        expected.update(
+            {
+                f"/scenarios/{scenario}/{field}": 30
+                for scenario in ("delay", "retry_success", "timeout", "connection_drop")
+                for field in (
+                    "trigger_fired_count",
+                    "toxic_installed_count",
+                    "proxy_path_verified_count",
+                )
+            }
+        )
+        expected.update(
+            {
+                "/scenarios/retry_success/retry_count": 30,
+                "/scenarios/retry_success/retry_success_count": 30,
+                "/scenarios/timeout/abort_count": 30,
+                "/scenarios/connection_drop/abort_count": 30,
+            }
+        )
+        self.assertEqual(assertions, expected)
+
+    def _state_verified_profile_fixture(self, root: Path) -> Path:
+        ledger, _ = self._fixture(root)
+        artifact = root / "results" / "evidence.json"
+        source = ROOT / "results/submission_evidence/toxiproxy_state_verified_30/aggregate.json"
+        artifact.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+        payload = json.loads(ledger.read_text())
+        claim = payload["claims"][0]
+        claim["artifact_sha256"] = self._sha256(artifact)
+        claim["assertions"] = [
+            {
+                "pointer": "/status",
+                "operator": "equals",
+                "expected": "complete_state_verified_fault_observations",
+            }
+        ]
+        claim["validation_profile"] = "toxiproxy_state_verified"
+        ledger.write_text(json.dumps(payload), encoding="utf-8")
+        return ledger
+
+    def test_state_verified_profile_rejects_superficially_asserted_incomplete_evidence(self):
+        cases = (
+            ("partial", lambda document: document["state_totals"].__setitem__("partial", 1)),
+            ("unknown", lambda document: document["state_totals"].__setitem__("unknown", 1)),
+            (
+                "missing_state_flag",
+                lambda document: document.pop("all_scenarios_state_verified"),
+            ),
+            (
+                "missing_consistency_flag",
+                lambda document: document.pop("all_observed_states_consistent"),
+            ),
+            ("wrong_scenario_set", lambda document: document["scenarios"].pop("delay")),
+            (
+                "wrong_complete_absent_distribution",
+                lambda document: document["scenarios"]["timeout"]["state_counts"].__setitem__("complete", 30),
+            ),
+            (
+                "incomplete_proxy_evidence",
+                lambda document: document["scenarios"]["delay"].__setitem__(
+                    "proxy_path_verified_count", 29
+                ),
+            ),
+            (
+                "wrong_retry_abort_semantics",
+                lambda document: document["scenarios"]["retry_success"].__setitem__(
+                    "retry_success_count", 29
+                ),
+            ),
+        )
+        for name, mutate in cases:
+            with self.subTest(name=name), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger = self._state_verified_profile_fixture(root)
+                artifact = root / "results" / "evidence.json"
+                document = json.loads(artifact.read_text())
+                mutate(document)
+                artifact.write_text(json.dumps(document), encoding="utf-8")
+                payload = json.loads(ledger.read_text())
+                payload["claims"][0]["artifact_sha256"] = self._sha256(artifact)
+                ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+                report = audit_claim_ledger(root, ledger)
+
+            self.assertIn(
+                "toxiproxy_state_evidence_incomplete",
+                {item["code"] for item in report["findings"]},
+            )
 
     def test_audit_rejects_incomplete_tau_task_set(self):
         with TemporaryDirectory() as tmp:

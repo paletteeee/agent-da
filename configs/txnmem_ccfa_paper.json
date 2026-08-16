@@ -69,7 +69,7 @@
     "official τ-bench workflow reward with native memory events; reward is not memory accuracy",
     "descriptive 20-task paired result; tuned token total is an observed lower bound and no population-significance claim is made",
     "three fixed paired repetitions; descriptive effect only, with no population-significance or universal-improvement claim",
-    "single-host proxy/fault-response observations; post-fault Qdrant/Neo4j persistent state was not independently verified; not atomicity/availability/latency evidence",
+    "single-host real Qdrant/Neo4j with deterministic Toxiproxy fault injection and post-operation readback for the tested workload and five scenarios; not general distributed transactions, cross-host fault tolerance, availability, linearizability, or production latency",
     "single-host five-task end-to-end smoke including model, services, and evaluator; not production latency",
     "three independently attested Agent-client-to-model-server repetitions; not multi-host Agent workers, one continuous 30-minute tunnel, or production latency",
     "joint-distribution diagnostic on a held-out trace split; rejection indicates mismatch and does not establish equivalence",
