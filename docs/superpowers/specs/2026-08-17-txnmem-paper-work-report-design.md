@@ -9,7 +9,7 @@
 - 可版本化源稿：`docs/txnmem_paper_work_and_experiment_report_zh.md`。
 - 确定性构建器：`scripts/build_txnmem_paper_work_report_docx.py`。
 - 文档 QA 记录：`docs/paper/txnmem_paper_work_report_qa_zh.md`。
-- 外部 DOCX：`/Users/xiaoyan_zhu/Desktop/agent-db/TxnMem_论文工作与实验总报告.docx`。
+- 外部 DOCX：`<external-output-dir>/TxnMem_论文工作与实验总报告.docx`。
 
 ## 内容结构
 
@@ -45,4 +45,3 @@
 - 自动测试检查关键样本量、结果、边界措辞和 active evidence path。
 - 构建两次 SHA-256 一致；DOCX 隐私、结构、表格几何和可访问性审计通过。
 - 完整渲染为 PNG，并逐页在 100% 视图检查无裁切、重叠、坏表格、缺字或异常分页。
-

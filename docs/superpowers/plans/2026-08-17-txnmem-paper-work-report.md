@@ -14,7 +14,7 @@
 - Preserve exact statistical units and claim boundaries.
 - Build with bundled workspace Python and render every final page.
 - Store no credential, routable host identity, private runtime path, or raw benchmark payload in the report.
-- Final DOCX path is `/Users/xiaoyan_zhu/Desktop/agent-db/TxnMem_论文工作与实验总报告.docx`.
+- Final DOCX path is `<external-output-dir>/TxnMem_论文工作与实验总报告.docx`.
 
 ---
 
@@ -102,4 +102,3 @@ Verify typography, tables, figures, captions, headers/footers, page breaks, and 
 - [ ] **Step 4: Record QA and commit intended files**
 
 Commit the source, builder, tests, QA report, design and plan. Do not add unrelated pre-existing result directories or the local `exit_code` provenance file.
-
