@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Work only in `/Users/xiaoyan_zhu/Desktop/agent-db/remote_staging/txnmem/.worktrees/pre-submission-evidence` on branch `codex/pre-submission-evidence`.
+- Work only in the current isolated worktree on branch `codex/pre-submission-evidence`.
 - Preserve the raw source bytes at `results/real_backend_faults_state_verified_30_v2/results/backend_performance.json`; do not normalize or rewrite them.
 - Track the raw JSON result but exclude transient `pid` and `run.log` files from formal evidence and commits.
 - Treat `33a334dc7c4e6d2e0250bb54cd25f0e2f080ed5d` as the experiment source commit and verify it is present in the local repository.
@@ -387,7 +387,7 @@ git commit -m "docs: report state-verified backend results"
 - Modify if required: `scripts/build_txnmem_ccfa_docx.py`
 - Modify if required: `tests/test_txnmem_ccfa_docx.py`
 - Modify: `docs/paper/txnmem_ccfa_docx_qa_zh.md`
-- Generate outside the Git worktree: `/Users/xiaoyan_zhu/Desktop/agent-db/TxnMem_CCF-A中文论文初稿_state_verified.docx`
+- Generate outside the Git worktree: `../../../../TxnMem_CCF-A中文论文初稿_state_verified.docx`
 
 ### Step 1: Run deterministic structure tests
 
@@ -419,7 +419,7 @@ python3 -m unittest tests.test_txnmem_ccfa_docx
 - [ ] Copy the visually approved file to:
 
 ```text
-/Users/xiaoyan_zhu/Desktop/agent-db/TxnMem_CCF-A中文论文初稿_state_verified.docx
+../../../../TxnMem_CCF-A中文论文初稿_state_verified.docx
 ```
 
 - [ ] Commit source and QA documentation only; keep the release binary outside the isolated worktree unless repository policy explicitly tracks it.
