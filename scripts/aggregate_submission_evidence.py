@@ -50,6 +50,7 @@ def main() -> int:
     toxiproxy.add_argument("--toxiproxy-version", required=True)
     toxiproxy.add_argument("--source-commit", required=True)
     toxiproxy.add_argument("--run-command", required=True)
+    toxiproxy.add_argument("--runtime-attestation", type=Path, required=True)
 
     args = parser.parse_args()
     if args.command == "tau":
@@ -71,12 +72,14 @@ def main() -> int:
             run_command=args.run_command,
         )
     else:
+        attestation = json.loads(args.runtime_attestation.read_text(encoding="utf-8"))
         result = aggregate_toxiproxy_submission_evidence(
             args.source,
             expected_repetitions=args.expected_repetitions,
             toxiproxy_version=args.toxiproxy_version,
             source_commit=args.source_commit,
             run_command=args.run_command,
+            runtime_attestation=attestation,
         )
     _write(result, args.out)
     print(f"wrote {result['evidence_id']} -> {args.out}")

@@ -298,8 +298,9 @@ def aggregate_toxiproxy_submission_evidence(
     toxiproxy_version: str,
     source_commit: str,
     run_command: str,
+    runtime_attestation: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Validate that every declared network fault traversed a real proxy."""
+    """Validate real-proxy fault evidence and recomputed backend readback state."""
 
     source, payload = _load(source_path)
     if expected_repetitions <= 0:
@@ -311,6 +312,13 @@ def aggregate_toxiproxy_submission_evidence(
     version = str(toxiproxy_version or "").strip()
     if not version:
         raise ValueError("toxiproxy_version must be specified")
+    attestation = _validate_toxiproxy_runtime_attestation(
+        runtime_attestation,
+        source=source,
+        source_commit=commit,
+        toxiproxy_version=version,
+        run_command=command,
+    )
     if payload.get("backend") != "vector-graph":
         raise ValueError("Toxiproxy evidence must use the vector-graph backend")
 
@@ -326,18 +334,27 @@ def aggregate_toxiproxy_submission_evidence(
             "available": True,
             "version": str(item["version"]),
         }
+    for service, service_version in normalized_health.items():
+        if attestation["services"][service]["version"] != service_version["version"]:
+            raise ValueError(f"Toxiproxy attestation service version mismatch: {service}")
 
     matrix = payload.get("fault_matrix")
     if not isinstance(matrix, Mapping):
         raise ValueError("Toxiproxy fault matrix is missing")
     if matrix.get("all_scenarios_evidence_valid") is not True:
         raise ValueError("Toxiproxy matrix contains invalid trigger evidence")
+    if matrix.get("all_scenarios_state_verified") is not True:
+        raise ValueError("Toxiproxy matrix does not attest state verification")
+    if matrix.get("all_observed_states_consistent") is not True:
+        raise ValueError("Toxiproxy matrix does not attest consistent observed state")
     raw_scenarios = matrix.get("scenarios")
     expected_names = {"normal", "delay", "timeout", "connection_drop", "retry_success"}
     if not isinstance(raw_scenarios, Mapping) or set(raw_scenarios) != expected_names:
         raise ValueError("Toxiproxy matrix must contain the five fixed scenarios")
+    workload_events = _toxiproxy_workload_events(payload)
 
     scenarios: dict[str, dict[str, Any]] = {}
+    state_totals: Counter[str] = Counter()
     for name in sorted(expected_names):
         row = raw_scenarios[name]
         if not isinstance(row, Mapping) or row.get("repetitions") != expected_repetitions:
@@ -392,6 +409,39 @@ def aggregate_toxiproxy_submission_evidence(
         elif success_count != repetitions or abort_count != 0:
             raise ValueError(f"Toxiproxy success semantics mismatch: {name}")
 
+        expected_evidence_counts = {
+            "fault_evidence_count": repetitions,
+            "proxy_path_verified_count": repetitions,
+            "evidence_valid_count": repetitions,
+            "trigger_fired_count": repetitions if non_normal else 0,
+            "toxic_installed_count": repetitions if non_normal else 0,
+            "toxic_cleared_count": repetitions if non_normal else 0,
+            "fault_observed_count": repetitions if non_normal else 0,
+            "retry_count": repetitions if name == "retry_success" else 0,
+            "retry_success_count": repetitions if name == "retry_success" else 0,
+        }
+        for field, expected in expected_evidence_counts.items():
+            if field in {"fault_evidence_count", "retry_count", "retry_success_count"}:
+                continue
+            observed = sum(bool(evidence.get(field.removesuffix("_count"))) for evidence in evidence_rows)
+            if observed != expected:
+                raise ValueError(f"Toxiproxy repetition evidence mismatch: {name}/{field}")
+        for field in ("retry_count", "retry_success_count"):
+            observed = sum(_nonnegative_int(evidence.get(field, 0), f"{name}/{field}") for evidence in evidence_rows)
+            if observed != expected_evidence_counts[field]:
+                raise ValueError(f"Toxiproxy repetition evidence mismatch: {name}/{field}")
+
+        scenario_states = _recompute_toxiproxy_states(
+            name, row, repetitions=repetitions, workload_events=workload_events
+        )
+        declared_state_counts = row.get("persistent_state_classification_counts")
+        if not isinstance(declared_state_counts, Mapping):
+            raise ValueError(f"Toxiproxy state counts are missing: {name}")
+        for field, expected in scenario_states.items():
+            if declared_state_counts.get(field) != expected:
+                raise ValueError(f"Toxiproxy state count mismatch: {name}/{field}")
+        state_totals.update(scenario_states)
+
         scenarios[name] = {
             "repetitions": repetitions,
             "success_count": success_count,
@@ -406,25 +456,169 @@ def aggregate_toxiproxy_submission_evidence(
             ),
             "toxic_cleared_count": int(row.get("toxic_cleared_count", 0) or 0),
             "fault_observed_count": int(row.get("fault_observed_count", 0) or 0),
+            "state_counts": scenario_states,
         }
 
     return {
-        "schema_version": 1,
-        "evidence_id": "toxiproxy_fault_path_30",
-        "status": "complete_fault_path_observations",
+        "schema_version": 2,
+        "evidence_id": "toxiproxy_state_verified_30",
+        "status": "complete_state_verified_fault_observations",
         "scenario_count": len(scenarios),
         "repetitions_per_scenario": expected_repetitions,
         "total_repetitions": expected_repetitions * len(scenarios),
         "all_scenarios_evidence_valid": True,
+        "all_scenarios_state_verified": True,
+        "all_observed_states_consistent": True,
+        "workload_events": workload_events,
+        "state_totals": {state: state_totals[state] for state in ("complete", "absent", "partial", "unknown")},
         "backend_health": normalized_health,
         "toxiproxy_version": version,
         "scenarios": scenarios,
         "source_commit": commit,
         "run_command": command,
+        "runtime_attestation": {
+            "sha256": _mapping_sha256(attestation),
+            "image_digests": {
+                service: attestation["services"][service]["image_digest"]
+                for service in ("qdrant", "neo4j", "toxiproxy")
+            },
+            "host_identity_sha256": attestation["host_identity_sha256"],
+        },
         "source_artifact": {"path": str(source), "sha256": _sha256(source)},
         "claim_boundary": (
-            "single-host proxy/fault-response observations; post-fault Qdrant/Neo4j "
-            "persistent state was not independently verified; not atomicity/availability/latency evidence"
+            "single-host real Qdrant/Neo4j with deterministic Toxiproxy fault injection and "
+            "post-operation readback for the tested workload and five scenarios; not general "
+            "distributed transactions, cross-host fault tolerance, availability, linearizability, "
+            "or production latency"
         ),
         "production_latency_claim": False,
     }
+
+
+def _nonnegative_int(value: Any, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{field} must be a non-negative integer")
+    return value
+
+
+def _toxiproxy_workload_events(payload: Mapping[str, Any]) -> int:
+    performance = payload.get("performance")
+    rows = performance.get("rows") if isinstance(performance, Mapping) else None
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], Mapping):
+        raise ValueError("Toxiproxy evidence must contain one performance workload row")
+    workload_events = _nonnegative_int(rows[0].get("workload_events"), "workload_events")
+    if workload_events != 2:
+        raise ValueError("Toxiproxy workload_events must equal 2")
+    return workload_events
+
+
+def _recompute_toxiproxy_states(
+    scenario: str,
+    row: Mapping[str, Any],
+    *,
+    repetitions: int,
+    workload_events: int,
+) -> Counter[str]:
+    verifications = row.get("persistent_state_verifications")
+    if not isinstance(verifications, list) or len(verifications) != repetitions:
+        raise ValueError(f"Toxiproxy state-verification row count mismatch: {scenario}")
+    required_state = "absent" if scenario in {"timeout", "connection_drop"} else "complete"
+    counts: Counter[str] = Counter()
+    for verification in verifications:
+        if not isinstance(verification, Mapping):
+            raise ValueError(f"Toxiproxy state verification must be an object: {scenario}")
+        items = verification.get("items")
+        if not isinstance(items, list) or len(items) != workload_events:
+            raise ValueError(f"Toxiproxy state item count mismatch: {scenario}")
+        memory_ids: list[str] = []
+        item_states: list[str] = []
+        for item in items:
+            if not isinstance(item, Mapping):
+                raise ValueError(f"Toxiproxy state item must be an object: {scenario}")
+            memory_id = str(item.get("memory_id", "")).strip()
+            if not memory_id:
+                raise ValueError(f"Toxiproxy state item is missing memory ID: {scenario}")
+            memory_ids.append(memory_id)
+            qdrant = item.get("qdrant")
+            neo4j = item.get("neo4j")
+            if not isinstance(qdrant, Mapping) or not isinstance(neo4j, Mapping):
+                raise ValueError(f"Toxiproxy backend readback is missing: {scenario}")
+            if qdrant.get("read_ok") is not True or neo4j.get("read_ok") is not True:
+                raise ValueError(f"Toxiproxy backend readback failed: {scenario}")
+            if qdrant.get("present") != neo4j.get("present") or qdrant.get("matches") != neo4j.get("matches"):
+                raise ValueError(f"Toxiproxy backend readback disagrees: {scenario}")
+            if qdrant.get("present") is True and qdrant.get("matches") is True:
+                state = "complete"
+            elif qdrant.get("present") is False and neo4j.get("present") is False:
+                state = "absent"
+            else:
+                raise ValueError(f"Toxiproxy backend readback is partial or unknown: {scenario}")
+            if item.get("classification") != state:
+                raise ValueError(f"Toxiproxy item classification mismatch: {scenario}")
+            item_states.append(state)
+        if len(set(memory_ids)) != workload_events:
+            raise ValueError(f"Toxiproxy state verification has duplicate memory IDs: {scenario}")
+        if set(item_states) != {required_state} or verification.get("classification") != required_state:
+            raise ValueError(f"Toxiproxy state classification mismatch: {scenario}")
+        counts[required_state] += 1
+    return Counter({state: counts[state] for state in ("complete", "absent", "partial", "unknown")})
+
+
+def _validate_toxiproxy_runtime_attestation(
+    raw_attestation: Mapping[str, Any],
+    *,
+    source: Path,
+    source_commit: str,
+    toxiproxy_version: str,
+    run_command: str,
+) -> dict[str, Any]:
+    if not isinstance(raw_attestation, Mapping):
+        raise ValueError("Toxiproxy runtime_attestation must be an object")
+    attestation = dict(raw_attestation)
+    if attestation.get("schema_version") != 1:
+        raise ValueError("Toxiproxy runtime attestation schema_version must equal 1")
+    captured_at = str(attestation.get("captured_at", "")).strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z", captured_at):
+        raise ValueError("Toxiproxy runtime attestation captured_at must be UTC ISO-8601")
+    if attestation.get("execution_scope") != "single_host_real_services":
+        raise ValueError("Toxiproxy runtime attestation must describe single-host real services")
+    if _hex_digest(attestation.get("source_commit"), "attestation source_commit", {40}) != source_commit:
+        raise ValueError("Toxiproxy runtime attestation source_commit mismatch")
+    if _hex_digest(attestation.get("source_artifact_sha256"), "source_artifact_sha256", {64}) != _sha256(source):
+        raise ValueError("Toxiproxy runtime attestation source artifact hash mismatch")
+    if attestation.get("exit_code") != 0:
+        raise ValueError("Toxiproxy runtime attestation exit_code must equal 0")
+    attested_command = str(attestation.get("run_command", "")).strip()
+    if not attested_command or _SECRET_TEXT.search(attested_command):
+        raise ValueError("Toxiproxy runtime attestation command is missing or secret-bearing")
+    if attested_command != run_command:
+        raise ValueError("Toxiproxy runtime attestation command mismatch")
+    runtime = attestation.get("runtime")
+    if not isinstance(runtime, Mapping):
+        raise ValueError("Toxiproxy runtime attestation runtime is missing")
+    for field in ("python", "docker", "compose", "kernel"):
+        if not str(runtime.get(field, "")).strip():
+            raise ValueError(f"Toxiproxy runtime attestation runtime version is missing: {field}")
+    services = attestation.get("services")
+    if not isinstance(services, Mapping) or set(services) != {"qdrant", "neo4j", "toxiproxy"}:
+        raise ValueError("Toxiproxy runtime attestation must describe three services")
+    for service in ("qdrant", "neo4j", "toxiproxy"):
+        item = services[service]
+        if not isinstance(item, Mapping):
+            raise ValueError(f"Toxiproxy runtime attestation service is malformed: {service}")
+        for field in ("version", "tag", "pull_source"):
+            if not str(item.get(field, "")).strip():
+                raise ValueError(f"Toxiproxy runtime attestation service field is missing: {service}/{field}")
+        _hex_digest(item.get("image_digest"), f"{service} image_digest", {64})
+    if str(services["toxiproxy"]["version"]) != toxiproxy_version:
+        raise ValueError("Toxiproxy runtime attestation version mismatch")
+    network_boundary = attestation.get("network_boundary")
+    if not isinstance(network_boundary, Mapping) or network_boundary.get("data_services_directly_published") is not False or network_boundary.get("client_data_path") != "toxiproxy":
+        raise ValueError("Toxiproxy runtime attestation network boundary is invalid")
+    _hex_digest(attestation.get("host_identity_sha256"), "host_identity_sha256", {64})
+    return attestation
+
+
+def _mapping_sha256(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()

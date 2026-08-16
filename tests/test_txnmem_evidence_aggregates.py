@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import math
+import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -23,124 +27,167 @@ SOURCE_COMMIT = "a" * 40
 
 
 class SubmissionEvidenceAggregateTests(unittest.TestCase):
-    def test_toxiproxy_aggregate_projects_only_fault_and_response_path_observations(self):
+    def test_toxiproxy_aggregate_requires_consistent_post_operation_state(self):
+        source = self._state_verified_toxiproxy_source()
+        with TemporaryDirectory() as tmp:
+            path = self._write(Path(tmp), "toxiproxy.json", source)
+            result = aggregate_toxiproxy_submission_evidence(
+                path,
+                expected_repetitions=2,
+                toxiproxy_version="2.5.0",
+                source_commit=SOURCE_COMMIT,
+                run_command="python txnmem_experiment.py backend-performance",
+                runtime_attestation=self._runtime_attestation(path),
+            )
+
+        self.assertEqual(result["schema_version"], 2)
+        self.assertEqual(result["evidence_id"], "toxiproxy_state_verified_30")
+        self.assertEqual(result["status"], "complete_state_verified_fault_observations")
+        self.assertEqual(result["workload_events"], 2)
+        self.assertEqual(result["total_repetitions"], 10)
+        self.assertEqual(result["state_totals"], {"complete": 6, "absent": 4, "partial": 0, "unknown": 0})
+        self.assertTrue(result["all_scenarios_state_verified"])
+        self.assertTrue(result["all_observed_states_consistent"])
+        self.assertEqual(len(result["runtime_attestation"]["sha256"]), 64)
+        self.assertEqual(set(result["runtime_attestation"]["image_digests"]), {"qdrant", "neo4j", "toxiproxy"})
+        self.assertEqual(set(result["runtime_attestation"]), {"sha256", "image_digests", "host_identity_sha256"})
+
+    def test_toxiproxy_aggregate_rejects_invalid_state_oracle_evidence(self):
+        cases = {
+            "partial state": lambda source: source["fault_matrix"]["scenarios"]["normal"]["persistent_state_verifications"][0].__setitem__("classification", "partial"),
+            "unknown state": lambda source: source["fault_matrix"]["scenarios"]["normal"]["persistent_state_verifications"][0].__setitem__("classification", "unknown"),
+            "Qdrant read failure": lambda source: source["fault_matrix"]["scenarios"]["normal"]["persistent_state_verifications"][0]["items"][0]["qdrant"].__setitem__("read_ok", False),
+            "Neo4j read failure": lambda source: source["fault_matrix"]["scenarios"]["normal"]["persistent_state_verifications"][0]["items"][0]["neo4j"].__setitem__("read_ok", False),
+            "present and matches disagreement": lambda source: source["fault_matrix"]["scenarios"]["normal"]["persistent_state_verifications"][0]["items"][0]["neo4j"].__setitem__("matches", False),
+            "duplicate expected memory IDs": lambda source: source["fault_matrix"]["scenarios"]["normal"]["persistent_state_verifications"][0]["items"][1].__setitem__("memory_id", "normal-m0"),
+            "state-verification row count mismatch": lambda source: source["fault_matrix"]["scenarios"]["normal"]["persistent_state_verifications"].pop(),
+            "state count mismatch": lambda source: source["fault_matrix"]["scenarios"]["normal"]["persistent_state_classification_counts"].__setitem__("complete", 1),
+            "memory-event count mismatch": lambda source: source["performance"]["rows"][0].__setitem__("workload_events", 3),
+            "scenario repetition mismatch": lambda source: source["fault_matrix"]["scenarios"]["normal"].__setitem__("repetitions", 1),
+            "aggregate all_scenarios_state_verified false": lambda source: source["fault_matrix"].__setitem__("all_scenarios_state_verified", False),
+            "aggregate all_observed_states_consistent false": lambda source: source["fault_matrix"].__setitem__("all_observed_states_consistent", False),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(name=name), TemporaryDirectory() as tmp:
+                source = self._state_verified_toxiproxy_source()
+                mutate(source)
+                path = self._write(Path(tmp), "toxiproxy.json", source)
+                with self.assertRaises(ValueError):
+                    aggregate_toxiproxy_submission_evidence(
+                        path, expected_repetitions=2, toxiproxy_version="2.5.0",
+                        source_commit=SOURCE_COMMIT,
+                        run_command="python txnmem_experiment.py backend-performance",
+                        runtime_attestation=self._runtime_attestation(path),
+                    )
+
+    def test_toxiproxy_aggregate_rejects_invalid_runtime_attestation(self):
+        cases = {
+            "missing image digest": lambda attestation: attestation["services"]["qdrant"].pop("image_digest"),
+            "mismatched source SHA-256": lambda attestation: attestation.__setitem__("source_artifact_sha256", "b" * 64),
+            "non-zero exit code": lambda attestation: attestation.__setitem__("exit_code", 1),
+            "missing runtime version": lambda attestation: attestation["runtime"].pop("docker"),
+            "secret-bearing command text": lambda attestation: attestation.__setitem__("run_command", "runner --secret=redacted"),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(name=name), TemporaryDirectory() as tmp:
+                path = self._write(Path(tmp), "toxiproxy.json", self._state_verified_toxiproxy_source())
+                attestation = self._runtime_attestation(path)
+                mutate(attestation)
+                with self.assertRaises(ValueError):
+                    aggregate_toxiproxy_submission_evidence(
+                        path, expected_repetitions=2, toxiproxy_version="2.5.0",
+                        source_commit=SOURCE_COMMIT,
+                        run_command="python txnmem_experiment.py backend-performance",
+                        runtime_attestation=attestation,
+                    )
+
+    def test_toxiproxy_cli_requires_runtime_attestation(self):
+        command = [
+            sys.executable,
+            str(ROOT / "scripts" / "aggregate_submission_evidence.py"),
+            "toxiproxy",
+            "--source", "source.json",
+            "--out", "aggregate.json",
+            "--toxiproxy-version", "2.5.0",
+            "--source-commit", SOURCE_COMMIT,
+            "--run-command", "python runner.py",
+        ]
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = str(ROOT / "src")
+        result = subprocess.run(
+            command, capture_output=True, text=True, check=False, cwd=ROOT, env=environment
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--runtime-attestation", result.stderr)
+
+    def _state_verified_toxiproxy_source(self, repetitions: int = 2) -> dict:
         scenarios = {}
         for name in ("normal", "delay", "timeout", "connection_drop", "retry_success"):
             non_normal = name != "normal"
             retry = name == "retry_success"
             abort = name in {"timeout", "connection_drop"}
-            evidence = {
-                "trigger_fired": non_normal,
-                "toxic_installed": non_normal,
-                "toxic_cleared": non_normal,
-                "proxy_path_verified": True,
-                "fault_observed": non_normal,
-                "evidence_valid": True,
-                "events": [] if not non_normal else [{"operation_elapsed_ms": 10.0}],
+            expected_state = "absent" if abort else "complete"
+            verification = {
+                "classification": expected_state,
+                "items": [
+                    {
+                        "classification": expected_state,
+                        "memory_id": f"{name}-m{index}",
+                        "qdrant": {"read_ok": True, "present": not abort, "matches": not abort},
+                        "neo4j": {"read_ok": True, "present": not abort, "matches": not abort},
+                    }
+                    for index in range(2)
+                ],
             }
+            evidence = [
+                {
+                    "trigger_fired": non_normal, "toxic_installed": non_normal,
+                    "toxic_cleared": non_normal, "proxy_path_verified": True,
+                    "fault_observed": non_normal, "evidence_valid": True,
+                    "retry_count": int(retry), "retry_success_count": int(retry),
+                }
+                for _ in range(repetitions)
+            ]
             scenarios[name] = {
-                "repetitions": 1,
-                "success_count": int(not abort),
-                "error_count": int(abort),
-                "retry_success_count": int(retry),
-                "abort_count": int(abort),
-                # Legacy runner fields are deliberately contradictory: they are
-                # not persisted-state evidence and must not enter the projection.
-                "partial_commit_count": 7,
-                "oracle_match_count": 0,
-                "retry_count": int(retry),
-                "fault_evidence_count": 1,
-                "trigger_fired_count": int(non_normal),
-                "toxic_installed_count": int(non_normal),
-                "toxic_cleared_count": int(non_normal),
-                "proxy_path_verified_count": 1,
-                "fault_observed_count": int(non_normal),
-                "evidence_valid_count": 1,
-                "repetition_evidence": [evidence],
-                "evidence_valid": True,
+                "repetitions": repetitions, "success_count": repetitions * int(not abort),
+                "error_count": repetitions * int(abort), "retry_success_count": repetitions * int(retry),
+                "abort_count": repetitions * int(abort), "retry_count": repetitions * int(retry),
+                "fault_evidence_count": repetitions, "trigger_fired_count": repetitions * int(non_normal),
+                "toxic_installed_count": repetitions * int(non_normal), "toxic_cleared_count": repetitions * int(non_normal),
+                "proxy_path_verified_count": repetitions, "fault_observed_count": repetitions * int(non_normal),
+                "evidence_valid_count": repetitions, "repetition_evidence": evidence, "evidence_valid": True,
+                "persistent_state_verifications": [copy.deepcopy(verification) for _ in range(repetitions)],
+                "persistent_state_classification_counts": {
+                    "complete": repetitions * int(expected_state == "complete"),
+                    "absent": repetitions * int(expected_state == "absent"), "partial": 0, "unknown": 0,
+                },
             }
-        source = {
+        return {
             "backend": "vector-graph",
-            "backend_health": {
-                "qdrant": {"available": True, "version": "1.11.5"},
-                "neo4j": {"available": True, "version": "5.22.0"},
-            },
+            "backend_health": {"qdrant": {"available": True, "version": "1.11.5"}, "neo4j": {"available": True, "version": "5.22.0"}},
             "fault_matrix": {
-                "all_scenarios_evidence_valid": True,
-                "all_scenarios_no_partial_commit": False,
-                "scenarios": scenarios,
+                "all_scenarios_evidence_valid": True, "all_scenarios_state_verified": True,
+                "all_observed_states_consistent": True, "scenarios": scenarios,
             },
+            "performance": {"rows": [{"workload_events": 2}]},
             "production_latency_claim": False,
         }
-        with TemporaryDirectory() as tmp:
-            path = self._write(Path(tmp), "toxiproxy.json", source)
-            result = aggregate_toxiproxy_submission_evidence(
-                path,
-                expected_repetitions=1,
-                toxiproxy_version="2.5.0",
-                source_commit=SOURCE_COMMIT,
-                run_command="python txnmem_experiment.py backend-performance",
-            )
 
-        self.assertEqual(result["status"], "complete_fault_path_observations")
-        self.assertEqual(result["scenario_count"], 5)
-        self.assertEqual(result["total_repetitions"], 5)
-        self.assertNotIn("total_partial_commit_count", result)
-        self.assertNotIn("partial_commit_count", result["scenarios"]["normal"])
-        self.assertEqual(result["scenarios"]["retry_success"]["retry_success_count"], 1)
-        self.assertNotIn("p50_trigger_elapsed_ms", result["scenarios"]["delay"])
-        self.assertIn("not atomicity/availability/latency evidence", result["claim_boundary"])
-
-    def test_toxiproxy_aggregate_rejects_missing_response_count(self):
-        source = {
-            "backend": "vector-graph",
-            "backend_health": {
-                "qdrant": {"available": True, "version": "1"},
-                "neo4j": {"available": True, "version": "1"},
+    def _runtime_attestation(self, source_path: Path) -> dict:
+        return {
+            "schema_version": 1, "captured_at": "2026-08-16T00:00:00Z",
+            "execution_scope": "single_host_real_services", "source_commit": SOURCE_COMMIT,
+            "source_artifact_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+            "exit_code": 0, "run_command": "python txnmem_experiment.py backend-performance",
+            "runtime": {"python": "3.12.0", "docker": "29.1.3", "compose": "2.40.3", "kernel": "test-kernel"},
+            "services": {
+                "qdrant": {"version": "1.11.5", "tag": "qdrant/qdrant:v1.11.5", "image_digest": "1" * 64, "pull_source": "registry/qdrant"},
+                "neo4j": {"version": "5.22.0", "tag": "neo4j:5.22.0", "image_digest": "2" * 64, "pull_source": "registry/neo4j"},
+                "toxiproxy": {"version": "2.5.0", "tag": "shopify/toxiproxy:2.5.0", "image_digest": "3" * 64, "pull_source": "registry/toxiproxy"},
             },
-            "fault_matrix": {
-                "all_scenarios_evidence_valid": True,
-                "scenarios": {
-                    name: {
-                        "repetitions": 1,
-                        "success_count": int(
-                            name not in {"timeout", "connection_drop"}
-                        ),
-                        "error_count": int(name in {"timeout", "connection_drop"}),
-                        "abort_count": int(name in {"timeout", "connection_drop"}),
-                        "retry_count": int(name == "retry_success"),
-                        "retry_success_count": int(name == "retry_success"),
-                        "fault_evidence_count": 1,
-                        "proxy_path_verified_count": 1,
-                        "evidence_valid_count": 1,
-                        "trigger_fired_count": int(name != "normal"),
-                        "toxic_installed_count": int(name != "normal"),
-                        "toxic_cleared_count": int(name != "normal"),
-                        "fault_observed_count": int(name != "normal"),
-                        "evidence_valid": True,
-                        "repetition_evidence": [{"evidence_valid": True}],
-                    }
-                    for name in (
-                        "normal",
-                        "delay",
-                        "timeout",
-                        "connection_drop",
-                        "retry_success",
-                    )
-                },
-            },
+            "network_boundary": {"data_services_directly_published": False, "client_data_path": "toxiproxy"},
+            "host_identity_sha256": "4" * 64,
         }
-        del source["fault_matrix"]["scenarios"]["normal"]["success_count"]
-        with TemporaryDirectory() as tmp:
-            path = self._write(Path(tmp), "toxiproxy.json", source)
-            with self.assertRaisesRegex(ValueError, "normal/success_count"):
-                aggregate_toxiproxy_submission_evidence(
-                    path,
-                    expected_repetitions=1,
-                    toxiproxy_version="2.5.0",
-                    source_commit=SOURCE_COMMIT,
-                    run_command="python txnmem_experiment.py backend-performance",
-                )
 
     def _write(self, root: Path, name: str, payload: dict) -> Path:
         path = root / name
