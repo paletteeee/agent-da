@@ -223,7 +223,7 @@ PYTHONPATH=src python3 scripts/aggregate_submission_evidence.py toxiproxy \
   --expected-repetitions 30 \
   --toxiproxy-version 2.5.0 \
   --source-commit 33a334dc7c4e6d2e0250bb54cd25f0e2f080ed5d \
-  --run-command "COMPOSE_PROGRESS=plain TXNMEM_PYTHON=/home/suma/txnmem_submission_20260816/.venv/bin/python TXNMEM_REPETITIONS=30 TXNMEM_EVENTS=2 TXNMEM_OUT_DIR=/home/suma/txnmem_submission_20260816/results/real_backend_faults_state_verified_30_v2 bash scripts/run_real_backend_smoke.sh" \
+  --run-command "COMPOSE_PROGRESS=plain TXNMEM_PYTHON=.venv/bin/python TXNMEM_REPETITIONS=30 TXNMEM_EVENTS=2 TXNMEM_OUT_DIR=results/real_backend_faults_state_verified_30_v2 bash scripts/run_real_backend_smoke.sh" \
   --runtime-attestation results/submission_evidence/toxiproxy_state_verified_30/environment_attestation.json
 ```
 
