@@ -958,8 +958,28 @@ class TaskTransactionCoordinator:
             source = self._require_existing(source_id)
             self._enforce_source_scope_policy(source_id, source, current_policy)
 
+        pending_base: int | None = None
+        prospective_memory_id = (
+            str(normalized.get("new_memory_id"))
+            if tool_name == "memory_supersede"
+            else str(normalized.get("memory_id"))
+            if normalized.get("memory_id") is not None
+            else None
+        )
+        if tool_name in _RECORD_TOOLS and prospective_memory_id is not None:
+            pending = self._pending_records.get(prospective_memory_id)
+            if pending is not None:
+                pending_base = int(pending.get("version", 0))
+            else:
+                try:
+                    pending_base = self.backend.current_version(
+                        prospective_memory_id
+                    )
+                except Exception as exc:
+                    raise TaskTransactionError("backend_state_unknown") from exc
+
         intent = self._append_intent(tool_name, normalized)
-        record = _new_record(intent, self.backend.current_version(_intent_memory_id(intent) or ""))
+        record = _new_record(intent, pending_base)
         if record is not None:
             record["status"] = "active"
             record.pop("target_status", None)
@@ -1134,7 +1154,14 @@ class TaskTransactionCoordinator:
     def _finalize_committed(
         self, intents: Sequence[Mapping[str, Any]]
     ) -> None:
-        finalized = self.backend.finalize_transaction(self.txn_id, intents)
+        try:
+            finalized = self.backend.finalize_transaction(self.txn_id, intents)
+        except Exception as exc:
+            if getattr(exc, "code", None) == "backend_commit_conflict":
+                raise TaskTransactionError("commit_conflict") from exc
+            raise
+        if finalized.get("status") == "conflict":
+            raise TaskTransactionError("commit_conflict")
         if finalized.get("status") != "complete":
             raise TaskTransactionError("commit_finalize_incomplete")
         self._phase("finalize_complete", "after_finalize", finalized)
@@ -1208,6 +1235,9 @@ class TaskTransactionCoordinator:
             self._abort_before_decision(exc.code, intents)
             raise
         except Exception as exc:
+            if getattr(exc, "code", None) == "backend_commit_conflict":
+                self._abort_before_decision("commit_conflict", intents)
+                raise TaskTransactionError("commit_conflict") from exc
             self._abort_before_decision("backend_state_unknown", intents)
             raise TaskTransactionError("backend_state_unknown") from exc
 

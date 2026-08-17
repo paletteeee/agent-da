@@ -129,50 +129,64 @@ class _FakeNeo4j:
         self.claim_barrier = None
         self.enforce_claims = True
         self.claims = {}
+        self.claim_requests = []
+        self.cas_requests = []
         self._cas_lock = threading.Lock()
 
     def claim_transaction_writes(
         self, namespace, txn_id, claims, idempotency_key
     ):
+        self.claim_requests.append(copy.deepcopy(list(claims)))
         if self.claim_barrier is not None:
             self.claim_barrier.wait(timeout=5)
         with self._cas_lock:
             conflicts = []
             for claim in claims:
-                key = (
-                    namespace,
-                    str(claim["memory_id"]),
-                    int(claim["target_version"]),
-                )
-                owner = self.claims.get(key)
-                if self.enforce_claims and owner not in {None, txn_id}:
-                    conflicts.append(str(claim["memory_id"]))
-                    continue
                 if self.enforce_claims:
+                    memory_id = str(claim["memory_id"])
+                    base_version = int(claim["base_version"])
+                    final_version = int(claim["final_version"])
                     current = self.retrieve_memory(
-                        namespace, str(claim["memory_id"])
+                        namespace, memory_id
                     )
                     canonical_version = (
                         int(current.get("version", 1))
                         if current is not None
                         else 0
                     )
-                    expected_version = int(claim["expected_version"])
-                    chained = all(
-                        (
-                            namespace,
-                            str(claim["memory_id"]),
-                            version,
-                        )
-                        in self.claims
-                        for version in range(
-                            canonical_version + 1, expected_version + 1
-                        )
-                    )
-                    if canonical_version > expected_version or (
-                        canonical_version < expected_version and not chained
+                    existing = [
+                        (key, value)
+                        for key, value in self.claims.items()
+                        if key[0] == namespace and key[1] == memory_id
+                    ]
+                    cursor = canonical_version
+                    while cursor < base_version:
+                        continuations = [
+                            key
+                            for key, _value in existing
+                            if key[2] == cursor and key[3] <= base_version
+                        ]
+                        if len(continuations) != 1:
+                            break
+                        cursor = continuations[0][3]
+                    overlapping = [
+                        (key, value)
+                        for key, value in existing
+                        if key[2] < final_version and base_version < key[3]
+                    ]
+                    same = [
+                        (key, value)
+                        for key, value in overlapping
+                        if key[2:] == (base_version, final_version)
+                        and value["txn_id"] == txn_id
+                        and value["claim_hash"] == claim["claim_hash"]
+                    ]
+                    if (
+                        canonical_version > base_version
+                        or cursor != base_version
+                        or (overlapping and len(same) != len(overlapping))
                     ):
-                        conflicts.append(str(claim["memory_id"]))
+                        conflicts.append(memory_id)
             if conflicts:
                 return {"status": "conflict", "memory_ids": sorted(conflicts)}
             if self.enforce_claims:
@@ -181,9 +195,13 @@ class _FakeNeo4j:
                         (
                             namespace,
                             str(claim["memory_id"]),
-                            int(claim["target_version"]),
+                            int(claim["base_version"]),
+                            int(claim["final_version"]),
                         )
-                    ] = txn_id
+                    ] = {
+                        "txn_id": txn_id,
+                        "claim_hash": str(claim["claim_hash"]),
+                    }
             return {"status": "claimed", "memory_ids": []}
 
     def release_transaction_claims(
@@ -191,9 +209,11 @@ class _FakeNeo4j:
     ):
         with self._cas_lock:
             self.claims = {
-                key: owner
-                for key, owner in self.claims.items()
-                if not (key[0] == namespace and owner == txn_id)
+                key: claim
+                for key, claim in self.claims.items()
+                if not (
+                    key[0] == namespace and claim["txn_id"] == txn_id
+                )
             }
         return {"status": "released"}
 
@@ -270,6 +290,14 @@ class _FakeNeo4j:
         idempotency_key,
         claim_txn_id=None,
     ):
+        self.cas_requests.append(
+            {
+                "memory_id": memory_id,
+                "expected_version": int(expected_version),
+                "desired_version": int(payload.get("version", 1)),
+                "claim_txn_id": claim_txn_id,
+            }
+        )
         if self.cas_barrier is not None:
             self.cas_barrier.wait(timeout=5)
         if self.cas_started_event is not None:
@@ -278,9 +306,23 @@ class _FakeNeo4j:
             if self.fail_upsert:
                 raise RuntimeError("neo4j unavailable")
             desired_version = int(payload.get("version", 1))
-            claim_key = (namespace, memory_id, desired_version)
-            claim_owner = self.claims.get(claim_key)
-            if claim_owner is not None and claim_owner != claim_txn_id:
+            claim_key = (
+                namespace,
+                memory_id,
+                int(expected_version),
+                desired_version,
+            )
+            claim = self.claims.get(claim_key)
+            claim_owner = claim["txn_id"] if claim is not None else None
+            overlapping_owners = {
+                value["txn_id"]
+                for key, value in self.claims.items()
+                if key[0] == namespace
+                and key[1] == memory_id
+                and key[2] < desired_version
+                and int(expected_version) < key[3]
+            }
+            if any(owner != claim_txn_id for owner in overlapping_owners):
                 return {"status": "conflict", "record": None}
             current = self.retrieve_memory(namespace, memory_id)
             current_version = (
@@ -419,6 +461,179 @@ class _FakeNeo4j:
 
     def healthcheck(self):
         return {"available": True, "version": "fake-neo4j"}
+
+
+class _MigrationRows:
+    def __init__(self, rows=()):
+        self.rows = [copy.deepcopy(row) for row in rows]
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    def single(self):
+        return copy.deepcopy(self.rows[0]) if self.rows else None
+
+    def consume(self):
+        return None
+
+
+class _MigrationTransaction:
+    def __init__(self, nodes, relationships):
+        self.nodes = nodes
+        self.relationships = relationships
+
+    def run(self, query, **parameters):
+        if "RETURN elementId(candidate) AS element_id" in query:
+            rows = []
+            for element_id, node in sorted(self.nodes.items()):
+                labels = set(node["labels"])
+                if not labels.intersection(
+                    {"MemoryIdentity", "Memory", "MemoryReference"}
+                ):
+                    continue
+                properties = node["properties"]
+                if properties.get("namespace") is None or properties.get("memory_id") is None:
+                    continue
+                properties["_migration_lock"] = int(
+                    properties.get("_migration_lock", 0)
+                ) + 1
+                rows.append(
+                    {
+                        "element_id": element_id,
+                        "labels": sorted(labels),
+                        "properties": copy.deepcopy(properties),
+                    }
+                )
+            return _MigrationRows(rows)
+        if "RETURN elementId(relationship) AS relationship_id" in query:
+            loser_ids = set(parameters["loser_ids"])
+            rows = []
+            for relationship_id, relationship in sorted(self.relationships.items()):
+                if relationship["type"] not in {"DERIVED_FROM", "SUPERSEDES"}:
+                    continue
+                if (
+                    relationship["source_id"] not in loser_ids
+                    and relationship["target_id"] not in loser_ids
+                ):
+                    continue
+                rows.append(
+                    {
+                        "relationship_id": relationship_id,
+                        "relationship_type": relationship["type"],
+                        "source_id": relationship["source_id"],
+                        "target_id": relationship["target_id"],
+                        "properties": copy.deepcopy(relationship.get("properties", {})),
+                    }
+                )
+            return _MigrationRows(rows)
+        if "WHERE elementId(relationship) IN $relationship_ids" in query:
+            for relationship_id in parameters["relationship_ids"]:
+                self.relationships.pop(relationship_id, None)
+            return _MigrationRows()
+        if "UNWIND $relationships AS edge" in query:
+            relationship_type = (
+                "DERIVED_FROM" if "[replacement:DERIVED_FROM]" in query else "SUPERSEDES"
+            )
+            next_index = len(self.relationships)
+            for edge in parameters["relationships"]:
+                relationship_id = f"migrated-{next_index:04d}"
+                next_index += 1
+                self.relationships[relationship_id] = {
+                    "type": relationship_type,
+                    "source_id": edge["source_id"],
+                    "target_id": edge["target_id"],
+                    "properties": copy.deepcopy(edge["properties"]),
+                }
+            return _MigrationRows()
+        if "SET winner:MemoryIdentity" in query:
+            winner = self.nodes[parameters["winner_id"]]
+            winner["labels"].add("MemoryIdentity")
+            if parameters["canonical"]:
+                winner["properties"].setdefault("canonical", True)
+            winner["properties"].pop("_migration_lock", None)
+            return _MigrationRows()
+        if "DETACH DELETE loser" in query:
+            for loser in parameters["losers"]:
+                node = self.nodes.get(loser["element_id"])
+                if node is None:
+                    continue
+                properties = node["properties"]
+                if (
+                    properties.get("namespace") != loser["namespace"]
+                    or properties.get("memory_id") != loser["memory_id"]
+                ):
+                    raise AssertionError("migration attempted to delete an unverified node")
+                self.nodes.pop(loser["element_id"])
+            return _MigrationRows()
+        if "MATCH (claim:MemoryWriteClaim)" in query:
+            return _MigrationRows()
+        raise AssertionError(f"unexpected migration transaction query: {query}")
+
+
+class _MigrationDriver:
+    def __init__(self, nodes, relationships=()):
+        self.nodes = copy.deepcopy(nodes)
+        self.relationships = {
+            relationship["relationship_id"]: copy.deepcopy(relationship)
+            for relationship in relationships
+        }
+        self.constraints = set()
+        self.events = []
+        self.rollback_count = 0
+
+    class _Session:
+        def __init__(self, driver):
+            self.driver = driver
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def execute_write(self, function):
+            self.driver.events.append("migration_begin")
+            working_nodes = copy.deepcopy(self.driver.nodes)
+            working_relationships = copy.deepcopy(self.driver.relationships)
+            transaction = _MigrationTransaction(working_nodes, working_relationships)
+            try:
+                result = function(transaction)
+            except Exception:
+                self.driver.rollback_count += 1
+                self.driver.events.append("migration_rollback")
+                raise
+            self.driver.nodes = working_nodes
+            self.driver.relationships = working_relationships
+            self.driver.events.append("migration_commit")
+            return result
+
+        def run(self, query, **_parameters):
+            if query.startswith("DROP CONSTRAINT memory_write_claim_unique"):
+                self.driver.constraints.discard("memory_write_claim_unique")
+                self.driver.events.append("claim_constraint_drop")
+                return _MigrationRows()
+            if query.startswith("CREATE CONSTRAINT memory_identity_unique"):
+                identities = [
+                    (
+                        node["properties"]["namespace"],
+                        node["properties"]["memory_id"],
+                    )
+                    for node in self.driver.nodes.values()
+                    if "MemoryIdentity" in node["labels"]
+                ]
+                if len(identities) != len(set(identities)):
+                    raise RuntimeError("identity constraint created before deduplication")
+                self.driver.constraints.add("memory_identity_unique")
+                self.driver.events.append("identity_constraint")
+                return _MigrationRows()
+            if query.startswith("CREATE CONSTRAINT memory_write_claim_unique"):
+                self.driver.constraints.add("memory_write_claim_unique")
+                self.driver.events.append("claim_constraint")
+                return _MigrationRows()
+            raise AssertionError(f"query ran outside migration transaction: {query}")
+
+    def session(self):
+        return self._Session(self)
 
 
 class VectorGraphMemoryBackendTests(unittest.TestCase):
@@ -602,145 +817,180 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertIn("source", identities)
         self.assertEqual(edges, {("target", "source")})
 
-    def test_neo4j_legacy_identity_migration_is_ordered_and_idempotent(self):
-        nodes = {
-            "canonical": {
-                "labels": {"Memory", "MemoryReference"},
-                "namespace": "tenant",
-                "memory_id": "shared",
-            },
-            "duplicate": {
-                "labels": {"MemoryReference"},
-                "namespace": "tenant",
-                "memory_id": "shared",
-            },
-            "source": {
-                "labels": {"MemoryReference"},
-                "namespace": "tenant",
-                "memory_id": "source",
-            },
-            "target": {
-                "labels": {"Memory"},
-                "namespace": "tenant",
-                "memory_id": "target",
-            },
-        }
-        edges = {
-            ("DERIVED_FROM", "target", "duplicate"),
-            ("SUPERSEDES", "duplicate", "source"),
-        }
-        constraints = []
+    def test_neo4j_legacy_migration_deduplicates_all_label_shapes_and_rewires_both_directions(self):
+        def node(labels, memory_id, **properties):
+            return {
+                "labels": set(labels),
+                "properties": {
+                    "namespace": "tenant",
+                    "memory_id": memory_id,
+                    **properties,
+                },
+            }
 
-        class Result:
-            def consume(self):
-                return None
-
-        class Session:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_args):
-                return None
-
-            @staticmethod
-            def _canonical_for(node_key):
-                node = nodes[node_key]
-                return next(
-                    (
-                        key
-                        for key, candidate in nodes.items()
-                        if key != node_key
-                        and "Memory" in candidate["labels"]
-                        and candidate["namespace"] == node["namespace"]
-                        and candidate["memory_id"] == node["memory_id"]
-                    ),
-                    None,
-                )
-
-            def run(self, query, **_parameters):
-                if query.startswith("MATCH (m:Memory) SET m:MemoryIdentity"):
-                    for node in nodes.values():
-                        if "Memory" in node["labels"]:
-                            node["labels"].add("MemoryIdentity")
-                elif "(legacy:MemoryReference)-[old:DERIVED_FROM]->(target)" in query:
-                    for kind, source, target in list(edges):
-                        canonical = self._canonical_for(source)
-                        if kind == "DERIVED_FROM" and canonical is not None:
-                            edges.remove((kind, source, target))
-                            edges.add((kind, canonical, target))
-                elif "(source)-[old:DERIVED_FROM]->(legacy:MemoryReference)" in query:
-                    for kind, source, target in list(edges):
-                        canonical = self._canonical_for(target)
-                        if kind == "DERIVED_FROM" and canonical is not None:
-                            edges.remove((kind, source, target))
-                            edges.add((kind, source, canonical))
-                elif "(legacy:MemoryReference)-[old:SUPERSEDES]->(target)" in query:
-                    for kind, source, target in list(edges):
-                        canonical = self._canonical_for(source)
-                        if kind == "SUPERSEDES" and canonical is not None:
-                            edges.remove((kind, source, target))
-                            edges.add((kind, canonical, target))
-                elif "(source)-[old:SUPERSEDES]->(legacy:MemoryReference)" in query:
-                    for kind, source, target in list(edges):
-                        canonical = self._canonical_for(target)
-                        if kind == "SUPERSEDES" and canonical is not None:
-                            edges.remove((kind, source, target))
-                            edges.add((kind, source, canonical))
-                elif "DETACH DELETE legacy" in query:
-                    for key in list(nodes):
-                        if (
-                            "MemoryReference" in nodes[key]["labels"]
-                            and self._canonical_for(key) is not None
-                        ):
-                            nodes.pop(key)
-                            edges.difference_update(
-                                edge for edge in set(edges) if key in edge[1:]
-                            )
-                elif query.startswith("MATCH (r:MemoryReference) SET r:MemoryIdentity"):
-                    for node in nodes.values():
-                        if "MemoryReference" in node["labels"]:
-                            node["labels"].add("MemoryIdentity")
-                            node["labels"].discard("MemoryReference")
-                elif query.startswith("CREATE CONSTRAINT memory_identity_unique"):
-                    identities = [
-                        (node["namespace"], node["memory_id"])
-                        for node in nodes.values()
-                        if "MemoryIdentity" in node["labels"]
-                    ]
-                    if len(identities) != len(set(identities)):
-                        raise RuntimeError("constraint created before deduplication")
-                    constraints.append("memory_identity_unique")
-                return Result()
-
-        class Driver:
-            def session(self):
-                return Session()
-
-        client = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
-        client.driver = Driver()
-
-        client._initialize_schema()
-        first_state = (copy.deepcopy(nodes), set(edges))
-        client._initialize_schema()
-
-        identities = sorted(
-            (node["namespace"], node["memory_id"])
-            for node in nodes.values()
-            if "MemoryIdentity" in node["labels"]
-        )
-        self.assertEqual(
-            identities,
-            [("tenant", "shared"), ("tenant", "source"), ("tenant", "target")],
-        )
-        self.assertEqual(
-            edges,
+        driver = _MigrationDriver(
             {
-                ("DERIVED_FROM", "target", "canonical"),
-                ("SUPERSEDES", "canonical", "source"),
+                "shared-identity": node(
+                    {"MemoryIdentity"}, "shared", canonical=False
+                ),
+                "shared-canonical": node(
+                    {"Memory", "MemoryReference"},
+                    "shared",
+                    canonical=True,
+                    version=4,
+                    status="active",
+                    value="canonical-value",
+                    custom_property="preserved",
+                ),
+                "hybrid": node(
+                    {"Memory", "MemoryReference"},
+                    "hybrid",
+                    canonical=True,
+                    version=2,
+                    value="hybrid-value",
+                ),
+                "hybrid-reference": node(
+                    {"Memory", "MemoryReference"},
+                    "hybrid",
+                    canonical=True,
+                    version=2,
+                    value="hybrid-value",
+                ),
+                "plain-a": node({"Memory"}, "plain", version=1, value="old"),
+                "plain-b": node({"Memory"}, "plain", version=2, value="new"),
+                "plain-c": node({"Memory"}, "plain", version=2, value="new"),
+                "reference-a": node({"MemoryReference"}, "reference"),
+                "reference-b": node({"MemoryReference"}, "reference"),
+                "external": node({"Memory"}, "external", version=1),
+            },
+            [
+                {
+                    "relationship_id": "r1",
+                    "type": "DERIVED_FROM",
+                    "source_id": "external",
+                    "target_id": "shared-identity",
+                    "properties": {"direction": "incoming"},
+                },
+                {
+                    "relationship_id": "r2",
+                    "type": "SUPERSEDES",
+                    "source_id": "shared-identity",
+                    "target_id": "reference-b",
+                    "properties": {"direction": "outgoing"},
+                },
+                {
+                    "relationship_id": "r3",
+                    "type": "DERIVED_FROM",
+                    "source_id": "plain-a",
+                    "target_id": "external",
+                    "properties": {"plain": "source"},
+                },
+                {
+                    "relationship_id": "r4",
+                    "type": "SUPERSEDES",
+                    "source_id": "external",
+                    "target_id": "plain-c",
+                    "properties": {"plain": "target"},
+                },
+                {
+                    "relationship_id": "r5",
+                    "type": "DERIVED_FROM",
+                    "source_id": "hybrid-reference",
+                    "target_id": "shared-identity",
+                    "properties": {"hybrid": True},
+                },
+            ],
+        )
+        client = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
+        client.driver = driver
+
+        client._initialize_schema()
+
+        self.assertEqual(
+            set(driver.nodes),
+            {"shared-canonical", "hybrid", "plain-b", "reference-a", "external"},
+        )
+        self.assertTrue(
+            all("MemoryIdentity" in node["labels"] for node in driver.nodes.values())
+        )
+        self.assertEqual(
+            driver.nodes["shared-canonical"]["properties"]["custom_property"],
+            "preserved",
+        )
+        self.assertIn("MemoryReference", driver.nodes["shared-canonical"]["labels"])
+        migrated_edges = {
+            (
+                edge["type"],
+                edge["source_id"],
+                edge["target_id"],
+                tuple(sorted(edge["properties"].items())),
+            )
+            for edge in driver.relationships.values()
+        }
+        self.assertEqual(
+            migrated_edges,
+            {
+                ("DERIVED_FROM", "external", "shared-canonical", (("direction", "incoming"),)),
+                ("SUPERSEDES", "shared-canonical", "reference-a", (("direction", "outgoing"),)),
+                ("DERIVED_FROM", "plain-b", "external", (("plain", "source"),)),
+                ("SUPERSEDES", "external", "plain-b", (("plain", "target"),)),
+                ("DERIVED_FROM", "hybrid", "shared-canonical", (("hybrid", True),)),
             },
         )
-        self.assertEqual((nodes, edges), first_state)
-        self.assertEqual(constraints, ["memory_identity_unique", "memory_identity_unique"])
+        self.assertLess(
+            driver.events.index("migration_commit"),
+            driver.events.index("identity_constraint"),
+        )
+        self.assertEqual(
+            driver.constraints,
+            {"memory_identity_unique", "memory_write_claim_unique"},
+        )
+
+        first_state = (copy.deepcopy(driver.nodes), copy.deepcopy(driver.relationships))
+        client._initialize_schema()
+        self.assertEqual(
+            (driver.nodes, driver.relationships),
+            first_state,
+        )
+
+    def test_neo4j_legacy_migration_conflict_rolls_back_without_constraints(self):
+        nodes = {
+            "left": {
+                "labels": {"Memory"},
+                "properties": {
+                    "namespace": "tenant",
+                    "memory_id": "conflict",
+                    "canonical": True,
+                    "version": 7,
+                    "value": "left",
+                    "canonical_state_hash": "left-hash",
+                },
+            },
+            "right": {
+                "labels": {"MemoryIdentity", "Memory"},
+                "properties": {
+                    "namespace": "tenant",
+                    "memory_id": "conflict",
+                    "canonical": True,
+                    "version": 7,
+                    "value": "right",
+                    "canonical_state_hash": "right-hash",
+                },
+            },
+        }
+        driver = _MigrationDriver(nodes)
+        before = copy.deepcopy(driver.nodes)
+        client = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
+        client.driver = driver
+
+        with self.assertRaisesRegex(VectorGraphBackendError, "divergent canonical"):
+            client._initialize_schema()
+
+        self.assertEqual(driver.nodes, before)
+        self.assertEqual(driver.relationships, {})
+        self.assertEqual(driver.constraints, set())
+        self.assertEqual(driver.rollback_count, 1)
+        self.assertEqual(driver.events, ["migration_begin", "migration_rollback"])
 
     def test_neo4j_transaction_cleanup_does_not_sweep_other_orphan_references(self):
         references = {"reference-owned-by-txn-b"}
@@ -975,13 +1225,106 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         backend.search("source")
 
         self.assertEqual(
-            [(service, operation) for service, operation, _ in observed[-2:]],
-            [("qdrant", "retrieve"), ("qdrant", "search")],
+            [(service, operation) for service, operation, _ in observed[-4:]],
+            [
+                ("qdrant", "read_rows"),
+                ("neo4j", "read_canonical"),
+                ("qdrant", "search_rows"),
+                ("neo4j", "search_canonical"),
+            ],
         )
         self.assertEqual(
             backend.metrics()["request_count"],
-            requests_after_write + 2,
+            requests_after_write + 4,
         )
+
+    def test_read_retries_qdrant_and_neo4j_at_their_own_proxy_boundaries(self):
+        observed = []
+        failures = {"qdrant": 1, "neo4j": 1}
+
+        def requester(service, operation, function, key):
+            observed.append((service, operation))
+            if operation in {"read_rows", "read_canonical"} and failures[service]:
+                failures[service] -= 1
+                raise TimeoutError(f"one-shot {service} read fault")
+            return function()
+
+        backend = VectorGraphMemoryBackend(
+            "episode-proxy-read-retries",
+            "http://qdrant-proxy:19000",
+            "bolt://neo4j-proxy:19001",
+            ("neo4j", "password"),
+            proxy_requester=requester,
+            qdrant_client=_FakeQdrant(),
+            neo4j_client=_FakeNeo4j(),
+            max_retries=1,
+        )
+        backend.write("m0", value="source")
+        observed.clear()
+        retries_before = backend.metrics()["retry_count"]
+
+        self.assertEqual(backend.read("m0")["value"], "source")
+
+        self.assertEqual(
+            observed,
+            [
+                ("qdrant", "read_rows"),
+                ("qdrant", "read_rows"),
+                ("neo4j", "read_canonical"),
+                ("neo4j", "read_canonical"),
+            ],
+        )
+        self.assertEqual(backend.metrics()["retry_count"], retries_before + 2)
+
+    def test_staged_visibility_retries_neo4j_on_its_own_boundary(self):
+        decisions = {"txn-visible": None}
+        observed = []
+        staged_faults = {"remaining": 1}
+
+        def requester(service, operation, function, key):
+            observed.append((service, operation))
+            if (
+                service == "neo4j"
+                and operation == "read_staged"
+                and staged_faults["remaining"]
+            ):
+                staged_faults["remaining"] -= 1
+                raise TimeoutError("one-shot Neo4j staged read fault")
+            return function()
+
+        backend = VectorGraphMemoryBackend(
+            "episode-proxy-staged-read",
+            "http://qdrant-proxy:19000",
+            "bolt://neo4j-proxy:19001",
+            ("neo4j", "password"),
+            proxy_requester=requester,
+            qdrant_client=_FakeQdrant(),
+            neo4j_client=_FakeNeo4j(),
+            decision_resolver=decisions.get,
+            max_retries=1,
+        )
+        intents = [
+            self._intent(
+                "txn-visible", 1, "memory_write", memory_id="m0", value="source"
+            )
+        ]
+        backend.stage_transaction("txn-visible", intents)
+        decisions["txn-visible"] = "COMMITTED"
+        observed.clear()
+        retries_before = backend.metrics()["retry_count"]
+
+        self.assertEqual(backend.read_committed("m0")["value"], "source")
+
+        self.assertEqual(
+            observed,
+            [
+                ("qdrant", "read_rows"),
+                ("neo4j", "read_canonical"),
+                ("neo4j", "read_staged"),
+                ("neo4j", "read_staged"),
+            ],
+        )
+        self.assertEqual(backend.metrics()["retry_count"], retries_before + 1)
 
     def test_public_invalidate_retries_and_instruments_its_existence_read(self):
         class OneShotTimeoutQdrant(_FakeQdrant):
@@ -1252,6 +1595,172 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertNotIn(
             "shared", [record["memory_id"] for record in backend.search_committed()]
         )
+        with self.assertRaises(VectorGraphBackendError) as raised:
+            backend.current_version("shared")
+        self.assertEqual(raised.exception.code, "backend_state_unknown")
+
+    def test_tampered_canonical_hash_authority_cannot_be_bypassed_by_staged_loser(self):
+        decisions = {"txn-loser": "COMMITTED"}
+        self.neo4j.enforce_claims = False
+        backend = VectorGraphMemoryBackend(
+            "txn-canonical-authority",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=self.qdrant,
+            neo4j_client=self.neo4j,
+            decision_resolver=decisions.get,
+        )
+        loser = [
+            self._intent(
+                "txn-loser", 1, "memory_write", memory_id="shared", value="loser"
+            )
+        ]
+        backend.stage_transaction("txn-loser", loser)
+        backend.write("shared", value="winner", agent_id="agent_model")
+        canonical = self.qdrant.points[
+            ("txn-canonical-authority", "shared")
+        ]["payload"]
+        original_hash = canonical["_canonical_state_hash"]
+        canonical["value"] = "loser"
+        self.assertEqual(canonical["_canonical_state_hash"], original_hash)
+
+        self.assertIsNone(backend.read_committed("shared"))
+        self.assertNotIn(
+            "shared", [record["memory_id"] for record in backend.search_committed()]
+        )
+        with self.assertRaises(VectorGraphBackendError) as raised:
+            backend.current_version("shared")
+        self.assertEqual(raised.exception.code, "backend_state_unknown")
+
+    def test_qdrant_only_high_version_does_not_poison_verified_successor(self):
+        decisions = {"txn-poison": "COMMITTED"}
+        backend = VectorGraphMemoryBackend(
+            "txn-qdrant-only-poison",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=self.qdrant,
+            neo4j_client=self.neo4j,
+            decision_resolver=decisions.get,
+        )
+        backend.write("shared", value="verified")
+        poison = [
+            self._intent(
+                "txn-poison", 1, "memory_write", memory_id="shared", value="poison"
+            )
+        ]
+        backend.stage_transaction("txn-poison", poison)
+        poison_payload = next(
+            row["payload"]
+            for (namespace, _point_id), row in self.qdrant.points.items()
+            if namespace == "txn-qdrant-only-poison"
+            and row["payload"].get("txn_id") == "txn-poison"
+        )
+        poison_payload["version"] = 99
+        self.neo4j.staged_memories.clear()
+        self.neo4j.staged_edges.clear()
+        self.neo4j.claims.clear()
+
+        self.assertEqual(backend.current_version("shared"), 1)
+        self.assertEqual(backend.read_committed("shared")["value"], "verified")
+
+        with tempfile.TemporaryDirectory() as directory:
+            journal = TransactionJournal(Path(directory) / "successor.sqlite3")
+            self.addCleanup(journal.close)
+            gateway = TaskTransactionGateway(
+                journal=journal,
+                backend=backend,
+                task_id="task-successor",
+                agent_id="agent",
+                txn_id="txn-successor",
+                policy_snapshot_provider=lambda: {
+                    "version": 1,
+                    "denied_actions": [],
+                    "scope_overrides": {},
+                },
+            )
+            backend.bind_decision_resolver(
+                lambda txn_id: (
+                    "COMMITTED"
+                    if txn_id == "txn-poison"
+                    else journal.load(txn_id).decision
+                )
+            )
+            gateway.call(
+                "memory_write", {"memory_id": "shared", "value": "successor"}
+            )
+            self.assertEqual(gateway.commit()["decision"], "COMMITTED")
+
+        self.assertEqual(backend.current_version("shared"), 2)
+        self.assertEqual(backend.read_committed("shared")["value"], "successor")
+
+    def test_unverified_qdrant_only_version_aborts_new_mutation_stably(self):
+        decisions = {"txn-poison": "COMMITTED"}
+        backend = VectorGraphMemoryBackend(
+            "txn-qdrant-only-unknown",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=self.qdrant,
+            neo4j_client=self.neo4j,
+            decision_resolver=decisions.get,
+        )
+        payload = {
+            "txn_id": "txn-poison",
+            "record_kind": "memory",
+            "sequence": 1,
+            "operation": "memory_write",
+            "memory_id": "shared",
+            "value": "poison",
+            "payload_hash": backend._payload_hash("poison"),
+            "status": "pending",
+            "target_status": "active",
+            "version": 99,
+            "base_version": 0,
+            "derived_from": [],
+            "supersedes_id": None,
+        }
+        self.qdrant.upsert(
+            "txn-qdrant-only-unknown",
+            "txn:txn-poison:1:memory:shared",
+            [0.0] * 32,
+            payload,
+            "poison",
+        )
+        with self.assertRaises(VectorGraphBackendError) as version_error:
+            backend.current_version("shared")
+        self.assertEqual(version_error.exception.code, "backend_state_unknown")
+
+        with tempfile.TemporaryDirectory() as directory:
+            journal = TransactionJournal(Path(directory) / "unknown.sqlite3")
+            self.addCleanup(journal.close)
+            gateway = TaskTransactionGateway(
+                journal=journal,
+                backend=backend,
+                task_id="task-unknown",
+                agent_id="agent",
+                txn_id="txn-new",
+                policy_snapshot_provider=lambda: {
+                    "version": 1,
+                    "denied_actions": [],
+                    "scope_overrides": {},
+                },
+            )
+            backend.bind_decision_resolver(
+                lambda txn_id: (
+                    "COMMITTED"
+                    if txn_id == "txn-poison"
+                    else journal.load(txn_id).decision
+                )
+            )
+
+            with self.assertRaises(TaskTransactionError) as raised:
+                gateway.call(
+                    "memory_write", {"memory_id": "shared", "value": "new"}
+                )
+            self.assertEqual(raised.exception.code, "backend_state_unknown")
+            self.assertEqual(journal.intents("txn-new"), [])
 
     def test_invalidate_committed_updates_status_and_version_in_both_stores(self):
         self.backend.write("source", value="source-value")
@@ -1299,12 +1808,19 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             len(observed),
         )
         self.assertEqual(
-            observed[:3],
+            observed[:4],
             [
                 ("qdrant", "invalidate_committed_canonical_read"),
                 ("neo4j", "invalidate_committed_canonical_read"),
-                ("qdrant", "invalidate_committed_read"),
+                ("qdrant", "invalidate_committed_rows"),
+                ("neo4j", "invalidate_committed_canonical"),
             ],
+        )
+        self.assertNotIn(
+            ("qdrant", "invalidate_committed_read"), observed
+        )
+        self.assertNotIn(
+            ("qdrant", "invalidate_committed_owner_read"), observed
         )
         self.assertFalse(any("rollback" in operation for _, operation in observed))
 
@@ -1536,6 +2052,201 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertEqual(vector["version"], graph["version"])
         self.assertEqual(vector["status"], graph["status"])
 
+    def test_repeated_same_id_commit_recovers_after_decision_and_allows_successor(self):
+        qdrant = _FakeQdrant()
+        neo4j = _FakeNeo4j()
+        fail_after_decision = {"enabled": True}
+
+        def phase_hook(phase, _evidence):
+            if phase == "after_commit_decision" and fail_after_decision["enabled"]:
+                raise RuntimeError("simulated coordinator crash")
+
+        policy = lambda: {
+            "version": 1,
+            "denied_actions": [],
+            "scope_overrides": {},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            first_journal = TransactionJournal(Path(directory) / "first.sqlite3")
+            self.addCleanup(first_journal.close)
+            backend = VectorGraphMemoryBackend(
+                "txn-repeat-recovery",
+                "http://qdrant",
+                "bolt://neo4j",
+                ("neo4j", "password"),
+                qdrant_client=qdrant,
+                neo4j_client=neo4j,
+            )
+            first = TaskTransactionGateway(
+                journal=first_journal,
+                backend=backend,
+                task_id="task-first",
+                agent_id="agent",
+                txn_id="txn-first",
+                policy_snapshot_provider=policy,
+                phase_hook=phase_hook,
+            )
+            first.call("memory_write", {"memory_id": "shared", "value": "one"})
+            first.call("memory_write", {"memory_id": "shared", "value": "two"})
+
+            with self.assertRaises(TaskTransactionError) as raised:
+                first.commit()
+            self.assertEqual(raised.exception.code, "commit_decided_response_lost")
+            self.assertEqual(first_journal.load("txn-first").state, "COMMITTED")
+
+            fail_after_decision["enabled"] = False
+            self.assertEqual(first.commit()["decision"], "COMMITTED")
+            self.assertEqual(backend.read_committed("shared")["value"], "two")
+            self.assertEqual(backend.read_committed("shared")["version"], 2)
+            self.assertEqual(neo4j.claims, {})
+            self.assertEqual(
+                neo4j.cas_requests[-1],
+                {
+                    "memory_id": "shared",
+                    "expected_version": 0,
+                    "desired_version": 2,
+                    "claim_txn_id": "txn-first",
+                },
+            )
+
+            successor_journal = TransactionJournal(
+                Path(directory) / "successor.sqlite3"
+            )
+            self.addCleanup(successor_journal.close)
+            successor = TaskTransactionGateway(
+                journal=successor_journal,
+                backend=backend,
+                task_id="task-successor",
+                agent_id="agent",
+                txn_id="txn-successor",
+                policy_snapshot_provider=policy,
+            )
+            successor.call(
+                "memory_write", {"memory_id": "shared", "value": "three"}
+            )
+            self.assertEqual(successor.commit()["decision"], "COMMITTED")
+            self.assertEqual(backend.read_committed("shared")["version"], 3)
+            self.assertEqual(backend.read_committed("shared")["value"], "three")
+            self.assertEqual(neo4j.claims, {})
+
+    def test_repeated_write_derive_supersede_uses_one_base_to_final_claim(self):
+        decisions = {"txn-combined": "COMMITTED"}
+        self.backend.bind_decision_resolver(decisions.get)
+        self.backend.write("old", value="old-value")
+        intents = [
+            self._intent(
+                "txn-combined", 1, "memory_write", memory_id="target", value="one"
+            ),
+            self._intent(
+                "txn-combined",
+                2,
+                "memory_derive",
+                memory_id="target",
+                source_ids=["old"],
+                value="two",
+            ),
+            self._intent(
+                "txn-combined",
+                3,
+                "memory_supersede",
+                old_memory_id="old",
+                new_memory_id="target",
+                value="three",
+            ),
+            self._intent(
+                "txn-combined",
+                4,
+                "status_overlay",
+                memory_id="old",
+                target_status="superseded",
+            ),
+        ]
+
+        self.backend.stage_transaction("txn-combined", intents)
+        claims = {
+            claim["memory_id"]: claim for claim in self.neo4j.claim_requests[-1]
+        }
+        self.assertEqual(
+            (claims["target"]["base_version"], claims["target"]["final_version"]),
+            (0, 3),
+        )
+        self.assertEqual(
+            (claims["old"]["base_version"], claims["old"]["final_version"]),
+            (1, 2),
+        )
+
+        self.assertEqual(
+            self.backend.finalize_transaction("txn-combined", intents)["status"],
+            "complete",
+        )
+        target = self.backend.read_committed("target")
+        self.assertEqual((target["value"], target["version"]), ("three", 3))
+        self.assertEqual(target["supersedes_id"], "old")
+        self.assertIsNone(self.backend.read_committed("old"))
+        self.assertEqual(self.backend.current_version("old"), 2)
+        self.assertEqual(self.neo4j.claims, {})
+
+    def test_repeated_write_interval_claim_blocks_an_overlapping_direct_cas(self):
+        decisions = {"txn-reserved": "COMMITTED"}
+        self.backend.bind_decision_resolver(decisions.get)
+        intents = [
+            self._intent(
+                "txn-reserved", 1, "memory_write", memory_id="shared", value="one"
+            ),
+            self._intent(
+                "txn-reserved", 2, "memory_write", memory_id="shared", value="two"
+            ),
+        ]
+        self.backend.stage_transaction("txn-reserved", intents)
+
+        with self.assertRaises(VectorGraphBackendError) as raised:
+            self.backend.write("shared", value="overlap")
+        self.assertEqual(raised.exception.code, "backend_commit_conflict")
+
+        self.assertEqual(
+            self.backend.finalize_transaction("txn-reserved", intents)["status"],
+            "complete",
+        )
+        self.assertEqual(self.backend.read_committed("shared")["value"], "two")
+        self.assertEqual(self.backend.current_version("shared"), 2)
+
+    def test_repeated_write_abort_cleanup_releases_interval_for_successor(self):
+        decisions = {"txn-aborted": "ABORTED", "txn-successor": "COMMITTED"}
+        self.backend.bind_decision_resolver(decisions.get)
+        aborted = [
+            self._intent(
+                "txn-aborted", 1, "memory_write", memory_id="shared", value="one"
+            ),
+            self._intent(
+                "txn-aborted", 2, "memory_write", memory_id="shared", value="two"
+            ),
+        ]
+        self.backend.stage_transaction("txn-aborted", aborted)
+        self.assertTrue(self.neo4j.claims)
+
+        self.assertEqual(
+            self.backend.cleanup_transaction("txn-aborted", aborted)["status"],
+            "clean",
+        )
+        self.assertEqual(self.neo4j.claims, {})
+
+        successor = [
+            self._intent(
+                "txn-successor",
+                1,
+                "memory_write",
+                memory_id="shared",
+                value="successor",
+            )
+        ]
+        self.backend.stage_transaction("txn-successor", successor)
+        self.assertEqual(
+            self.backend.finalize_transaction("txn-successor", successor)["status"],
+            "complete",
+        )
+        self.assertEqual(self.backend.current_version("shared"), 1)
+        self.assertEqual(self.backend.read_committed("shared")["value"], "successor")
+
     def test_coordinator_claims_new_identity_before_only_one_commit_decision(self):
         qdrant = _FakeQdrant()
         neo4j = _FakeNeo4j()
@@ -1630,14 +2341,93 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         decisions.update({"txn-a": "COMMITTED", "txn-b": "COMMITTED"})
         self.assertEqual(backend.finalize_transaction("txn-a", first)["status"], "complete")
 
-        with self.assertRaisesRegex(VectorGraphBackendError, "version conflict"):
+        with self.assertRaisesRegex(VectorGraphBackendError, "version conflict") as raised:
             backend.finalize_transaction("txn-b", second)
+        self.assertEqual(raised.exception.code, "backend_commit_conflict")
 
         self.assertEqual(backend.read_committed("shared")["value"], "winner")
         self.assertEqual(
             [row["value"] for row in backend.search_committed() if row["memory_id"] == "shared"],
             ["winner"],
         )
+
+    def test_dual_committed_coordinator_loser_has_stable_commit_conflict(self):
+        qdrant = _FakeQdrant()
+        neo4j = _FakeNeo4j()
+        neo4j.enforce_claims = False
+
+        with tempfile.TemporaryDirectory() as directory:
+            journals = [
+                TransactionJournal(Path(directory) / f"journal-{index}.sqlite3")
+                for index in range(2)
+            ]
+            self.addCleanup(journals[0].close)
+            self.addCleanup(journals[1].close)
+            gateways = []
+            for index, value in enumerate(("winner-or-loser-a", "winner-or-loser-b")):
+                backend = VectorGraphMemoryBackend(
+                    "txn-dual-coordinator",
+                    "http://qdrant",
+                    "bolt://neo4j",
+                    ("neo4j", "password"),
+                    qdrant_client=qdrant,
+                    neo4j_client=neo4j,
+                )
+
+                gateway = TaskTransactionGateway(
+                    journal=journals[index],
+                    backend=backend,
+                    task_id=f"task-{index}",
+                    agent_id="agent",
+                    txn_id=f"txn-{index}",
+                    policy_snapshot_provider=lambda: {
+                        "version": 1,
+                        "denied_actions": [],
+                        "scope_overrides": {},
+                    },
+                )
+                gateway.call(
+                    "memory_write", {"memory_id": "shared", "value": value}
+                )
+                gateways.append(gateway)
+
+            for index, gateway in enumerate(gateways):
+                txn_id = f"txn-{index}"
+                frozen = journals[index].freeze(txn_id)
+                journals[index].prepare(txn_id)
+                gateway.coordinator.backend.stage_transaction(
+                    txn_id, frozen["intents"]
+                )
+                self.assertEqual(
+                    gateway.coordinator.backend.verify_transaction(
+                        txn_id, frozen["intents"]
+                    )["status"],
+                    "complete",
+                )
+                journals[index].decide(txn_id, "COMMITTED")
+
+            self.assertEqual(gateways[0].commit()["decision"], "COMMITTED")
+            with self.assertRaises(TaskTransactionError) as loser:
+                gateways[1].commit()
+            self.assertEqual(loser.exception.code, "commit_conflict")
+            self.assertEqual(
+                [journal.load(f"txn-{index}").state for index, journal in enumerate(journals)],
+                ["COMMITTED", "COMMITTED"],
+            )
+
+            with self.assertRaises(TaskTransactionError) as retried:
+                gateways[1].commit()
+            self.assertEqual(retried.exception.code, "commit_conflict")
+
+        visible = VectorGraphMemoryBackend(
+            "txn-dual-coordinator",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=qdrant,
+            neo4j_client=neo4j,
+        ).read_committed("shared")
+        self.assertIn(visible["value"], {"winner-or-loser-a", "winner-or-loser-b"})
 
     def test_conflicting_direct_writes_are_linearized_before_vector_projection(self):
         qdrant = _FakeQdrant()

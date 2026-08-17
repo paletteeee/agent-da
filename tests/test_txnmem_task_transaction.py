@@ -552,6 +552,10 @@ class TaskTransactionGatewayTests(unittest.TestCase):
         gateway = self.gateway(backend=backend)
         gateway.call("memory_write", {"memory_id": "memory_a", "value": "first"})
         gateway.call("memory_write", {"memory_id": "memory_a", "value": "second"})
+        self.assertEqual(
+            gateway.call("memory_read", {"memory_id": "memory_a"})["version"],
+            2,
+        )
 
         result = gateway.commit()
 

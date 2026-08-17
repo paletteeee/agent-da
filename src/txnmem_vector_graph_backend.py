@@ -31,6 +31,14 @@ from txnmem_task_transaction import (
 class VectorGraphBackendError(RuntimeError):
     """A storage or compensation failure with aggregate-safe metadata."""
 
+    code = "backend_state_unknown"
+
+
+class VectorGraphCommitConflict(VectorGraphBackendError):
+    """A deterministic canonical CAS/claim conflict, not response loss."""
+
+    code = "backend_commit_conflict"
+
 
 def _qdrant_point_id(namespace: str, memory_id: str) -> str:
     """Map arbitrary application IDs to Qdrant's UUID-compatible point IDs."""
@@ -176,53 +184,260 @@ class _Neo4jBoltClient:
         self._initialize_schema()
 
     def _initialize_schema(self) -> None:
-        """Promote the immediately-prior identity schema before constraining it."""
+        """Atomically reconcile every legacy identity before installing constraints."""
+
+        def migrate(tx):
+            candidates = [
+                {
+                    "element_id": str(row["element_id"]),
+                    "labels": {str(label) for label in row["labels"]},
+                    "properties": copy.deepcopy(dict(row["properties"])),
+                }
+                for row in tx.run(
+                    "MATCH (candidate) "
+                    "WHERE (candidate:MemoryIdentity OR candidate:Memory "
+                    "OR candidate:MemoryReference) "
+                    "AND candidate.namespace IS NOT NULL "
+                    "AND candidate.memory_id IS NOT NULL "
+                    "SET candidate._migration_lock="
+                    "coalesce(candidate._migration_lock, 0) + 1 "
+                    "RETURN elementId(candidate) AS element_id, "
+                    "labels(candidate) AS labels, properties(candidate) AS properties "
+                    "ORDER BY candidate.namespace, candidate.memory_id, element_id"
+                )
+            ]
+            groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+            for candidate in candidates:
+                properties = candidate["properties"]
+                key = (
+                    str(properties["namespace"]),
+                    str(properties["memory_id"]),
+                )
+                groups.setdefault(key, []).append(candidate)
+
+            winners: dict[tuple[str, str], dict[str, Any]] = {}
+            replacement_ids: dict[str, str] = {}
+            losers: list[dict[str, str]] = []
+            for key, group in sorted(groups.items()):
+                self._validate_legacy_canonical_group(key, group)
+                winner = min(group, key=self._legacy_winner_key)
+                winners[key] = winner
+                for candidate in group:
+                    if candidate["element_id"] == winner["element_id"]:
+                        continue
+                    replacement_ids[candidate["element_id"]] = winner["element_id"]
+                    losers.append(
+                        {
+                            "element_id": candidate["element_id"],
+                            "namespace": key[0],
+                            "memory_id": key[1],
+                        }
+                    )
+
+            loser_ids = sorted(replacement_ids)
+            if loser_ids:
+                relationships = [
+                    {
+                        "relationship_id": str(row["relationship_id"]),
+                        "relationship_type": str(row["relationship_type"]),
+                        "source_id": replacement_ids.get(
+                            str(row["source_id"]), str(row["source_id"])
+                        ),
+                        "target_id": replacement_ids.get(
+                            str(row["target_id"]), str(row["target_id"])
+                        ),
+                        "properties": copy.deepcopy(dict(row["properties"])),
+                    }
+                    for row in tx.run(
+                        "MATCH (source)-[relationship:DERIVED_FROM|SUPERSEDES]->(target) "
+                        "WHERE elementId(source) IN $loser_ids "
+                        "OR elementId(target) IN $loser_ids "
+                        "RETURN elementId(relationship) AS relationship_id, "
+                        "type(relationship) AS relationship_type, "
+                        "elementId(source) AS source_id, elementId(target) AS target_id, "
+                        "properties(relationship) AS properties "
+                        "ORDER BY relationship_id",
+                        loser_ids=loser_ids,
+                    )
+                ]
+                tx.run(
+                    "MATCH ()-[relationship]->() "
+                    "WHERE elementId(relationship) IN $relationship_ids "
+                    "DELETE relationship",
+                    relationship_ids=[
+                        relationship["relationship_id"]
+                        for relationship in relationships
+                    ],
+                ).consume()
+                for relationship_type in ("DERIVED_FROM", "SUPERSEDES"):
+                    rewired = [
+                        {
+                            "source_id": relationship["source_id"],
+                            "target_id": relationship["target_id"],
+                            "properties": relationship["properties"],
+                        }
+                        for relationship in relationships
+                        if relationship["relationship_type"] == relationship_type
+                    ]
+                    if not rewired:
+                        continue
+                    tx.run(
+                        "UNWIND $relationships AS edge "
+                        "MATCH (source) WHERE elementId(source)=edge.source_id "
+                        "MATCH (target) WHERE elementId(target)=edge.target_id "
+                        f"CREATE (source)-[replacement:{relationship_type}]->(target) "
+                        "SET replacement = edge.properties",
+                        relationships=rewired,
+                    ).consume()
+
+            for key, winner in sorted(winners.items()):
+                tx.run(
+                    "MATCH (winner) WHERE elementId(winner)=$winner_id "
+                    "AND winner.namespace=$namespace "
+                    "AND winner.memory_id=$memory_id "
+                    "SET winner:MemoryIdentity, "
+                    "winner.canonical=CASE WHEN $canonical "
+                    "THEN coalesce(winner.canonical, true) "
+                    "ELSE coalesce(winner.canonical, false) END "
+                    "REMOVE winner._migration_lock",
+                    winner_id=winner["element_id"],
+                    namespace=key[0],
+                    memory_id=key[1],
+                    canonical=self._legacy_is_canonical(winner),
+                ).consume()
+            if losers:
+                tx.run(
+                    "UNWIND $losers AS loser_row MATCH (loser) "
+                    "WHERE elementId(loser)=loser_row.element_id "
+                    "AND loser.namespace=loser_row.namespace "
+                    "AND loser.memory_id=loser_row.memory_id "
+                    "AND (loser:MemoryIdentity OR loser:Memory "
+                    "OR loser:MemoryReference) DETACH DELETE loser",
+                    losers=sorted(losers, key=lambda row: row["element_id"]),
+                ).consume()
+            tx.run(
+                "MATCH (claim:MemoryWriteClaim) "
+                "SET claim.base_version=coalesce(claim.base_version, "
+                "claim.target_version - 1), "
+                "claim.final_version=coalesce(claim.final_version, "
+                "claim.target_version)"
+            ).consume()
+            return {"winner_count": len(winners), "loser_count": len(losers)}
 
         with self.driver.session() as session:
-            session.run(
-                "MATCH (m:Memory) SET m:MemoryIdentity, "
-                "m.canonical=coalesce(m.canonical, true)"
-            ).consume()
-            for relationship in ("DERIVED_FROM", "SUPERSEDES"):
-                session.run(
-                    f"MATCH (legacy:MemoryReference)-[old:{relationship}]->(target) "
-                    "MATCH (canonical:MemoryIdentity:Memory) "
-                    "WHERE canonical.namespace=legacy.namespace "
-                    "AND canonical.memory_id=legacy.memory_id "
-                    "AND elementId(legacy) <> elementId(canonical) "
-                    f"MERGE (canonical)-[replacement:{relationship}]->(target) "
-                    "SET replacement += properties(old) DELETE old"
-                ).consume()
-                session.run(
-                    f"MATCH (source)-[old:{relationship}]->(legacy:MemoryReference) "
-                    "MATCH (canonical:MemoryIdentity:Memory) "
-                    "WHERE canonical.namespace=legacy.namespace "
-                    "AND canonical.memory_id=legacy.memory_id "
-                    "AND elementId(legacy) <> elementId(canonical) "
-                    f"MERGE (source)-[replacement:{relationship}]->(canonical) "
-                    "SET replacement += properties(old) DELETE old"
-                ).consume()
-            session.run(
-                "MATCH (legacy:MemoryReference) "
-                "MATCH (canonical:MemoryIdentity:Memory) "
-                "WHERE canonical.namespace=legacy.namespace "
-                "AND canonical.memory_id=legacy.memory_id "
-                "AND elementId(legacy) <> elementId(canonical) "
-                "DETACH DELETE legacy"
-            ).consume()
-            session.run(
-                "MATCH (r:MemoryReference) SET r:MemoryIdentity "
-                "REMOVE r:MemoryReference"
-            ).consume()
+            execute_write = getattr(session, "execute_write", None)
+            if callable(execute_write):
+                execute_write(migrate)
+            else:  # pragma: no cover - compatibility with older driver shims
+                session.write_transaction(migrate)
+        with self.driver.session() as session:
             session.run(
                 "CREATE CONSTRAINT memory_identity_unique IF NOT EXISTS "
                 "FOR (m:MemoryIdentity) REQUIRE (m.namespace, m.memory_id) IS UNIQUE"
             ).consume()
             session.run(
+                "DROP CONSTRAINT memory_write_claim_unique IF EXISTS"
+            ).consume()
+            session.run(
                 "CREATE CONSTRAINT memory_write_claim_unique IF NOT EXISTS "
                 "FOR (c:MemoryWriteClaim) REQUIRE "
-                "(c.namespace, c.memory_id, c.target_version) IS UNIQUE"
+                "(c.namespace, c.memory_id, c.base_version, c.final_version) IS UNIQUE"
             ).consume()
+
+    @staticmethod
+    def _legacy_is_canonical(candidate: Mapping[str, Any]) -> bool:
+        properties = candidate["properties"]
+        return bool(properties.get("canonical") is True or "Memory" in candidate["labels"])
+
+    @staticmethod
+    def _legacy_version(candidate: Mapping[str, Any]) -> int:
+        try:
+            return int(candidate["properties"].get("version") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @classmethod
+    def _legacy_winner_key(cls, candidate: Mapping[str, Any]) -> tuple[Any, ...]:
+        labels = set(candidate["labels"])
+        properties = candidate["properties"]
+        canonical_fields = (
+            "canonical_state_hash",
+            "_canonical_state_hash",
+            "status",
+            "value",
+            "canonical_source_ids",
+            "derived_from",
+            "canonical_supersedes_id",
+            "supersedes_id",
+        )
+        richness = sum(properties.get(field) is not None for field in canonical_fields)
+        state_hash = properties.get("canonical_state_hash") or properties.get(
+            "_canonical_state_hash"
+        )
+        label_rank = (
+            4
+            if {"MemoryIdentity", "Memory"}.issubset(labels)
+            else 3
+            if "Memory" in labels
+            else 2
+            if "MemoryIdentity" in labels
+            else 1
+        )
+        return (
+            -int(cls._legacy_is_canonical(candidate)),
+            -cls._legacy_version(candidate),
+            -int(state_hash is not None),
+            -richness,
+            -label_rank,
+            str(candidate["element_id"]),
+        )
+
+    @staticmethod
+    def _legacy_canonical_evidence(candidate: Mapping[str, Any]) -> dict[str, Any]:
+        properties = candidate["properties"]
+        source_ids = properties.get("canonical_source_ids")
+        if source_ids is None:
+            source_ids = properties.get("derived_from")
+        if isinstance(source_ids, (list, tuple, set)):
+            source_ids = sorted(str(item) for item in source_ids)
+        return {
+            "state_hash": properties.get("canonical_state_hash")
+            or properties.get("_canonical_state_hash"),
+            "status": properties.get("status"),
+            "value": properties.get("value"),
+            "scope": properties.get("scope"),
+            "agent_id": properties.get("agent_id"),
+            "source_ids": source_ids,
+            "supersedes_id": properties.get("canonical_supersedes_id")
+            if properties.get("canonical_supersedes_id") is not None
+            else properties.get("supersedes_id"),
+        }
+
+    @classmethod
+    def _validate_legacy_canonical_group(
+        cls,
+        key: tuple[str, str],
+        group: Sequence[Mapping[str, Any]],
+    ) -> None:
+        by_version: dict[int, list[Mapping[str, Any]]] = {}
+        for candidate in group:
+            if cls._legacy_is_canonical(candidate):
+                by_version.setdefault(cls._legacy_version(candidate), []).append(candidate)
+        for version, candidates in by_version.items():
+            evidence = [cls._legacy_canonical_evidence(item) for item in candidates]
+            for left_index, left in enumerate(evidence):
+                for right in evidence[left_index + 1 :]:
+                    divergent = any(
+                        left[field] is not None
+                        and right[field] is not None
+                        and left[field] != right[field]
+                        for field in left
+                    )
+                    if divergent:
+                        raise VectorGraphBackendError(
+                            "divergent canonical legacy identities for "
+                            f"{key[0]}:{key[1]} at version {version}"
+                        )
 
     def claim_transaction_writes(
         self, namespace, txn_id, claims, idempotency_key
@@ -233,8 +448,8 @@ class _Neo4jBoltClient:
             (
                 {
                     "memory_id": str(claim["memory_id"]),
-                    "expected_version": int(claim["expected_version"]),
-                    "target_version": int(claim["target_version"]),
+                    "base_version": int(claim["base_version"]),
+                    "final_version": int(claim["final_version"]),
                     "claim_hash": str(claim["claim_hash"]),
                 }
                 for claim in claims
@@ -258,50 +473,62 @@ class _Neo4jBoltClient:
                     if current and current.get("canonical")
                     else 0
                 )
-                if canonical_version > claim["expected_version"]:
+                if canonical_version > claim["base_version"]:
                     return {
                         "status": "conflict",
                         "memory_ids": [claim["memory_id"]],
                     }
-                if canonical_version < claim["expected_version"]:
-                    prior = tx.run(
-                        "MATCH (prior:MemoryWriteClaim {namespace:$namespace, "
-                        "memory_id:$memory_id}) "
-                        "WHERE prior.txn_id IS NOT NULL "
-                        "AND prior.target_version > $canonical_version "
-                        "AND prior.target_version <= $expected_version "
-                        "RETURN collect(prior.target_version) AS versions",
-                        namespace=namespace,
-                        memory_id=claim["memory_id"],
-                        canonical_version=canonical_version,
-                        expected_version=claim["expected_version"],
-                    ).single()
-                    versions = sorted(
-                        int(version)
-                        for version in ((prior or {}).get("versions") or [])
-                    )
-                    if versions != list(
-                        range(canonical_version + 1, claim["expected_version"] + 1)
-                    ):
+                reservations = list(tx.run(
+                    "MATCH (c:MemoryWriteClaim {namespace:$namespace, "
+                    "memory_id:$memory_id}) WHERE c.txn_id IS NOT NULL "
+                    "RETURN coalesce(c.base_version, c.target_version - 1) AS base_version, "
+                    "coalesce(c.final_version, c.target_version) AS final_version, "
+                    "c.txn_id AS claim_txn_id, c.claim_hash AS claim_hash "
+                    "ORDER BY base_version, final_version, claim_txn_id",
+                    namespace=namespace,
+                    memory_id=claim["memory_id"],
+                ))
+                existing = [
+                    {
+                        "base_version": int(row["base_version"]),
+                        "final_version": int(row["final_version"]),
+                        "txn_id": str(row["claim_txn_id"]),
+                        "claim_hash": str(row["claim_hash"]),
+                    }
+                    for row in reservations
+                ]
+                if canonical_version < claim["base_version"]:
+                    cursor = canonical_version
+                    while cursor < claim["base_version"]:
+                        continuations = [
+                            row
+                            for row in existing
+                            if row["base_version"] == cursor
+                            and row["final_version"] <= claim["base_version"]
+                        ]
+                        if len(continuations) != 1:
+                            break
+                        cursor = continuations[0]["final_version"]
+                    if cursor != claim["base_version"]:
                         return {
                             "status": "conflict",
                             "memory_ids": [claim["memory_id"]],
                         }
-                reservation = tx.run(
-                    "MERGE (c:MemoryWriteClaim {namespace:$namespace, "
-                    "memory_id:$memory_id, target_version:$target_version}) "
-                    "SET c._claim_lock=coalesce(c._claim_lock, 0) + 1 "
-                    "RETURN c.txn_id AS claim_txn_id, c.claim_hash AS claim_hash",
-                    namespace=namespace,
-                    memory_id=claim["memory_id"],
-                    target_version=claim["target_version"],
-                ).single()
-                owner = reservation.get("claim_txn_id") if reservation else None
-                same_claim = bool(
-                    owner == txn_id
-                    and reservation.get("claim_hash") == claim["claim_hash"]
-                )
-                if owner is not None and not same_claim:
+                overlapping = [
+                    row
+                    for row in existing
+                    if row["base_version"] < claim["final_version"]
+                    and claim["base_version"] < row["final_version"]
+                ]
+                same_claim = [
+                    row
+                    for row in overlapping
+                    if row["base_version"] == claim["base_version"]
+                    and row["final_version"] == claim["final_version"]
+                    and row["txn_id"] == txn_id
+                    and row["claim_hash"] == claim["claim_hash"]
+                ]
+                if overlapping and len(same_claim) != len(overlapping):
                     return {
                         "status": "conflict",
                         "memory_ids": [claim["memory_id"]],
@@ -309,13 +536,16 @@ class _Neo4jBoltClient:
                 current_rows.append(claim)
             for claim in current_rows:
                 tx.run(
-                    "MATCH (c:MemoryWriteClaim {namespace:$namespace, "
-                    "memory_id:$memory_id, target_version:$target_version}) "
-                    "SET c.txn_id=$txn_id, c.claim_hash=$claim_hash",
+                    "MERGE (c:MemoryWriteClaim {namespace:$namespace, "
+                    "memory_id:$memory_id, base_version:$base_version, "
+                    "final_version:$final_version}) "
+                    "SET c.txn_id=$txn_id, c.claim_hash=$claim_hash, "
+                    "c.target_version=$final_version",
                     namespace=namespace,
                     memory_id=claim["memory_id"],
                     txn_id=txn_id,
-                    target_version=claim["target_version"],
+                    base_version=claim["base_version"],
+                    final_version=claim["final_version"],
                     claim_hash=claim["claim_hash"],
                 ).consume()
             return {"status": "claimed", "memory_ids": []}
@@ -348,6 +578,7 @@ class _Neo4jBoltClient:
                     "txn_id:$txn_id, sequence:$sequence, record_kind:$record_kind}) "
                     "SET m.status=$status, m.target_status=$target_status, "
                     "m.payload_hash=$payload_hash, m.version=$version, "
+                    "m.base_version=$base_version, "
                     "m.operation=$operation, m.agent_id=$agent_id, m.scope=$scope, "
                     "m.derived_from=$source_ids, m.supersedes_id=$supersedes_id",
                     namespace=namespace,
@@ -359,6 +590,7 @@ class _Neo4jBoltClient:
                     target_status=payload["target_status"],
                     payload_hash=payload["payload_hash"],
                     version=int(payload["version"]),
+                    base_version=int(payload.get("base_version", 0)),
                     operation=payload["operation"],
                     agent_id=payload.get("agent_id"),
                     scope=payload.get("scope"),
@@ -466,27 +698,38 @@ class _Neo4jBoltClient:
                 "MERGE (m:MemoryIdentity {namespace:$namespace, memory_id:$memory_id}) "
                 "SET m._cas_lock=coalesce(m._cas_lock, 0) + 1 "
                 "WITH m OPTIONAL MATCH (claim:MemoryWriteClaim "
-                "{namespace:$namespace, memory_id:$memory_id, "
-                "target_version:$target_version}) "
+                "{namespace:$namespace, memory_id:$memory_id}) "
+                "WHERE claim IS NULL OR ("
+                "coalesce(claim.base_version, claim.target_version - 1) "
+                "< $final_version AND $base_version < "
+                "coalesce(claim.final_version, claim.target_version)) "
                 "RETURN coalesce(m.canonical, false) AS canonical, "
                 "m.status AS status, m.version AS version, "
                 "m.canonical_state_hash AS state_hash, "
                 "m.canonical_source_ids AS source_ids, "
                 "m.canonical_supersedes_id AS supersedes_id, "
                 "m.canonical_operation_id AS operation_id, "
-                "claim.txn_id AS claim_txn_id",
+                "collect(claim.txn_id) AS claim_txn_ids",
                 namespace=namespace,
                 memory_id=memory_id,
-                target_version=desired_version,
+                base_version=int(expected_version),
+                final_version=desired_version,
             ).single()
             canonical = bool(current and current.get("canonical"))
             current_version = (
                 int(current.get("version") or 1) if canonical else 0
             )
             current_record = None
-            current_claim = current.get("claim_txn_id") if current else None
-            if current_claim is not None and current_claim != claim_txn_id:
+            current_claims = {
+                str(owner)
+                for owner in ((current or {}).get("claim_txn_ids") or [])
+                if owner is not None
+            }
+            if any(owner != claim_txn_id for owner in current_claims):
                 return {"status": "conflict", "record": None}
+            current_claim = (
+                claim_txn_id if claim_txn_id in current_claims else None
+            )
             if canonical:
                 current_record = {
                     "status": current.get("status"),
@@ -511,11 +754,13 @@ class _Neo4jBoltClient:
                 if exact and current_claim == claim_txn_id:
                     tx.run(
                         "MATCH (claim:MemoryWriteClaim {namespace:$namespace, "
-                        "memory_id:$memory_id, target_version:$target_version, "
+                        "memory_id:$memory_id, base_version:$base_version, "
+                        "final_version:$final_version, "
                         "txn_id:$txn_id}) DELETE claim",
                         namespace=namespace,
                         memory_id=memory_id,
-                        target_version=desired_version,
+                        base_version=int(expected_version),
+                        final_version=desired_version,
                         txn_id=claim_txn_id,
                     ).consume()
                 return {
@@ -543,11 +788,13 @@ class _Neo4jBoltClient:
             if claim_txn_id is not None:
                 tx.run(
                     "MATCH (claim:MemoryWriteClaim {namespace:$namespace, "
-                    "memory_id:$memory_id, target_version:$target_version, "
+                    "memory_id:$memory_id, base_version:$base_version, "
+                    "final_version:$final_version, "
                     "txn_id:$txn_id}) DELETE claim",
                     namespace=namespace,
                     memory_id=memory_id,
-                    target_version=desired_version,
+                    base_version=int(expected_version),
+                    final_version=desired_version,
                     txn_id=claim_txn_id,
                 ).consume()
             tx.run(
@@ -802,8 +1049,16 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
     ) -> list[dict[str, Any]]:
         durable_bases: dict[str, int] = {}
         try:
-            existing = self.qdrant.retrieve_many_by_txn(
-                self.db_namespace, str(txn_id)
+            existing = self._call(
+                "qdrant",
+                "stage_base_read",
+                lambda: self._require_readback(
+                    self.qdrant.retrieve_many_by_txn(
+                        self.db_namespace, str(txn_id)
+                    ),
+                    "Qdrant staged base readback is unknown",
+                ),
+                self._transaction_key(str(txn_id), 0, "stage_base_read"),
             )
         except Exception:
             existing = None
@@ -814,10 +1069,16 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                         str(row["memory_id"]), int(row["base_version"])
                     )
 
+        observed_versions: dict[str, int | None] = {}
+
         def version_reader(memory_id: str) -> int | None:
             if memory_id in durable_bases:
                 return durable_bases[memory_id] or None
-            return self._current_version_excluding(memory_id, str(txn_id))
+            if memory_id not in observed_versions:
+                observed_versions[memory_id] = self._current_version_excluding(
+                    memory_id, str(txn_id)
+                )
+            return observed_versions[memory_id]
 
         records = _replay_staged_records(intents, version_reader)
         latest = _latest_record_intents(intents)
@@ -900,6 +1161,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             "status",
             "target_status",
             "version",
+            "base_version",
             "derived_from",
             "supersedes_id",
         )
@@ -928,9 +1190,26 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
     def _read_failure(exc: Exception) -> dict[str, Any]:
         return {"read_ok": False, "error": type(exc).__name__}
 
+    @staticmethod
+    def _require_readback(result: Any, detail: str) -> Mapping[str, Any]:
+        if not isinstance(result, Mapping) or not result.get("read_ok", False):
+            raise VectorGraphBackendError(detail)
+        return result
+
     def _qdrant_transaction_state(self, txn_id: str) -> dict[str, Any]:
+        key = self._transaction_key(txn_id, 0, "qdrant_readback")
         try:
-            result = self.qdrant.retrieve_many_by_txn(self.db_namespace, txn_id)
+            result = self._call(
+                "qdrant",
+                "transaction_readback",
+                lambda: self._require_readback(
+                    self.qdrant.retrieve_many_by_txn(
+                        self.db_namespace, txn_id
+                    ),
+                    "Qdrant transaction readback is unknown",
+                ),
+                key,
+            )
         except Exception as exc:
             return self._read_failure(exc)
         if not isinstance(result, Mapping) or not result.get("read_ok", False):
@@ -951,8 +1230,19 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         return {"read_ok": True, "objects": rows}
 
     def _neo4j_transaction_state(self, txn_id: str) -> dict[str, Any]:
+        key = self._transaction_key(txn_id, 0, "neo4j_readback")
         try:
-            result = self.neo4j.retrieve_many_by_txn(self.db_namespace, txn_id)
+            result = self._call(
+                "neo4j",
+                "transaction_readback",
+                lambda: self._require_readback(
+                    self.neo4j.retrieve_many_by_txn(
+                        self.db_namespace, txn_id
+                    ),
+                    "Neo4j transaction readback is unknown",
+                ),
+                key,
+            )
         except Exception as exc:
             return self._read_failure(exc)
         if not isinstance(result, Mapping) or not result.get("read_ok", False):
@@ -1013,10 +1303,21 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             return None
         return str(decision).upper() if decision is not None else None
 
-    def _rows_for_memory(self, memory_id: str) -> list[dict[str, Any]]:
+    def _rows_for_memory(
+        self, memory_id: str, *, operation: str = "memory"
+    ) -> list[dict[str, Any]]:
+        key = self._key(f"{operation}_rows", memory_id)
         method = getattr(self.qdrant, "retrieve_many_by_memory", None)
         if callable(method):
-            result = method(self.db_namespace, memory_id)
+            result = self._call(
+                "qdrant",
+                f"{operation}_rows",
+                lambda: self._require_readback(
+                    method(self.db_namespace, memory_id),
+                    "Qdrant memory readback is unknown",
+                ),
+                key,
+            )
             if not isinstance(result, Mapping) or not result.get("read_ok", False):
                 raise VectorGraphBackendError("Qdrant memory readback is unknown")
             rows = [
@@ -1025,26 +1326,52 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 if isinstance(row, Mapping)
             ]
         else:
-            row = self.qdrant.retrieve(self.db_namespace, memory_id)
+            row = self._call(
+                "qdrant",
+                f"{operation}_canonical_row",
+                lambda: self.qdrant.retrieve(self.db_namespace, memory_id),
+                key,
+            )
             rows = [copy.deepcopy(dict(row))] if isinstance(row, Mapping) else []
-            for candidate in self.qdrant.search(
-                self.db_namespace, self.embedder(memory_id), 1000
-            ):
+            searched = self._call(
+                "qdrant",
+                f"{operation}_staged_rows",
+                lambda: self.qdrant.search(
+                    self.db_namespace, self.embedder(memory_id), 1000
+                ),
+                key,
+            )
+            for candidate in searched:
                 if (
                     isinstance(candidate, Mapping)
                     and str(candidate.get("memory_id")) == memory_id
                 ):
                     rows.append(copy.deepcopy(dict(candidate)))
-        if memory_id in self.memories and not any(
-            row.get("txn_id") is None for row in rows
-        ):
-            rows.append(copy.deepcopy(self.memories[memory_id]))
-        return rows
+        unique: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            fingerprint = json.dumps(
+                row,
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            )
+            unique.setdefault(fingerprint, row)
+        return list(unique.values())
 
-    def _all_rows(self) -> list[dict[str, Any]]:
+    def _all_rows(self, *, operation: str = "search") -> list[dict[str, Any]]:
+        key = self._key(f"{operation}_rows", "*")
         method = getattr(self.qdrant, "scan_namespace", None)
         if callable(method):
-            result = method(self.db_namespace, 1000)
+            result = self._call(
+                "qdrant",
+                f"{operation}_rows",
+                lambda: self._require_readback(
+                    method(self.db_namespace, 1000),
+                    "Qdrant namespace readback is unknown",
+                ),
+                key,
+            )
             if not isinstance(result, Mapping) or not result.get("read_ok", False):
                 raise VectorGraphBackendError("Qdrant namespace readback is unknown")
             rows = [
@@ -1055,21 +1382,16 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         else:
             rows = [
                 copy.deepcopy(dict(row))
-                for row in self.qdrant.search(
-                    self.db_namespace, self.embedder(""), 1000
+                for row in self._call(
+                    "qdrant",
+                    f"{operation}_rows",
+                    lambda: self.qdrant.search(
+                        self.db_namespace, self.embedder(""), 1000
+                    ),
+                    key,
                 )
                 if isinstance(row, Mapping)
             ]
-        stored_canonical_ids = {
-            str(row.get("memory_id"))
-            for row in rows
-            if row.get("txn_id") is None and row.get("memory_id") is not None
-        }
-        rows.extend(
-            copy.deepcopy(memory)
-            for memory_id, memory in self.memories.items()
-            if memory_id not in stored_canonical_ids
-        )
         return rows
 
     @staticmethod
@@ -1175,18 +1497,308 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 selected["status"] = status
         return selected if status == "active" else None
 
+    @staticmethod
+    def _record_fingerprint(record: Mapping[str, Any]) -> str:
+        return json.dumps(
+            record,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+        )
+
+    def _canonical_evidence(
+        self,
+        memory_id: str,
+        rows: Sequence[Mapping[str, Any]],
+        *,
+        operation: str,
+    ) -> dict[str, Any]:
+        canonical_rows = [row for row in rows if row.get("txn_id") is None]
+        canonical_fingerprints = {
+            self._record_fingerprint(row) for row in canonical_rows
+        }
+        if len(canonical_fingerprints) > 1:
+            return {"status": "divergent", "record": None, "version": None}
+        qdrant = canonical_rows[0] if canonical_rows else None
+        key = self._key(f"{operation}_canonical", memory_id)
+        try:
+            neo4j = self._call(
+                "neo4j",
+                f"{operation}_canonical",
+                lambda: self.neo4j.retrieve_memory(
+                    self.db_namespace, memory_id
+                ),
+                key,
+            )
+        except Exception:
+            return {"status": "unknown", "record": None, "version": None}
+        if qdrant is None and neo4j is None:
+            return {"status": "absent", "record": None, "version": None}
+        if qdrant is None or not isinstance(neo4j, Mapping):
+            return {"status": "partial", "record": None, "version": None}
+        try:
+            recomputed_hash = self._canonical_state_hash(qdrant)
+            stored_hash = str(qdrant["_canonical_state_hash"])
+            version = int(qdrant["version"])
+            desired = {
+                "status": str(qdrant["status"]),
+                "version": version,
+                "derived_from": list(qdrant["derived_from"]),
+                "supersedes_id": qdrant.get("supersedes_id"),
+                "_canonical_state_hash": recomputed_hash,
+            }
+        except (KeyError, TypeError, ValueError):
+            return {"status": "partial", "record": None, "version": None}
+        if (
+            stored_hash != recomputed_hash
+            or neo4j.get("state_hash") != recomputed_hash
+            or not self._neo4j_canonical_matches(neo4j, desired)
+        ):
+            return {"status": "partial", "record": None, "version": None}
+        return {
+            "status": "complete",
+            "record": self._public_record(qdrant, str(qdrant["status"])),
+            "version": version,
+        }
+
+    def _verified_staged_groups(
+        self,
+        memory_id: str,
+        rows: Sequence[Mapping[str, Any]],
+        *,
+        operation: str,
+        excluded_txn_id: str | None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        committed: dict[str, list[Mapping[str, Any]]] = {}
+        for row in rows:
+            txn_id = row.get("txn_id")
+            if txn_id is None or str(txn_id) == excluded_txn_id:
+                continue
+            if self._decision(str(txn_id)) != "COMMITTED":
+                continue
+            committed.setdefault(str(txn_id), []).append(row)
+        groups: list[dict[str, Any]] = []
+        unverified = False
+        for txn_id, qdrant_rows in sorted(committed.items()):
+            key = self._transaction_key(txn_id, 0, f"{operation}_staged")
+            try:
+                raw = self._call(
+                    "neo4j",
+                    f"{operation}_staged",
+                    lambda txn_id=txn_id: self._require_readback(
+                        self.neo4j.retrieve_many_by_txn(
+                            self.db_namespace, txn_id
+                        ),
+                        "Neo4j staged visibility readback is unknown",
+                    ),
+                    key,
+                )
+            except Exception:
+                unverified = True
+                continue
+            if not isinstance(raw, Mapping) or not raw.get("read_ok", False):
+                unverified = True
+                continue
+            relevant_qdrant = [
+                row
+                for row in qdrant_rows
+                if str(row.get("memory_id")) == memory_id
+                and row.get("record_kind") in {"memory", "status_overlay"}
+            ]
+            relevant_neo4j = [
+                row
+                for row in raw.get("nodes", [])
+                if isinstance(row, Mapping)
+                and str(row.get("memory_id")) == memory_id
+                and row.get("record_kind") in {"memory", "status_overlay"}
+            ]
+            qdrant_safe = sorted(
+                self._record_fingerprint(self._safe_transaction_row(row))
+                for row in relevant_qdrant
+            )
+            neo4j_safe = sorted(
+                self._record_fingerprint(self._safe_transaction_row(row))
+                for row in relevant_neo4j
+            )
+            if (
+                not relevant_qdrant
+                or len(relevant_qdrant) != len(qdrant_rows)
+                or qdrant_safe != neo4j_safe
+            ):
+                unverified = True
+                continue
+            memory_rows = [
+                row for row in relevant_qdrant if row.get("record_kind") == "memory"
+            ]
+            overlay_rows = [
+                row
+                for row in relevant_qdrant
+                if row.get("record_kind") == "status_overlay"
+            ]
+            memory_row = (
+                max(memory_rows, key=lambda row: int(row.get("sequence", 0)))
+                if memory_rows
+                else None
+            )
+            overlay_row = (
+                max(overlay_rows, key=lambda row: int(row.get("sequence", 0)))
+                if overlay_rows
+                else None
+            )
+            groups.append(
+                {
+                    "txn_id": txn_id,
+                    "base_version": min(
+                        int(row.get("base_version", 0))
+                        for row in relevant_qdrant
+                    ),
+                    "final_version": max(
+                        int(row.get("version", 1))
+                        for row in relevant_qdrant
+                    ),
+                    "memory_row": memory_row,
+                    "overlay_row": overlay_row,
+                }
+            )
+        return groups, unverified
+
+    def _apply_staged_group(
+        self,
+        current: Mapping[str, Any] | None,
+        group: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        memory_row = group.get("memory_row")
+        if isinstance(memory_row, Mapping):
+            physical_status = str(memory_row.get("status", "pending"))
+            status = (
+                str(memory_row.get("target_status", "active"))
+                if physical_status == "pending"
+                else physical_status
+            )
+            return self._public_record(memory_row, status)
+        overlay = group.get("overlay_row")
+        if current is None or not isinstance(overlay, Mapping):
+            return None
+        result = copy.deepcopy(dict(current))
+        result["status"] = str(overlay.get("target_status"))
+        result["version"] = int(group["final_version"])
+        return result
+
+    def _memory_evidence(
+        self,
+        memory_id: str,
+        rows: Sequence[Mapping[str, Any]],
+        *,
+        operation: str,
+        excluded_txn_id: str | None = None,
+    ) -> dict[str, Any]:
+        canonical = self._canonical_evidence(
+            memory_id, rows, operation=operation
+        )
+        if canonical["status"] in {"unknown", "partial", "divergent"}:
+            return canonical
+        groups, unverified = self._verified_staged_groups(
+            memory_id,
+            rows,
+            operation=operation,
+            excluded_txn_id=excluded_txn_id,
+        )
+        current = (
+            copy.deepcopy(canonical["record"])
+            if isinstance(canonical.get("record"), Mapping)
+            else None
+        )
+        version = int(canonical.get("version") or 0)
+        applied = False
+        owner_txn_id: str | None = None
+        owner_base_version: int | None = None
+        remaining = list(groups)
+        while True:
+            candidates = [
+                group
+                for group in remaining
+                if int(group["base_version"]) == version
+                and int(group["final_version"]) > version
+            ]
+            if not candidates:
+                break
+            outcomes = []
+            for group in candidates:
+                outcome = self._apply_staged_group(current, group)
+                if outcome is None:
+                    return {
+                        "status": "unknown",
+                        "record": None,
+                        "version": None,
+                    }
+                outcomes.append((group, outcome))
+            fingerprints = {
+                self._record_fingerprint(outcome)
+                for _group, outcome in outcomes
+            }
+            if len(fingerprints) != 1:
+                return {
+                    "status": "divergent",
+                    "record": None,
+                    "version": None,
+                }
+            selected_group, selected = min(
+                outcomes, key=lambda item: str(item[0]["txn_id"])
+            )
+            selected_version = int(selected_group["final_version"])
+            if any(
+                int(group["final_version"]) != selected_version
+                for group, _outcome in outcomes
+            ):
+                return {
+                    "status": "divergent",
+                    "record": None,
+                    "version": None,
+                }
+            current = selected
+            version = selected_version
+            applied = True
+            owner_txn_id = str(selected_group["txn_id"])
+            owner_base_version = int(selected_group["base_version"])
+            remaining = [group for group in remaining if group not in candidates]
+
+        if any(int(group["base_version"]) > version for group in remaining):
+            return {"status": "unknown", "record": None, "version": None}
+        if canonical["status"] == "absent" and unverified:
+            return {"status": "unknown", "record": None, "version": None}
+        if canonical["status"] == "absent" and not applied:
+            return {"status": "absent", "record": None, "version": None}
+        return {
+            "status": "complete",
+            "record": current,
+            "version": version,
+            "owner_txn_id": owner_txn_id,
+            "owner_base_version": owner_base_version,
+        }
+
+    def _read_memory_evidence(
+        self, memory_id: str, *, operation: str
+    ) -> dict[str, Any]:
+        rows = self._rows_for_memory(memory_id, operation=operation)
+        return self._memory_evidence(
+            memory_id, rows, operation=operation
+        )
+
     def read_committed(self, memory_id: str) -> Mapping[str, Any] | None:
         memory_id = str(memory_id)
-        rows = self._rows_for_memory(memory_id)
-        record = self._effective_record(memory_id, rows)
-        if record is None:
+        evidence = self._read_memory_evidence(memory_id, operation="read")
+        record = evidence.get("record")
+        if evidence.get("status") != "complete" or not isinstance(
+            record, Mapping
+        ):
             return None
-        return record if self._visible_record_is_supported(record, rows) else None
+        return record if str(record.get("status", "active")) == "active" else None
 
     def search_committed(
         self, query: str | None = None
     ) -> list[Mapping[str, Any]]:
-        rows = self._all_rows()
+        rows = self._all_rows(operation="search")
         ids = sorted(
             {
                 str(row["memory_id"])
@@ -1199,9 +1811,14 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             candidates = [
                 row for row in rows if str(row.get("memory_id")) == memory_id
             ]
-            record = self._effective_record(memory_id, candidates)
-            if record is None or not self._visible_record_is_supported(
-                record, candidates
+            evidence = self._memory_evidence(
+                memory_id, candidates, operation="search"
+            )
+            record = evidence.get("record")
+            if (
+                evidence.get("status") != "complete"
+                or not isinstance(record, Mapping)
+                or str(record.get("status", "active")) != "active"
             ):
                 continue
             if query is None or any(
@@ -1353,66 +1970,17 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         record: Mapping[str, Any],
         rows: Sequence[Mapping[str, Any]],
     ) -> bool:
-        """Require graph evidence for whichever vector row made a record visible."""
+        """Resolve vector and graph evidence before accepting a visible record."""
 
-        memory_id = str(record["memory_id"])
-        version = int(record.get("version", 1))
-        staged = [
-            row
-            for row in rows
-            if row.get("txn_id") is not None
-            and int(row.get("version", 1)) == version
-            and self._decision(str(row.get("txn_id"))) == "COMMITTED"
-            and (
-                (
-                    row.get("record_kind") == "memory"
-                    and self._public_record(
-                        row,
-                        str(
-                            row.get("target_status", "active")
-                            if row.get("status") == "pending"
-                            else row.get("status", "active")
-                        ),
-                    )
-                    == dict(record)
-                )
-                or (
-                    row.get("record_kind") == "status_overlay"
-                    and str(row.get("target_status"))
-                    == str(record.get("status"))
-                )
-            )
-        ]
-        for row in staged:
-            try:
-                raw = self.neo4j.retrieve_many_by_txn(
-                    self.db_namespace, str(row["txn_id"])
-                )
-            except Exception:
-                continue
-            if not isinstance(raw, Mapping) or not raw.get("read_ok", False):
-                continue
-            expected = self._safe_transaction_row(row)
-            if any(
-                self._safe_transaction_row(node) == expected
-                for node in raw.get("nodes", [])
-                if isinstance(node, Mapping)
-            ):
-                return True
-        try:
-            canonical = self.neo4j.retrieve_memory(self.db_namespace, memory_id)
-        except Exception:
-            return False
-        desired = self._canonical_payload(record, "visibility")
-        desired.pop("_canonical_operation_id", None)
-        if canonical is None:
-            return False
-        expected_hash = self._canonical_state_hash(record)
-        current_hash = canonical.get("state_hash")
-        if current_hash is not None and current_hash != expected_hash:
-            return False
-        desired["_canonical_state_hash"] = current_hash
-        return self._neo4j_canonical_matches(canonical, desired)
+        evidence = self._memory_evidence(
+            str(record["memory_id"]), rows, operation="visibility"
+        )
+        supported = evidence.get("record")
+        return bool(
+            evidence.get("status") == "complete"
+            and isinstance(supported, Mapping)
+            and dict(supported) == dict(record)
+        )
 
     @staticmethod
     def _canonical_transition_action(
@@ -1437,10 +2005,16 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         key: str,
         operation: str,
         claim_txn_id: str | None = None,
+        expected_version: int | None = None,
     ) -> str:
         memory_id = str(desired["memory_id"])
         canonical = self._canonical_payload(desired, key)
         desired_version = int(canonical.get("version", 1))
+        base_version = (
+            desired_version - 1
+            if expected_version is None
+            else int(expected_version)
+        )
         compare_and_set = getattr(self.neo4j, "compare_and_set_memory", None)
         if not callable(compare_and_set):
             raise VectorGraphBackendError("Neo4j canonical CAS is unavailable")
@@ -1454,7 +2028,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                     canonical,
                     list(canonical.get("derived_from", [])),
                     canonical.get("supersedes_id"),
-                    desired_version - 1,
+                    base_version,
                     key,
                     claim_txn_id,
                 ),
@@ -1468,7 +2042,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             if status == "newer":
                 return "skipped"
             if status not in {"applied", "matched"}:
-                raise VectorGraphBackendError(
+                raise VectorGraphCommitConflict(
                     f"canonical version conflict for {memory_id}"
                 )
             qdrant_action = "matched"
@@ -1506,11 +2080,11 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 ):
                     qdrant_action = "apply"
                 if qdrant_action == "newer":
-                    raise VectorGraphBackendError(
+                    raise VectorGraphCommitConflict(
                         f"canonical projection is newer than authority for {memory_id}"
                     )
                 if qdrant_action == "conflict":
-                    raise VectorGraphBackendError(
+                    raise VectorGraphCommitConflict(
                         f"canonical version conflict for {memory_id}"
                     )
                 if qdrant_action == "apply":
@@ -1649,20 +2223,21 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
     def _current_version_excluding(
         self, memory_id: str, excluded_txn_id: str | None
     ) -> int | None:
-        rows = self._rows_for_memory(str(memory_id))
-        eligible = [
-            row
-            for row in rows
-            if (
-                row.get("txn_id") is None
-                or (
-                    str(row.get("txn_id")) != excluded_txn_id
-                    and self._decision(str(row.get("txn_id"))) == "COMMITTED"
-                )
+        memory_id = str(memory_id)
+        rows = self._rows_for_memory(memory_id, operation="current_version")
+        evidence = self._memory_evidence(
+            memory_id,
+            rows,
+            operation="current_version",
+            excluded_txn_id=excluded_txn_id,
+        )
+        if evidence.get("status") == "absent":
+            return None
+        if evidence.get("status") != "complete":
+            raise VectorGraphBackendError(
+                f"verified version is unavailable for {memory_id}"
             )
-        ]
-        versions = [int(row.get("version", 1)) for row in eligible]
-        return max(versions) if versions else None
+        return int(evidence["version"])
 
     def _compensate_failed_commit(
         self,
@@ -1744,28 +2319,14 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         return copy.deepcopy(memory)
 
     def read(self, memory_id: str | None = None, **fields: Any) -> dict[str, Any] | None:
-        memory = (
-            self._call(
-                "qdrant",
-                "retrieve",
-                lambda: self.read_committed(str(memory_id)),
-                self._key("read", str(memory_id)),
-            )
-            if memory_id is not None
-            else None
-        )
+        memory = self.read_committed(str(memory_id)) if memory_id is not None else None
         self._event("memory_read", memory_id=memory_id, **fields)
         return copy.deepcopy(memory) if memory is not None else None
 
     def search(self, query: str | None = None, **fields: Any) -> list[dict[str, Any]]:
-        matches = self._call(
-            "qdrant",
-            "search",
-            lambda: [
-                copy.deepcopy(dict(row)) for row in self.search_committed(query)
-            ],
-            self._key("search", str(query or "")),
-        )
+        matches = [
+            copy.deepcopy(dict(row)) for row in self.search_committed(query)
+        ]
         self._event("memory_search", query=query, **fields)
         return matches
 
@@ -1899,46 +2460,30 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                         f"canonical version advanced during invalidate for {memory_id}"
                     )
 
-        stored = self._call(
-            "qdrant",
-            "invalidate_committed_read",
-            lambda: self.read_committed(memory_id),
-            read_key,
+        visible_evidence = self._read_memory_evidence(
+            memory_id, operation="invalidate_committed"
+        )
+        visible_record = visible_evidence.get("record")
+        stored = (
+            visible_record
+            if visible_evidence.get("status") == "complete"
+            and isinstance(visible_record, Mapping)
+            and str(visible_record.get("status", "active")) == "active"
+            else None
         )
         if recovery_record is not None:
             record = recovery_record
         elif isinstance(stored, Mapping):
             if qdrant_before is None and neo4j_before is None:
                 base_key = self._key("invalidate_committed_base", memory_id)
-                staged_owner = None
-                owner_rows = self._call(
-                    "qdrant",
-                    "invalidate_committed_owner_read",
-                    lambda: self._rows_for_memory(memory_id),
-                    base_key,
-                )
-                for row in owner_rows:
-                    if (
-                        row.get("txn_id") is not None
-                        and row.get("record_kind") == "memory"
-                        and self._decision(str(row["txn_id"])) == "COMMITTED"
-                        and self._public_record(
-                            row,
-                            str(
-                                row.get("target_status", "active")
-                                if row.get("status") == "pending"
-                                else row.get("status", "active")
-                            ),
-                        )
-                        == dict(stored)
-                    ):
-                        staged_owner = str(row["txn_id"])
-                        break
                 self._apply_canonical_transition(
                     stored,
                     key=base_key,
                     operation="invalidate_committed_base",
-                    claim_txn_id=staged_owner,
+                    claim_txn_id=visible_evidence.get("owner_txn_id"),
+                    expected_version=visible_evidence.get(
+                        "owner_base_version"
+                    ),
                 )
             record = copy.deepcopy(dict(stored))
             record["status"] = "invalid"
@@ -2015,10 +2560,10 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             claims.append(
                 {
                     "memory_id": memory_id,
-                    "expected_version": min(
+                    "base_version": min(
                         int(row.get("base_version", 0)) for row in source_rows
                     ),
-                    "target_version": max(
+                    "final_version": max(
                         int(row.get("version", 1)) for row in source_rows
                     ),
                     "claim_hash": self._payload_hash(rows),
@@ -2137,7 +2682,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             if not isinstance(claimed, Mapping) or claimed.get(
                 "status"
             ) != "claimed":
-                raise VectorGraphBackendError(
+                raise VectorGraphCommitConflict(
                     f"transaction write conflict for {txn_id}"
                 )
         qdrant_errors: list[Exception] = []
@@ -2291,6 +2836,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                     key=canonical_key,
                     operation="finalize_canonical",
                     claim_txn_id=txn_id,
+                    expected_version=int(finalized.get("base_version", 0)),
                 )
                 if transition == "skipped":
                     return {"status": "conflict", "txn_id": txn_id}
@@ -2331,6 +2877,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 key=key,
                 operation="finalize_overlay",
                 claim_txn_id=txn_id,
+                expected_version=int(overlay.get("base_version", 0)),
             )
             if transition == "skipped":
                 return {"status": "conflict", "txn_id": txn_id}
@@ -2451,8 +2998,16 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 "supersedes_id": action.get("supersedes_id"),
             }
             item: dict[str, Any] = {"memory_id": memory_id}
+            read_key = self._key("verify_persistent_state", memory_id)
             try:
-                qdrant_state = self.qdrant.retrieve(self.db_namespace, memory_id)
+                qdrant_state = self._call(
+                    "qdrant",
+                    "verify_persistent_state",
+                    lambda: self.qdrant.retrieve(
+                        self.db_namespace, memory_id
+                    ),
+                    read_key,
+                )
             except Exception as exc:
                 item["qdrant"] = {
                     "read_ok": False,
@@ -2473,8 +3028,13 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                     ),
                 }
             try:
-                neo4j_state = self.neo4j.retrieve_memory(
-                    self.db_namespace, memory_id
+                neo4j_state = self._call(
+                    "neo4j",
+                    "verify_persistent_state",
+                    lambda: self.neo4j.retrieve_memory(
+                        self.db_namespace, memory_id
+                    ),
+                    read_key,
                 )
             except Exception as exc:
                 item["neo4j"] = {
