@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -30,6 +31,8 @@ from txnmem_benchmark_manifests import (
 )
 from txnmem_model_protocol import ModelProtocolError, ModelResponse, ToolCall
 from txnmem_real_agent import AgentToolError, NativeMemoryToolGateway
+from txnmem_task_transaction import InMemoryTransactionBackend
+from txnmem_transaction_journal import TransactionJournal
 
 
 class _StubModel:
@@ -191,6 +194,80 @@ class BenchmarkBridgeTest(unittest.TestCase):
         )
         projections = {event.get("projection") for event in report["events"]}
         self.assertIn("benchmark_tool_call", projections)
+
+    def test_task_mode_executes_model_and_benchmark_memory_through_one_journaled_transaction(self):
+        class _TransactionOnlyBackend(InMemoryTransactionBackend):
+            def __init__(self):
+                super().__init__()
+                self.direct_calls = []
+                self.events = []
+
+            def write(self, memory_id, value=None, **fields):
+                self.direct_calls.append(("write", memory_id))
+                return {"memory_id": memory_id, "value": value, "status": "active"}
+
+            def read(self, memory_id=None, **fields):
+                self.direct_calls.append(("read", memory_id))
+                return None
+
+            def search(self, query=None, **fields):
+                self.direct_calls.append(("search", query))
+                return []
+
+            def validated_events(self):
+                return list(self.events)
+
+        backend = _TransactionOnlyBackend()
+        model = _StubModel(
+            [
+                ModelResponse(
+                    "", [ToolCall("c1", "book_item", {"item_id": "a1"})]
+                ),
+                ModelResponse(
+                    "",
+                    [
+                        ToolCall(
+                            "c2",
+                            "memory_write",
+                            {"memory_id": "model-memory", "value": "booked"},
+                        )
+                    ],
+                ),
+                ModelResponse("done", []),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            journal_path = Path(directory) / "benchmark-task.sqlite3"
+            report = run_benchmark_agent(
+                {
+                    "task_id": "benchmark-task",
+                    "instruction": "book a1",
+                    "transaction_mode": "task",
+                    "transaction_journal_path": journal_path,
+                    "transaction_id": "txn-benchmark-task",
+                },
+                model,
+                backend,
+                _StubAdapter(),
+                max_steps=5,
+            )
+
+            self.assertTrue(journal_path.exists())
+            journal = TransactionJournal(journal_path)
+            self.addCleanup(journal.close)
+            self.assertEqual(journal.load("txn-benchmark-task").decision, "COMMITTED")
+            self.assertEqual(len(journal.intents("txn-benchmark-task")), 2)
+
+        self.assertEqual(report["status"], "completed")
+        self.assertEqual(report["transaction"]["decision"], "committed")
+        self.assertEqual(backend.direct_calls, [])
+        self.assertEqual(backend.committed["model-memory"]["value"], "booked")
+        projected_ids = [
+            memory_id
+            for memory_id in backend.committed
+            if memory_id.startswith("stub:book_item:")
+        ]
+        self.assertEqual(projected_ids, ["stub:book_item:0001"])
 
     def test_model_failure_still_runs_benchmark_evaluator(self):
         evaluated = []

@@ -387,6 +387,8 @@ def run_benchmark_experiment_manifest(
             }
             if run_report.get("failure_code") is not None:
                 task_summary["failure_code"] = run_report.get("failure_code")
+            if isinstance(run_report.get("transaction"), Mapping):
+                task_summary["transaction"] = dict(run_report["transaction"])
             task_summary["task_evaluator"] = evaluate_task_contract(task_record, run_report)
             events = run_report.get("events", [])
             if events:

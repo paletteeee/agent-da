@@ -25,7 +25,15 @@ from typing import Any, Callable
 from txnmem_backend import InstrumentedMemoryBackend
 from txnmem_failure_controller import FailureController, FailureInjectionError
 from txnmem_model_protocol import ModelProtocolError, add_response_usage, empty_usage_summary
-from txnmem_real_agent import NativeMemoryToolGateway, AgentToolError, _assistant_message, _failed_report
+from txnmem_real_agent import (
+    NativeMemoryToolGateway,
+    AgentToolError,
+    _assistant_message,
+    _failed_report,
+    _transaction_summary,
+)
+from txnmem_task_transaction import TaskTransactionError, TaskTransactionGateway
+from txnmem_transaction_journal import TransactionJournal
 
 
 class BenchmarkEnvAdapter:
@@ -728,10 +736,28 @@ class BenchmarkToolGateway(NativeMemoryToolGateway):
         adapter: BenchmarkEnvAdapter,
         agent_id: str = "agent_model",
         failure_controller: FailureController | None = None,
+        transaction_gateway: TaskTransactionGateway | None = None,
     ):
         super().__init__(backend, agent_id=agent_id, failure_controller=failure_controller)
         self.adapter = adapter
+        self.transaction_gateway = transaction_gateway
         self.benchmark_calls: list[dict[str, Any]] = []
+
+    def call(self, name: str, arguments: Mapping[str, Any]) -> Any:
+        if self.transaction_gateway is None:
+            return super().call(name, arguments)
+        operation = dict(arguments)
+        operation.setdefault("agent_id", self.agent_id)
+        operation.setdefault("projection", "real_model_native")
+        result = self.transaction_gateway.call(name, operation)
+        if name == "memory_invalidate":
+            return {"ok": True, "memory_id": operation.get("memory_id")}
+        return copy.deepcopy(result)
+
+    def validated_events(self) -> list[dict[str, Any]]:
+        if self.transaction_gateway is not None:
+            return self.transaction_gateway.validated_events()
+        return self.backend.validated_events()
 
     def call_benchmark(self, name: str, arguments: Mapping[str, Any], step: int) -> tuple[str, dict[str, Any]]:
         observation, metadata = self.adapter.execute(name, arguments)
@@ -753,7 +779,23 @@ class BenchmarkToolGateway(NativeMemoryToolGateway):
                 "tool_name": name,
                 "model_step": step,
             }
-            if kind == "memory_write":
+            if self.transaction_gateway is not None and kind == "memory_write":
+                self.call(
+                    "memory_write",
+                    {
+                        "memory_id": memory_id,
+                        "value": {"tool_name": name, "arguments": dict(arguments)},
+                        **event_fields,
+                    },
+                )
+            elif self.transaction_gateway is not None and kind == "memory_read":
+                self.call("memory_read", {"memory_id": memory_id, **event_fields})
+            elif self.transaction_gateway is not None and kind == "memory_search":
+                self.call(
+                    "memory_search",
+                    {"query": str(arguments.get("query", "")), **event_fields},
+                )
+            elif kind == "memory_write":
                 self.backend.write(memory_id, value={"tool_name": name, "arguments": dict(arguments)}, **event_fields)
             elif kind in {"memory_read", "memory_search"}:
                 self.backend.read(memory_id, **event_fields) if kind == "memory_read" else self.backend.search(
@@ -834,7 +876,60 @@ def run_benchmark_agent(
     failure_controller = task.get("failure_controller", task.get("failure_schedule"))
     if failure_controller is not None and not isinstance(failure_controller, FailureController):
         failure_controller = FailureController(failure_controller)
-    gateway = BenchmarkToolGateway(backend, adapter, agent_id=agent_id, failure_controller=failure_controller)
+    transaction_mode = str(task.get("transaction_mode", "direct"))
+    if transaction_mode not in {"direct", "task"}:
+        raise ValueError("transaction_mode must be 'direct' or 'task'")
+    journal_path = task.get("transaction_journal_path")
+    if transaction_mode == "task" and journal_path is None:
+        raise ValueError("transaction_journal_path is required in task mode")
+    journal: TransactionJournal | None = None
+    transaction_gateway: TaskTransactionGateway | None = None
+
+    def transaction_phase_hook(phase: str, evidence: Mapping[str, Any]) -> None:
+        configured = task.get("transaction_phase_hook")
+        if callable(configured):
+            configured(phase, evidence)
+        if failure_controller is not None:
+            try:
+                failure_controller.observe_phase(
+                    phase,
+                    evidence,
+                    backend=backend,
+                    gateway=gateway,
+                )
+            except FailureInjectionError as exc:
+                raise TaskTransactionError(exc.code, str(exc)) from exc
+
+    if transaction_mode == "task":
+        resolved_path = Path(journal_path)
+        resolved_path.parent.mkdir(parents=True, exist_ok=True)
+        journal = TransactionJournal(resolved_path)
+        txn_id = str(task.get("transaction_id") or f"txn_{task_id}")
+        policy_provider = task.get("policy_snapshot_provider")
+        transaction_gateway = TaskTransactionGateway(
+            journal=journal,
+            backend=backend,
+            task_id=task_id,
+            agent_id=agent_id,
+            txn_id=txn_id,
+            policy_snapshot_provider=policy_provider
+            if callable(policy_provider)
+            else lambda: {
+                "version": 1,
+                "denied_actions": [],
+                "scope_overrides": {},
+            },
+            phase_hook=transaction_phase_hook,
+        )
+    else:
+        txn_id = None
+    gateway = BenchmarkToolGateway(
+        backend,
+        adapter,
+        agent_id=agent_id,
+        failure_controller=failure_controller,
+        transaction_gateway=transaction_gateway,
+    )
 
     prompt_profile = str(task.get("prompt_profile", "baseline"))
     if prompt_profile not in PROMPT_PROFILES:
@@ -969,7 +1064,7 @@ def run_benchmark_agent(
             task_id,
             step,
             code,
-            backend.validated_events(),
+            gateway.validated_events(),
             messages,
             model_usage,
         )
@@ -987,6 +1082,20 @@ def run_benchmark_agent(
 
     def finalize(report: dict[str, Any]) -> dict[str, Any]:
         try:
+            if transaction_gateway is not None:
+                try:
+                    if report.get("status") == "completed":
+                        transaction_gateway.commit()
+                    else:
+                        transaction_gateway.abort(
+                            str(report.get("failure_code", "task_aborted"))
+                        )
+                except TaskTransactionError as exc:
+                    report["status"] = "failed"
+                    report["failure_code"] = exc.code
+                report["events"] = gateway.validated_events()
+                assert journal is not None and txn_id is not None
+                report["transaction"] = _transaction_summary(journal, txn_id)
             report["official"] = adapter.evaluate(report)
         except Exception as exc:
             report["official"] = {
@@ -994,6 +1103,9 @@ def run_benchmark_agent(
                 "official_evaluator": f"{adapter.dataset}_evaluator",
                 "error": f"{type(exc).__name__}: {exc}",
             }
+        finally:
+            if journal is not None:
+                journal.close()
         return report
 
     def completed(step: int, final_text: str) -> dict[str, Any]:
@@ -1002,7 +1114,7 @@ def run_benchmark_agent(
             "status": "completed",
             "steps": step,
             "final_text": final_text,
-            "events": backend.validated_events(),
+            "events": gateway.validated_events(),
             "messages": messages,
             "model_usage": model_usage,
             "prompt_profile": prompt_profile,
@@ -1068,7 +1180,7 @@ def run_benchmark_agent(
                         and not str(result).startswith("Error:")
                     ):
                         successful_completion_call = True
-            except AgentToolError as exc:
+            except (AgentToolError, TaskTransactionError) as exc:
                 return failed(step, exc.code)
             except FailureInjectionError as exc:
                 return failed(step, exc.code)

@@ -150,7 +150,7 @@ class _FakeNeo4j:
                     )
                 )
             ]
-            for source_id in source_ids:
+            for source_id in dict.fromkeys(source_ids):
                 self.staged_edges.append(
                     {
                         "txn_id": payload["txn_id"],
@@ -322,6 +322,94 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
                 {"namespace": "tenant-a", "txn_id": "txn-shared"},
             ],
         )
+
+    def test_neo4j_canonical_rewrite_replaces_only_outgoing_memory_edges(self):
+        edges = {
+            ("DERIVED_FROM", "other", "m"),
+            ("AUDITS", "m", "audit"),
+        }
+
+        class Result:
+            def consume(self):
+                return None
+
+        class Session:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def run(self, query, **parameters):
+                if (
+                    "OPTIONAL MATCH (m)-[r:DERIVED_FROM|SUPERSEDES]->()" in query
+                    and "TxnMemory" not in query
+                ):
+                    edges.difference_update(
+                        edge
+                        for edge in set(edges)
+                        if edge[1] == parameters["memory_id"]
+                        and edge[0] in {"DERIVED_FROM", "SUPERSEDES"}
+                    )
+                elif "MERGE (m)-[:DERIVED_FROM]->(s)" in query:
+                    edges.add(
+                        (
+                            "DERIVED_FROM",
+                            parameters["memory_id"],
+                            parameters["source_id"],
+                        )
+                    )
+                return Result()
+
+        class Driver:
+            def session(self):
+                return Session()
+
+        client = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
+        client.driver = Driver()
+        payload = {"status": "active", "version": 1}
+
+        client.upsert_memory("tenant", "m", payload, ["s1"], None, "first")
+        client.upsert_memory("tenant", "m", payload, ["s2"], None, "second")
+
+        self.assertEqual(
+            edges,
+            {
+                ("DERIVED_FROM", "other", "m"),
+                ("AUDITS", "m", "audit"),
+                ("DERIVED_FROM", "m", "s2"),
+            },
+        )
+
+    def test_neo4j_transaction_cleanup_does_not_sweep_other_orphan_references(self):
+        references = {"reference-owned-by-txn-b"}
+
+        class Result:
+            def consume(self):
+                return None
+
+        class Session:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def run(self, query, **parameters):
+                if "MATCH (r:MemoryReference" in query:
+                    references.clear()
+                return Result()
+
+        class Driver:
+            def session(self):
+                return Session()
+
+        client = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
+        client.driver = Driver()
+
+        client.delete_many_by_txn("tenant", "txn-a", "cleanup-key")
+
+        self.assertEqual(references, {"reference-owned-by-txn-b"})
 
     def test_qdrant_point_id_is_stable_uuid_for_arbitrary_memory_ids(self):
         first = _qdrant_point_id("tenant", "real_a")
@@ -702,6 +790,66 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             "active",
         )
 
+    def test_newer_committed_overlay_hides_an_unfinalized_transaction_created_record(self):
+        decisions = {"txn-create": "COMMITTED"}
+        backend = VectorGraphMemoryBackend(
+            "txn-overlay-order",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=self.qdrant,
+            neo4j_client=self.neo4j,
+            decision_resolver=decisions.get,
+        )
+        created = [
+            self._intent(
+                "txn-create", 1, "memory_write", memory_id="created", value="value"
+            )
+        ]
+        overlay = [
+            self._intent(
+                "txn-overlay",
+                1,
+                "status_overlay",
+                memory_id="created",
+                target_status="invalid",
+            )
+        ]
+        backend.stage_transaction("txn-create", created)
+        backend.stage_transaction("txn-overlay", overlay)
+
+        self.assertEqual(backend.read_committed("created")["value"], "value")
+        decisions["txn-overlay"] = "COMMITTED"
+
+        self.assertIsNone(backend.read_committed("created"))
+        self.assertEqual(backend.current_version("created"), 2)
+
+    def test_equal_version_committed_record_conflicts_fail_closed(self):
+        decisions = {}
+        backend = VectorGraphMemoryBackend(
+            "txn-equal-visible",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=self.qdrant,
+            neo4j_client=self.neo4j,
+            decision_resolver=decisions.get,
+        )
+        first = [
+            self._intent("txn-a", 1, "memory_write", memory_id="shared", value="a")
+        ]
+        second = [
+            self._intent("txn-b", 1, "memory_write", memory_id="shared", value="b")
+        ]
+        backend.stage_transaction("txn-a", first)
+        backend.stage_transaction("txn-b", second)
+        decisions.update({"txn-a": "COMMITTED", "txn-b": "COMMITTED"})
+
+        self.assertIsNone(backend.read_committed("shared"))
+        self.assertNotIn(
+            "shared", [record["memory_id"] for record in backend.search_committed()]
+        )
+
     def test_invalidate_committed_updates_status_and_version_in_both_stores(self):
         self.backend.write("source", value="source-value")
 
@@ -712,6 +860,70 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertEqual(self.qdrant.retrieve("episode-1", "source")["version"], 2)
         self.assertEqual(self.neo4j.memories[("episode-1", "source")]["version"], 2)
         self.assertIsNone(self.backend.read_committed("source"))
+
+    def test_invalidate_committed_rolls_back_qdrant_when_neo4j_write_fails(self):
+        observed = []
+
+        def requester(service, operation, function, key):
+            observed.append((service, operation))
+            return function()
+
+        backend = VectorGraphMemoryBackend(
+            "txn-invalidate-atomic",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            proxy_requester=requester,
+            qdrant_client=self.qdrant,
+            neo4j_client=self.neo4j,
+            max_retries=0,
+        )
+        backend.write("source", value="source-value")
+        observed.clear()
+        requests_before = backend.metrics()["request_count"]
+        self.neo4j.fail_upsert = True
+
+        with self.assertRaises(VectorGraphBackendError):
+            backend.invalidate_committed("source")
+
+        vector = self.qdrant.retrieve("txn-invalidate-atomic", "source")
+        graph = self.neo4j.memories[("txn-invalidate-atomic", "source")]
+        self.assertEqual((vector["status"], vector["version"]), ("active", 1))
+        self.assertEqual((graph["status"], graph["version"]), ("active", 1))
+        self.assertEqual(backend.read_committed("source")["value"], "source-value")
+        self.assertEqual(
+            backend.metrics()["request_count"] - requests_before,
+            len(observed),
+        )
+        self.assertEqual(observed[0], ("qdrant", "invalidate_committed_read"))
+        self.assertIn(("qdrant", "invalidate_committed_rollback"), observed)
+
+    def test_invalidate_committed_handles_decision_visible_unfinalized_record(self):
+        decisions = {"txn-create": "COMMITTED"}
+        backend = VectorGraphMemoryBackend(
+            "txn-invalidate-unfinalized",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=self.qdrant,
+            neo4j_client=self.neo4j,
+            decision_resolver=decisions.get,
+        )
+        intents = [
+            self._intent(
+                "txn-create", 1, "memory_write", memory_id="source", value="value"
+            )
+        ]
+        backend.stage_transaction("txn-create", intents)
+
+        invalidated = backend.invalidate_committed("source")
+
+        self.assertEqual((invalidated["status"], invalidated["version"]), ("invalid", 2))
+        self.assertIsNone(backend.read_committed("source"))
+        self.assertEqual(backend.current_version("source"), 2)
+        raw = backend.raw_transaction_state("txn-create", intents)
+        self.assertEqual(raw["qdrant"]["objects"][0]["status"], "pending")
+        self.assertEqual(raw["qdrant"]["objects"][0]["version"], 1)
 
     def test_invalidate_committed_advances_a_finalized_transaction_record(self):
         decisions = {"txn-final": "COMMITTED"}
@@ -743,6 +955,114 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertEqual(
             self.neo4j.memories[("txn-finalized", "final")]["status"],
             "invalid",
+        )
+
+    def test_retrying_an_older_record_finalize_cannot_overwrite_a_newer_commit(self):
+        decisions = {"txn-a": "COMMITTED", "txn-b": "COMMITTED"}
+        backend = VectorGraphMemoryBackend(
+            "txn-stale-record",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=self.qdrant,
+            neo4j_client=self.neo4j,
+            decision_resolver=decisions.get,
+        )
+        first = [
+            self._intent(
+                "txn-a", 1, "memory_write", memory_id="shared", value="first"
+            )
+        ]
+        second = [
+            self._intent(
+                "txn-b", 1, "memory_write", memory_id="shared", value="second"
+            )
+        ]
+        backend.stage_transaction("txn-a", first)
+        backend.finalize_transaction("txn-a", first)
+        backend.stage_transaction("txn-b", second)
+        backend.finalize_transaction("txn-b", second)
+
+        backend.finalize_transaction("txn-a", first)
+
+        self.assertEqual(backend.read_committed("shared")["value"], "second")
+        self.assertEqual(
+            self.qdrant.retrieve("txn-stale-record", "shared")["version"], 2
+        )
+        self.assertEqual(
+            self.neo4j.memories[("txn-stale-record", "shared")]["version"], 2
+        )
+
+    def test_retrying_an_older_overlay_finalize_cannot_reverse_a_newer_overlay(self):
+        decisions = {"txn-a": "COMMITTED", "txn-b": "COMMITTED"}
+        backend = VectorGraphMemoryBackend(
+            "txn-stale-overlay",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=self.qdrant,
+            neo4j_client=self.neo4j,
+            decision_resolver=decisions.get,
+        )
+        backend.write("shared", value="value")
+        first = [
+            self._intent(
+                "txn-a",
+                1,
+                "status_overlay",
+                memory_id="shared",
+                target_status="superseded",
+            )
+        ]
+        second = [
+            self._intent(
+                "txn-b",
+                1,
+                "status_overlay",
+                memory_id="shared",
+                target_status="invalid",
+            )
+        ]
+        backend.stage_transaction("txn-a", first)
+        backend.finalize_transaction("txn-a", first)
+        backend.stage_transaction("txn-b", second)
+        backend.finalize_transaction("txn-b", second)
+
+        backend.finalize_transaction("txn-a", first)
+
+        canonical = self.qdrant.retrieve("txn-stale-overlay", "shared")
+        self.assertEqual((canonical["status"], canonical["version"]), ("invalid", 3))
+        graph = self.neo4j.memories[("txn-stale-overlay", "shared")]
+        self.assertEqual((graph["status"], graph["version"]), ("invalid", 3))
+
+    def test_equal_version_finalize_conflict_fails_closed_without_overwrite(self):
+        decisions = {"txn-a": "COMMITTED"}
+        backend = VectorGraphMemoryBackend(
+            "txn-equal-conflict",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=self.qdrant,
+            neo4j_client=self.neo4j,
+            decision_resolver=decisions.get,
+        )
+        intents = [
+            self._intent(
+                "txn-a", 1, "memory_write", memory_id="shared", value="expected"
+            )
+        ]
+        backend.stage_transaction("txn-a", intents)
+        backend.finalize_transaction("txn-a", intents)
+        self.qdrant.points[("txn-equal-conflict", "shared")]["payload"][
+            "value"
+        ] = "conflicting"
+
+        with self.assertRaisesRegex(VectorGraphBackendError, "version conflict"):
+            backend.finalize_transaction("txn-a", intents)
+
+        self.assertEqual(
+            self.qdrant.retrieve("txn-equal-conflict", "shared")["value"],
+            "conflicting",
         )
 
     def test_exact_verification_covers_objects_nodes_and_direct_edges_without_values(self):
@@ -798,6 +1118,52 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertEqual(self.qdrant.transaction_keys[0], expected_first_key)
         self.assertEqual(self.neo4j.transaction_keys[0], expected_first_key)
 
+    def test_raw_transaction_state_redacts_caller_controlled_identity_and_scope(self):
+        intents = [
+            self._intent(
+                "txn-redacted",
+                1,
+                "memory_write",
+                memory_id="memory",
+                value="SECRET_VALUE",
+                agent_id="SECRET_AGENT_ID",
+                scope="SECRET_SCOPE",
+            )
+        ]
+        self.backend.stage_transaction("txn-redacted", intents)
+
+        raw = self.backend.raw_transaction_state("txn-redacted", intents)
+
+        serialized = json.dumps(raw, sort_keys=True)
+        self.assertNotIn("SECRET_VALUE", serialized)
+        self.assertNotIn("SECRET_AGENT_ID", serialized)
+        self.assertNotIn("SECRET_SCOPE", serialized)
+        self.assertEqual(raw["qdrant"]["objects"][0]["memory_id"], "memory")
+        self.assertEqual(len(raw["qdrant"]["objects"][0]["payload_hash"]), 64)
+
+    def test_duplicate_transaction_sources_match_neo4j_merge_semantics(self):
+        intents = [
+            self._intent(
+                "txn-duplicate-sources",
+                1,
+                "memory_derive",
+                memory_id="derived",
+                source_ids=["source", "source"],
+                value="value",
+            )
+        ]
+
+        self.backend.stage_transaction("txn-duplicate-sources", intents)
+
+        self.assertEqual(
+            self.backend.verify_transaction("txn-duplicate-sources", intents)[
+                "status"
+            ],
+            "complete",
+        )
+        raw = self.backend.raw_transaction_state("txn-duplicate-sources", intents)
+        self.assertEqual(len(raw["neo4j"]["edges"]), 1)
+
     def test_verification_distinguishes_partial_absent_and_unknown_readback(self):
         intents = [
             self._intent("txn-check", 1, "memory_write", memory_id="m", value="value")
@@ -816,6 +1182,19 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertEqual(
             self.backend.verify_transaction("txn-check", intents)["status"],
             "unknown",
+        )
+
+    def test_verification_returns_unknown_when_expected_version_readback_fails(self):
+        intents = [
+            self._intent(
+                "txn-unreadable", 1, "memory_write", memory_id="m", value="value"
+            )
+        ]
+        self.qdrant.fail_readback = True
+
+        self.assertEqual(
+            self.backend.verify_transaction("txn-unreadable", intents),
+            {"status": "unknown", "txn_id": "txn-unreadable"},
         )
 
     def test_verification_recomputes_qdrant_hash_from_the_stored_value(self):

@@ -175,6 +175,7 @@ class _Neo4jBoltClient:
         self.driver = GraphDatabase.driver(str(uri), auth=tuple(auth))
 
     def upsert_memory(self, namespace, memory_id, payload, source_ids, supersedes_id, idempotency_key):
+        source_ids = sorted({str(source_id) for source_id in source_ids})
         txn_id = payload.get("txn_id")
         if txn_id is not None:
             with self.driver.session() as session:
@@ -250,6 +251,12 @@ class _Neo4jBoltClient:
                 memory_id=memory_id,
                 status=payload.get("status", "active"),
                 version=int(payload.get("version", 1)),
+            ).consume()
+            session.run(
+                "MATCH (m:Memory {namespace:$namespace, memory_id:$memory_id}) "
+                "OPTIONAL MATCH (m)-[r:DERIVED_FROM|SUPERSEDES]->() DELETE r",
+                namespace=namespace,
+                memory_id=memory_id,
             ).consume()
             for source_id in source_ids:
                 session.run(
@@ -358,11 +365,6 @@ class _Neo4jBoltClient:
                 "DETACH DELETE m",
                 namespace=namespace,
                 txn_id=txn_id,
-            ).consume()
-            session.run(
-                "MATCH (r:MemoryReference {namespace:$namespace}) "
-                "WHERE NOT (r)--() DELETE r",
-                namespace=namespace,
             ).consume()
 
     def healthcheck(self):
@@ -554,8 +556,6 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             "status",
             "target_status",
             "version",
-            "agent_id",
-            "scope",
             "derived_from",
             "supersedes_id",
         )
@@ -744,67 +744,69 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
     def _effective_record(
         self, memory_id: str, rows: Sequence[Mapping[str, Any]]
     ) -> dict[str, Any] | None:
-        staged = [
+        eligible = [
             row
             for row in rows
-            if row.get("txn_id") is not None
-            and row.get("record_kind") == "memory"
-            and self._decision(str(row["txn_id"])) == "COMMITTED"
+            if row.get("txn_id") is None
+            or self._decision(str(row.get("txn_id"))) == "COMMITTED"
         ]
-        if staged:
-            staged_row = max(
-                staged,
-                key=lambda item: (
-                    int(item.get("version", 0)),
-                    int(item.get("sequence", 0)),
-                    str(item.get("txn_id", "")),
-                ),
-            )
-            direct = [row for row in rows if row.get("txn_id") is None]
-            direct_row = (
-                max(direct, key=lambda item: int(item.get("version", 1)))
-                if direct
-                else None
-            )
-            row = (
-                direct_row
-                if direct_row is not None
-                and int(direct_row.get("version", 1))
-                > int(staged_row.get("version", 0))
-                else staged_row
-            )
-            physical_status = str(row.get("status", "pending"))
+        records = [
+            row
+            for row in eligible
+            if row.get("txn_id") is None or row.get("record_kind") == "memory"
+        ]
+        if not records:
+            return None
+        record_version = max(int(row.get("version", 1)) for row in records)
+        latest_records = [
+            row
+            for row in records
+            if int(row.get("version", 1)) == record_version
+        ]
+        resolved_records: list[dict[str, Any]] = []
+        for row in latest_records:
+            physical_status = str(row.get("status", "active"))
             status = (
                 str(row.get("target_status", "active"))
-                if physical_status == "pending"
+                if row.get("txn_id") is not None and physical_status == "pending"
                 else physical_status
             )
-            return self._public_record(row, status) if status == "active" else None
+            resolved_records.append(self._public_record(row, status))
+        fingerprints = {
+            json.dumps(
+                record,
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            )
+            for record in resolved_records
+        }
+        if len(fingerprints) != 1:
+            return None
+        selected = resolved_records[0]
+        status = str(selected.get("status", "active"))
 
         overlays = [
-            row
-            for row in rows
-            if row.get("txn_id") is not None
-            and row.get("record_kind") == "status_overlay"
-            and self._decision(str(row["txn_id"])) == "COMMITTED"
+            row for row in eligible if row.get("record_kind") == "status_overlay"
         ]
         if overlays:
-            overlay = max(
-                overlays,
-                key=lambda item: (
-                    str(item.get("txn_id", "")),
-                    int(item.get("sequence", 0)),
-                ),
-            )
-            if str(overlay.get("target_status")) != "active":
-                return None
-
-        direct = [row for row in rows if row.get("txn_id") is None]
-        if not direct:
-            return None
-        row = max(direct, key=lambda item: int(item.get("version", 1)))
-        status = str(row.get("status", "active"))
-        return self._public_record(row, status) if status == "active" else None
+            overlay_version = max(int(row.get("version", 1)) for row in overlays)
+            if overlay_version >= record_version:
+                targets = {
+                    str(row.get("target_status"))
+                    for row in overlays
+                    if int(row.get("version", 1)) == overlay_version
+                }
+                if len(targets) != 1:
+                    return None
+                overlay_status = next(iter(targets))
+                if overlay_version == record_version and status != overlay_status:
+                    return None
+                status = overlay_status
+                selected["version"] = overlay_version
+                selected["status"] = status
+        return selected if status == "active" else None
 
     def read_committed(self, memory_id: str) -> Mapping[str, Any] | None:
         memory_id = str(memory_id)
@@ -842,6 +844,132 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
 
     def current_version(self, memory_id: str) -> int | None:
         return self._current_version_excluding(str(memory_id), None)
+
+    @staticmethod
+    def _qdrant_canonical_matches(
+        current: Mapping[str, Any], desired: Mapping[str, Any]
+    ) -> bool:
+        return all(
+            current.get(field) == value
+            for field, value in desired.items()
+            if field not in {"namespace"}
+        )
+
+    @classmethod
+    def _qdrant_states_equal(
+        cls,
+        current: Mapping[str, Any] | None,
+        expected: Mapping[str, Any] | None,
+    ) -> bool:
+        if current is None or expected is None:
+            return current is None and expected is None
+        return cls._qdrant_canonical_matches(current, expected)
+
+    @staticmethod
+    def _neo4j_states_equal(
+        current: Mapping[str, Any] | None,
+        expected: Mapping[str, Any] | None,
+    ) -> bool:
+        if current is None or expected is None:
+            return current is None and expected is None
+        return (
+            str(current.get("status")) == str(expected.get("status"))
+            and int(current.get("version", 1)) == int(expected.get("version", 1))
+            and sorted(str(item) for item in current.get("source_ids", []))
+            == sorted(str(item) for item in expected.get("source_ids", []))
+            and current.get("supersedes_id") == expected.get("supersedes_id")
+        )
+
+    @staticmethod
+    def _neo4j_canonical_matches(
+        current: Mapping[str, Any], desired: Mapping[str, Any]
+    ) -> bool:
+        expected = {
+            "status": desired.get("status", "active"),
+            "version": int(desired.get("version", 1)),
+            "source_ids": sorted(
+                str(source_id) for source_id in desired.get("derived_from", [])
+            ),
+            "supersedes_id": desired.get("supersedes_id"),
+        }
+        return all(current.get(field) == value for field, value in expected.items())
+
+    @staticmethod
+    def _canonical_transition_action(
+        current: Mapping[str, Any] | None,
+        desired: Mapping[str, Any],
+        matches: Callable[[Mapping[str, Any], Mapping[str, Any]], bool],
+    ) -> str:
+        if current is None:
+            return "apply"
+        current_version = int(current.get("version", 1))
+        desired_version = int(desired.get("version", 1))
+        if current_version > desired_version:
+            return "newer"
+        if current_version == desired_version:
+            return "matched" if matches(current, desired) else "conflict"
+        return "apply"
+
+    def _apply_canonical_transition(
+        self,
+        desired: Mapping[str, Any],
+        *,
+        key: str,
+        operation: str,
+    ) -> str:
+        memory_id = str(desired["memory_id"])
+        qdrant_current = self._call(
+            "qdrant",
+            f"{operation}_read",
+            lambda: self.qdrant.retrieve(self.db_namespace, memory_id),
+            key,
+        )
+        neo4j_current = self._call(
+            "neo4j",
+            f"{operation}_read",
+            lambda: self.neo4j.retrieve_memory(self.db_namespace, memory_id),
+            key,
+        )
+        qdrant_action = self._canonical_transition_action(
+            qdrant_current, desired, self._qdrant_canonical_matches
+        )
+        neo4j_action = self._canonical_transition_action(
+            neo4j_current, desired, self._neo4j_canonical_matches
+        )
+        if "newer" in {qdrant_action, neo4j_action}:
+            return "skipped"
+        if "conflict" in {qdrant_action, neo4j_action}:
+            raise VectorGraphBackendError(
+                f"canonical version conflict for {memory_id}"
+            )
+        if qdrant_action == "apply":
+            self._call(
+                "qdrant",
+                operation,
+                lambda: self.qdrant.upsert(
+                    self.db_namespace,
+                    memory_id,
+                    self.embedder(desired.get("value", memory_id)),
+                    desired,
+                    key,
+                ),
+                key,
+            )
+        if neo4j_action == "apply":
+            self._call(
+                "neo4j",
+                operation,
+                lambda: self.neo4j.upsert_memory(
+                    self.db_namespace,
+                    memory_id,
+                    desired,
+                    list(desired.get("derived_from", [])),
+                    desired.get("supersedes_id"),
+                    key,
+                ),
+                key,
+            )
+        return "applied" if "apply" in {qdrant_action, neo4j_action} else "matched"
 
     def _current_version_excluding(
         self, memory_id: str, excluded_txn_id: str | None
@@ -900,7 +1028,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
 
     def write(self, memory_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
         memory_id = str(memory_id)
-        source_ids = list(fields.get("source_ids", []))
+        source_ids = sorted({str(item) for item in fields.get("source_ids", [])})
         supersedes_id = fields.get("supersedes_id")
         key = self._key("write", memory_id, source_ids)
         if key in self._committed_keys and memory_id in self.memories:
@@ -1025,40 +1153,170 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
 
     def invalidate_committed(self, memory_id: str) -> Mapping[str, Any]:
         memory_id = str(memory_id)
-        stored = self.qdrant.retrieve(self.db_namespace, memory_id)
-        if not isinstance(stored, Mapping):
-            stored = self.memories.get(memory_id)
+        key = self._key("invalidate_committed", memory_id)
+        stored = self._call(
+            "qdrant",
+            "invalidate_committed_read",
+            lambda: self.read_committed(memory_id),
+            key,
+        )
         if not isinstance(stored, Mapping):
             raise KeyError(memory_id)
         record = copy.deepcopy(dict(stored))
         record["status"] = "invalid"
         record["version"] = int(record.get("version", 1)) + 1
-        key = self._key("invalidate_committed", memory_id)
-        self._call(
+        qdrant_before = self._call(
             "qdrant",
-            "invalidate_committed",
-            lambda: self.qdrant.upsert(
-                self.db_namespace,
-                memory_id,
-                self.embedder(record.get("value", memory_id)),
-                record,
-                key,
-            ),
+            "invalidate_committed_canonical_read",
+            lambda: self.qdrant.retrieve(self.db_namespace, memory_id),
             key,
         )
-        if hasattr(self.neo4j, "update_status"):
-            self._call(
-                "neo4j",
-                "invalidate_committed",
-                lambda: self.neo4j.update_status(
-                    self.db_namespace,
-                    memory_id,
-                    "invalid",
+        neo4j_before = self._call(
+            "neo4j",
+            "invalidate_committed_canonical_read",
+            lambda: self.neo4j.retrieve_memory(self.db_namespace, memory_id),
+            key,
+        )
+        qdrant_action = self._canonical_transition_action(
+            qdrant_before, record, self._qdrant_canonical_matches
+        )
+        neo4j_action = self._canonical_transition_action(
+            neo4j_before, record, self._neo4j_canonical_matches
+        )
+        if "newer" in {qdrant_action, neo4j_action}:
+            raise VectorGraphBackendError(
+                f"canonical version advanced during invalidate for {memory_id}"
+            )
+        if "conflict" in {qdrant_action, neo4j_action}:
+            raise VectorGraphBackendError(
+                f"canonical version conflict for {memory_id}"
+            )
+        try:
+            if qdrant_action == "apply":
+                self._call(
+                    "qdrant",
+                    "invalidate_committed",
+                    lambda: self.qdrant.upsert(
+                        self.db_namespace,
+                        memory_id,
+                        self.embedder(record.get("value", memory_id)),
+                        record,
+                        key,
+                    ),
                     key,
-                    version=int(record["version"]),
-                ),
+                )
+            if neo4j_action == "apply":
+                self._call(
+                    "neo4j",
+                    "invalidate_committed",
+                    lambda: self.neo4j.upsert_memory(
+                        self.db_namespace,
+                        memory_id,
+                        record,
+                        list(record.get("derived_from", [])),
+                        record.get("supersedes_id"),
+                        key,
+                    ),
+                    key,
+                )
+        except Exception as exc:
+            qdrant_after = self._call(
+                "qdrant",
+                "invalidate_committed_recovery_read",
+                lambda: self.qdrant.retrieve(self.db_namespace, memory_id),
                 key,
             )
+            neo4j_after = self._call(
+                "neo4j",
+                "invalidate_committed_recovery_read",
+                lambda: self.neo4j.retrieve_memory(self.db_namespace, memory_id),
+                key,
+            )
+            if (
+                isinstance(qdrant_after, Mapping)
+                and isinstance(neo4j_after, Mapping)
+                and self._qdrant_canonical_matches(qdrant_after, record)
+                and self._neo4j_canonical_matches(neo4j_after, record)
+            ):
+                self.memories[memory_id] = copy.deepcopy(record)
+                return copy.deepcopy(record)
+            if not self._qdrant_states_equal(qdrant_after, qdrant_before):
+                if qdrant_before is None:
+                    self._call(
+                        "qdrant",
+                        "invalidate_committed_rollback",
+                        lambda: self.qdrant.delete(
+                            self.db_namespace, memory_id, key
+                        ),
+                        key,
+                    )
+                else:
+                    self._call(
+                        "qdrant",
+                        "invalidate_committed_rollback",
+                        lambda: self.qdrant.upsert(
+                            self.db_namespace,
+                            memory_id,
+                            self.embedder(qdrant_before.get("value", memory_id)),
+                            qdrant_before,
+                            key,
+                        ),
+                        key,
+                    )
+            if not self._neo4j_states_equal(neo4j_after, neo4j_before):
+                if neo4j_before is None:
+                    self._call(
+                        "neo4j",
+                        "invalidate_committed_rollback",
+                        lambda: self.neo4j.delete_memory(
+                            self.db_namespace, memory_id, key
+                        ),
+                        key,
+                    )
+                else:
+                    restored = copy.deepcopy(
+                        dict(qdrant_before) if isinstance(qdrant_before, Mapping) else record
+                    )
+                    restored["status"] = neo4j_before.get("status")
+                    restored["version"] = int(neo4j_before.get("version", 1))
+                    restored["derived_from"] = list(
+                        neo4j_before.get("source_ids", [])
+                    )
+                    restored["supersedes_id"] = neo4j_before.get("supersedes_id")
+                    self._call(
+                        "neo4j",
+                        "invalidate_committed_rollback",
+                        lambda: self.neo4j.upsert_memory(
+                            self.db_namespace,
+                            memory_id,
+                            restored,
+                            list(restored.get("derived_from", [])),
+                            restored.get("supersedes_id"),
+                            key,
+                        ),
+                        key,
+                    )
+            qdrant_restored = self._call(
+                "qdrant",
+                "invalidate_committed_rollback_read",
+                lambda: self.qdrant.retrieve(self.db_namespace, memory_id),
+                key,
+            )
+            neo4j_restored = self._call(
+                "neo4j",
+                "invalidate_committed_rollback_read",
+                lambda: self.neo4j.retrieve_memory(self.db_namespace, memory_id),
+                key,
+            )
+            if not self._qdrant_states_equal(
+                qdrant_restored, qdrant_before
+            ) or not self._neo4j_states_equal(neo4j_restored, neo4j_before):
+                raise VectorGraphBackendError(
+                    f"invalidate recovery is incomplete for {memory_id}"
+                ) from exc
+            raise VectorGraphBackendError(
+                f"invalidate failed and prior state was restored for {memory_id}"
+            ) from exc
         self.memories[memory_id] = copy.deepcopy(record)
         return copy.deepcopy(record)
 
@@ -1248,7 +1506,10 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         self, txn_id: str, intents: Sequence[Mapping[str, Any]]
     ) -> Mapping[str, Any]:
         txn_id = str(txn_id)
-        expected = self._expected_transaction_state(txn_id, intents)
+        try:
+            expected = self._expected_transaction_state(txn_id, intents)
+        except Exception:
+            return {"status": "unknown", "txn_id": txn_id}
         qdrant = self._qdrant_transaction_state(txn_id)
         neo4j = self._neo4j_transaction_state(txn_id)
         if not qdrant.get("read_ok", False) or not neo4j.get("read_ok", False):
@@ -1318,36 +1579,15 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                     int(row["sequence"]),
                     f"finalize_canonical:{row['operation']}",
                 )
-                self._call(
-                    "qdrant",
-                    "finalize_canonical",
-                    lambda committed=committed, canonical_key=canonical_key: self.qdrant.upsert(
-                        self.db_namespace,
-                        str(committed["memory_id"]),
-                        self.embedder(
-                            committed.get("value", committed["memory_id"])
-                        ),
-                        committed,
-                        canonical_key,
-                    ),
-                    canonical_key,
+                transition = self._apply_canonical_transition(
+                    committed,
+                    key=canonical_key,
+                    operation="finalize_canonical",
                 )
-                self._call(
-                    "neo4j",
-                    "finalize_canonical",
-                    lambda committed=committed, canonical_key=canonical_key: self.neo4j.upsert_memory(
-                        self.db_namespace,
-                        str(committed["memory_id"]),
-                        committed,
-                        list(committed.get("derived_from", [])),
-                        committed.get("supersedes_id"),
-                        canonical_key,
-                    ),
-                    canonical_key,
-                )
-                self.memories[str(committed["memory_id"])] = copy.deepcopy(
-                    committed
-                )
+                if transition != "skipped":
+                    self.memories[str(committed["memory_id"])] = copy.deepcopy(
+                        committed
+                    )
 
         staged_ids = {
             str(row["memory_id"])
@@ -1362,7 +1602,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             if memory_id in staged_ids:
                 continue
             overlay = max(overlays, key=lambda row: int(row["sequence"]))
-            stored = self.qdrant.retrieve(self.db_namespace, memory_id)
+            stored = self.read_committed(memory_id)
             if not isinstance(stored, Mapping):
                 stored = self.memories.get(memory_id)
             if not isinstance(stored, Mapping):
@@ -1373,32 +1613,12 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             key = self._transaction_key(
                 txn_id, int(overlay["sequence"]), "finalize:status_overlay"
             )
-            self._call(
-                "qdrant",
-                "finalize_overlay",
-                lambda committed=committed, key=key: self.qdrant.upsert(
-                    self.db_namespace,
-                    memory_id,
-                    self.embedder(committed.get("value", memory_id)),
-                    committed,
-                    key,
-                ),
-                key,
+            transition = self._apply_canonical_transition(
+                committed,
+                key=key,
+                operation="finalize_overlay",
             )
-            if hasattr(self.neo4j, "update_status"):
-                self._call(
-                    "neo4j",
-                    "finalize_overlay",
-                    lambda committed=committed, key=key: self.neo4j.update_status(
-                        self.db_namespace,
-                        memory_id,
-                        committed["status"],
-                        key,
-                        version=int(committed["version"]),
-                    ),
-                    key,
-                )
-            if memory_id in self.memories:
+            if transition != "skipped":
                 self.memories[memory_id] = copy.deepcopy(committed)
         return {"status": "complete", "txn_id": txn_id}
 

@@ -100,7 +100,7 @@ def _intent_memory_id(intent: Mapping[str, Any]) -> str | None:
 def _source_ids(intent: Mapping[str, Any]) -> list[str]:
     arguments = intent["arguments"]
     if intent["tool_name"] in {"memory_derive", "memory_propagate"}:
-        return [str(item) for item in arguments.get("source_ids", [])]
+        return sorted({str(item) for item in arguments.get("source_ids", [])})
     if intent["tool_name"] == "memory_supersede":
         return [str(arguments["old_memory_id"])]
     return []
@@ -941,6 +941,9 @@ class TaskTransactionCoordinator:
         if tool_name == "memory_propagate":
             normalized["source_ids"] = [str(normalized.pop("source_id"))]
         if tool_name in {"memory_derive", "memory_propagate"}:
+            normalized["source_ids"] = sorted(
+                {str(source_id) for source_id in normalized.get("source_ids", [])}
+            )
             for source_id in normalized.get("source_ids", []):
                 source = self._require_source(str(source_id))
                 self._enforce_source_scope_policy(
@@ -1120,8 +1123,21 @@ class TaskTransactionCoordinator:
             self.journal.decide(self.txn_id, "ABORTED")
             self.journal.record_phase(self.txn_id, "abort_decided", {"code": code})
             self._event("abort", reason=code)
-        self.backend.cleanup_transaction(self.txn_id, intents)
+        try:
+            cleanup = self.backend.cleanup_transaction(self.txn_id, intents)
+        except Exception as exc:
+            raise TaskTransactionError("abort_cleanup_incomplete") from exc
+        if cleanup.get("status") != "clean":
+            raise TaskTransactionError("abort_cleanup_incomplete")
         self.journal.record_phase(self.txn_id, "cleanup_complete", {"status": "clean"})
+
+    def _finalize_committed(
+        self, intents: Sequence[Mapping[str, Any]]
+    ) -> None:
+        finalized = self.backend.finalize_transaction(self.txn_id, intents)
+        if finalized.get("status") != "complete":
+            raise TaskTransactionError("commit_finalize_incomplete")
+        self._phase("finalize_complete", "after_finalize", finalized)
 
     @staticmethod
     def _ordered_phases() -> list[str]:
@@ -1142,8 +1158,9 @@ class TaskTransactionCoordinator:
             frozen = self.journal.frozen_snapshot(self.txn_id)
             intents = frozen["intents"] if frozen is not None else self.journal.intents(self.txn_id)
             try:
-                self.backend.finalize_transaction(self.txn_id, intents)
-                self._phase("finalize_complete", "after_finalize", {"status": "complete"})
+                self._finalize_committed(intents)
+            except TaskTransactionError:
+                raise
             except Exception as exc:
                 raise TaskTransactionError("commit_decided_response_lost") from exc
             return {
@@ -1197,8 +1214,9 @@ class TaskTransactionCoordinator:
         try:
             if self.phase_hook:
                 self.phase_hook("after_commit_decision", {"decision": "COMMITTED"})
-            self.backend.finalize_transaction(self.txn_id, intents)
-            self._phase("finalize_complete", "after_finalize", {"status": "complete"})
+            self._finalize_committed(intents)
+        except TaskTransactionError:
+            raise
         except Exception as exc:
             raise TaskTransactionError("commit_decided_response_lost") from exc
         return {

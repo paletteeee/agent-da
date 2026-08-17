@@ -38,6 +38,23 @@ class _VerificationBackend(InMemoryTransactionBackend):
         return {"status": self.status, "txn_id": txn_id}
 
 
+class _RecoveryStatusBackend(InMemoryTransactionBackend):
+    def __init__(self, *, finalize_status="complete", cleanup_status="clean"):
+        super().__init__()
+        self.finalize_status = finalize_status
+        self.cleanup_status = cleanup_status
+
+    def finalize_transaction(self, txn_id, intents):
+        if self.finalize_status == "complete":
+            return super().finalize_transaction(txn_id, intents)
+        return {"status": self.finalize_status, "txn_id": txn_id}
+
+    def cleanup_transaction(self, txn_id, intents):
+        if self.cleanup_status == "clean":
+            return super().cleanup_transaction(txn_id, intents)
+        return {"status": self.cleanup_status, "txn_id": txn_id}
+
+
 class _DecisionFaultJournal(TransactionJournal):
     def __init__(self, path: Path, mode: str):
         super().__init__(path)
@@ -578,6 +595,32 @@ class TaskTransactionGatewayTests(unittest.TestCase):
             [],
         )
 
+    def test_duplicate_source_ids_are_deduplicated_before_journaling(self) -> None:
+        backend = InMemoryTransactionBackend(
+            {
+                "source_a": {"memory_id": "source_a", "value": "a"},
+                "source_b": {"memory_id": "source_b", "value": "b"},
+            }
+        )
+        gateway = self.gateway(backend=backend)
+
+        gateway.call(
+            "memory_derive",
+            {
+                "memory_id": "derived",
+                "source_ids": ["source_b", "source_a", "source_b", "source_a"],
+                "value": "derived",
+            },
+        )
+
+        intent = self.journal.intents("txn_task_1")[0]
+        self.assertEqual(intent["arguments"]["source_ids"], ["source_a", "source_b"])
+        gateway.commit()
+        self.assertEqual(
+            backend.read_committed("derived")["derived_from"],
+            ["source_a", "source_b"],
+        )
+
     def test_latest_derive_still_rejects_a_real_cycle(self) -> None:
         backend = InMemoryTransactionBackend(
             {
@@ -625,6 +668,36 @@ class TaskTransactionGatewayTests(unittest.TestCase):
         self.assertEqual(recovered["decision"], "COMMITTED")
         self.assertEqual(backend.read_committed("memory_a")["status"], "active")
         self.assertEqual(self.journal.load("txn_task_1").state, "COMMITTED")
+
+    def test_partial_finalize_preserves_committed_recovery_record_without_complete_phase(self) -> None:
+        backend = _RecoveryStatusBackend(finalize_status="partial")
+        gateway = self.gateway(backend=backend)
+        gateway.call("memory_write", {"memory_id": "memory_a", "value": "a"})
+
+        with self.assertRaises(TaskTransactionError) as raised:
+            gateway.commit()
+
+        self.assertEqual(raised.exception.code, "commit_finalize_incomplete")
+        self.assertEqual(self.journal.load("txn_task_1").state, "COMMITTED")
+        self.assertNotIn(
+            "finalize_complete",
+            [phase["phase"] for phase in self.journal.phases("txn_task_1")],
+        )
+
+    def test_unknown_cleanup_preserves_aborted_recovery_record_without_complete_phase(self) -> None:
+        backend = _RecoveryStatusBackend(cleanup_status="unknown")
+        gateway = self.gateway(backend=backend)
+        gateway.call("memory_write", {"memory_id": "memory_a", "value": "a"})
+
+        with self.assertRaises(TaskTransactionError) as raised:
+            gateway.abort("task_failed")
+
+        self.assertEqual(raised.exception.code, "abort_cleanup_incomplete")
+        self.assertEqual(self.journal.load("txn_task_1").state, "ABORTED")
+        self.assertNotIn(
+            "cleanup_complete",
+            [phase["phase"] for phase in self.journal.phases("txn_task_1")],
+        )
 
     def test_decision_write_failure_aborts_and_cleans_staged_state(self) -> None:
         journal = _DecisionFaultJournal(
