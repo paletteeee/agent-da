@@ -15,11 +15,17 @@ SUPPORTED_KINDS = frozenset(
         "memory_derive",
         "memory_propagate",
         "memory_supersede",
+        "memory_invalidate",
+        "begin_txn",
+        "commit",
+        "abort",
         "invalidate",
         "policy_change",
         "policy_revoke",
     }
 )
+
+TRANSACTION_LIFECYCLE_KINDS = frozenset({"begin_txn", "commit", "abort"})
 
 
 class EventContractError(ValueError):
@@ -79,12 +85,20 @@ def validate_event(
     normalized["event_id"] = event_id
     normalized["kind"] = kind
     normalized["agent_id"] = agent_id
+    if kind in TRANSACTION_LIFECYCLE_KINDS:
+        normalized["txn_id"] = _require_non_empty_string(
+            normalized, "txn_id", "missing_txn_id"
+        )
+    elif "txn_id" in normalized:
+        normalized["txn_id"] = _require_non_empty_string(
+            normalized, "txn_id", "invalid_txn_id"
+        )
     if kind in {"memory_write", "memory_derive", "memory_propagate"}:
         _require_memory_id(normalized)
     elif kind == "memory_supersede":
         _require_memory_id(normalized, "old_memory_id")
         _require_memory_id(normalized, "new_memory_id")
-    elif kind == "invalidate":
+    elif kind in {"invalidate", "memory_invalidate"}:
         _require_memory_id(normalized)
     _validate_provenance_fields(normalized)
     return normalized

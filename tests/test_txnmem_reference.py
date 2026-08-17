@@ -1,4 +1,7 @@
 import copy
+import json
+import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -11,6 +14,175 @@ from txnmem_workloads import generate_instance  # noqa: E402
 
 
 class TxnMemReferenceTests(unittest.TestCase):
+    def _instance(self, operations, *, initial_memories=None, edges=None, failure_schedule=None):
+        return {
+            "instance_id": "task_1_reference",
+            "workload": "trace_grounded_replay",
+            "seed": 0,
+            "config": {},
+            "initial_memories": initial_memories or [],
+            "policies": [],
+            "failure_schedule": failure_schedule or [],
+            "provenance_edges": edges or [],
+            "operations": operations,
+        }
+
+    def test_reference_import_does_not_load_transaction_implementation_modules(self):
+        process = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import json, sys; import txnmem_reference; print(json.dumps(sorted(sys.modules)))",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": str(ROOT / "src")},
+        )
+
+        loaded_modules = set(json.loads(process.stdout))
+        self.assertFalse(
+            loaded_modules
+            & {
+                "txnmem_transaction_gateway",
+                "txnmem_transaction_journal",
+                "txnmem_transaction_recovery",
+                "txnmem_vector_graph_backend",
+            }
+        )
+
+    def test_explicit_abort_discards_staged_writes_and_records_reason(self):
+        oracle = reference_outcome(
+            self._instance(
+                [
+                    {"op_id": "begin", "step": 1, "type": "begin_txn", "txn_id": "txn_1", "agent_id": "agent_1"},
+                    {"op_id": "write", "step": 2, "type": "write", "txn_id": "txn_1", "memory_id": "m1", "agent_id": "agent_1"},
+                    {"op_id": "abort", "step": 3, "type": "abort", "txn_id": "txn_1", "abort_reason": "MODEL_CANCELLED", "agent_id": "agent_1"},
+                ]
+            )
+        )
+
+        outcome = oracle["allowed_outcomes"][0]
+        self.assertEqual(outcome["txn_states"]["txn_1"], "aborted")
+        self.assertEqual(outcome["committed_memory_ids"], [])
+        abort_event = next(event for event in oracle["event_trace"] if event["operation_id"] == "abort")
+        self.assertEqual(abort_event["decision"], "aborted")
+        self.assertEqual(abort_event["reason_codes"], ["MODEL_CANCELLED"])
+
+        default_oracle = reference_outcome(
+            self._instance(
+                [
+                    {"op_id": "begin", "step": 1, "type": "begin_txn", "txn_id": "txn_2", "agent_id": "agent_1"},
+                    {"op_id": "abort", "step": 2, "type": "abort", "txn_id": "txn_2", "agent_id": "agent_1"},
+                ]
+            )
+        )
+        default_abort = next(event for event in default_oracle["event_trace"] if event["operation_id"] == "abort")
+        self.assertEqual(default_abort["reason_codes"], ["EXPLICIT_ABORT"])
+
+    def test_terminal_abort_cannot_be_revived_by_write_or_commit(self):
+        oracle = reference_outcome(
+            self._instance(
+                [
+                    {"op_id": "begin", "step": 1, "type": "begin_txn", "txn_id": "txn_1", "agent_id": "agent_1"},
+                    {"op_id": "write", "step": 2, "type": "write", "txn_id": "txn_1", "memory_id": "m1", "agent_id": "agent_1"},
+                    {"op_id": "abort", "step": 3, "type": "abort", "txn_id": "txn_1", "agent_id": "agent_1"},
+                    {"op_id": "late_write", "step": 4, "type": "write", "txn_id": "txn_1", "memory_id": "m2", "agent_id": "agent_1"},
+                    {"op_id": "late_commit", "step": 5, "type": "commit", "txn_id": "txn_1", "agent_id": "agent_1"},
+                ]
+            )
+        )
+
+        outcome = oracle["allowed_outcomes"][0]
+        self.assertEqual(outcome["txn_states"]["txn_1"], "aborted")
+        self.assertEqual(outcome["committed_memory_ids"], [])
+        terminal_events = [
+            event
+            for event in oracle["event_trace"]
+            if event["operation_id"] in {"late_write", "late_commit"}
+        ]
+        self.assertEqual([event["reason_codes"] for event in terminal_events], [["TERMINAL_TRANSACTION"], ["TERMINAL_TRANSACTION"]])
+
+    def test_transactional_invalidation_applies_only_when_transaction_commits(self):
+        initial_memories = [
+            {"memory_id": "root", "agent_id": "agent_1", "scope": "tenant:user_001", "status": "active"},
+            {"memory_id": "child", "agent_id": "agent_1", "scope": "tenant:user_001", "status": "active"},
+        ]
+        edges = [{"source_id": "root", "derived_id": "child", "relation": "read_derive"}]
+        def outcome_for(terminal_type):
+            return reference_outcome(
+                self._instance(
+                    [
+                        {"op_id": "begin", "step": 1, "type": "begin_txn", "txn_id": "txn_1", "agent_id": "agent_1"},
+                        {"op_id": "invalidate", "step": 2, "type": "invalidate", "txn_id": "txn_1", "memory_id": "root", "agent_id": "agent_1"},
+                        {"op_id": terminal_type, "step": 3, "type": terminal_type, "txn_id": "txn_1", "agent_id": "agent_1"},
+                    ],
+                    initial_memories=initial_memories,
+                    edges=edges,
+                )
+            )["allowed_outcomes"][0]
+
+        aborted = outcome_for("abort")
+        committed = outcome_for("commit")
+
+        self.assertEqual(aborted["txn_states"]["txn_1"], "aborted")
+        self.assertEqual(aborted["invalid_memory_ids"], [])
+        self.assertEqual(committed["txn_states"]["txn_1"], "committed")
+        self.assertEqual(committed["invalid_memory_ids"], ["child", "root"])
+
+    def test_source_invalidation_after_derive_aborts_commit_before_publish(self):
+        oracle = reference_outcome(
+            self._instance(
+                [
+                    {"op_id": "begin", "step": 1, "type": "begin_txn", "txn_id": "txn_1", "agent_id": "agent_1"},
+                    {"op_id": "derive", "step": 2, "type": "derive", "txn_id": "txn_1", "memory_id": "derived", "source_ids": ["root"], "scope": "tenant:user_001", "agent_id": "agent_1"},
+                    {"op_id": "commit", "step": 3, "type": "commit", "txn_id": "txn_1", "agent_id": "agent_1"},
+                ],
+                initial_memories=[{"memory_id": "root", "agent_id": "agent_1", "scope": "tenant:user_001", "status": "active"}],
+                failure_schedule=[{"trigger": {"after_operation": "derive"}, "type": "invalidate", "target": "root"}],
+            )
+        )
+
+        outcome = oracle["allowed_outcomes"][0]
+        self.assertEqual(outcome["txn_states"]["txn_1"], "aborted")
+        self.assertEqual(outcome["committed_memory_ids"], [])
+        self.assertEqual(outcome["invalid_memory_ids"], ["root"])
+        self.assertNotIn("derived", outcome["visible_memory_ids"])
+
+    def test_policy_revoke_after_write_aborts_commit_during_revalidation(self):
+        oracle = reference_outcome(
+            self._instance(
+                [
+                    {"op_id": "begin", "step": 1, "type": "begin_txn", "txn_id": "txn_1", "agent_id": "agent_1"},
+                    {"op_id": "write", "step": 2, "type": "write", "txn_id": "txn_1", "memory_id": "m1", "agent_id": "agent_1"},
+                    {"op_id": "commit", "step": 3, "type": "commit", "txn_id": "txn_1", "agent_id": "agent_1"},
+                ],
+                failure_schedule=[{"trigger": {"after_operation": "write"}, "type": "revoke", "target": "write"}],
+            )
+        )
+
+        outcome = oracle["allowed_outcomes"][0]
+        self.assertEqual(outcome["txn_states"]["txn_1"], "aborted")
+        self.assertEqual(outcome["committed_memory_ids"], [])
+        commit_event = next(event for event in oracle["event_trace"] if event["operation_id"] == "commit")
+        self.assertEqual(commit_event["reason_codes"], ["POLICY_REVOKED"])
+
+    def test_policy_revoke_after_derive_revalidates_the_authorized_action(self):
+        oracle = reference_outcome(
+            self._instance(
+                [
+                    {"op_id": "begin", "step": 1, "type": "begin_txn", "txn_id": "txn_1", "agent_id": "agent_1"},
+                    {"op_id": "derive", "step": 2, "type": "derive", "txn_id": "txn_1", "memory_id": "derived", "source_ids": ["root"], "scope": "tenant:user_001", "agent_id": "agent_1"},
+                    {"op_id": "commit", "step": 3, "type": "commit", "txn_id": "txn_1", "agent_id": "agent_1"},
+                ],
+                initial_memories=[{"memory_id": "root", "agent_id": "agent_1", "scope": "tenant:user_001", "status": "active"}],
+                failure_schedule=[{"trigger": {"after_operation": "derive"}, "type": "revoke", "target": "derive"}],
+            )
+        )
+
+        outcome = oracle["allowed_outcomes"][0]
+        self.assertEqual(outcome["txn_states"]["txn_1"], "aborted")
+        self.assertEqual(outcome["committed_memory_ids"], [])
     def test_reference_ignores_generator_expected_outcome(self):
         instance = generate_instance("atomic_multi_write", seed=0, config={"txn_size": 2})
         instance = copy.deepcopy(instance)

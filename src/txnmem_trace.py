@@ -27,6 +27,8 @@ KIND_TO_TYPE = {
     "supersede": "supersede",
     "begin_txn": "begin_txn",
     "commit": "commit",
+    "abort": "abort",
+    "memory_invalidate": "invalidate",
 }
 
 
@@ -63,6 +65,7 @@ def normalize_trace(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             "task_id",
             "sample_id",
             "session_id",
+            "abort_reason",
         ):
             if field in event:
                 operation[field] = event[field]

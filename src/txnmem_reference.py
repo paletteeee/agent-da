@@ -38,6 +38,7 @@ def _initial_state(instance: dict[str, Any]) -> dict[str, Any]:
     for memory in instance.get("initial_memories", []):
         item = copy.deepcopy(memory)
         item.setdefault("status", "active")
+        item.setdefault("version", 1)
         memories[str(item["memory_id"])] = item
 
     edges = [copy.deepcopy(edge) for edge in instance.get("provenance_edges", [])]
@@ -68,9 +69,12 @@ def _txn(state: dict[str, Any], txn_id: str) -> dict[str, Any]:
             "status": "active",
             "begin_policy_version": state["policy_version"],
             "read_set": [],
+            "read_versions": {},
             "write_set": {},
             "pending_edges": [],
             "supersessions": [],
+            "invalidations": set(),
+            "authorized_actions": set(),
         }
     return transactions[txn_id]
 
@@ -162,7 +166,7 @@ def _graph_has_cycle(edges: Iterable[dict[str, Any]]) -> bool:
     return any(visit(node) for node in nodes)
 
 
-def _apply_policy_event(state: dict[str, Any], event: dict[str, Any], operation: dict[str, Any]) -> None:
+def _apply_schedule_event(state: dict[str, Any], event: dict[str, Any], operation: dict[str, Any]) -> None:
     event_type = event.get("type") or event.get("action")
     if event_type in {"revoke", "policy_change"}:
         state["policy_version"] += 1
@@ -172,6 +176,24 @@ def _apply_policy_event(state: dict[str, Any], event: dict[str, Any], operation:
         _append_trace(state, operation, event_type="policy_change", decision="applied", reason_codes=["POLICY_VERSION_CHANGED"])
     elif event_type == "delay":
         _append_trace(state, operation, event_type="delay", decision="applied", reason_codes=[])
+    elif event_type == "invalidate":
+        memory_id = event.get("target") or event.get("memory_id")
+        memory = state["memories"].get(memory_id)
+        if memory is None:
+            _append_trace(state, operation, event_type="invalidate", decision="denied", reason_codes=["MEMORY_NOT_FOUND"])
+            return
+        if memory.get("status") != "invalid":
+            memory["status"] = "invalid"
+            memory["version"] = int(memory.get("version", 1)) + 1
+        _repair(state, [memory_id])
+        _append_trace(
+            state,
+            operation,
+            event_type="invalidate",
+            decision="applied",
+            affected_memory_ids=[memory_id],
+            reason_codes=[],
+        )
 
 
 def _event_matches_operation(event: dict[str, Any], operation: dict[str, Any], after: bool) -> bool:
@@ -212,9 +234,30 @@ def _abort_transaction(state: dict[str, Any], txn_id: str, reason: str) -> None:
     txn["write_set"].clear()
     txn["pending_edges"].clear()
     txn["supersessions"].clear()
+    txn["invalidations"].clear()
     # An authorized abort after revalidation is a correct outcome, not an
     # authorization violation.  The flag is reserved for an actually
     # committed write that bypassed the current policy.
+
+
+def _record_read_version(txn: dict[str, Any], memory: dict[str, Any]) -> None:
+    txn["read_versions"][memory["memory_id"]] = (
+        int(memory.get("version", 1)),
+        memory.get("scope"),
+        memory.get("status"),
+    )
+
+
+def _read_revalidation_reason(state: dict[str, Any], txn: dict[str, Any]) -> str | None:
+    for memory_id, (version, scope, status) in txn["read_versions"].items():
+        memory = state["memories"].get(memory_id)
+        if memory is None or int(memory.get("version", 1)) != version:
+            return "SOURCE_VERSION_CHANGED"
+        if memory.get("scope") != scope:
+            return "SOURCE_SCOPE_CHANGED"
+        if memory.get("status") != status or memory.get("status") != "active":
+            return "SOURCE_INVALID"
+    return None
 
 
 def _stage_write(state: dict[str, Any], operation: dict[str, Any], txn_id: str) -> None:
@@ -257,6 +300,8 @@ def _execute_read(state: dict[str, Any], operation: dict[str, Any], txn_id: str)
         state["observed_visible_ids"].add(memory["memory_id"])
         if memory["memory_id"] not in txn["read_set"]:
             txn["read_set"].append(memory["memory_id"])
+        if memory["memory_id"] in state["memories"]:
+            _record_read_version(txn, memory)
     _append_trace(state, operation, decision="allowed" if visible else "denied", affected_memory_ids=visible, reason_codes=[] if visible else ["SCOPE_OR_POLICY_DENIED"])
 
 
@@ -266,6 +311,7 @@ def _execute_derive(state: dict[str, Any], operation: dict[str, Any], txn_id: st
     if not _policy_allows(state, operation, "derive", operation.get("scope")):
         _append_trace(state, operation, decision="denied", reason_codes=["POLICY_DENIED"])
         return
+    txn["authorized_actions"].add("derive")
     # A native memory_derive call names and reads its source_ids directly; the
     # event trace does not need a separate memory_read event to establish that
     # dependency.  Treat existing committed memories and read-your-writes as
@@ -288,6 +334,8 @@ def _execute_derive(state: dict[str, Any], operation: dict[str, Any], txn_id: st
     for source_id in source_ids:
         if source_id not in txn["read_set"]:
             txn["read_set"].append(source_id)
+        if source_id in state["memories"]:
+            _record_read_version(txn, state["memories"][source_id])
     _stage_write(state, operation, txn_id)
     output_id = operation.get("memory_id") or operation.get("output_id")
     for source_id in source_ids:
@@ -320,8 +368,11 @@ def _execute_propagate(state: dict[str, Any], operation: dict[str, Any], txn_id:
     if not _policy_allows(state, operation, "propagate", operation.get("target_scope")):
         _append_trace(state, operation, decision="denied", reason_codes=["POLICY_DENIED"])
         return
+    txn["authorized_actions"].add("propagate")
     if source_id not in txn["read_set"]:
         txn["read_set"].append(source_id)
+    if source_id in state["memories"]:
+        _record_read_version(txn, state["memories"][source_id])
     _stage_write(state, {**operation, "memory_id": output_id, "scope": operation.get("target_scope", operation.get("scope"))}, txn_id)
     txn["pending_edges"].append(
         {
@@ -363,7 +414,12 @@ def _commit(state: dict[str, Any], operation: dict[str, Any], crash_resolution: 
     txn = _txn(state, txn_id)
     if txn["status"] != "active":
         return
-    if txn["write_set"] and "write" in state["revoked_actions"]:
+    revalidation_reason = _read_revalidation_reason(state, txn)
+    if revalidation_reason is not None:
+        _abort_transaction(state, txn_id, revalidation_reason)
+        _append_trace(state, operation, decision="aborted", reason_codes=[revalidation_reason])
+        return
+    if txn["authorized_actions"] & state["revoked_actions"]:
         _abort_transaction(state, txn_id, "POLICY_REVOKED")
         _append_trace(state, operation, decision="aborted", reason_codes=["POLICY_REVOKED"])
         return
@@ -381,6 +437,8 @@ def _commit(state: dict[str, Any], operation: dict[str, Any], crash_resolution: 
     for memory_id, memory in txn["write_set"].items():
         committed = copy.deepcopy(memory)
         committed["status"] = "active"
+        previous = state["memories"].get(memory_id)
+        committed["version"] = int(previous.get("version", 0)) + 1 if previous else 1
         state["memories"][memory_id] = committed
         if memory_id not in state["committed_memory_ids"]:
             state["committed_memory_ids"].append(memory_id)
@@ -392,9 +450,16 @@ def _commit(state: dict[str, Any], operation: dict[str, Any], crash_resolution: 
             _append_trace(state, operation, decision="aborted", reason_codes=["SUPERSESSION_TARGET_MISSING"])
             return
         old_memory["status"] = "superseded"
+        old_memory["version"] = int(old_memory.get("version", 1)) + 1
         new_memory["status"] = "active"
         new_memory["supersedes_id"] = old_id
     state["edges"] = pending_edges
+    for memory_id in txn["invalidations"]:
+        memory = state["memories"].get(memory_id)
+        if memory is not None and memory.get("status") != "invalid":
+            memory["status"] = "invalid"
+            memory["version"] = int(memory.get("version", 1)) + 1
+    _repair(state, txn["invalidations"])
     txn["status"] = "committed"
     _append_trace(state, operation, decision="committed", reason_codes=[])
 
@@ -409,15 +474,37 @@ def _repair(state: dict[str, Any], root_ids: Iterable[str]) -> None:
     for root_id in invalid_roots:
         for descendant_id in _descendants(state["edges"], root_id):
             if descendant_id in state["memories"]:
-                state["memories"][descendant_id]["status"] = "invalid"
+                descendant = state["memories"][descendant_id]
+                if descendant.get("status") != "invalid":
+                    descendant["status"] = "invalid"
+                    descendant["version"] = int(descendant.get("version", 1)) + 1
 
 
 def _apply_invalidate(state: dict[str, Any], operation: dict[str, Any]) -> None:
     memory_id = operation.get("memory_id") or operation.get("root_id")
+    txn = state["transactions"].get(operation.get("txn_id", "implicit"))
+    if txn and txn["status"] == "active":
+        if memory_id not in state["memories"] and memory_id not in txn["write_set"]:
+            _append_trace(state, operation, decision="denied", reason_codes=["MEMORY_NOT_FOUND"])
+            return
+        invalidated = {memory_id}
+        invalidated.update(_descendants(state["edges"] + txn["pending_edges"], memory_id))
+        txn["invalidations"].update(invalidated)
+        _append_trace(
+            state,
+            operation,
+            decision="invalidated",
+            affected_memory_ids=sorted(invalidated),
+            reason_codes=[],
+        )
+        return
     if memory_id not in state["memories"]:
         _append_trace(state, operation, decision="denied", reason_codes=["MEMORY_NOT_FOUND"])
         return
-    state["memories"][memory_id]["status"] = "invalid"
+    memory = state["memories"][memory_id]
+    if memory.get("status") != "invalid":
+        memory["status"] = "invalid"
+        memory["version"] = int(memory.get("version", 1)) + 1
     _repair(state, [memory_id])
     _append_trace(state, operation, decision="invalidated", affected_memory_ids=[memory_id], reason_codes=[])
 
@@ -431,7 +518,7 @@ def _run(instance: dict[str, Any], crash_resolution: str | None) -> dict[str, An
             break
         pre_events = _events_for_operation(instance, operation, after=False)
         for event in pre_events:
-            _apply_policy_event(state, event, operation)
+            _apply_schedule_event(state, event, operation)
         pre_crashes = [event for event in pre_events if _crash_applies(event, operation)]
         ambiguous_commit_crash = bool(
             pre_crashes
@@ -446,13 +533,28 @@ def _run(instance: dict[str, Any], crash_resolution: str | None) -> dict[str, An
 
         op_type = operation.get("type")
         txn_id = operation.get("txn_id", "implicit")
-        if op_type == "begin_txn":
+        terminal_txn = state["transactions"].get(txn_id)
+        if terminal_txn and terminal_txn["status"] in {"committed", "aborted"}:
+            terminal_status = terminal_txn["status"]
+            if (op_type == "commit" and terminal_status == "committed") or (
+                op_type == "abort" and terminal_status == "aborted"
+            ):
+                _append_trace(state, operation, decision=terminal_status, reason_codes=[])
+            else:
+                _append_trace(
+                    state,
+                    operation,
+                    decision="denied",
+                    reason_codes=["TERMINAL_TRANSACTION"],
+                )
+        elif op_type == "begin_txn":
             txn = _txn(state, txn_id)
             txn["begin_policy_version"] = state["policy_version"]
             _append_trace(state, operation, decision="allowed", reason_codes=[])
         elif op_type in {"write", "stage_write"}:
             if _policy_allows(state, operation, "write", operation.get("scope")):
                 _stage_write(state, operation, txn_id)
+                _txn(state, txn_id)["authorized_actions"].add("write")
                 _append_trace(state, operation, decision="allowed", reason_codes=[])
             else:
                 _append_trace(state, operation, decision="denied", reason_codes=["POLICY_DENIED"])
@@ -468,6 +570,10 @@ def _run(instance: dict[str, Any], crash_resolution: str | None) -> dict[str, An
             _commit(state, operation, "abort" if ambiguous_commit_crash and crash_resolution == "abort" else None)
             if ambiguous_commit_crash:
                 stopped = True
+        elif op_type == "abort":
+            abort_reason = str(operation.get("abort_reason") or "EXPLICIT_ABORT")
+            _abort_transaction(state, txn_id, abort_reason)
+            _append_trace(state, operation, decision="aborted", reason_codes=[abort_reason])
         elif op_type == "invalidate":
             _apply_invalidate(state, operation)
         elif op_type == "repair":
@@ -477,6 +583,8 @@ def _run(instance: dict[str, Any], crash_resolution: str | None) -> dict[str, An
             _append_trace(state, operation, decision="denied", reason_codes=["UNSUPPORTED_OPERATION"])
 
         post_events = _events_for_operation(instance, operation, after=True)
+        for event in post_events:
+            _apply_schedule_event(state, event, operation)
         if any(_crash_applies(event, operation) for event in post_events):
             if operation.get("type") != "commit":
                 for txn_id in list(state["transactions"]):
