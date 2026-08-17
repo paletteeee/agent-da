@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import statistics
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 from txnmem_benchmark_bridge import TauBenchAdapter, _official_tau_user_strategy
@@ -14,8 +16,52 @@ from txnmem_real_experiment import load_task_manifest, run_benchmark_batch
 from txnmem_vector_graph_backend import VectorGraphMemoryBackend
 
 
-def main() -> int:
+def _argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Run the real Qdrant/Neo4j E2E smoke slice."
+    )
+    parser.add_argument(
+        "--transaction-mode",
+        choices=("direct", "task"),
+        default="direct",
+    )
+    parser.add_argument("--journal-path", type=Path)
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print resolved mode and data endpoints without contacting services.",
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = _argument_parser()
+    arguments = parser.parse_args(argv)
+    if arguments.transaction_mode == "task" and arguments.journal_path is None:
+        parser.error("--journal-path is required when --transaction-mode=task")
+
     root = Path(os.environ.get("TXNMEM_ROOT", ".")).resolve()
+    journal_path = (
+        arguments.journal_path.resolve()
+        if arguments.journal_path is not None
+        else None
+    )
+    qdrant_url = os.environ.get("TXNMEM_QDRANT_URL", "http://127.0.0.1:19000")
+    neo4j_uri = os.environ.get("TXNMEM_NEO4J_URI", "bolt://127.0.0.1:19001")
+    if arguments.dry_run:
+        print(
+            json.dumps(
+                {
+                    "journal_path": str(journal_path) if journal_path else None,
+                    "neo4j_uri": neo4j_uri,
+                    "qdrant_url": qdrant_url,
+                    "transaction_mode": arguments.transaction_mode,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+
     manifest_path = root / "results/native_scale/manifests/tau_bench.json"
     out_root = root / os.environ.get("TXNMEM_E2E_OUT", "results/e2e_real_backend")
     manifest, digest = load_task_manifest(manifest_path)
@@ -24,8 +70,6 @@ def main() -> int:
     model_server_build = os.environ["TXNMEM_MODEL_SERVER_BUILD"]
     source_commit = os.environ["TXNMEM_SOURCE_COMMIT"]
     run_id = os.environ["TXNMEM_RUN_ID"]
-    qdrant_url = os.environ.get("TXNMEM_QDRANT_URL", "http://127.0.0.1:6333")
-    neo4j_uri = os.environ.get("TXNMEM_NEO4J_URI", "bolt://127.0.0.1:7687")
     neo4j_auth = (
         os.environ.get("TXNMEM_NEO4J_USER", "neo4j"),
         os.environ["TXNMEM_NEO4J_PASSWORD"],
@@ -53,7 +97,12 @@ def main() -> int:
     ):
         raise RuntimeError("Qdrant/Neo4j healthcheck failed before E2E run")
 
-    for index, task in enumerate(manifest["tasks"][:limit], start=1):
+    for index, source_task in enumerate(manifest["tasks"][:limit], start=1):
+        task = dict(source_task)
+        task["transaction_mode"] = arguments.transaction_mode
+        if arguments.transaction_mode == "task":
+            task["transaction_journal_path"] = str(journal_path)
+            task["transaction_id"] = f"txn_e2e_{run_id}_tau_{index:04d}"
         task_out = out_root / f"task_{index:02d}"
 
         def adapter_factory() -> TauBenchAdapter:
@@ -105,6 +154,8 @@ def main() -> int:
         "model_server_build": model_server_build,
         "source_commit": source_commit,
         "run_id": run_id,
+        "transaction_mode": arguments.transaction_mode,
+        "journal_path": str(journal_path) if journal_path else None,
         "backend": {
             service: backend_health[service].get("version")
             for service in ("qdrant", "neo4j")

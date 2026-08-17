@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -8,6 +12,48 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RealBackendScriptTests(unittest.TestCase):
+    def _run_e2e_cli(self, *arguments):
+        environment = os.environ.copy()
+        environment["PYTHONPATH"] = os.pathsep.join(
+            [str(ROOT / "src"), str(ROOT / "scripts")]
+        )
+        return subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "run_e2e_real_backend.py"), *arguments],
+            cwd=ROOT,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_e2e_cli_task_mode_requires_journal_and_dry_run_uses_proxy_ports(self):
+        missing = self._run_e2e_cli("--dry-run", "--transaction-mode", "task")
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("--journal-path", missing.stderr)
+
+        journal = ROOT / "results" / "dry-run-task-journal.sqlite3"
+        configured = self._run_e2e_cli(
+            "--dry-run",
+            "--transaction-mode",
+            "task",
+            "--journal-path",
+            str(journal),
+        )
+        self.assertEqual(configured.returncode, 0, configured.stderr)
+        payload = json.loads(configured.stdout)
+        self.assertEqual(payload["transaction_mode"], "task")
+        self.assertEqual(payload["journal_path"], str(journal.resolve()))
+        self.assertEqual(payload["qdrant_url"], "http://127.0.0.1:19000")
+        self.assertEqual(payload["neo4j_uri"], "bolt://127.0.0.1:19001")
+
+    def test_e2e_cli_keeps_direct_mode_as_default_without_a_journal(self):
+        completed = self._run_e2e_cli("--dry-run")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload["transaction_mode"], "direct")
+        self.assertIsNone(payload["journal_path"])
+
     def test_e2e_runner_attests_model_identity_and_live_backend_health(self):
         script = (ROOT / "scripts" / "run_e2e_real_backend.py").read_text(
             encoding="utf-8"
