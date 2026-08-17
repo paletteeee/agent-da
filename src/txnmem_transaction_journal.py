@@ -140,6 +140,14 @@ class TransactionJournal:
                 created_at TEXT NOT NULL,
                 UNIQUE (txn_id, backend, operation_key, phase)
             );
+            CREATE TABLE IF NOT EXISTS transaction_freezes (
+                txn_id TEXT PRIMARY KEY REFERENCES transactions(txn_id),
+                intents_json TEXT NOT NULL,
+                read_set_json TEXT NOT NULL,
+                intents_digest TEXT NOT NULL,
+                read_set_digest TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             """
         )
 
@@ -225,6 +233,12 @@ class TransactionJournal:
 
         def action() -> dict[str, Any]:
             self._load_row(txn_id)
+            if self._connection.execute(
+                "SELECT 1 FROM transaction_freezes WHERE txn_id = ?", (txn_id,)
+            ).fetchone() is not None:
+                raise TransactionDecisionError(
+                    "transaction_frozen", f"cannot append intent to frozen transaction {txn_id}"
+                )
             row = self._connection.execute(
                 "SELECT tool_name, arguments_json, payload_digest FROM intents "
                 "WHERE txn_id = ? AND sequence = ?",
@@ -255,6 +269,12 @@ class TransactionJournal:
     ) -> None:
         def action() -> None:
             self._load_row(txn_id)
+            if self._connection.execute(
+                "SELECT 1 FROM transaction_freezes WHERE txn_id = ?", (txn_id,)
+            ).fetchone() is not None:
+                raise TransactionDecisionError(
+                    "transaction_frozen", f"cannot append read to frozen transaction {txn_id}"
+                )
             row = self._connection.execute(
                 "SELECT observed_version, scope FROM read_set WHERE txn_id = ? AND memory_id = ?",
                 (txn_id, memory_id),
@@ -271,6 +291,74 @@ class TransactionJournal:
                 )
 
         self._in_write(action)
+
+    @staticmethod
+    def _freeze_from_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "txn_id": row["txn_id"],
+            "intents": json.loads(row["intents_json"]),
+            "read_set": json.loads(row["read_set_json"]),
+            "intents_digest": row["intents_digest"],
+            "read_set_digest": row["read_set_digest"],
+        }
+
+    def frozen_snapshot(self, txn_id: str) -> dict[str, Any] | None:
+        self._load_row(txn_id)
+        row = self._connection.execute(
+            "SELECT txn_id, intents_json, read_set_json, intents_digest, read_set_digest "
+            "FROM transaction_freezes WHERE txn_id = ?",
+            (txn_id,),
+        ).fetchone()
+        return self._freeze_from_row(row) if row is not None else None
+
+    def freeze(self, txn_id: str) -> dict[str, Any]:
+        """Atomically persist the exact intent/read-set snapshot used by commit."""
+
+        def action() -> dict[str, Any]:
+            record = self._record_from_row(self._load_row(txn_id))
+            row = self._connection.execute(
+                "SELECT txn_id, intents_json, read_set_json, intents_digest, read_set_digest "
+                "FROM transaction_freezes WHERE txn_id = ?",
+                (txn_id,),
+            ).fetchone()
+            if row is not None:
+                return self._freeze_from_row(row)
+            if record.state != "ACTIVE":
+                raise TransactionDecisionError(
+                    "freeze_requires_active", f"cannot freeze {record.state} transaction {txn_id}"
+                )
+            intents = self.intents(txn_id)
+            read_set = self.read_set(txn_id)
+            intents_json = json.dumps(
+                intents, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            )
+            read_set_json = json.dumps(
+                read_set, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            )
+            intents_digest = hashlib.sha256(intents_json.encode("utf-8")).hexdigest()
+            read_set_digest = hashlib.sha256(read_set_json.encode("utf-8")).hexdigest()
+            self._connection.execute(
+                "INSERT INTO transaction_freezes "
+                "(txn_id, intents_json, read_set_json, intents_digest, read_set_digest, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    txn_id,
+                    intents_json,
+                    read_set_json,
+                    intents_digest,
+                    read_set_digest,
+                    _utc_timestamp(),
+                ),
+            )
+            return {
+                "txn_id": txn_id,
+                "intents": intents,
+                "read_set": read_set,
+                "intents_digest": intents_digest,
+                "read_set_digest": read_set_digest,
+            }
+
+        return self._in_write(action)
 
     def record_phase(
         self, txn_id: str, phase: str, evidence: Mapping[str, Any] | None = None
@@ -485,6 +573,7 @@ class TransactionJournal:
             },
             "intents": self.intents(txn_id),
             "read_set": self.read_set(txn_id),
+            "frozen_snapshot": self.frozen_snapshot(txn_id),
             "phases": self.phases(txn_id),
             "backend_receipts": self.backend_receipts(txn_id),
         }

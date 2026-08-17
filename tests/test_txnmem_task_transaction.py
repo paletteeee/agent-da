@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -35,6 +36,22 @@ class _VerificationBackend(InMemoryTransactionBackend):
         self, txn_id: str, intents: Sequence[Mapping[str, Any]]
     ) -> Mapping[str, Any]:
         return {"status": self.status, "txn_id": txn_id}
+
+
+class _DecisionFaultJournal(TransactionJournal):
+    def __init__(self, path: Path, mode: str):
+        super().__init__(path)
+        self.mode = mode
+        self.injected = False
+
+    def decide(self, txn_id: str, decision: str):
+        if decision.upper() != "COMMITTED" or self.injected:
+            return super().decide(txn_id, decision)
+        self.injected = True
+        if self.mode == "before_write":
+            raise RuntimeError("decision write failed")
+        record = super().decide(txn_id, decision)
+        raise RuntimeError("decision response lost")
 
 
 class TaskTransactionGatewayTests(unittest.TestCase):
@@ -205,6 +222,191 @@ class TaskTransactionGatewayTests(unittest.TestCase):
             ],
         )
 
+    def test_owner_reads_and_sources_observe_local_invalidate_and_supersede(self) -> None:
+        for index, (tool_name, arguments) in enumerate(
+            (
+                ("memory_invalidate", {"memory_id": "old"}),
+                (
+                    "memory_supersede",
+                    {"old_memory_id": "old", "new_memory_id": "new", "value": "new"},
+                ),
+            ),
+            start=1,
+        ):
+            with self.subTest(tool_name=tool_name):
+                backend = InMemoryTransactionBackend(
+                    {
+                        "old": {
+                            "memory_id": "old",
+                            "value": "old",
+                            "status": "active",
+                            "scope": "tenant:user_001",
+                            "version": 3,
+                            "derived_from": [],
+                        }
+                    }
+                )
+                gateway = self.gateway(txn_id=f"txn_overlay_{index}", backend=backend)
+                gateway.call(tool_name, arguments)
+
+                self.assertIsNone(gateway.call("memory_read", {"memory_id": "old"}))
+                self.assertNotIn(
+                    "old",
+                    [
+                        item["memory_id"]
+                        for item in gateway.call("memory_search", {})
+                    ],
+                )
+                with self.assertRaises(TaskTransactionError) as raised:
+                    gateway.call(
+                        "memory_derive",
+                        {
+                            "memory_id": "derived",
+                            "source_ids": ["old"],
+                            "value": "derived",
+                        },
+                    )
+                self.assertEqual(raised.exception.code, "source_invalidated")
+
+    def test_unchanged_policy_denial_rejects_intent_and_commit(self) -> None:
+        denied_at_begin = self.gateway(
+            txn_id="txn_denied_at_begin",
+            policy_snapshot_provider=lambda: _policy(denied_actions=["write"]),
+        )
+        with self.assertRaises(TaskTransactionError) as raised:
+            denied_at_begin.call(
+                "memory_write", {"memory_id": "blocked", "value": "blocked"}
+            )
+        self.assertEqual(raised.exception.code, "policy_revalidation_failed")
+        self.assertEqual(self.journal.intents("txn_denied_at_begin"), [])
+
+        policies = [_policy()]
+        denied_before_call = self.gateway(
+            txn_id="txn_denied_before_call",
+            policy_snapshot_provider=lambda: policies[-1],
+        )
+        policies.append(_policy(denied_actions=["write"]))
+        with self.assertRaises(TaskTransactionError) as raised:
+            denied_before_call.call(
+                "memory_write", {"memory_id": "blocked", "value": "blocked"}
+            )
+        self.assertEqual(raised.exception.code, "policy_revalidation_failed")
+        self.assertEqual(self.journal.intents("txn_denied_before_call"), [])
+
+        commit_policies = [_policy()]
+        denied_before_commit = self.gateway(
+            txn_id="txn_denied_before_commit",
+            policy_snapshot_provider=lambda: commit_policies[-1],
+        )
+        denied_before_commit.call(
+            "memory_write", {"memory_id": "blocked", "value": "blocked"}
+        )
+        commit_policies.append(_policy(denied_actions=["write"]))
+        with self.assertRaises(TaskTransactionError) as raised:
+            denied_before_commit.commit()
+        self.assertEqual(raised.exception.code, "policy_revalidation_failed")
+        self.assertEqual(self.journal.load("txn_denied_before_commit").state, "ABORTED")
+
+    def test_scope_override_controls_accepted_scope_and_is_revalidated(self) -> None:
+        forced = self.gateway(
+            txn_id="txn_forced_scope",
+            policy_snapshot_provider=lambda: _policy(
+                scope_overrides={"memory_a": "tenant:forced"}
+            ),
+        )
+        forced.call(
+            "memory_write",
+            {
+                "memory_id": "memory_a",
+                "value": "a",
+                "scope": "tenant:model_requested",
+            },
+        )
+        forced.commit()
+        self.assertEqual(
+            forced.coordinator.backend.read_committed("memory_a")["scope"],
+            "tenant:forced",
+        )
+
+        policies = [_policy(scope_overrides={"memory_b": "tenant:first"})]
+        changed = self.gateway(
+            txn_id="txn_changed_scope",
+            policy_snapshot_provider=lambda: policies[-1],
+        )
+        changed.call("memory_write", {"memory_id": "memory_b", "value": "b"})
+        policies.append(_policy(scope_overrides={"memory_b": "tenant:second"}))
+
+        with self.assertRaises(TaskTransactionError) as raised:
+            changed.commit()
+
+        self.assertEqual(raised.exception.code, "policy_revalidation_failed")
+        self.assertEqual(self.journal.load("txn_changed_scope").state, "ABORTED")
+
+    def test_new_source_scope_override_is_enforced_at_commit(self) -> None:
+        backend = InMemoryTransactionBackend(
+            {
+                "source": {
+                    "memory_id": "source",
+                    "value": "source",
+                    "status": "active",
+                    "scope": "tenant:observed",
+                    "version": 2,
+                    "derived_from": [],
+                }
+            }
+        )
+        policies = [_policy()]
+        gateway = self.gateway(
+            txn_id="txn_source_scope",
+            backend=backend,
+            policy_snapshot_provider=lambda: policies[-1],
+        )
+        gateway.call(
+            "memory_derive",
+            {"memory_id": "derived", "source_ids": ["source"], "value": "derived"},
+        )
+        policies.append(
+            _policy(scope_overrides={"source": "tenant:policy_required"})
+        )
+
+        with self.assertRaises(TaskTransactionError) as raised:
+            gateway.commit()
+
+        self.assertEqual(raised.exception.code, "policy_revalidation_failed")
+        self.assertEqual(self.journal.load("txn_source_scope").state, "ABORTED")
+
+    def test_changed_invalidate_scope_override_is_enforced_at_commit(self) -> None:
+        backend = InMemoryTransactionBackend(
+            {
+                "source": {
+                    "memory_id": "source",
+                    "value": "source",
+                    "status": "active",
+                    "scope": "tenant:observed",
+                    "version": 2,
+                    "derived_from": [],
+                }
+            }
+        )
+        policies = [
+            _policy(scope_overrides={"source": "tenant:observed"})
+        ]
+        gateway = self.gateway(
+            txn_id="txn_invalidate_scope",
+            backend=backend,
+            policy_snapshot_provider=lambda: policies[-1],
+        )
+        gateway.call("memory_invalidate", {"memory_id": "source"})
+        policies.append(
+            _policy(scope_overrides={"source": "tenant:policy_required"})
+        )
+
+        with self.assertRaises(TaskTransactionError) as raised:
+            gateway.commit()
+
+        self.assertEqual(raised.exception.code, "policy_revalidation_failed")
+        self.assertEqual(self.journal.load("txn_invalidate_scope").state, "ABORTED")
+
     def test_commit_revalidation_failures_abort_and_hide_new_objects(self) -> None:
         cases = (
             ("policy", "policy_revalidation_failed"),
@@ -315,6 +517,12 @@ class TaskTransactionGatewayTests(unittest.TestCase):
             ["begin_txn", "memory_write", "commit"],
         )
         self.assertEqual(backend.read_committed("memory_a")["status"], "active")
+        frozen = self.journal.frozen_snapshot("txn_task_1")
+        self.assertEqual(
+            [intent["tool_name"] for intent in frozen["intents"]],
+            ["memory_write"],
+        )
+        self.assertEqual(frozen["read_set"], [])
 
     def test_repeated_write_to_one_memory_stages_latest_value_once(self) -> None:
         backend = InMemoryTransactionBackend()
@@ -332,6 +540,63 @@ class TaskTransactionGatewayTests(unittest.TestCase):
             )["qdrant"]["objects"],
             [{"memory_id": "memory_a"}],
         )
+
+    def test_latest_plain_write_removes_an_earlier_derived_cycle(self) -> None:
+        backend = InMemoryTransactionBackend(
+            {
+                "source": {
+                    "memory_id": "source",
+                    "value": "source",
+                    "status": "active",
+                    "scope": "tenant:user_001",
+                    "version": 1,
+                    "derived_from": ["target"],
+                }
+            }
+        )
+        gateway = self.gateway(backend=backend)
+        gateway.call(
+            "memory_derive",
+            {"memory_id": "target", "source_ids": ["source"], "value": "derived"},
+        )
+        gateway.call("memory_write", {"memory_id": "target", "value": "plain"})
+
+        result = gateway.commit()
+
+        self.assertEqual(result["decision"], "COMMITTED")
+        self.assertEqual(backend.read_committed("target")["derived_from"], [])
+        self.assertEqual(
+            backend.raw_transaction_state(
+                "txn_task_1", self.journal.intents("txn_task_1")
+            )["neo4j"]["edges"],
+            [],
+        )
+
+    def test_latest_derive_still_rejects_a_real_cycle(self) -> None:
+        backend = InMemoryTransactionBackend(
+            {
+                "source": {
+                    "memory_id": "source",
+                    "value": "source",
+                    "status": "active",
+                    "scope": "tenant:user_001",
+                    "version": 1,
+                    "derived_from": ["target"],
+                }
+            }
+        )
+        gateway = self.gateway(backend=backend)
+        gateway.call("memory_write", {"memory_id": "target", "value": "plain"})
+        gateway.call(
+            "memory_derive",
+            {"memory_id": "target", "source_ids": ["source"], "value": "derived"},
+        )
+
+        with self.assertRaises(TaskTransactionError) as raised:
+            gateway.commit()
+
+        self.assertEqual(raised.exception.code, "provenance_cycle")
+        self.assertEqual(self.journal.load("txn_task_1").state, "ABORTED")
 
     def test_response_fault_after_commit_decision_never_reverses_decision(self) -> None:
         backend = InMemoryTransactionBackend()
@@ -354,6 +619,63 @@ class TaskTransactionGatewayTests(unittest.TestCase):
         self.assertEqual(recovered["decision"], "COMMITTED")
         self.assertEqual(backend.read_committed("memory_a")["status"], "active")
         self.assertEqual(self.journal.load("txn_task_1").state, "COMMITTED")
+
+    def test_decision_write_failure_aborts_and_cleans_staged_state(self) -> None:
+        journal = _DecisionFaultJournal(
+            Path(self.temporary_directory.name) / "decision_before.sqlite3",
+            "before_write",
+        )
+        self.addCleanup(journal.close)
+        backend = InMemoryTransactionBackend()
+        gateway = TaskTransactionGateway(
+            journal=journal,
+            backend=backend,
+            task_id="task_decision_before",
+            agent_id="agent_model",
+            txn_id="txn_decision_before",
+            policy_snapshot_provider=lambda: _policy(),
+        )
+        gateway.call("memory_write", {"memory_id": "memory_a", "value": "a"})
+
+        with self.assertRaises(TaskTransactionError) as raised:
+            gateway.commit()
+
+        self.assertEqual(raised.exception.code, "commit_decision_failed")
+        self.assertEqual(journal.load("txn_decision_before").state, "ABORTED")
+        self.assertIsNone(backend.read_committed("memory_a"))
+        self.assertEqual(
+            backend.raw_transaction_state(
+                "txn_decision_before", journal.frozen_snapshot("txn_decision_before")["intents"]
+            )["gateway_visible"],
+            [],
+        )
+
+    def test_decision_response_loss_reloads_commit_and_finishes(self) -> None:
+        journal = _DecisionFaultJournal(
+            Path(self.temporary_directory.name) / "decision_after.sqlite3",
+            "after_write",
+        )
+        self.addCleanup(journal.close)
+        backend = InMemoryTransactionBackend()
+        gateway = TaskTransactionGateway(
+            journal=journal,
+            backend=backend,
+            task_id="task_decision_after",
+            agent_id="agent_model",
+            txn_id="txn_decision_after",
+            policy_snapshot_provider=lambda: _policy(),
+        )
+        gateway.call("memory_write", {"memory_id": "memory_a", "value": "a"})
+
+        result = gateway.commit()
+
+        self.assertEqual(result["decision"], "COMMITTED")
+        self.assertEqual(journal.load("txn_decision_after").state, "COMMITTED")
+        self.assertEqual(backend.read_committed("memory_a")["value"], "a")
+        self.assertIn(
+            "finalize_complete",
+            [phase["phase"] for phase in journal.phases("txn_decision_after")],
+        )
 
 
 class SQLiteStagingTransactionBackendTests(unittest.TestCase):
@@ -390,6 +712,218 @@ class SQLiteStagingTransactionBackendTests(unittest.TestCase):
                     "gateway_visible": [],
                 },
             )
+
+
+class DeterministicTransactionBackendRegressionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary_directory.cleanup)
+
+    def _backend(self, adapter: str, name: str, memories: Mapping[str, Mapping[str, Any]] | None = None):
+        if adapter == "memory":
+            return InMemoryTransactionBackend(memories)
+        backend = SQLiteStagingTransactionBackend(
+            Path(self.temporary_directory.name) / f"{name}.sqlite3", memories
+        )
+        self.addCleanup(backend.close)
+        return backend
+
+    def test_finalized_stage_never_shadows_a_newer_committed_rewrite(self) -> None:
+        for adapter in ("memory", "sqlite"):
+            with self.subTest(adapter=adapter):
+                journal = TransactionJournal(
+                    Path(self.temporary_directory.name) / f"shadow_{adapter}_journal.sqlite3"
+                )
+                self.addCleanup(journal.close)
+                backend = self._backend(adapter, f"shadow_{adapter}")
+                first = TaskTransactionGateway(
+                    journal=journal,
+                    backend=backend,
+                    task_id="task_first",
+                    agent_id="agent_model",
+                    txn_id="txn_1",
+                    policy_snapshot_provider=lambda: _policy(),
+                )
+                first.call("memory_write", {"memory_id": "shared", "value": "first"})
+                first.commit()
+                second = TaskTransactionGateway(
+                    journal=journal,
+                    backend=backend,
+                    task_id="task_second",
+                    agent_id="agent_model",
+                    txn_id="txn_2",
+                    policy_snapshot_provider=lambda: _policy(),
+                )
+                second.call("memory_write", {"memory_id": "shared", "value": "second"})
+                second.commit()
+
+                record = backend.read_committed("shared")
+                self.assertEqual(record["value"], "second")
+                self.assertEqual(record["version"], 2)
+
+    def test_verify_requires_exact_supersede_and_invalidate_overlays(self) -> None:
+        intents = [
+            {
+                "txn_id": "txn_overlay",
+                "sequence": 1,
+                "tool_name": "memory_supersede",
+                "arguments": {
+                    "old_memory_id": "old",
+                    "new_memory_id": "new",
+                    "value": "new",
+                },
+            },
+            {
+                "txn_id": "txn_overlay",
+                "sequence": 2,
+                "tool_name": "status_overlay",
+                "arguments": {"memory_id": "old", "target_status": "superseded"},
+            },
+            {
+                "txn_id": "txn_overlay",
+                "sequence": 3,
+                "tool_name": "status_overlay",
+                "arguments": {"memory_id": "new", "target_status": "invalid"},
+            },
+        ]
+        initial = {
+            "old": {
+                "memory_id": "old",
+                "value": "old",
+                "status": "active",
+                "version": 4,
+            }
+        }
+        for adapter in ("memory", "sqlite"):
+            with self.subTest(adapter=adapter):
+                backend = self._backend(adapter, f"overlay_{adapter}", initial)
+                backend.stage_transaction("txn_overlay", intents)
+                self.assertEqual(
+                    backend.verify_transaction("txn_overlay", intents)["status"],
+                    "complete",
+                )
+                if adapter == "memory":
+                    backend.pending["txn_overlay"]["overlays"].pop()
+                else:
+                    connection = sqlite3.connect(backend.path)
+                    connection.execute(
+                        "DELETE FROM status_overlays WHERE txn_id = ? AND sequence = ?",
+                        ("txn_overlay", 3),
+                    )
+                    connection.commit()
+                    connection.close()
+
+                self.assertEqual(
+                    backend.verify_transaction("txn_overlay", intents)["status"],
+                    "partial",
+                )
+
+    def test_repeated_target_stages_only_latest_provenance_edge(self) -> None:
+        intents = [
+            {
+                "txn_id": "txn_edges",
+                "sequence": 1,
+                "tool_name": "memory_derive",
+                "arguments": {
+                    "memory_id": "target",
+                    "source_ids": ["source_a"],
+                    "value": "first",
+                },
+            },
+            {
+                "txn_id": "txn_edges",
+                "sequence": 2,
+                "tool_name": "memory_propagate",
+                "arguments": {
+                    "memory_id": "target",
+                    "source_ids": ["source_b"],
+                    "value": "second",
+                },
+            },
+        ]
+        for adapter in ("memory", "sqlite"):
+            with self.subTest(adapter=adapter):
+                backend = self._backend(adapter, f"edges_{adapter}")
+                backend.stage_transaction("txn_edges", intents)
+
+                self.assertEqual(
+                    backend.raw_transaction_state("txn_edges", intents)["neo4j"]["edges"],
+                    [
+                        {
+                            "kind": "DERIVED_FROM",
+                            "source_id": "source_b",
+                            "target_id": "target",
+                        }
+                    ],
+                )
+
+    def test_state_changing_intents_increment_staged_version_in_sequence(self) -> None:
+        intents = [
+            {
+                "txn_id": "txn_version",
+                "sequence": 1,
+                "tool_name": "memory_write",
+                "arguments": {"memory_id": "memory_a", "value": "updated"},
+            },
+            {
+                "txn_id": "txn_version",
+                "sequence": 2,
+                "tool_name": "status_overlay",
+                "arguments": {"memory_id": "memory_a", "target_status": "invalid"},
+            },
+        ]
+        initial = {
+            "memory_a": {
+                "memory_id": "memory_a",
+                "value": "initial",
+                "status": "active",
+                "version": 5,
+            }
+        }
+        for adapter in ("memory", "sqlite"):
+            with self.subTest(adapter=adapter):
+                backend = self._backend(adapter, f"version_{adapter}", initial)
+                backend.stage_transaction("txn_version", intents)
+                backend.finalize_transaction("txn_version", intents)
+
+                self.assertEqual(backend.current_version("memory_a"), 7)
+                self.assertIsNone(backend.read_committed("memory_a"))
+
+    def test_later_write_reactivates_an_earlier_overlay_at_decision_point(self) -> None:
+        intents = [
+            {
+                "txn_id": "txn_reactivate",
+                "sequence": 1,
+                "tool_name": "status_overlay",
+                "arguments": {"memory_id": "memory_a", "target_status": "invalid"},
+            },
+            {
+                "txn_id": "txn_reactivate",
+                "sequence": 2,
+                "tool_name": "memory_write",
+                "arguments": {"memory_id": "memory_a", "value": "reactivated"},
+            },
+        ]
+        initial = {
+            "memory_a": {
+                "memory_id": "memory_a",
+                "value": "initial",
+                "status": "active",
+                "version": 5,
+            }
+        }
+        for adapter in ("memory", "sqlite"):
+            with self.subTest(adapter=adapter):
+                backend = self._backend(adapter, f"reactivate_{adapter}", initial)
+                backend.bind_decision_resolver(
+                    lambda txn_id: "COMMITTED" if txn_id == "txn_reactivate" else None
+                )
+                backend.stage_transaction("txn_reactivate", intents)
+
+                staged_visible = backend.read_committed("memory_a")
+                self.assertEqual(staged_visible["value"], "reactivated")
+                self.assertEqual(staged_visible["version"], 7)
+                self.assertEqual(staged_visible["status"], "active")
 
 
 if __name__ == "__main__":

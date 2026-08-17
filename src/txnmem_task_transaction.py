@@ -15,6 +15,9 @@ from txnmem_transaction_journal import TransactionJournal
 
 PolicySnapshotProvider = Callable[[], Mapping[str, Any]]
 PhaseHook = Callable[[str, Mapping[str, Any]], None]
+_RECORD_TOOLS = frozenset(
+    {"memory_write", "memory_derive", "memory_propagate", "memory_supersede"}
+)
 
 
 class TransactionBackend(Protocol):
@@ -103,12 +106,7 @@ def _source_ids(intent: Mapping[str, Any]) -> list[str]:
 
 def _new_record(intent: Mapping[str, Any], previous_version: int | None = None) -> dict[str, Any] | None:
     tool_name = intent["tool_name"]
-    if tool_name not in {
-        "memory_write",
-        "memory_derive",
-        "memory_propagate",
-        "memory_supersede",
-    }:
+    if tool_name not in _RECORD_TOOLS:
         return None
     arguments = intent["arguments"]
     memory_id = _intent_memory_id(intent)
@@ -131,29 +129,23 @@ def _new_record(intent: Mapping[str, Any], previous_version: int | None = None) 
 
 
 def _expected_ids(intents: Sequence[Mapping[str, Any]]) -> list[str]:
-    return sorted(
-        {
-            str(memory_id)
-            for intent in intents
-            for memory_id in [_intent_memory_id(intent)]
-            if memory_id is not None
-            and intent["tool_name"]
-            in {
-                "memory_write",
-                "memory_derive",
-                "memory_propagate",
-                "memory_supersede",
-            }
-        }
-    )
+    return sorted(_latest_record_intents(intents))
+
+
+def _latest_record_intents(
+    intents: Sequence[Mapping[str, Any]],
+) -> dict[str, Mapping[str, Any]]:
+    latest: dict[str, Mapping[str, Any]] = {}
+    for intent in sorted(intents, key=lambda item: int(item["sequence"])):
+        memory_id = _intent_memory_id(intent)
+        if memory_id is not None and intent["tool_name"] in _RECORD_TOOLS:
+            latest[memory_id] = intent
+    return latest
 
 
 def _expected_edges(intents: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
     edges: list[dict[str, str]] = []
-    for intent in intents:
-        target_id = _intent_memory_id(intent)
-        if target_id is None:
-            continue
+    for target_id, intent in _latest_record_intents(intents).items():
         if intent["tool_name"] in {"memory_derive", "memory_propagate"}:
             edges.extend(
                 {"kind": "DERIVED_FROM", "source_id": source_id, "target_id": target_id}
@@ -168,6 +160,45 @@ def _expected_edges(intents: Sequence[Mapping[str, Any]]) -> list[dict[str, str]
                 }
             )
     return sorted(edges, key=lambda edge: (edge["kind"], edge["source_id"], edge["target_id"]))
+
+
+def _expected_overlays(intents: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "sequence": int(intent["sequence"]),
+            "memory_id": str(intent["arguments"]["memory_id"]),
+            "target_status": str(intent["arguments"]["target_status"]),
+        }
+        for intent in sorted(intents, key=lambda item: int(item["sequence"]))
+        if intent["tool_name"] == "status_overlay"
+    ]
+
+
+def _replay_staged_records(
+    intents: Sequence[Mapping[str, Any]],
+    current_version: Callable[[str], int | None],
+) -> dict[str, dict[str, Any]]:
+    versions: dict[str, int] = {}
+    records: dict[str, dict[str, Any]] = {}
+    for intent in sorted(intents, key=lambda item: int(item["sequence"])):
+        if intent["tool_name"] in _RECORD_TOOLS:
+            memory_id = _intent_memory_id(intent)
+            assert memory_id is not None
+            versions.setdefault(memory_id, current_version(memory_id) or 0)
+            record = _new_record(intent, versions[memory_id])
+            assert record is not None
+            versions[memory_id] = int(record["version"])
+            records[memory_id] = record
+        elif intent["tool_name"] == "status_overlay":
+            memory_id = str(intent["arguments"]["memory_id"])
+            versions.setdefault(memory_id, current_version(memory_id) or 0)
+            versions[memory_id] += 1
+            if memory_id in records:
+                records[memory_id]["version"] = versions[memory_id]
+                records[memory_id]["target_status"] = str(
+                    intent["arguments"]["target_status"]
+                )
+    return records
 
 
 class InMemoryTransactionBackend:
@@ -199,7 +230,7 @@ class InMemoryTransactionBackend:
     def _effective_overlay_status(self, memory_id: str) -> str | None:
         overlays: list[tuple[int, str]] = []
         for txn_id, staged in self.pending.items():
-            if self._decision_resolver(txn_id) != "COMMITTED":
+            if txn_id in self._finalized or self._decision_resolver(txn_id) != "COMMITTED":
                 continue
             overlays.extend(
                 (int(overlay["sequence"]), str(overlay["target_status"]))
@@ -210,12 +241,12 @@ class InMemoryTransactionBackend:
 
     def _committed_pending(self, memory_id: str) -> dict[str, Any] | None:
         for txn_id, staged in self.pending.items():
-            if self._decision_resolver(txn_id) != "COMMITTED":
+            if txn_id in self._finalized or self._decision_resolver(txn_id) != "COMMITTED":
                 continue
             record = staged["qdrant"].get(memory_id)
             if record is not None:
                 effective = copy.deepcopy(record)
-                effective["status"] = self._effective_overlay_status(memory_id) or effective["target_status"]
+                effective["status"] = effective["target_status"]
                 if effective["status"] == "active":
                     effective.pop("target_status", None)
                     effective.pop("txn_id", None)
@@ -267,13 +298,9 @@ class InMemoryTransactionBackend:
         phase_hook: PhaseHook | None = None,
     ) -> Mapping[str, Any]:
         staged = self._staged(txn_id)
-        for intent in intents:
-            memory_id = _intent_memory_id(intent)
-            previous = self.current_version(memory_id) if memory_id else None
-            record = _new_record(intent, previous)
-            if record is not None:
-                record["txn_id"] = txn_id
-                staged["qdrant"][record["memory_id"]] = record
+        staged["qdrant"] = _replay_staged_records(intents, self.current_version)
+        for record in staged["qdrant"].values():
+            record["txn_id"] = txn_id
         qdrant_evidence = {
             "txn_id": txn_id,
             "memory_ids": sorted(staged["qdrant"]),
@@ -281,18 +308,12 @@ class InMemoryTransactionBackend:
         if phase_hook:
             phase_hook("after_qdrant_stage", qdrant_evidence)
 
-        for memory_id, record in staged["qdrant"].items():
-            staged["nodes"][memory_id] = copy.deepcopy(record)
+        staged["nodes"] = {
+            memory_id: copy.deepcopy(record)
+            for memory_id, record in staged["qdrant"].items()
+        }
         staged["edges"] = _expected_edges(intents)
-        staged["overlays"] = [
-            {
-                "sequence": int(intent["sequence"]),
-                "memory_id": str(intent["arguments"]["memory_id"]),
-                "target_status": str(intent["arguments"]["target_status"]),
-            }
-            for intent in intents
-            if intent["tool_name"] == "status_overlay"
-        ]
+        staged["overlays"] = _expected_overlays(intents)
         neo4j_evidence = {
             "txn_id": txn_id,
             "memory_ids": sorted(staged["nodes"]),
@@ -320,6 +341,7 @@ class InMemoryTransactionBackend:
             if qdrant_ids == expected_ids
             and node_ids == expected_ids
             and edges == _expected_edges(intents)
+            and staged["overlays"] == _expected_overlays(intents)
             else "partial"
         )
         return {"status": status, "txn_id": txn_id}
@@ -339,8 +361,6 @@ class InMemoryTransactionBackend:
             committed = copy.deepcopy(record)
             committed["status"] = committed.pop("target_status")
             committed.pop("txn_id", None)
-            for overlay in sorted(overlays_by_memory.get(memory_id, []), key=lambda item: item["sequence"]):
-                committed["status"] = overlay["target_status"]
             self.committed[memory_id] = committed
         for memory_id, overlays in overlays_by_memory.items():
             if memory_id in staged["qdrant"]:
@@ -462,7 +482,11 @@ class SQLiteStagingTransactionBackend:
 
     def _overlay_status(self, memory_id: str) -> str | None:
         rows = self._connection.execute(
-            "SELECT txn_id, target_status FROM status_overlays WHERE memory_id = ? ORDER BY sequence",
+            "SELECT overlays.txn_id, overlays.target_status FROM status_overlays AS overlays "
+            "WHERE overlays.memory_id = ? AND NOT EXISTS ("
+            "SELECT 1 FROM finalized_transactions AS finalized "
+            "WHERE finalized.txn_id = overlays.txn_id) "
+            "ORDER BY overlays.sequence",
             (memory_id,),
         ).fetchall()
         status = None
@@ -473,13 +497,16 @@ class SQLiteStagingTransactionBackend:
 
     def read_committed(self, memory_id: str) -> Mapping[str, Any] | None:
         rows = self._connection.execute(
-            "SELECT txn_id, payload_json FROM vector_objects WHERE memory_id = ? ORDER BY txn_id",
+            "SELECT objects.txn_id, objects.payload_json FROM vector_objects AS objects "
+            "WHERE objects.memory_id = ? AND NOT EXISTS ("
+            "SELECT 1 FROM finalized_transactions AS finalized "
+            "WHERE finalized.txn_id = objects.txn_id) ORDER BY objects.txn_id",
             (memory_id,),
         ).fetchall()
         for row in rows:
             if self._decision_resolver(str(row["txn_id"])) == "COMMITTED":
                 record = json.loads(row["payload_json"])
-                record["status"] = self._overlay_status(memory_id) or record.pop("target_status")
+                record["status"] = record.pop("target_status")
                 record.pop("txn_id", None)
                 if record["status"] == "active":
                     return record
@@ -524,11 +551,9 @@ class SQLiteStagingTransactionBackend:
         intents: Sequence[Mapping[str, Any]],
         phase_hook: PhaseHook | None = None,
     ) -> Mapping[str, Any]:
-        for intent in intents:
-            memory_id = _intent_memory_id(intent)
-            record = _new_record(intent, self.current_version(memory_id) if memory_id else None)
-            if record is None:
-                continue
+        records = _replay_staged_records(intents, self.current_version)
+        self._connection.execute("DELETE FROM vector_objects WHERE txn_id = ?", (txn_id,))
+        for record in records.values():
             record["txn_id"] = txn_id
             self._connection.execute(
                 "INSERT INTO vector_objects(txn_id, memory_id, payload_json) VALUES (?, ?, ?) "
@@ -539,33 +564,31 @@ class SQLiteStagingTransactionBackend:
         if phase_hook:
             phase_hook("after_qdrant_stage", qdrant_evidence)
 
-        rows = self._connection.execute(
-            "SELECT memory_id, payload_json FROM vector_objects WHERE txn_id = ?", (txn_id,)
-        ).fetchall()
-        for row in rows:
+        self._connection.execute("DELETE FROM graph_nodes WHERE txn_id = ?", (txn_id,))
+        self._connection.execute("DELETE FROM graph_edges WHERE txn_id = ?", (txn_id,))
+        self._connection.execute("DELETE FROM status_overlays WHERE txn_id = ?", (txn_id,))
+        for memory_id, record in records.items():
             self._connection.execute(
                 "INSERT INTO graph_nodes(txn_id, memory_id, payload_json) VALUES (?, ?, ?) "
                 "ON CONFLICT(txn_id, memory_id) DO UPDATE SET payload_json=excluded.payload_json",
-                (txn_id, row["memory_id"], row["payload_json"]),
+                (txn_id, memory_id, self._payload(record)),
             )
         for edge in _expected_edges(intents):
             self._connection.execute(
                 "INSERT OR IGNORE INTO graph_edges(txn_id, kind, source_id, target_id) VALUES (?, ?, ?, ?)",
                 (txn_id, edge["kind"], edge["source_id"], edge["target_id"]),
             )
-        for intent in intents:
-            if intent["tool_name"] == "status_overlay":
-                self._connection.execute(
-                    "INSERT INTO status_overlays(txn_id, sequence, memory_id, target_status) VALUES (?, ?, ?, ?) "
-                    "ON CONFLICT(txn_id, sequence) DO UPDATE SET "
-                    "memory_id=excluded.memory_id, target_status=excluded.target_status",
-                    (
-                        txn_id,
-                        int(intent["sequence"]),
-                        str(intent["arguments"]["memory_id"]),
-                        str(intent["arguments"]["target_status"]),
-                    ),
-                )
+        for overlay in _expected_overlays(intents):
+            self._connection.execute(
+                "INSERT INTO status_overlays(txn_id, sequence, memory_id, target_status) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    txn_id,
+                    overlay["sequence"],
+                    overlay["memory_id"],
+                    overlay["target_status"],
+                ),
+            )
         neo4j_evidence = {
             "txn_id": txn_id,
             "memory_ids": _expected_ids(intents),
@@ -581,14 +604,27 @@ class SQLiteStagingTransactionBackend:
         raw = self.raw_transaction_state(txn_id, intents)
         qdrant_ids = [item["memory_id"] for item in raw["qdrant"]["objects"]]
         node_ids = [item["memory_id"] for item in raw["neo4j"]["nodes"]]
-        if not qdrant_ids and not node_ids:
-            status = "absent"
-        elif (
+        overlays = [
+            {
+                "sequence": int(row[0]),
+                "memory_id": str(row[1]),
+                "target_status": str(row[2]),
+            }
+            for row in self._connection.execute(
+                "SELECT sequence, memory_id, target_status FROM status_overlays "
+                "WHERE txn_id = ? ORDER BY sequence",
+                (txn_id,),
+            ).fetchall()
+        ]
+        if (
             qdrant_ids == _expected_ids(intents)
             and node_ids == _expected_ids(intents)
             and raw["neo4j"]["edges"] == _expected_edges(intents)
+            and overlays == _expected_overlays(intents)
         ):
             status = "complete"
+        elif not qdrant_ids and not node_ids and not raw["neo4j"]["edges"] and not overlays:
+            status = "absent"
         else:
             status = "partial"
         return {"status": status, "txn_id": txn_id}
@@ -616,8 +652,6 @@ class SQLiteStagingTransactionBackend:
             record = json.loads(row["payload_json"])
             record["status"] = record.pop("target_status")
             record.pop("txn_id", None)
-            for overlay in by_memory.get(str(row["memory_id"]), []):
-                record["status"] = str(overlay["target_status"])
             self._put_committed(record)
         staged_ids = {str(row["memory_id"]) for row in rows}
         for memory_id, memory_overlays in by_memory.items():
@@ -770,6 +804,8 @@ class TaskTransactionCoordinator:
         )
 
     def _visible_record(self, memory_id: str, *, record_read: bool = True) -> dict[str, Any] | None:
+        if self._pending_status.get(memory_id) not in {None, "active"}:
+            return None
         pending = self._pending_records.get(memory_id)
         if pending is not None:
             if self._pending_status.get(memory_id, pending.get("status", "active")) != "active":
@@ -797,6 +833,9 @@ class TaskTransactionCoordinator:
 
     def search(self, query: str | None = None) -> list[dict[str, Any]]:
         merged = {str(item["memory_id"]): copy.deepcopy(dict(item)) for item in self.backend.search_committed(query)}
+        for memory_id, status in self._pending_status.items():
+            if status != "active":
+                merged.pop(memory_id, None)
         for memory_id, record in self._pending_records.items():
             if self._pending_status.get(memory_id, record.get("status", "active")) != "active":
                 continue
@@ -814,21 +853,85 @@ class TaskTransactionCoordinator:
             raise TaskTransactionError("source_invalidated", f"source unavailable: {memory_id}")
         return source
 
+    def _require_existing(self, memory_id: str) -> dict[str, Any]:
+        pending = self._pending_records.get(memory_id)
+        if pending is not None:
+            return copy.deepcopy(pending)
+        record = self.backend.read_committed(memory_id)
+        if record is None:
+            raise TaskTransactionError("source_invalidated", f"memory unavailable: {memory_id}")
+        return copy.deepcopy(dict(record))
+
+    @staticmethod
+    def _policy_action(tool_name: str) -> str:
+        return tool_name.removeprefix("memory_")
+
+    @staticmethod
+    def _target_id(tool_name: str, arguments: Mapping[str, Any]) -> str | None:
+        if tool_name == "memory_supersede":
+            return str(arguments["new_memory_id"])
+        memory_id = arguments.get("memory_id")
+        return str(memory_id) if memory_id is not None else None
+
+    def _apply_accept_policy(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        current_policy: Mapping[str, Any],
+    ) -> None:
+        policies = (self.begin_policy, current_policy)
+        action = self._policy_action(tool_name)
+        for policy in policies:
+            denied = set(policy["denied_actions"])
+            if "write" in denied or action in denied:
+                raise TaskTransactionError("policy_revalidation_failed")
+
+        target_id = self._target_id(tool_name, arguments)
+        overrides = [
+            str(policy["scope_overrides"][target_id])
+            for policy in policies
+            if target_id is not None and target_id in policy["scope_overrides"]
+        ]
+        if len(set(overrides)) > 1:
+            raise TaskTransactionError("policy_revalidation_failed")
+        if overrides:
+            arguments["scope"] = overrides[-1]
+
+    def _enforce_source_scope_policy(
+        self,
+        memory_id: str,
+        source: Mapping[str, Any],
+        current_policy: Mapping[str, Any],
+    ) -> None:
+        for policy in (self.begin_policy, current_policy):
+            required = policy["scope_overrides"].get(memory_id)
+            if required is not None and str(source.get("scope")) != str(required):
+                raise TaskTransactionError("policy_revalidation_failed")
+
     def mutate(self, tool_name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if self.journal.load(self.txn_id).state != "ACTIVE":
             raise TaskTransactionError("transaction_not_active")
         normalized = copy.deepcopy(dict(arguments))
         normalized.setdefault("agent_id", self.agent_id)
         normalized.setdefault("scope", "tenant:user_001")
+        current_policy = _normalize_policy(self.policy_snapshot_provider())
+        self._apply_accept_policy(tool_name, normalized, current_policy)
         if tool_name == "memory_propagate":
             normalized["source_ids"] = [str(normalized.pop("source_id"))]
         if tool_name in {"memory_derive", "memory_propagate"}:
             for source_id in normalized.get("source_ids", []):
-                self._require_source(str(source_id))
+                source = self._require_source(str(source_id))
+                self._enforce_source_scope_policy(
+                    str(source_id), source, current_policy
+                )
         elif tool_name == "memory_supersede":
-            self._require_source(str(normalized["old_memory_id"]))
+            source_id = str(normalized["old_memory_id"])
+            source = self._require_source(source_id)
+            self._enforce_source_scope_policy(source_id, source, current_policy)
         elif tool_name == "memory_invalidate":
-            self._require_source(str(normalized["memory_id"]))
+            source_id = str(normalized["memory_id"])
+            source = self._require_existing(source_id)
+            self._enforce_source_scope_policy(source_id, source, current_policy)
 
         intent = self._append_intent(tool_name, normalized)
         record = _new_record(intent, self.backend.current_version(_intent_memory_id(intent) or ""))
@@ -877,21 +980,51 @@ class TaskTransactionCoordinator:
             queue.extend(sorted(children.get(memory_id, set())))
         return expanded
 
-    def _revalidate_policy(self, intents: Sequence[Mapping[str, Any]]) -> None:
+    def _revalidate_policy(
+        self,
+        intents: Sequence[Mapping[str, Any]],
+        read_set: Sequence[Mapping[str, Any]],
+    ) -> None:
+        source_scopes = {
+            str(item["memory_id"]): str(item["scope"]) for item in read_set
+        }
+        source_scopes.update(
+            {
+                memory_id: str(intent["arguments"].get("scope", "tenant:user_001"))
+                for memory_id, intent in _latest_record_intents(intents).items()
+            }
+        )
         for intent in intents:
             if intent["tool_name"] == "status_overlay":
                 continue
-            policy = _normalize_policy(self.policy_snapshot_provider())
-            denied = set(policy["denied_actions"])
-            action = str(intent["tool_name"]).removeprefix("memory_")
-            if policy["version"] != self.begin_policy["version"] and (
-                "write" in denied or action in denied
-            ):
-                raise TaskTransactionError("policy_revalidation_failed")
+            action = self._policy_action(str(intent["tool_name"]))
+            target_id = self._target_id(str(intent["tool_name"]), intent["arguments"])
+            current_policy = _normalize_policy(self.policy_snapshot_provider())
+            for policy in (self.begin_policy, current_policy):
+                denied = set(policy["denied_actions"])
+                if "write" in denied or action in denied:
+                    raise TaskTransactionError("policy_revalidation_failed")
+                required_scope = policy["scope_overrides"].get(target_id)
+                if (
+                    required_scope is not None
+                    and str(intent["arguments"].get("scope")) != str(required_scope)
+                ):
+                    raise TaskTransactionError("policy_revalidation_failed")
+                for source_id in _source_ids(intent):
+                    required_source_scope = policy["scope_overrides"].get(source_id)
+                    if (
+                        required_source_scope is not None
+                        and source_scopes.get(source_id) != str(required_source_scope)
+                    ):
+                        raise TaskTransactionError("policy_revalidation_failed")
 
-    def _revalidate_reads_and_sources(self, intents: Sequence[Mapping[str, Any]]) -> None:
+    def _revalidate_reads_and_sources(
+        self,
+        intents: Sequence[Mapping[str, Any]],
+        read_set: Sequence[Mapping[str, Any]],
+    ) -> None:
         source_ids = {source_id for intent in intents for source_id in _source_ids(intent)}
-        reads = {str(item["memory_id"]): item for item in self.journal.read_set(self.txn_id)}
+        reads = {str(item["memory_id"]): item for item in read_set}
         for memory_id, observed in reads.items():
             current_raw = getattr(self.backend, "committed", {}).get(memory_id)
             current = current_raw or self.backend.read_committed(memory_id)
@@ -912,10 +1045,12 @@ class TaskTransactionCoordinator:
             graph[str(record["memory_id"])] = {str(source) for source in record.get("derived_from", [])}
         for memory_id, record in getattr(self.backend, "committed", {}).items():
             graph[str(memory_id)] = {str(source) for source in record.get("derived_from", [])}
-        for intent in intents:
-            memory_id = _intent_memory_id(intent)
-            if memory_id and intent["tool_name"] in {"memory_derive", "memory_propagate"}:
-                graph[memory_id] = set(_source_ids(intent))
+        for memory_id, intent in _latest_record_intents(intents).items():
+            graph[memory_id] = (
+                set(_source_ids(intent))
+                if intent["tool_name"] in {"memory_derive", "memory_propagate"}
+                else set()
+            )
 
         visiting: set[str] = set()
         visited: set[str] = set()
@@ -978,11 +1113,12 @@ class TaskTransactionCoordinator:
         ]
 
     def commit(self) -> dict[str, Any]:
-        intents = self.journal.intents(self.txn_id)
         record = self.journal.load(self.txn_id)
         if record.state == "ABORTED":
             raise TaskTransactionError("transaction_aborted")
         if record.state == "COMMITTED":
+            frozen = self.journal.frozen_snapshot(self.txn_id)
+            intents = frozen["intents"] if frozen is not None else self.journal.intents(self.txn_id)
             try:
                 self.backend.finalize_transaction(self.txn_id, intents)
                 self._phase("finalize_complete", "after_finalize", {"status": "complete"})
@@ -994,9 +1130,15 @@ class TaskTransactionCoordinator:
                 "phases": self._ordered_phases(),
             }
 
+        intents = self.journal.intents(self.txn_id)
         try:
-            self._revalidate_policy(intents)
-            self._revalidate_reads_and_sources(intents)
+            frozen = self.journal.frozen_snapshot(self.txn_id)
+            if frozen is None:
+                frozen = self.journal.freeze(self.txn_id)
+            intents = frozen["intents"]
+            read_set = frozen["read_set"]
+            self._revalidate_policy(intents, read_set)
+            self._revalidate_reads_and_sources(intents, read_set)
             self._revalidate_graph(intents)
             self.journal.prepare(self.txn_id)
             self._phase(
@@ -1021,7 +1163,13 @@ class TaskTransactionCoordinator:
             self._abort_before_decision("backend_state_unknown", intents)
             raise TaskTransactionError("backend_state_unknown") from exc
 
-        self.journal.decide(self.txn_id, "COMMITTED")
+        try:
+            self.journal.decide(self.txn_id, "COMMITTED")
+        except Exception as exc:
+            decision_after = self.journal.load(self.txn_id)
+            if decision_after.decision != "COMMITTED":
+                self._abort_before_decision("commit_decision_failed", intents)
+                raise TaskTransactionError("commit_decision_failed") from exc
         self.journal.record_phase(self.txn_id, "commit_decided", {"decision": "COMMITTED"})
         self._event("commit")
         try:

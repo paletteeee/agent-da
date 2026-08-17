@@ -161,6 +161,56 @@ class TransactionJournalTests(unittest.TestCase):
             self.journal.record_read("txn_1", memory_id="m1", observed_version=3, scope="team")
         self.assertEqual(caught.exception.code, "read_set_conflict")
 
+    def test_freeze_atomically_persists_snapshot_and_rejects_later_appends(self) -> None:
+        self._begin()
+        intent = self.journal.append_intent(
+            "txn_1",
+            sequence=1,
+            tool_name="memory_write",
+            arguments={"memory_id": "m1", "value": "one"},
+        )
+        self.journal.record_read(
+            "txn_1", memory_id="source", observed_version=4, scope="tenant:one"
+        )
+        digest_before = self.journal.state_digest("txn_1")
+
+        frozen = self.journal.freeze("txn_1")
+
+        self.assertEqual(frozen["txn_id"], "txn_1")
+        self.assertEqual(frozen["intents"], [intent])
+        self.assertEqual(
+            frozen["read_set"],
+            [
+                {
+                    "txn_id": "txn_1",
+                    "memory_id": "source",
+                    "observed_version": 4,
+                    "scope": "tenant:one",
+                }
+            ],
+        )
+        self.assertEqual(len(frozen["intents_digest"]), 64)
+        self.assertEqual(len(frozen["read_set_digest"]), 64)
+        self.assertNotEqual(digest_before, self.journal.state_digest("txn_1"))
+        self.assertEqual(self.journal.freeze("txn_1"), frozen)
+        with self.assertRaises(TransactionDecisionError) as caught:
+            self.journal.append_intent(
+                "txn_1",
+                sequence=2,
+                tool_name="memory_write",
+                arguments={"memory_id": "m2"},
+            )
+        self.assertEqual(caught.exception.code, "transaction_frozen")
+        with self.assertRaises(TransactionDecisionError) as caught:
+            self.journal.record_read(
+                "txn_1", memory_id="late", observed_version=1, scope="tenant:one"
+            )
+        self.assertEqual(caught.exception.code, "transaction_frozen")
+
+        self.journal.close()
+        self.journal = TransactionJournal(self.path)
+        self.assertEqual(self.journal.frozen_snapshot("txn_1"), frozen)
+
     def test_phases_and_receipts_are_idempotent_and_persist(self) -> None:
         self._begin()
         self.journal.append_intent(
