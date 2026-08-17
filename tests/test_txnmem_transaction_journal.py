@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import multiprocessing
 import os
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -52,6 +55,17 @@ class TransactionJournalTests(unittest.TestCase):
             begin_policy_version=7,
         )
 
+    def _direct_state_update(self, txn_id: str, state: str, decision: str | None) -> None:
+        connection = sqlite3.connect(self.path)
+        try:
+            connection.execute(
+                "UPDATE transactions SET state = ?, decision = ? WHERE txn_id = ?",
+                (state, decision, txn_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
     def test_begin_creates_active_transaction_and_is_idempotent(self) -> None:
         record = self._begin()
         self.assertEqual(
@@ -86,6 +100,43 @@ class TransactionJournalTests(unittest.TestCase):
         with self.assertRaises(TransactionDecisionError) as caught:
             self.journal.decide("txn_not_prepared", "COMMITTED")
         self.assertEqual(caught.exception.code, "commit_requires_prepared")
+
+    def test_database_rejects_active_to_committed_direct_update(self) -> None:
+        self._begin("txn_direct_commit")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self._direct_state_update("txn_direct_commit", "COMMITTED", "COMMITTED")
+        self.assertEqual(self.journal.load("txn_direct_commit").state, "ACTIVE")
+
+    def test_database_rejects_terminal_reopening_direct_update(self) -> None:
+        self._begin("txn_reopen")
+        self.journal.prepare("txn_reopen")
+        self.journal.decide("txn_reopen", "COMMITTED")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self._direct_state_update("txn_reopen", "ACTIVE", None)
+        self.assertEqual(self.journal.load("txn_reopen").state, "COMMITTED")
+
+    def test_database_rejects_committed_to_aborted_direct_update(self) -> None:
+        self._begin("txn_flip_committed")
+        self.journal.prepare("txn_flip_committed")
+        self.journal.decide("txn_flip_committed", "COMMITTED")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self._direct_state_update("txn_flip_committed", "ABORTED", "ABORTED")
+        self.assertEqual(self.journal.load("txn_flip_committed").decision, "COMMITTED")
+
+    def test_database_rejects_aborted_to_committed_direct_update(self) -> None:
+        self._begin("txn_flip_aborted")
+        self.journal.decide("txn_flip_aborted", "ABORTED")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self._direct_state_update("txn_flip_aborted", "COMMITTED", "COMMITTED")
+        self.assertEqual(self.journal.load("txn_flip_aborted").decision, "ABORTED")
+
+    def test_database_allows_legal_and_same_decision_direct_updates(self) -> None:
+        self._begin("txn_legal")
+        self._direct_state_update("txn_legal", "ACTIVE", None)
+        self._direct_state_update("txn_legal", "PREPARED", None)
+        self._direct_state_update("txn_legal", "COMMITTED", "COMMITTED")
+        self._direct_state_update("txn_legal", "COMMITTED", "COMMITTED")
+        self.assertEqual(self.journal.load("txn_legal").decision, "COMMITTED")
 
     def test_intents_and_reads_are_idempotent_but_conflicts_are_coded(self) -> None:
         self._begin()
@@ -169,6 +220,9 @@ class TransactionJournalTests(unittest.TestCase):
         once = self.journal.state_digest("txn_1")
         self.journal.record_phase("txn_1", "recovery_started", {"attempt": 1})
         self.assertNotEqual(before, once)
+        self.assertEqual(once, self.journal.state_digest("txn_1"))
+        self.journal.close()
+        self.journal = TransactionJournal(self.path)
         self.assertEqual(once, self.journal.state_digest("txn_1"))
 
     def test_opposite_decisions_from_processes_produce_one_terminal_winner(self) -> None:

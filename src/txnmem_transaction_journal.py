@@ -78,6 +78,31 @@ class TransactionJournal:
                     OR (state = 'ABORTED' AND decision = 'ABORTED')
                 )
             );
+            CREATE TRIGGER IF NOT EXISTS transactions_enforce_state_transition
+            BEFORE UPDATE OF state, decision ON transactions
+            FOR EACH ROW
+            WHEN NOT (
+                (OLD.state = NEW.state AND OLD.decision IS NEW.decision)
+                OR (
+                    OLD.state = 'ACTIVE' AND OLD.decision IS NULL
+                    AND NEW.state = 'PREPARED' AND NEW.decision IS NULL
+                )
+                OR (
+                    OLD.state = 'ACTIVE' AND OLD.decision IS NULL
+                    AND NEW.state = 'ABORTED' AND NEW.decision = 'ABORTED'
+                )
+                OR (
+                    OLD.state = 'PREPARED' AND OLD.decision IS NULL
+                    AND NEW.state = 'COMMITTED' AND NEW.decision = 'COMMITTED'
+                )
+                OR (
+                    OLD.state = 'PREPARED' AND OLD.decision IS NULL
+                    AND NEW.state = 'ABORTED' AND NEW.decision = 'ABORTED'
+                )
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'invalid transaction state transition');
+            END;
             CREATE TABLE IF NOT EXISTS intents (
                 txn_id TEXT NOT NULL REFERENCES transactions(txn_id),
                 sequence INTEGER NOT NULL CHECK (sequence >= 0),
