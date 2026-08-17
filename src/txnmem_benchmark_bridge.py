@@ -750,9 +750,26 @@ class BenchmarkToolGateway(NativeMemoryToolGateway):
         operation.setdefault("agent_id", self.agent_id)
         operation.setdefault("projection", "real_model_native")
         result = self.transaction_gateway.call(name, operation)
+        if self.failure_controller is not None:
+            try:
+                self.failure_controller.observe(
+                    self.transaction_gateway.validated_events()[-1],
+                    backend=self.backend,
+                    gateway=self,
+                )
+            except FailureInjectionError as exc:
+                raise TaskTransactionError(exc.code, str(exc)) from exc
         if name == "memory_invalidate":
             return {"ok": True, "memory_id": operation.get("memory_id")}
         return copy.deepcopy(result)
+
+    def revoke_policy(self, action: str, *, trigger_event: Mapping[str, Any]) -> None:
+        if self.transaction_gateway is not None:
+            self.transaction_gateway.revoke_policy(
+                action, trigger_event=trigger_event
+            )
+            return
+        super().revoke_policy(action, trigger_event=trigger_event)
 
     def validated_events(self) -> list[dict[str, Any]]:
         if self.transaction_gateway is not None:
@@ -987,6 +1004,7 @@ def run_benchmark_agent(
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": instruction})
     model_usage = empty_usage_summary()
+    mutation_count = 0
     preflight: list[dict[str, str]] = []
     preflight_call_count = 0
     preflight_login_count = 0
@@ -1108,6 +1126,16 @@ def run_benchmark_agent(
                 journal.close()
         return report
 
+    def observe_mutation(tool_name: str) -> None:
+        nonlocal mutation_count
+        if transaction_gateway is None:
+            return
+        mutation_count += 1
+        transaction_phase_hook(
+            "after_mutation",
+            {"mutation_count": mutation_count, "tool_name": tool_name},
+        )
+
     def completed(step: int, final_text: str) -> dict[str, Any]:
         report = {
             "task_id": task_id,
@@ -1165,6 +1193,14 @@ def run_benchmark_agent(
             try:
                 if call.name.startswith("memory_"):
                     result = gateway.call(call.name, call.arguments)
+                    if call.name in {
+                        "memory_write",
+                        "memory_derive",
+                        "memory_propagate",
+                        "memory_supersede",
+                        "memory_invalidate",
+                    }:
+                        observe_mutation(call.name)
                 else:
                     arguments = call.arguments
                     if prompt_profile == "tuned" and adapter.dataset == "appworld":
@@ -1174,6 +1210,11 @@ def run_benchmark_agent(
                         if isinstance(properties, Mapping):
                             arguments = adapt_appworld_arguments(arguments, properties.keys())
                     result, _metadata = gateway.call_benchmark(call.name, arguments, step)
+                    if (
+                        _metadata.get("ok", True)
+                        and adapter.tool_event_kind(call.name) == "memory_write"
+                    ):
+                        observe_mutation(call.name)
                     if (
                         call.name == "supervisor__complete_task"
                         and _metadata.get("ok", True)

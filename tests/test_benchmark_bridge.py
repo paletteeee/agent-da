@@ -30,6 +30,7 @@ from txnmem_benchmark_manifests import (
     generate_tau_bench_manifest,
 )
 from txnmem_model_protocol import ModelProtocolError, ModelResponse, ToolCall
+from txnmem_failure_controller import FailureController
 from txnmem_real_agent import AgentToolError, NativeMemoryToolGateway
 from txnmem_task_transaction import InMemoryTransactionBackend
 from txnmem_transaction_journal import TransactionJournal
@@ -268,6 +269,103 @@ class BenchmarkBridgeTest(unittest.TestCase):
             if memory_id.startswith("stub:book_item:")
         ]
         self.assertEqual(projected_ids, ["stub:book_item:0001"])
+
+    def test_task_mode_failure_schedule_observes_projected_write_once_and_aborts(self):
+        controller = FailureController(
+            [
+                {
+                    "trigger": {"kind": "memory_write", "count": 1},
+                    "action": {"type": "crash"},
+                }
+            ]
+        )
+        backend = InMemoryTransactionBackend()
+        with tempfile.TemporaryDirectory() as directory:
+            report = run_benchmark_agent(
+                {
+                    "task_id": "benchmark-crash",
+                    "instruction": "book a1",
+                    "transaction_mode": "task",
+                    "transaction_journal_path": Path(directory) / "journal.sqlite3",
+                    "failure_controller": controller,
+                },
+                _StubModel(
+                    [
+                        ModelResponse("", [ToolCall("c1", "book_item", {"item_id": "a1"})]),
+                        ModelResponse("done", []),
+                    ]
+                ),
+                backend,
+                _StubAdapter(),
+                max_steps=2,
+            )
+
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["failure_code"], "injected_crash")
+        self.assertEqual(report["transaction"]["decision"], "aborted")
+        self.assertIn("cleanup_complete", report["transaction"]["phases"])
+        self.assertEqual(controller.counts["memory_write"], 1)
+        self.assertEqual(backend.committed, {})
+
+    def test_task_mode_failure_schedule_invalidates_source_at_mutation_boundary(self):
+        backend = InMemoryTransactionBackend(
+            {
+                "source": {
+                    "memory_id": "source",
+                    "value": "source-value",
+                    "status": "active",
+                    "version": 1,
+                    "derived_from": [],
+                }
+            }
+        )
+        controller = FailureController(
+            [
+                {
+                    "trigger": {"phase": "after_mutation", "count": 1},
+                    "action": {"type": "invalidate", "target": "source"},
+                }
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            report = run_benchmark_agent(
+                {
+                    "task_id": "benchmark-invalidate",
+                    "instruction": "derive",
+                    "transaction_mode": "task",
+                    "transaction_journal_path": Path(directory) / "journal.sqlite3",
+                    "failure_controller": controller,
+                },
+                _StubModel(
+                    [
+                        ModelResponse(
+                            "",
+                            [
+                                ToolCall(
+                                    "c1",
+                                    "memory_derive",
+                                    {
+                                        "memory_id": "derived",
+                                        "source_ids": ["source"],
+                                        "value": "derived-value",
+                                    },
+                                )
+                            ],
+                        ),
+                        ModelResponse("done", []),
+                    ]
+                ),
+                backend,
+                _StubAdapter(),
+                max_steps=3,
+            )
+
+        self.assertEqual(controller.phase_counts["after_mutation"], 1)
+        self.assertEqual(report["failure_code"], "source_invalidated")
+        self.assertEqual(report["transaction"]["decision"], "aborted")
+        self.assertIn("cleanup_complete", report["transaction"]["phases"])
+        self.assertIsNone(backend.read_committed("source"))
+        self.assertIsNone(backend.read_committed("derived"))
 
     def test_model_failure_still_runs_benchmark_evaluator(self):
         evaluated = []

@@ -487,17 +487,55 @@ def run_benchmark_batch(
     all_task_summaries: list[dict[str, Any]] = []
     reports: list[dict[str, Any]] = []
     for repetition in range(repetitions):
+        repetition_dir = out_dir if repetitions == 1 else out_dir / f"rep_{repetition + 1:02d}"
         repetition_tasks: list[dict[str, Any]] = []
-        for task in tasks:
+        for task_index, task in enumerate(tasks, start=1):
             item = dict(task)
             item["seed"] = int(item.get("seed", 0)) + repetition * 100
+            transaction_mode = str(
+                item.get(
+                    "transaction_mode",
+                    manifest.get("transaction_mode", "direct"),
+                )
+            )
+            item["transaction_mode"] = transaction_mode
+            if transaction_mode == "task":
+                task_id = str(
+                    item.get("task_id") or f"native_task_{task_index:04d}"
+                )
+                base_transaction_id = str(
+                    item.get(
+                        "transaction_id",
+                        manifest.get("transaction_id", f"txn_{task_id}"),
+                    )
+                )
+                repetition_suffix = f"rep_{repetition + 1:02d}"
+                item["transaction_id"] = (
+                    f"{base_transaction_id}__{task_id}__{repetition_suffix}"
+                )
+                item["transaction_journal_path"] = (
+                    repetition_dir
+                    / "journals"
+                    / f"{task_id}__{repetition_suffix}.sqlite3"
+                )
+                for option in (
+                    "policy_snapshot_provider",
+                    "transaction_phase_hook",
+                    "failure_controller",
+                    "failure_schedule",
+                ):
+                    if option not in item and option in manifest:
+                        item[option] = manifest[option]
             repetition_tasks.append(item)
         repetition_manifest = {
             "manifest_version": int(manifest.get("manifest_version", 1)),
             "dataset_name": str(manifest.get("dataset_name", "benchmark")),
             "tasks": repetition_tasks,
         }
-        repetition_dir = out_dir if repetitions == 1 else out_dir / f"rep_{repetition + 1:02d}"
+        if "transaction_mode" in manifest:
+            repetition_manifest["transaction_mode"] = manifest[
+                "transaction_mode"
+            ]
         report = run_benchmark_experiment_manifest(
             repetition_manifest,
             model,

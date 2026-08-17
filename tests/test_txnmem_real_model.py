@@ -1560,6 +1560,69 @@ class TxnMemRealExperimentTests(unittest.TestCase):
         self.assertTrue(report["token_usage_complete"])
         self.assertEqual(report["task_summaries"][0]["benchmark_tool_trace"], [])
 
+    def test_benchmark_batch_propagates_task_mode_with_unique_repetition_transactions(self):
+        class _BatchTransactionBackend(InMemoryTransactionBackend):
+            def __init__(self):
+                super().__init__()
+                self.events = []
+
+            def validated_events(self):
+                return list(self.events)
+
+        manifest = {
+            "dataset_name": "stub",
+            "transaction_mode": "task",
+            "transaction_id": "manifest-transaction",
+            "tasks": [
+                {
+                    "task_id": "repeatable-task",
+                    "instruction": "complete",
+                    "prompt": "complete",
+                }
+            ],
+        }
+        model = _ScriptedModel(
+            [ModelResponse("done one", []), ModelResponse("done two", [])]
+        )
+
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            report = run_benchmark_batch(
+                manifest,
+                model,
+                out_dir,
+                backend_factory=lambda _index, _root: _BatchTransactionBackend(),
+                adapter_factory=lambda: _NoopBenchmarkAdapter(),
+                repetitions=2,
+            )
+            journals = sorted(
+                str(path.relative_to(out_dir))
+                for path in out_dir.rglob("*.sqlite3")
+            )
+
+        self.assertTrue(
+            all("transaction" in summary for summary in report["task_summaries"])
+        )
+        transaction_ids = [
+            summary["transaction"]["txn_id"]
+            for summary in report["task_summaries"]
+        ]
+        self.assertEqual(len(set(transaction_ids)), 2)
+        self.assertEqual(
+            transaction_ids,
+            [
+                "manifest-transaction__repeatable-task__rep_01",
+                "manifest-transaction__repeatable-task__rep_02",
+            ],
+        )
+        self.assertEqual(
+            journals,
+            [
+                "rep_01/journals/repeatable-task__rep_01.sqlite3",
+                "rep_02/journals/repeatable-task__rep_02.sqlite3",
+            ],
+        )
+
     def test_benchmark_batch_preserves_sanitized_model_visible_tool_attestation(self):
         manifest = {
             "dataset_name": "appworld",
