@@ -1155,6 +1155,15 @@ class TaskTransactionCoordinator:
         if record.state == "ABORTED":
             raise TaskTransactionError("transaction_aborted")
         if record.state == "COMMITTED":
+            if any(
+                phase["phase"] == "finalize_complete"
+                for phase in self.journal.phases(self.txn_id)
+            ):
+                return {
+                    "txn_id": self.txn_id,
+                    "decision": "COMMITTED",
+                    "phases": self._ordered_phases(),
+                }
             frozen = self.journal.frozen_snapshot(self.txn_id)
             intents = frozen["intents"] if frozen is not None else self.journal.intents(self.txn_id)
             try:

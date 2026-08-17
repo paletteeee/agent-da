@@ -173,11 +173,170 @@ class _Neo4jBoltClient:
         except ImportError as exc:  # pragma: no cover - exercised on remote host
             raise RuntimeError("neo4j driver is required for the real graph backend") from exc
         self.driver = GraphDatabase.driver(str(uri), auth=tuple(auth))
+        self._initialize_schema()
+
+    def _initialize_schema(self) -> None:
+        """Promote the immediately-prior identity schema before constraining it."""
+
         with self.driver.session() as session:
+            session.run(
+                "MATCH (m:Memory) SET m:MemoryIdentity, "
+                "m.canonical=coalesce(m.canonical, true)"
+            ).consume()
+            for relationship in ("DERIVED_FROM", "SUPERSEDES"):
+                session.run(
+                    f"MATCH (legacy:MemoryReference)-[old:{relationship}]->(target) "
+                    "MATCH (canonical:MemoryIdentity:Memory) "
+                    "WHERE canonical.namespace=legacy.namespace "
+                    "AND canonical.memory_id=legacy.memory_id "
+                    "AND elementId(legacy) <> elementId(canonical) "
+                    f"MERGE (canonical)-[replacement:{relationship}]->(target) "
+                    "SET replacement += properties(old) DELETE old"
+                ).consume()
+                session.run(
+                    f"MATCH (source)-[old:{relationship}]->(legacy:MemoryReference) "
+                    "MATCH (canonical:MemoryIdentity:Memory) "
+                    "WHERE canonical.namespace=legacy.namespace "
+                    "AND canonical.memory_id=legacy.memory_id "
+                    "AND elementId(legacy) <> elementId(canonical) "
+                    f"MERGE (source)-[replacement:{relationship}]->(canonical) "
+                    "SET replacement += properties(old) DELETE old"
+                ).consume()
+            session.run(
+                "MATCH (legacy:MemoryReference) "
+                "MATCH (canonical:MemoryIdentity:Memory) "
+                "WHERE canonical.namespace=legacy.namespace "
+                "AND canonical.memory_id=legacy.memory_id "
+                "AND elementId(legacy) <> elementId(canonical) "
+                "DETACH DELETE legacy"
+            ).consume()
+            session.run(
+                "MATCH (r:MemoryReference) SET r:MemoryIdentity "
+                "REMOVE r:MemoryReference"
+            ).consume()
             session.run(
                 "CREATE CONSTRAINT memory_identity_unique IF NOT EXISTS "
                 "FOR (m:MemoryIdentity) REQUIRE (m.namespace, m.memory_id) IS UNIQUE"
             ).consume()
+            session.run(
+                "CREATE CONSTRAINT memory_write_claim_unique IF NOT EXISTS "
+                "FOR (c:MemoryWriteClaim) REQUIRE "
+                "(c.namespace, c.memory_id, c.target_version) IS UNIQUE"
+            ).consume()
+
+    def claim_transaction_writes(
+        self, namespace, txn_id, claims, idempotency_key
+    ):
+        """Atomically reserve every logical identity changed by a task txn."""
+
+        normalized = sorted(
+            (
+                {
+                    "memory_id": str(claim["memory_id"]),
+                    "expected_version": int(claim["expected_version"]),
+                    "target_version": int(claim["target_version"]),
+                    "claim_hash": str(claim["claim_hash"]),
+                }
+                for claim in claims
+            ),
+            key=lambda claim: claim["memory_id"],
+        )
+
+        def reserve(tx):
+            current_rows = []
+            for claim in normalized:
+                current = tx.run(
+                    "MERGE (m:MemoryIdentity {namespace:$namespace, memory_id:$memory_id}) "
+                    "SET m._claim_lock=coalesce(m._claim_lock, 0) + 1 "
+                    "RETURN coalesce(m.canonical, false) AS canonical, "
+                    "m.version AS version",
+                    namespace=namespace,
+                    memory_id=claim["memory_id"],
+                ).single()
+                canonical_version = (
+                    int(current.get("version") or 1)
+                    if current and current.get("canonical")
+                    else 0
+                )
+                if canonical_version > claim["expected_version"]:
+                    return {
+                        "status": "conflict",
+                        "memory_ids": [claim["memory_id"]],
+                    }
+                if canonical_version < claim["expected_version"]:
+                    prior = tx.run(
+                        "MATCH (prior:MemoryWriteClaim {namespace:$namespace, "
+                        "memory_id:$memory_id}) "
+                        "WHERE prior.txn_id IS NOT NULL "
+                        "AND prior.target_version > $canonical_version "
+                        "AND prior.target_version <= $expected_version "
+                        "RETURN collect(prior.target_version) AS versions",
+                        namespace=namespace,
+                        memory_id=claim["memory_id"],
+                        canonical_version=canonical_version,
+                        expected_version=claim["expected_version"],
+                    ).single()
+                    versions = sorted(
+                        int(version)
+                        for version in ((prior or {}).get("versions") or [])
+                    )
+                    if versions != list(
+                        range(canonical_version + 1, claim["expected_version"] + 1)
+                    ):
+                        return {
+                            "status": "conflict",
+                            "memory_ids": [claim["memory_id"]],
+                        }
+                reservation = tx.run(
+                    "MERGE (c:MemoryWriteClaim {namespace:$namespace, "
+                    "memory_id:$memory_id, target_version:$target_version}) "
+                    "SET c._claim_lock=coalesce(c._claim_lock, 0) + 1 "
+                    "RETURN c.txn_id AS claim_txn_id, c.claim_hash AS claim_hash",
+                    namespace=namespace,
+                    memory_id=claim["memory_id"],
+                    target_version=claim["target_version"],
+                ).single()
+                owner = reservation.get("claim_txn_id") if reservation else None
+                same_claim = bool(
+                    owner == txn_id
+                    and reservation.get("claim_hash") == claim["claim_hash"]
+                )
+                if owner is not None and not same_claim:
+                    return {
+                        "status": "conflict",
+                        "memory_ids": [claim["memory_id"]],
+                    }
+                current_rows.append(claim)
+            for claim in current_rows:
+                tx.run(
+                    "MATCH (c:MemoryWriteClaim {namespace:$namespace, "
+                    "memory_id:$memory_id, target_version:$target_version}) "
+                    "SET c.txn_id=$txn_id, c.claim_hash=$claim_hash",
+                    namespace=namespace,
+                    memory_id=claim["memory_id"],
+                    txn_id=txn_id,
+                    target_version=claim["target_version"],
+                    claim_hash=claim["claim_hash"],
+                ).consume()
+            return {"status": "claimed", "memory_ids": []}
+
+        with self.driver.session() as session:
+            execute_write = getattr(session, "execute_write", None)
+            if callable(execute_write):
+                return execute_write(reserve)
+            return session.write_transaction(reserve)
+
+    def release_transaction_claims(
+        self, namespace, txn_id, idempotency_key
+    ):
+        with self.driver.session() as session:
+            session.run(
+                "MATCH (c:MemoryWriteClaim {namespace:$namespace, txn_id:$txn_id}) "
+                "DELETE c",
+                namespace=namespace,
+                txn_id=txn_id,
+            ).consume()
+        return {"status": "released"}
 
     def upsert_memory(self, namespace, memory_id, payload, source_ids, supersedes_id, idempotency_key):
         source_ids = sorted({str(source_id) for source_id in source_ids})
@@ -293,6 +452,7 @@ class _Neo4jBoltClient:
         supersedes_id,
         expected_version,
         idempotency_key,
+        claim_txn_id=None,
     ):
         """Linearize a canonical transition on one Neo4j identity node."""
 
@@ -305,20 +465,28 @@ class _Neo4jBoltClient:
             current = tx.run(
                 "MERGE (m:MemoryIdentity {namespace:$namespace, memory_id:$memory_id}) "
                 "SET m._cas_lock=coalesce(m._cas_lock, 0) + 1 "
+                "WITH m OPTIONAL MATCH (claim:MemoryWriteClaim "
+                "{namespace:$namespace, memory_id:$memory_id, "
+                "target_version:$target_version}) "
                 "RETURN coalesce(m.canonical, false) AS canonical, "
                 "m.status AS status, m.version AS version, "
                 "m.canonical_state_hash AS state_hash, "
                 "m.canonical_source_ids AS source_ids, "
                 "m.canonical_supersedes_id AS supersedes_id, "
-                "m.canonical_operation_id AS operation_id",
+                "m.canonical_operation_id AS operation_id, "
+                "claim.txn_id AS claim_txn_id",
                 namespace=namespace,
                 memory_id=memory_id,
+                target_version=desired_version,
             ).single()
             canonical = bool(current and current.get("canonical"))
             current_version = (
                 int(current.get("version") or 1) if canonical else 0
             )
             current_record = None
+            current_claim = current.get("claim_txn_id") if current else None
+            if current_claim is not None and current_claim != claim_txn_id:
+                return {"status": "conflict", "record": None}
             if canonical:
                 current_record = {
                     "status": current.get("status"),
@@ -340,6 +508,16 @@ class _Neo4jBoltClient:
                     and current_record.get("supersedes_id") == supersedes_id
                     and current_record.get("state_hash") == desired_hash
                 )
+                if exact and current_claim == claim_txn_id:
+                    tx.run(
+                        "MATCH (claim:MemoryWriteClaim {namespace:$namespace, "
+                        "memory_id:$memory_id, target_version:$target_version, "
+                        "txn_id:$txn_id}) DELETE claim",
+                        namespace=namespace,
+                        memory_id=memory_id,
+                        target_version=desired_version,
+                        txn_id=claim_txn_id,
+                    ).consume()
                 return {
                     "status": "matched" if exact else "conflict",
                     "record": current_record,
@@ -362,6 +540,16 @@ class _Neo4jBoltClient:
                 supersedes_id=supersedes_id,
                 operation_id=idempotency_key,
             ).consume()
+            if claim_txn_id is not None:
+                tx.run(
+                    "MATCH (claim:MemoryWriteClaim {namespace:$namespace, "
+                    "memory_id:$memory_id, target_version:$target_version, "
+                    "txn_id:$txn_id}) DELETE claim",
+                    namespace=namespace,
+                    memory_id=memory_id,
+                    target_version=desired_version,
+                    txn_id=claim_txn_id,
+                ).consume()
             tx.run(
                 "MATCH (m:MemoryIdentity {namespace:$namespace, memory_id:$memory_id}) "
                 "OPTIONAL MATCH (m)-[r:DERIVED_FROM|SUPERSEDES]->() DELETE r",
@@ -943,9 +1131,27 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             )
             for record in resolved_records
         }
-        if len(fingerprints) != 1:
-            return None
-        selected = resolved_records[0]
+        if len(fingerprints) == 1:
+            selected = resolved_records[0]
+        else:
+            canonical_records = [
+                self._public_record(row, str(row.get("status", "active")))
+                for row in latest_records
+                if row.get("txn_id") is None
+            ]
+            canonical_fingerprints = {
+                json.dumps(
+                    record,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                    separators=(",", ":"),
+                )
+                for record in canonical_records
+            }
+            if len(canonical_fingerprints) != 1:
+                return None
+            selected = canonical_records[0]
         status = str(selected.get("status", "active"))
 
         overlays = [
@@ -1063,17 +1269,68 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         return all(current.get(field) == value for field, value in expected.items())
 
     @staticmethod
-    def _canonical_state_hash(record: Mapping[str, Any]) -> str:
-        public = {
-            str(key): value
-            for key, value in record.items()
-            if key
-            not in {
-                "namespace",
-                "_canonical_state_hash",
-                "_canonical_operation_id",
-            }
+    def _canonical_state_material(
+        record: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        required = (
+            "memory_id",
+            "value",
+            "status",
+            "agent_id",
+            "scope",
+            "derived_from",
+            "version",
+        )
+        missing = [field for field in required if field not in record]
+        if missing:
+            raise ValueError(
+                f"canonical record missing fields: {','.join(missing)}"
+            )
+        if not isinstance(record["memory_id"], str) or not record[
+            "memory_id"
+        ]:
+            raise ValueError("canonical memory_id is invalid")
+        if not isinstance(record["status"], str) or not record["status"]:
+            raise ValueError("canonical status is invalid")
+        if not isinstance(record["agent_id"], str) or not record["agent_id"]:
+            raise ValueError("canonical agent_id is invalid")
+        if not isinstance(record["scope"], str) or not record["scope"]:
+            raise ValueError("canonical scope is invalid")
+        source_ids = record["derived_from"]
+        if isinstance(source_ids, (str, bytes)) or not isinstance(
+            source_ids, Sequence
+        ):
+            raise ValueError("canonical provenance is invalid")
+        if any(
+            not isinstance(source_id, str) or not source_id
+            for source_id in source_ids
+        ):
+            raise ValueError("canonical provenance is invalid")
+        canonical_source_ids = sorted(set(source_ids))
+        if list(source_ids) != canonical_source_ids:
+            raise ValueError("canonical provenance is not canonical")
+        version = record["version"]
+        if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+            raise ValueError("canonical version is invalid")
+        supersedes_id = record.get("supersedes_id")
+        if supersedes_id is not None and (
+            not isinstance(supersedes_id, str) or not supersedes_id
+        ):
+            raise ValueError("canonical supersedes_id is invalid")
+        return {
+            "memory_id": record["memory_id"],
+            "value": copy.deepcopy(record["value"]),
+            "status": record["status"],
+            "agent_id": record["agent_id"],
+            "scope": record["scope"],
+            "derived_from": canonical_source_ids,
+            "supersedes_id": supersedes_id,
+            "version": version,
         }
+
+    @classmethod
+    def _canonical_state_hash(cls, record: Mapping[str, Any]) -> str:
+        public = cls._canonical_state_material(record)
         encoded = json.dumps(
             public,
             ensure_ascii=False,
@@ -1179,6 +1436,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         *,
         key: str,
         operation: str,
+        claim_txn_id: str | None = None,
     ) -> str:
         memory_id = str(desired["memory_id"])
         canonical = self._canonical_payload(desired, key)
@@ -1198,6 +1456,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                     canonical.get("supersedes_id"),
                     desired_version - 1,
                     key,
+                    claim_txn_id,
                 ),
                 key,
             )
@@ -1365,23 +1624,26 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         else:
             qdrant = reads["qdrant"]
             neo4j = reads["neo4j"]
-            expected = {
-                "status": qdrant.get("status", "active"),
-                "version": int(qdrant.get("version", 1)),
-                "derived_from": list(qdrant.get("derived_from", [])),
-                "supersedes_id": qdrant.get("supersedes_id"),
-                "_canonical_state_hash": neo4j.get("state_hash"),
-            }
-            status = (
-                "complete"
-                if self._neo4j_canonical_matches(neo4j, expected)
-                and (
-                    qdrant.get("_canonical_state_hash") is None
-                    or qdrant.get("_canonical_state_hash")
-                    == neo4j.get("state_hash")
+            try:
+                recomputed_hash = self._canonical_state_hash(qdrant)
+                stored_hash = qdrant["_canonical_state_hash"]
+            except (KeyError, TypeError, ValueError):
+                status = "partial"
+            else:
+                expected = {
+                    "status": qdrant["status"],
+                    "version": int(qdrant["version"]),
+                    "derived_from": list(qdrant["derived_from"]),
+                    "supersedes_id": qdrant.get("supersedes_id"),
+                    "_canonical_state_hash": recomputed_hash,
+                }
+                status = (
+                    "complete"
+                    if stored_hash == recomputed_hash
+                    and neo4j.get("state_hash") == recomputed_hash
+                    and self._neo4j_canonical_matches(neo4j, expected)
+                    else "partial"
                 )
-                else "partial"
-            )
         return {"status": status, **reads}
 
     def _current_version_excluding(
@@ -1536,9 +1798,15 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         return memory
 
     def invalidate(self, memory_id: str, **fields: Any) -> None:
-        if memory_id in self.memories or self.qdrant.retrieve(
-            self.db_namespace, memory_id
-        ) is not None:
+        memory_id = str(memory_id)
+        key = self._key("invalidate_lookup", memory_id)
+        existing = self._call(
+            "qdrant",
+            "invalidate_lookup",
+            lambda: self.qdrant.retrieve(self.db_namespace, memory_id),
+            key,
+        )
+        if existing is not None or memory_id in self.memories:
             self.invalidate_committed(memory_id)
         self._event("invalidate", memory_id=memory_id, **fields)
 
@@ -1642,10 +1910,35 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         elif isinstance(stored, Mapping):
             if qdrant_before is None and neo4j_before is None:
                 base_key = self._key("invalidate_committed_base", memory_id)
+                staged_owner = None
+                owner_rows = self._call(
+                    "qdrant",
+                    "invalidate_committed_owner_read",
+                    lambda: self._rows_for_memory(memory_id),
+                    base_key,
+                )
+                for row in owner_rows:
+                    if (
+                        row.get("txn_id") is not None
+                        and row.get("record_kind") == "memory"
+                        and self._decision(str(row["txn_id"])) == "COMMITTED"
+                        and self._public_record(
+                            row,
+                            str(
+                                row.get("target_status", "active")
+                                if row.get("status") == "pending"
+                                else row.get("status", "active")
+                            ),
+                        )
+                        == dict(stored)
+                    ):
+                        staged_owner = str(row["txn_id"])
+                        break
                 self._apply_canonical_transition(
                     stored,
                     key=base_key,
                     operation="invalidate_committed_base",
+                    claim_txn_id=staged_owner,
                 )
             record = copy.deepcopy(dict(stored))
             record["status"] = "invalid"
@@ -1697,6 +1990,41 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 ),
             ),
         }
+
+    def _transaction_claims(
+        self, expected: Mapping[str, Any]
+    ) -> list[dict[str, Any]]:
+        rows_by_memory: dict[str, list[dict[str, Any]]] = {}
+        for row in expected["rows"]:
+            rows_by_memory.setdefault(str(row["memory_id"]), []).append(
+                self._safe_transaction_row(row)
+            )
+        claims = []
+        for memory_id, rows in sorted(rows_by_memory.items()):
+            rows.sort(
+                key=lambda row: (
+                    int(row.get("sequence", 0)),
+                    str(row.get("record_kind", "")),
+                )
+            )
+            source_rows = [
+                row
+                for row in expected["rows"]
+                if str(row["memory_id"]) == memory_id
+            ]
+            claims.append(
+                {
+                    "memory_id": memory_id,
+                    "expected_version": min(
+                        int(row.get("base_version", 0)) for row in source_rows
+                    ),
+                    "target_version": max(
+                        int(row.get("version", 1)) for row in source_rows
+                    ),
+                    "claim_hash": self._payload_hash(rows),
+                }
+            )
+        return claims
 
     @staticmethod
     def _canonical_verification_row(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -1788,6 +2116,30 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
     ) -> Mapping[str, Any]:
         txn_id = str(txn_id)
         expected = self._expected_transaction_state(txn_id, intents)
+        claims = self._transaction_claims(expected)
+        if claims:
+            claim_writes = getattr(
+                self.neo4j, "claim_transaction_writes", None
+            )
+            if not callable(claim_writes):
+                raise VectorGraphBackendError(
+                    "Neo4j transaction write claims are unavailable"
+                )
+            claim_key = self._transaction_key(txn_id, 0, "claim")
+            claimed = self._call(
+                "neo4j",
+                "stage_claim",
+                lambda: claim_writes(
+                    self.db_namespace, txn_id, claims, claim_key
+                ),
+                claim_key,
+            )
+            if not isinstance(claimed, Mapping) or claimed.get(
+                "status"
+            ) != "claimed":
+                raise VectorGraphBackendError(
+                    f"transaction write conflict for {txn_id}"
+                )
         qdrant_errors: list[Exception] = []
         for row in expected["rows"]:
             key = self._transaction_key(
@@ -1938,11 +2290,13 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                     committed,
                     key=canonical_key,
                     operation="finalize_canonical",
+                    claim_txn_id=txn_id,
                 )
-                if transition != "skipped":
-                    self.memories[str(committed["memory_id"])] = copy.deepcopy(
-                        committed
-                    )
+                if transition == "skipped":
+                    return {"status": "conflict", "txn_id": txn_id}
+                self.memories[str(committed["memory_id"])] = copy.deepcopy(
+                    committed
+                )
 
         staged_ids = {
             str(row["memory_id"])
@@ -1976,9 +2330,11 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 committed,
                 key=key,
                 operation="finalize_overlay",
+                claim_txn_id=txn_id,
             )
-            if transition != "skipped":
-                self.memories[memory_id] = copy.deepcopy(committed)
+            if transition == "skipped":
+                return {"status": "conflict", "txn_id": txn_id}
+            self.memories[memory_id] = copy.deepcopy(committed)
         return {"status": "complete", "txn_id": txn_id}
 
     def cleanup_transaction(
@@ -1986,6 +2342,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
     ) -> Mapping[str, Any]:
         txn_id = str(txn_id)
         key = self._transaction_key(txn_id, 0, "cleanup")
+        cleanup_unknown = False
         for service, function in (
             (
                 "qdrant",
@@ -2004,8 +2361,29 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 self._call(service, "cleanup", function, key)
             except Exception:
                 continue
+        release_claims = getattr(
+            self.neo4j, "release_transaction_claims", None
+        )
+        if callable(release_claims):
+            try:
+                released = self._call(
+                    "neo4j",
+                    "cleanup_claim",
+                    lambda: release_claims(
+                        self.db_namespace, txn_id, key
+                    ),
+                    key,
+                )
+                if not isinstance(released, Mapping) or released.get(
+                    "status"
+                ) != "released":
+                    cleanup_unknown = True
+            except Exception:
+                cleanup_unknown = True
+        elif intents:
+            cleanup_unknown = True
         raw = self.raw_transaction_state(txn_id, intents)
-        if not raw["qdrant"].get("read_ok", False) or not raw["neo4j"].get(
+        if cleanup_unknown or not raw["qdrant"].get("read_ok", False) or not raw["neo4j"].get(
             "read_ok", False
         ):
             status = "unknown"

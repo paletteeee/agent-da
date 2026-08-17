@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import hashlib
 import inspect
@@ -13,7 +14,7 @@ from typing import Any
 
 from txnmem_backend import InstrumentedMemoryBackend
 from txnmem_event_contract import validate_events
-from txnmem_failure_controller import validate_failure_schedule
+from txnmem_failure_controller import FailureController, validate_failure_schedule
 from txnmem_model_protocol import merge_usage_summaries
 from txnmem_real_agent import run_real_agent
 from txnmem_realism import trace_evidence_summary
@@ -492,6 +493,24 @@ def run_benchmark_batch(
         for task_index, task in enumerate(tasks, start=1):
             item = dict(task)
             item["seed"] = int(item.get("seed", 0)) + repetition * 100
+            failure_config = item.get(
+                "failure_controller",
+                item.get(
+                    "failure_schedule",
+                    manifest.get(
+                        "failure_controller", manifest.get("failure_schedule")
+                    ),
+                ),
+            )
+            if failure_config is not None:
+                schedule = (
+                    failure_config.schedule
+                    if isinstance(failure_config, FailureController)
+                    else failure_config
+                )
+                item["failure_controller"] = FailureController(
+                    copy.deepcopy(list(schedule))
+                )
             transaction_mode = str(
                 item.get(
                     "transaction_mode",
@@ -509,20 +528,26 @@ def run_benchmark_batch(
                         manifest.get("transaction_id", f"txn_{task_id}"),
                     )
                 )
-                repetition_suffix = f"rep_{repetition + 1:02d}"
-                item["transaction_id"] = (
-                    f"{base_transaction_id}__{task_id}__{repetition_suffix}"
-                )
+                identity_material = json.dumps(
+                    [
+                        base_transaction_id,
+                        task_id,
+                        int(task_index),
+                        int(repetition + 1),
+                    ],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                transaction_id = f"txn_{hashlib.sha256(identity_material).hexdigest()}"
+                item["transaction_id"] = transaction_id
                 item["transaction_journal_path"] = (
                     repetition_dir
                     / "journals"
-                    / f"{task_id}__{repetition_suffix}.sqlite3"
+                    / f"{transaction_id}.sqlite3"
                 )
                 for option in (
                     "policy_snapshot_provider",
                     "transaction_phase_hook",
-                    "failure_controller",
-                    "failure_schedule",
                 ):
                     if option not in item and option in manifest:
                         item[option] = manifest[option]

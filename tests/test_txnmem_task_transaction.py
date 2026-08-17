@@ -684,6 +684,37 @@ class TaskTransactionGatewayTests(unittest.TestCase):
             [phase["phase"] for phase in self.journal.phases("txn_task_1")],
         )
 
+    def test_retry_after_durable_finalize_complete_does_not_rematerialize_stale_state(self) -> None:
+        class CountingFinalizeBackend(InMemoryTransactionBackend):
+            def __init__(self):
+                super().__init__()
+                self.finalize_calls = 0
+
+            def finalize_transaction(self, txn_id, intents):
+                self.finalize_calls += 1
+                if self.finalize_calls > 1:
+                    return {"status": "partial", "txn_id": txn_id}
+                return super().finalize_transaction(txn_id, intents)
+
+        backend = CountingFinalizeBackend()
+        gateway = self.gateway(backend=backend)
+        gateway.call("memory_write", {"memory_id": "memory_a", "value": "a"})
+        first = gateway.commit()
+
+        recovered = gateway.commit()
+
+        self.assertEqual(first["decision"], "COMMITTED")
+        self.assertEqual(recovered["decision"], "COMMITTED")
+        self.assertEqual(backend.finalize_calls, 1)
+        self.assertEqual(
+            [
+                phase["phase"]
+                for phase in self.journal.phases("txn_task_1")
+                if phase["phase"] == "finalize_complete"
+            ],
+            ["finalize_complete"],
+        )
+
     def test_unknown_cleanup_preserves_aborted_recovery_record_without_complete_phase(self) -> None:
         backend = _RecoveryStatusBackend(cleanup_status="unknown")
         gateway = self.gateway(backend=backend)

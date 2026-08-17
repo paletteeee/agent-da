@@ -1608,20 +1608,108 @@ class TxnMemRealExperimentTests(unittest.TestCase):
             for summary in report["task_summaries"]
         ]
         self.assertEqual(len(set(transaction_ids)), 2)
-        self.assertEqual(
-            transaction_ids,
+        self.assertTrue(all(txn_id.startswith("txn_") for txn_id in transaction_ids))
+        self.assertEqual(len(journals), 2)
+        self.assertTrue(all("/journals/txn_" in f"/{path}" for path in journals))
+
+    def test_benchmark_batch_hashes_adversarial_identity_and_clones_failure_controller(self):
+        class PerRunWriteModel:
+            def __init__(self):
+                self.calls = 0
+
+            def complete(self, messages, tools, *, seed=None, temperature=0.0):
+                self.calls += 1
+                if any(message.get("role") == "tool" for message in messages):
+                    return ModelResponse("done", [])
+                return ModelResponse(
+                    "",
+                    [
+                        ToolCall(
+                            f"call-{self.calls}",
+                            "memory_write",
+                            {"memory_id": "shared", "value": "value"},
+                        )
+                    ],
+                )
+
+        source_controller = FailureController(
             [
-                "manifest-transaction__repeatable-task__rep_01",
-                "manifest-transaction__repeatable-task__rep_02",
-            ],
+                {
+                    "trigger": {"phase": "after_mutation", "count": 1},
+                    "action": {"type": "crash"},
+                }
+            ]
+        )
+        malicious_id = "../../absolute/../路径|task::id"
+        tasks = [
+            {
+                "task_id": malicious_id,
+                "instruction": "write once",
+                "prompt": "write once",
+            },
+            {
+                "task_id": malicious_id,
+                "instruction": "write once again",
+                "prompt": "write once again",
+            },
+        ]
+        manifest = {
+            "dataset_name": "stub",
+            "transaction_mode": "task",
+            "transaction_id": "base/../txn::identity",
+            "failure_controller": source_controller,
+            "tasks": tasks,
+        }
+
+        def run_once(root):
+            report = run_benchmark_batch(
+                manifest,
+                PerRunWriteModel(),
+                root,
+                backend_factory=lambda _index, _root: InMemoryTransactionBackend(),
+                adapter_factory=lambda: _NoopBenchmarkAdapter(),
+                repetitions=2,
+            )
+            transaction_ids = [
+                summary["transaction"]["txn_id"]
+                for summary in report["task_summaries"]
+            ]
+            journals = sorted(root.rglob("*.sqlite3"))
+            return report, transaction_ids, journals
+
+        with TemporaryDirectory() as first_tmp, TemporaryDirectory() as second_tmp:
+            first_root = Path(first_tmp)
+            second_root = Path(second_tmp)
+            first_report, first_ids, first_journals = run_once(first_root)
+            second_report, second_ids, second_journals = run_once(second_root)
+
+            self.assertEqual(first_ids, second_ids)
+            self.assertEqual(len(set(first_ids)), 4)
+            self.assertEqual(len(first_journals), 4)
+            self.assertEqual(len(second_journals), 4)
+            for root, journals in (
+                (first_root, first_journals),
+                (second_root, second_journals),
+            ):
+                allowed_roots = {
+                    (root / "rep_01" / "journals").resolve(),
+                    (root / "rep_02" / "journals").resolve(),
+                }
+                self.assertTrue(all(path.resolve().parent in allowed_roots for path in journals))
+
+        self.assertEqual(
+            [summary.get("failure_code") for summary in first_report["task_summaries"]],
+            ["injected_crash"] * 4,
         )
         self.assertEqual(
-            journals,
-            [
-                "rep_01/journals/repeatable-task__rep_01.sqlite3",
-                "rep_02/journals/repeatable-task__rep_02.sqlite3",
-            ],
+            [summary.get("failure_code") for summary in second_report["task_summaries"]],
+            ["injected_crash"] * 4,
         )
+        self.assertEqual(source_controller.counts, {})
+        self.assertEqual(source_controller.phase_counts, {})
+        self.assertEqual(source_controller.fired, set())
+        self.assertTrue(all("transaction_id" not in task for task in tasks))
+        self.assertTrue(all("transaction_journal_path" not in task for task in tasks))
 
     def test_benchmark_batch_preserves_sanitized_model_visible_tool_attestation(self):
         manifest = {

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+import copy
 import hashlib
 import json
 import threading
@@ -125,7 +126,76 @@ class _FakeNeo4j:
         self.cleanup_count = 0
         self.cas_barrier = None
         self.cas_started_event = None
+        self.claim_barrier = None
+        self.enforce_claims = True
+        self.claims = {}
         self._cas_lock = threading.Lock()
+
+    def claim_transaction_writes(
+        self, namespace, txn_id, claims, idempotency_key
+    ):
+        if self.claim_barrier is not None:
+            self.claim_barrier.wait(timeout=5)
+        with self._cas_lock:
+            conflicts = []
+            for claim in claims:
+                key = (
+                    namespace,
+                    str(claim["memory_id"]),
+                    int(claim["target_version"]),
+                )
+                owner = self.claims.get(key)
+                if self.enforce_claims and owner not in {None, txn_id}:
+                    conflicts.append(str(claim["memory_id"]))
+                    continue
+                if self.enforce_claims:
+                    current = self.retrieve_memory(
+                        namespace, str(claim["memory_id"])
+                    )
+                    canonical_version = (
+                        int(current.get("version", 1))
+                        if current is not None
+                        else 0
+                    )
+                    expected_version = int(claim["expected_version"])
+                    chained = all(
+                        (
+                            namespace,
+                            str(claim["memory_id"]),
+                            version,
+                        )
+                        in self.claims
+                        for version in range(
+                            canonical_version + 1, expected_version + 1
+                        )
+                    )
+                    if canonical_version > expected_version or (
+                        canonical_version < expected_version and not chained
+                    ):
+                        conflicts.append(str(claim["memory_id"]))
+            if conflicts:
+                return {"status": "conflict", "memory_ids": sorted(conflicts)}
+            if self.enforce_claims:
+                for claim in claims:
+                    self.claims[
+                        (
+                            namespace,
+                            str(claim["memory_id"]),
+                            int(claim["target_version"]),
+                        )
+                    ] = txn_id
+            return {"status": "claimed", "memory_ids": []}
+
+    def release_transaction_claims(
+        self, namespace, txn_id, idempotency_key
+    ):
+        with self._cas_lock:
+            self.claims = {
+                key: owner
+                for key, owner in self.claims.items()
+                if not (key[0] == namespace and owner == txn_id)
+            }
+        return {"status": "released"}
 
     def upsert_memory(self, namespace, memory_id, payload, source_ids, supersedes_id, idempotency_key):
         if self.fail_upsert:
@@ -198,6 +268,7 @@ class _FakeNeo4j:
         supersedes_id,
         expected_version,
         idempotency_key,
+        claim_txn_id=None,
     ):
         if self.cas_barrier is not None:
             self.cas_barrier.wait(timeout=5)
@@ -206,8 +277,12 @@ class _FakeNeo4j:
         with self._cas_lock:
             if self.fail_upsert:
                 raise RuntimeError("neo4j unavailable")
-            current = self.retrieve_memory(namespace, memory_id)
             desired_version = int(payload.get("version", 1))
+            claim_key = (namespace, memory_id, desired_version)
+            claim_owner = self.claims.get(claim_key)
+            if claim_owner is not None and claim_owner != claim_txn_id:
+                return {"status": "conflict", "record": None}
+            current = self.retrieve_memory(namespace, memory_id)
             current_version = (
                 int(current.get("version", 1)) if current is not None else 0
             )
@@ -224,6 +299,8 @@ class _FakeNeo4j:
                     and current_payload is not None
                     and current_payload.get("_canonical_state_hash") == desired_hash
                 )
+                if exact and claim_owner == claim_txn_id:
+                    self.claims.pop(claim_key, None)
                 return {
                     "status": "matched" if exact else "conflict",
                     "record": current,
@@ -233,6 +310,8 @@ class _FakeNeo4j:
             stored = dict(payload)
             stored["_canonical_operation_id"] = idempotency_key
             self.memories[(namespace, memory_id)] = stored
+            if claim_owner == claim_txn_id:
+                self.claims.pop(claim_key, None)
             self.edges = [
                 edge
                 for edge in self.edges
@@ -523,6 +602,146 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertIn("source", identities)
         self.assertEqual(edges, {("target", "source")})
 
+    def test_neo4j_legacy_identity_migration_is_ordered_and_idempotent(self):
+        nodes = {
+            "canonical": {
+                "labels": {"Memory", "MemoryReference"},
+                "namespace": "tenant",
+                "memory_id": "shared",
+            },
+            "duplicate": {
+                "labels": {"MemoryReference"},
+                "namespace": "tenant",
+                "memory_id": "shared",
+            },
+            "source": {
+                "labels": {"MemoryReference"},
+                "namespace": "tenant",
+                "memory_id": "source",
+            },
+            "target": {
+                "labels": {"Memory"},
+                "namespace": "tenant",
+                "memory_id": "target",
+            },
+        }
+        edges = {
+            ("DERIVED_FROM", "target", "duplicate"),
+            ("SUPERSEDES", "duplicate", "source"),
+        }
+        constraints = []
+
+        class Result:
+            def consume(self):
+                return None
+
+        class Session:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            @staticmethod
+            def _canonical_for(node_key):
+                node = nodes[node_key]
+                return next(
+                    (
+                        key
+                        for key, candidate in nodes.items()
+                        if key != node_key
+                        and "Memory" in candidate["labels"]
+                        and candidate["namespace"] == node["namespace"]
+                        and candidate["memory_id"] == node["memory_id"]
+                    ),
+                    None,
+                )
+
+            def run(self, query, **_parameters):
+                if query.startswith("MATCH (m:Memory) SET m:MemoryIdentity"):
+                    for node in nodes.values():
+                        if "Memory" in node["labels"]:
+                            node["labels"].add("MemoryIdentity")
+                elif "(legacy:MemoryReference)-[old:DERIVED_FROM]->(target)" in query:
+                    for kind, source, target in list(edges):
+                        canonical = self._canonical_for(source)
+                        if kind == "DERIVED_FROM" and canonical is not None:
+                            edges.remove((kind, source, target))
+                            edges.add((kind, canonical, target))
+                elif "(source)-[old:DERIVED_FROM]->(legacy:MemoryReference)" in query:
+                    for kind, source, target in list(edges):
+                        canonical = self._canonical_for(target)
+                        if kind == "DERIVED_FROM" and canonical is not None:
+                            edges.remove((kind, source, target))
+                            edges.add((kind, source, canonical))
+                elif "(legacy:MemoryReference)-[old:SUPERSEDES]->(target)" in query:
+                    for kind, source, target in list(edges):
+                        canonical = self._canonical_for(source)
+                        if kind == "SUPERSEDES" and canonical is not None:
+                            edges.remove((kind, source, target))
+                            edges.add((kind, canonical, target))
+                elif "(source)-[old:SUPERSEDES]->(legacy:MemoryReference)" in query:
+                    for kind, source, target in list(edges):
+                        canonical = self._canonical_for(target)
+                        if kind == "SUPERSEDES" and canonical is not None:
+                            edges.remove((kind, source, target))
+                            edges.add((kind, source, canonical))
+                elif "DETACH DELETE legacy" in query:
+                    for key in list(nodes):
+                        if (
+                            "MemoryReference" in nodes[key]["labels"]
+                            and self._canonical_for(key) is not None
+                        ):
+                            nodes.pop(key)
+                            edges.difference_update(
+                                edge for edge in set(edges) if key in edge[1:]
+                            )
+                elif query.startswith("MATCH (r:MemoryReference) SET r:MemoryIdentity"):
+                    for node in nodes.values():
+                        if "MemoryReference" in node["labels"]:
+                            node["labels"].add("MemoryIdentity")
+                            node["labels"].discard("MemoryReference")
+                elif query.startswith("CREATE CONSTRAINT memory_identity_unique"):
+                    identities = [
+                        (node["namespace"], node["memory_id"])
+                        for node in nodes.values()
+                        if "MemoryIdentity" in node["labels"]
+                    ]
+                    if len(identities) != len(set(identities)):
+                        raise RuntimeError("constraint created before deduplication")
+                    constraints.append("memory_identity_unique")
+                return Result()
+
+        class Driver:
+            def session(self):
+                return Session()
+
+        client = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
+        client.driver = Driver()
+
+        client._initialize_schema()
+        first_state = (copy.deepcopy(nodes), set(edges))
+        client._initialize_schema()
+
+        identities = sorted(
+            (node["namespace"], node["memory_id"])
+            for node in nodes.values()
+            if "MemoryIdentity" in node["labels"]
+        )
+        self.assertEqual(
+            identities,
+            [("tenant", "shared"), ("tenant", "source"), ("tenant", "target")],
+        )
+        self.assertEqual(
+            edges,
+            {
+                ("DERIVED_FROM", "target", "canonical"),
+                ("SUPERSEDES", "canonical", "source"),
+            },
+        )
+        self.assertEqual((nodes, edges), first_state)
+        self.assertEqual(constraints, ["memory_identity_unique", "memory_identity_unique"])
+
     def test_neo4j_transaction_cleanup_does_not_sweep_other_orphan_references(self):
         references = {"reference-owned-by-txn-b"}
 
@@ -764,6 +983,53 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             requests_after_write + 2,
         )
 
+    def test_public_invalidate_retries_and_instruments_its_existence_read(self):
+        class OneShotTimeoutQdrant(_FakeQdrant):
+            def __init__(self):
+                super().__init__()
+                self.timeout_once = False
+
+            def retrieve(self, namespace, point_id):
+                if self.timeout_once:
+                    self.timeout_once = False
+                    raise TimeoutError("one-shot existence read timeout")
+                return super().retrieve(namespace, point_id)
+
+        observed = []
+        qdrant = OneShotTimeoutQdrant()
+
+        def requester(service, operation, function, key):
+            observed.append((service, operation))
+            return function()
+
+        backend = VectorGraphMemoryBackend(
+            "invalidate-instrumented",
+            "http://qdrant-proxy",
+            "bolt://neo4j-proxy",
+            ("neo4j", "password"),
+            proxy_requester=requester,
+            qdrant_client=qdrant,
+            neo4j_client=_FakeNeo4j(),
+            max_retries=1,
+        )
+        backend.write("existing", value="value")
+        observed.clear()
+        retries_before = backend.metrics()["retry_count"]
+        qdrant.timeout_once = True
+
+        backend.invalidate("existing")
+        backend.invalidate("missing")
+
+        self.assertEqual(backend.metrics()["retry_count"], retries_before + 1)
+        self.assertGreaterEqual(
+            observed.count(("qdrant", "invalidate_lookup")), 3
+        )
+        self.assertEqual(
+            [event["memory_id"] for event in backend.validated_events() if event["kind"] == "invalidate"],
+            ["existing", "missing"],
+        )
+        self.assertIsNone(backend.read_committed("existing"))
+
     def test_staged_records_are_raw_pending_and_fail_closed_until_committed(self):
         decisions = {}
         backend = VectorGraphMemoryBackend(
@@ -962,6 +1228,7 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
 
     def test_equal_version_committed_record_conflicts_fail_closed(self):
         decisions = {}
+        self.neo4j.enforce_claims = False
         backend = VectorGraphMemoryBackend(
             "txn-equal-visible",
             "http://qdrant",
@@ -1217,9 +1484,10 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertIsNone(self.backend.read_committed("source"))
 
     def test_conflicting_equal_version_finalizers_are_linearized_by_storage_cas(self):
-        decisions = {"txn-a": "COMMITTED", "txn-b": "COMMITTED"}
+        decisions = {}
         qdrant = _FakeQdrant()
         neo4j = _FakeNeo4j()
+        neo4j.enforce_claims = False
         first_backend = VectorGraphMemoryBackend(
             "txn-concurrent",
             "http://qdrant",
@@ -1242,6 +1510,7 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         second = [self._intent("txn-b", 1, "memory_write", memory_id="shared", value="b")]
         first_backend.stage_transaction("txn-a", first)
         second_backend.stage_transaction("txn-b", second)
+        decisions.update({"txn-a": "COMMITTED", "txn-b": "COMMITTED"})
         neo4j.cas_barrier = threading.Barrier(2)
         outcomes = []
 
@@ -1266,6 +1535,109 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         graph = neo4j.retrieve_memory("txn-concurrent", "shared")
         self.assertEqual(vector["version"], graph["version"])
         self.assertEqual(vector["status"], graph["status"])
+
+    def test_coordinator_claims_new_identity_before_only_one_commit_decision(self):
+        qdrant = _FakeQdrant()
+        neo4j = _FakeNeo4j()
+        prepare_barrier = threading.Barrier(2)
+        outcomes = []
+
+        with tempfile.TemporaryDirectory() as directory:
+            def phase_hook(phase, _evidence):
+                if phase == "after_prepare":
+                    prepare_barrier.wait(timeout=5)
+
+            def commit(index, value):
+                journal = TransactionJournal(
+                    Path(directory) / f"journal-{index}.sqlite3"
+                )
+                try:
+                    backend = VectorGraphMemoryBackend(
+                        "txn-claimed-new-id",
+                        "http://qdrant",
+                        "bolt://neo4j",
+                        ("neo4j", "password"),
+                        qdrant_client=qdrant,
+                        neo4j_client=neo4j,
+                    )
+                    gateway = TaskTransactionGateway(
+                        journal=journal,
+                        backend=backend,
+                        task_id=f"task-{index}",
+                        agent_id="agent",
+                        txn_id=f"txn-{index}",
+                        policy_snapshot_provider=lambda: {
+                            "version": 1,
+                            "denied_actions": [],
+                            "scope_overrides": {},
+                        },
+                        phase_hook=phase_hook,
+                    )
+                    gateway.call(
+                        "memory_write", {"memory_id": "shared", "value": value}
+                    )
+                    outcomes.append(gateway.commit()["decision"])
+                except TaskTransactionError as exc:
+                    outcomes.append(exc.code)
+                finally:
+                    journal.close()
+
+            threads = [
+                threading.Thread(target=commit, args=(0, "a")),
+                threading.Thread(target=commit, args=(1, "b")),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+
+            states = []
+            for index in range(2):
+                journal = TransactionJournal(
+                    Path(directory) / f"journal-{index}.sqlite3"
+                )
+                try:
+                    states.append(journal.load(f"txn-{index}").state)
+                finally:
+                    journal.close()
+            states.sort()
+
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+        self.assertEqual(states, ["ABORTED", "COMMITTED"])
+        self.assertIn("COMMITTED", outcomes)
+        canonical = qdrant.retrieve("txn-claimed-new-id", "shared")
+        self.assertIn(canonical["value"], {"a", "b"})
+        self.assertEqual(neo4j.retrieve_memory("txn-claimed-new-id", "shared")["version"], 1)
+
+    def test_adversarial_dual_committed_rows_keep_exact_canonical_winner_visible(self):
+        decisions = {}
+        qdrant = _FakeQdrant()
+        neo4j = _FakeNeo4j()
+        neo4j.enforce_claims = False
+        backend = VectorGraphMemoryBackend(
+            "txn-dual-committed",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=qdrant,
+            neo4j_client=neo4j,
+            decision_resolver=decisions.get,
+        )
+        first = [self._intent("txn-a", 1, "memory_write", memory_id="shared", value="winner")]
+        second = [self._intent("txn-b", 1, "memory_write", memory_id="shared", value="loser")]
+        backend.stage_transaction("txn-a", first)
+        backend.stage_transaction("txn-b", second)
+        decisions.update({"txn-a": "COMMITTED", "txn-b": "COMMITTED"})
+        self.assertEqual(backend.finalize_transaction("txn-a", first)["status"], "complete")
+
+        with self.assertRaisesRegex(VectorGraphBackendError, "version conflict"):
+            backend.finalize_transaction("txn-b", second)
+
+        self.assertEqual(backend.read_committed("shared")["value"], "winner")
+        self.assertEqual(
+            [row["value"] for row in backend.search_committed() if row["memory_id"] == "shared"],
+            ["winner"],
+        )
 
     def test_conflicting_direct_writes_are_linearized_before_vector_projection(self):
         qdrant = _FakeQdrant()
@@ -1525,9 +1897,10 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         backend.stage_transaction("txn-b", second)
         backend.finalize_transaction("txn-b", second)
 
-        backend.finalize_transaction("txn-a", first)
+        stale_retry = backend.finalize_transaction("txn-a", first)
 
         canonical = self.qdrant.retrieve("txn-stale-overlay", "shared")
+        self.assertIn(stale_retry["status"], {"partial", "conflict"})
         self.assertEqual((canonical["status"], canonical["version"]), ("invalid", 3))
         graph = self.neo4j.memories[("txn-stale-overlay", "shared")]
         self.assertEqual((graph["status"], graph["version"]), ("invalid", 3))
@@ -1561,6 +1934,62 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             self.qdrant.retrieve("txn-equal-conflict", "shared")["value"],
             "conflicting",
         )
+
+    def test_overlay_finalize_rejects_tampered_or_incomplete_qdrant_canonical_payload(self):
+        for mutation in (
+            "tampered-value",
+            "tampered-provenance",
+            "tampered-status",
+            "tampered-version",
+            "missing-scope",
+        ):
+            with self.subTest(mutation=mutation):
+                qdrant = _FakeQdrant()
+                neo4j = _FakeNeo4j()
+                backend = VectorGraphMemoryBackend(
+                    f"canonical-integrity-{mutation}",
+                    "http://qdrant",
+                    "bolt://neo4j",
+                    ("neo4j", "password"),
+                    qdrant_client=qdrant,
+                    neo4j_client=neo4j,
+                    decision_resolver=lambda txn_id: (
+                        "COMMITTED" if txn_id == "txn-overlay" else None
+                    ),
+                )
+                backend.write("shared", value="original")
+                intents = [
+                    self._intent(
+                        "txn-overlay",
+                        1,
+                        "status_overlay",
+                        memory_id="shared",
+                        target_status="invalid",
+                    )
+                ]
+                backend.stage_transaction("txn-overlay", intents)
+                payload = qdrant.points[
+                    (f"canonical-integrity-{mutation}", "shared")
+                ]["payload"]
+                if mutation == "tampered-value":
+                    payload["value"] = "attacker-controlled"
+                elif mutation == "tampered-provenance":
+                    payload["derived_from"] = ["attacker-source"]
+                elif mutation == "tampered-status":
+                    payload["status"] = "superseded"
+                elif mutation == "tampered-version":
+                    payload["version"] = 9
+                else:
+                    payload.pop("scope")
+
+                result = backend.finalize_transaction("txn-overlay", intents)
+
+                self.assertIn(result["status"], {"partial", "unknown"})
+                graph = neo4j.memories[
+                    (f"canonical-integrity-{mutation}", "shared")
+                ]
+                self.assertEqual((graph["status"], graph["version"]), ("active", 1))
+                self.assertEqual(graph["value"], "original")
 
     def test_exact_verification_covers_objects_nodes_and_direct_edges_without_values(self):
         decisions = {"txn-all": "COMMITTED"}
