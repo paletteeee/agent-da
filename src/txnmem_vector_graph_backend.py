@@ -40,6 +40,16 @@ class VectorGraphCommitConflict(VectorGraphBackendError):
     code = "backend_commit_conflict"
 
 
+class _ServiceBoundaryFailure(VectorGraphBackendError):
+    """Fallback wrapper when an exhausted exception cannot carry provenance."""
+
+    def __init__(self, service: str, operation: str, cause: Exception):
+        super().__init__(f"{service}:{operation} failed: {cause}")
+        self.service = str(service)
+        self.operation = str(operation)
+        self.__cause__ = cause
+
+
 def _qdrant_point_id(namespace: str, memory_id: str) -> str:
     """Map arbitrary application IDs to Qdrant's UUID-compatible point IDs."""
 
@@ -221,6 +231,11 @@ class _Neo4jBoltClient:
             for key, group in sorted(groups.items()):
                 self._validate_legacy_canonical_group(key, group)
                 winner = min(group, key=self._legacy_winner_key)
+                merged_labels, merged_properties = self._legacy_merged_winner(
+                    winner, group
+                )
+                winner["merged_labels"] = merged_labels
+                winner["merged_properties"] = merged_properties
                 winners[key] = winner
                 for candidate in group:
                     if candidate["element_id"] == winner["element_id"]:
@@ -236,39 +251,66 @@ class _Neo4jBoltClient:
 
             loser_ids = sorted(replacement_ids)
             if loser_ids:
-                relationships = [
-                    {
-                        "relationship_id": str(row["relationship_id"]),
-                        "relationship_type": str(row["relationship_type"]),
-                        "source_id": replacement_ids.get(
-                            str(row["source_id"]), str(row["source_id"])
-                        ),
-                        "target_id": replacement_ids.get(
-                            str(row["target_id"]), str(row["target_id"])
-                        ),
-                        "properties": copy.deepcopy(dict(row["properties"])),
-                    }
-                    for row in tx.run(
+                participant_ids = sorted(
+                    set(loser_ids) | set(replacement_ids.values())
+                )
+                relationship_rows = list(
+                    tx.run(
                         "MATCH (source)-[relationship:DERIVED_FROM|SUPERSEDES]->(target) "
-                        "WHERE elementId(source) IN $loser_ids "
-                        "OR elementId(target) IN $loser_ids "
+                        "WHERE elementId(source) IN $participant_ids "
+                        "OR elementId(target) IN $participant_ids "
                         "RETURN elementId(relationship) AS relationship_id, "
                         "type(relationship) AS relationship_type, "
                         "elementId(source) AS source_id, elementId(target) AS target_id, "
                         "properties(relationship) AS properties "
                         "ORDER BY relationship_id",
-                        loser_ids=loser_ids,
+                        participant_ids=participant_ids,
                     )
-                ]
+                )
                 tx.run(
                     "MATCH ()-[relationship]->() "
                     "WHERE elementId(relationship) IN $relationship_ids "
                     "DELETE relationship",
                     relationship_ids=[
-                        relationship["relationship_id"]
-                        for relationship in relationships
+                        str(row["relationship_id"])
+                        for row in relationship_rows
                     ],
                 ).consume()
+                relationships_by_fingerprint: dict[str, dict[str, Any]] = {}
+                for row in relationship_rows:
+                    original_source_id = str(row["source_id"])
+                    original_target_id = str(row["target_id"])
+                    source_id = replacement_ids.get(
+                        original_source_id, original_source_id
+                    )
+                    target_id = replacement_ids.get(
+                        original_target_id, original_target_id
+                    )
+                    if (
+                        source_id == target_id
+                        and original_source_id != original_target_id
+                    ):
+                        continue
+                    relationship = {
+                        "relationship_type": str(row["relationship_type"]),
+                        "source_id": source_id,
+                        "target_id": target_id,
+                        "properties": copy.deepcopy(dict(row["properties"])),
+                    }
+                    fingerprint = json.dumps(
+                        relationship,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        default=str,
+                        separators=(",", ":"),
+                    )
+                    relationships_by_fingerprint.setdefault(
+                        fingerprint, relationship
+                    )
+                relationships = [
+                    relationships_by_fingerprint[fingerprint]
+                    for fingerprint in sorted(relationships_by_fingerprint)
+                ]
                 for relationship_type in ("DERIVED_FROM", "SUPERSEDES"):
                     rewired = [
                         {
@@ -291,19 +333,28 @@ class _Neo4jBoltClient:
                     ).consume()
 
             for key, winner in sorted(winners.items()):
+                labels = sorted(
+                    set(winner["merged_labels"]) - {"MemoryIdentity"}
+                )
+                label_clause = "".join(
+                    f":`{label.replace('`', '``')}`" for label in labels
+                )
                 tx.run(
                     "MATCH (winner) WHERE elementId(winner)=$winner_id "
                     "AND winner.namespace=$namespace "
                     "AND winner.memory_id=$memory_id "
-                    "SET winner:MemoryIdentity, "
+                    f"SET winner:MemoryIdentity{label_clause}, "
+                    "winner += $merged_properties, "
                     "winner.canonical=CASE WHEN $canonical "
-                    "THEN coalesce(winner.canonical, true) "
+                    "THEN true "
                     "ELSE coalesce(winner.canonical, false) END "
                     "REMOVE winner._migration_lock",
                     winner_id=winner["element_id"],
                     namespace=key[0],
                     memory_id=key[1],
                     canonical=self._legacy_is_canonical(winner),
+                    merged_labels=sorted(winner["merged_labels"]),
+                    merged_properties=winner["merged_properties"],
                 ).consume()
             if losers:
                 tx.run(
@@ -347,7 +398,19 @@ class _Neo4jBoltClient:
     @staticmethod
     def _legacy_is_canonical(candidate: Mapping[str, Any]) -> bool:
         properties = candidate["properties"]
-        return bool(properties.get("canonical") is True or "Memory" in candidate["labels"])
+        state_hash = properties.get("canonical_state_hash") or properties.get(
+            "_canonical_state_hash"
+        )
+        canonical_evidence = (
+            state_hash is not None
+            and properties.get("status") is not None
+            and properties.get("version") is not None
+        )
+        return bool(
+            properties.get("canonical") is True
+            or "Memory" in candidate["labels"]
+            or canonical_evidence
+        )
 
     @staticmethod
     def _legacy_version(candidate: Mapping[str, Any]) -> int:
@@ -391,6 +454,86 @@ class _Neo4jBoltClient:
             -label_rank,
             str(candidate["element_id"]),
         )
+
+    @classmethod
+    def _legacy_merged_winner(
+        cls,
+        winner: Mapping[str, Any],
+        group: Sequence[Mapping[str, Any]],
+    ) -> tuple[set[str], dict[str, Any]]:
+        labels = {
+            str(label)
+            for candidate in group
+            for label in candidate["labels"]
+        }
+        labels.add("MemoryIdentity")
+        if cls._legacy_is_canonical(winner):
+            labels.add("Memory")
+
+        ignored = {
+            "_migration_lock",
+            "_claim_lock",
+            "_cas_lock",
+            "_projection_lock",
+        }
+        canonical_fields = (
+            {
+                "namespace",
+                "memory_id",
+                "canonical",
+                "version",
+                "status",
+                "value",
+                "agent_id",
+                "scope",
+                "canonical_state_hash",
+                "_canonical_state_hash",
+                "canonical_source_ids",
+                "derived_from",
+                "canonical_supersedes_id",
+                "supersedes_id",
+                "canonical_operation_id",
+                "_canonical_operation_id",
+            }
+            if cls._legacy_is_canonical(winner)
+            else set()
+        )
+        merged = {
+            str(field): copy.deepcopy(value)
+            for field, value in winner["properties"].items()
+            if field not in ignored
+        }
+        fields = sorted(
+            {
+                str(field)
+                for candidate in group
+                for field in candidate["properties"]
+                if field not in ignored
+            }
+        )
+        for field in fields:
+            if field in canonical_fields:
+                continue
+            if merged.get(field) is not None:
+                continue
+            values: dict[str, Any] = {}
+            for candidate in group:
+                value = candidate["properties"].get(field)
+                if value is None:
+                    continue
+                fingerprint = json.dumps(
+                    value,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                    separators=(",", ":"),
+                )
+                values.setdefault(fingerprint, value)
+            if len(values) == 1:
+                merged[field] = copy.deepcopy(next(iter(values.values())))
+        if cls._legacy_is_canonical(winner):
+            merged["canonical"] = True
+        return labels, merged
 
     @staticmethod
     def _legacy_canonical_evidence(candidate: Mapping[str, Any]) -> dict[str, Any]:
@@ -579,6 +722,7 @@ class _Neo4jBoltClient:
                     "SET m.status=$status, m.target_status=$target_status, "
                     "m.payload_hash=$payload_hash, m.version=$version, "
                     "m.base_version=$base_version, "
+                    "m.staged_state_hash=$staged_state_hash, "
                     "m.operation=$operation, m.agent_id=$agent_id, m.scope=$scope, "
                     "m.derived_from=$source_ids, m.supersedes_id=$supersedes_id",
                     namespace=namespace,
@@ -589,6 +733,7 @@ class _Neo4jBoltClient:
                     status=payload["status"],
                     target_status=payload["target_status"],
                     payload_hash=payload["payload_hash"],
+                    staged_state_hash=payload["staged_state_hash"],
                     version=int(payload["version"]),
                     base_version=int(payload.get("base_version", 0)),
                     operation=payload["operation"],
@@ -949,6 +1094,26 @@ class _Neo4jBoltClient:
             return {"read_ok": False, "error": type(exc).__name__}
         return {"read_ok": True, "nodes": nodes, "edges": edges}
 
+    def retrieve_txn_ids_by_memory(self, namespace, memory_id):
+        try:
+            with self.driver.session() as session:
+                record = session.run(
+                    "MATCH (m:TxnMemory {namespace:$namespace, memory_id:$memory_id}) "
+                    "RETURN collect(DISTINCT m.txn_id) AS txn_ids",
+                    namespace=namespace,
+                    memory_id=memory_id,
+                ).single()
+        except Exception as exc:
+            return {"read_ok": False, "error": type(exc).__name__}
+        return {
+            "read_ok": True,
+            "txn_ids": sorted(
+                str(txn_id)
+                for txn_id in ((record or {}).get("txn_ids") or [])
+                if txn_id is not None
+            ),
+        }
+
     def delete_many_by_txn(self, namespace, txn_id, idempotency_key):
         with self.driver.session() as session:
             session.run(
@@ -1044,6 +1209,149 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         )
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
+    def _staged_state_material(
+        self, row: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        required = {
+            "txn_id",
+            "record_kind",
+            "sequence",
+            "operation",
+            "memory_id",
+            "payload_hash",
+            "status",
+            "target_status",
+            "version",
+            "base_version",
+            "derived_from",
+            "supersedes_id",
+        }
+        if not required.issubset(row):
+            raise ValueError("incomplete staged state")
+        record_kind = str(row["record_kind"])
+        if record_kind not in {"memory", "status_overlay"}:
+            raise ValueError("unsupported staged record kind")
+        target_status = str(row["target_status"])
+        physical_status = str(row["status"])
+        if physical_status not in {"pending", target_status}:
+            raise ValueError("invalid staged physical status")
+        source_ids = row["derived_from"]
+        if not isinstance(source_ids, (list, tuple, set)):
+            raise ValueError("invalid staged provenance")
+
+        material = {
+            str(field): copy.deepcopy(value)
+            for field, value in row.items()
+            if field not in {"namespace", "staged_state_hash", "value"}
+        }
+        material["namespace"] = self.db_namespace
+        material["txn_id"] = str(row["txn_id"])
+        material["record_kind"] = record_kind
+        material["sequence"] = int(row["sequence"])
+        material["operation"] = str(row["operation"])
+        material["memory_id"] = str(row["memory_id"])
+        material["status"] = "durable"
+        material["target_status"] = target_status
+        material["version"] = int(row["version"])
+        material["base_version"] = int(row["base_version"])
+        material["derived_from"] = sorted(
+            {str(source_id) for source_id in source_ids}
+        )
+        material["supersedes_id"] = (
+            str(row["supersedes_id"])
+            if row.get("supersedes_id") is not None
+            else None
+        )
+        if record_kind == "memory":
+            if "value" not in row:
+                raise ValueError("staged memory value is missing")
+            payload_hash = self._payload_hash(row["value"])
+        else:
+            payload_hash = self._payload_hash(
+                [
+                    material["memory_id"],
+                    target_status,
+                    material["sequence"],
+                ]
+            )
+        if str(row["payload_hash"]) != payload_hash:
+            raise ValueError("staged payload hash mismatch")
+        material["payload_hash"] = payload_hash
+        return material
+
+    def _staged_state_hash(self, row: Mapping[str, Any]) -> str:
+        return self._payload_hash(self._staged_state_material(row))
+
+    def _staged_row_evidence(
+        self,
+        row: Mapping[str, Any],
+        *,
+        qdrant_payload: bool,
+        normalize_status: bool,
+    ) -> dict[str, Any] | None:
+        required = {
+            "txn_id",
+            "record_kind",
+            "sequence",
+            "operation",
+            "memory_id",
+            "payload_hash",
+            "status",
+            "target_status",
+            "version",
+            "base_version",
+            "derived_from",
+            "staged_state_hash",
+        }
+        if not required.issubset(row):
+            return None
+        try:
+            record_kind = str(row["record_kind"])
+            if record_kind not in {"memory", "status_overlay"}:
+                return None
+            target_status = str(row["target_status"])
+            physical_status = str(row["status"])
+            if physical_status not in {"pending", target_status}:
+                return None
+            source_ids = row["derived_from"]
+            if not isinstance(source_ids, (list, tuple, set)):
+                return None
+            if qdrant_payload:
+                payload_hash = self._staged_state_material(row)["payload_hash"]
+                if str(row["staged_state_hash"]) != self._staged_state_hash(row):
+                    return None
+            else:
+                payload_hash = str(row["payload_hash"])
+            return {
+                "txn_id": str(row["txn_id"]),
+                "record_kind": record_kind,
+                "sequence": int(row["sequence"]),
+                "operation": str(row["operation"]),
+                "memory_id": str(row["memory_id"]),
+                "payload_hash": payload_hash,
+                "staged_state_hash": str(row["staged_state_hash"]),
+                "status": "durable" if normalize_status else physical_status,
+                "target_status": target_status,
+                "version": int(row["version"]),
+                "base_version": int(row["base_version"]),
+                "agent_id": row.get("agent_id")
+                if record_kind == "memory"
+                else None,
+                "scope": row.get("scope")
+                if record_kind == "memory"
+                else None,
+                "derived_from": sorted(
+                    {str(source_id) for source_id in source_ids}
+                ),
+                "supersedes_id": (
+                    str(row["supersedes_id"])
+                    if row.get("supersedes_id") is not None
+                    else None
+                ),
+            }
+        except (KeyError, TypeError, ValueError):
+            return None
+
     def _transaction_rows(
         self, txn_id: str, intents: Sequence[Mapping[str, Any]]
     ) -> list[dict[str, Any]]:
@@ -1137,6 +1445,8 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                     ),
                 }
             )
+        for row in rows:
+            row["staged_state_hash"] = self._staged_state_hash(row)
         return sorted(
             rows,
             key=lambda row: (
@@ -1162,6 +1472,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             "target_status",
             "version",
             "base_version",
+            "staged_state_hash",
             "derived_from",
             "supersedes_id",
         )
@@ -1196,12 +1507,14 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             raise VectorGraphBackendError(detail)
         return result
 
-    def _qdrant_transaction_state(self, txn_id: str) -> dict[str, Any]:
+    def _qdrant_transaction_evidence(
+        self, txn_id: str, *, operation: str = "transaction_readback"
+    ) -> dict[str, Any]:
         key = self._transaction_key(txn_id, 0, "qdrant_readback")
         try:
             result = self._call(
                 "qdrant",
-                "transaction_readback",
+                operation,
                 lambda: self._require_readback(
                     self.qdrant.retrieve_many_by_txn(
                         self.db_namespace, txn_id
@@ -1216,25 +1529,27 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             error = result.get("error", "readback_failed") if isinstance(result, Mapping) else "invalid_readback"
             return {"read_ok": False, "error": str(error)}
         rows = [
-            self._safe_transaction_row(row)
+            copy.deepcopy(dict(row))
             for row in result.get("rows", [])
             if isinstance(row, Mapping)
         ]
         rows.sort(
             key=lambda row: (
-                int(row.get("sequence", 0)),
+                str(row.get("sequence", "")),
                 str(row.get("record_kind", "")),
                 str(row.get("memory_id", "")),
             )
         )
-        return {"read_ok": True, "objects": rows}
+        return {"read_ok": True, "rows": rows}
 
-    def _neo4j_transaction_state(self, txn_id: str) -> dict[str, Any]:
+    def _neo4j_transaction_evidence(
+        self, txn_id: str, *, operation: str = "transaction_readback"
+    ) -> dict[str, Any]:
         key = self._transaction_key(txn_id, 0, "neo4j_readback")
         try:
             result = self._call(
                 "neo4j",
-                "transaction_readback",
+                operation,
                 lambda: self._require_readback(
                     self.neo4j.retrieve_many_by_txn(
                         self.db_namespace, txn_id
@@ -1249,30 +1564,58 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             error = result.get("error", "readback_failed") if isinstance(result, Mapping) else "invalid_readback"
             return {"read_ok": False, "error": str(error)}
         nodes = [
-            self._safe_transaction_row(row)
+            copy.deepcopy(dict(row))
             for row in result.get("nodes", [])
             if isinstance(row, Mapping)
         ]
         nodes.sort(
             key=lambda row: (
-                int(row.get("sequence", 0)),
+                str(row.get("sequence", "")),
                 str(row.get("record_kind", "")),
                 str(row.get("memory_id", "")),
             )
         )
         edges = [
-            self._safe_edge(edge)
+            copy.deepcopy(dict(edge))
             for edge in result.get("edges", [])
             if isinstance(edge, Mapping)
         ]
         edges.sort(
             key=lambda edge: (
-                edge["kind"],
-                edge["source_id"],
-                edge["target_id"],
+                str(edge.get("kind", "")),
+                str(edge.get("source_id", "")),
+                str(edge.get("target_id", "")),
             )
         )
         return {"read_ok": True, "nodes": nodes, "edges": edges}
+
+    def _qdrant_transaction_state(self, txn_id: str) -> dict[str, Any]:
+        evidence = self._qdrant_transaction_evidence(txn_id)
+        if not evidence.get("read_ok", False):
+            return evidence
+        return {
+            "read_ok": True,
+            "objects": [
+                self._safe_transaction_row(row)
+                for row in evidence.get("rows", [])
+            ],
+        }
+
+    def _neo4j_transaction_state(self, txn_id: str) -> dict[str, Any]:
+        evidence = self._neo4j_transaction_evidence(txn_id)
+        if not evidence.get("read_ok", False):
+            return evidence
+        return {
+            "read_ok": True,
+            "nodes": [
+                self._safe_transaction_row(row)
+                for row in evidence.get("nodes", [])
+            ],
+            "edges": [
+                self._safe_edge(edge)
+                for edge in evidence.get("edges", [])
+            ],
+        }
 
     def _call(self, service: str, operation: str, function: Callable[[], Any], key: str) -> Any:
         attempts = 0
@@ -1287,9 +1630,20 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 else:
                     result = function()
                 break
-            except Exception:
+            except Exception as exc:
+                if getattr(exc, "_txnmem_service", None) is not None or isinstance(
+                    exc, _ServiceBoundaryFailure
+                ):
+                    raise
                 if attempts > self.max_retries:
                     self._metrics["error_count"] += 1
+                    try:
+                        setattr(exc, "_txnmem_service", str(service))
+                        setattr(exc, "_txnmem_operation", str(operation))
+                    except Exception:
+                        raise _ServiceBoundaryFailure(
+                            service, operation, exc
+                        ) from exc
                     raise
                 self._metrics["retry_count"] += 1
         elapsed = (time.perf_counter() - started) * 1000.0
@@ -1406,6 +1760,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             "payload_hash",
             "target_status",
             "base_version",
+            "staged_state_hash",
             "_canonical_state_hash",
             "_canonical_operation_id",
         ):
@@ -1569,63 +1924,64 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         *,
         operation: str,
         excluded_txn_id: str | None,
+        discover_missing: bool,
     ) -> tuple[list[dict[str, Any]], bool]:
-        committed: dict[str, list[Mapping[str, Any]]] = {}
+        committed_ids: set[str] = set()
         for row in rows:
             txn_id = row.get("txn_id")
             if txn_id is None or str(txn_id) == excluded_txn_id:
                 continue
             if self._decision(str(txn_id)) != "COMMITTED":
                 continue
-            committed.setdefault(str(txn_id), []).append(row)
+            committed_ids.add(str(txn_id))
         groups: list[dict[str, Any]] = []
         unverified = False
-        for txn_id, qdrant_rows in sorted(committed.items()):
-            key = self._transaction_key(txn_id, 0, f"{operation}_staged")
-            try:
-                raw = self._call(
-                    "neo4j",
-                    f"{operation}_staged",
-                    lambda txn_id=txn_id: self._require_readback(
-                        self.neo4j.retrieve_many_by_txn(
-                            self.db_namespace, txn_id
+        if discover_missing:
+            discover = getattr(self.neo4j, "retrieve_txn_ids_by_memory", None)
+            if callable(discover):
+                key = self._key(f"{operation}_staged_ids", memory_id)
+                try:
+                    discovered = self._call(
+                        "neo4j",
+                        f"{operation}_staged_ids",
+                        lambda: self._require_readback(
+                            discover(self.db_namespace, memory_id),
+                            "Neo4j staged identity readback is unknown",
                         ),
-                        "Neo4j staged visibility readback is unknown",
-                    ),
-                    key,
-                )
-            except Exception:
+                        key,
+                    )
+                except Exception:
+                    unverified = True
+                else:
+                    for txn_id in discovered.get("txn_ids", []):
+                        txn_id = str(txn_id)
+                        if (
+                            txn_id != excluded_txn_id
+                            and self._decision(txn_id) == "COMMITTED"
+                        ):
+                            committed_ids.add(txn_id)
+
+        for txn_id in sorted(committed_ids):
+            qdrant = self._qdrant_transaction_evidence(
+                txn_id, operation=f"{operation}_staged"
+            )
+            neo4j = self._neo4j_transaction_evidence(
+                txn_id, operation=f"{operation}_staged"
+            )
+            if not self._transaction_evidence_matches(
+                qdrant, neo4j, normalize_status=True
+            ):
                 unverified = True
                 continue
-            if not isinstance(raw, Mapping) or not raw.get("read_ok", False):
-                unverified = True
-                continue
+            qdrant_rows = qdrant.get("rows", [])
             relevant_qdrant = [
                 row
                 for row in qdrant_rows
-                if str(row.get("memory_id")) == memory_id
-                and row.get("record_kind") in {"memory", "status_overlay"}
-            ]
-            relevant_neo4j = [
-                row
-                for row in raw.get("nodes", [])
                 if isinstance(row, Mapping)
                 and str(row.get("memory_id")) == memory_id
                 and row.get("record_kind") in {"memory", "status_overlay"}
             ]
-            qdrant_safe = sorted(
-                self._record_fingerprint(self._safe_transaction_row(row))
-                for row in relevant_qdrant
-            )
-            neo4j_safe = sorted(
-                self._record_fingerprint(self._safe_transaction_row(row))
-                for row in relevant_neo4j
-            )
-            if (
-                not relevant_qdrant
-                or len(relevant_qdrant) != len(qdrant_rows)
-                or qdrant_safe != neo4j_safe
-            ):
+            if not relevant_qdrant:
                 unverified = True
                 continue
             memory_rows = [
@@ -1703,6 +2059,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             rows,
             operation=operation,
             excluded_txn_id=excluded_txn_id,
+            discover_missing=canonical["status"] == "absent",
         )
         current = (
             copy.deepcopy(canonical["record"])
@@ -2527,7 +2884,6 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         ]
         return {
             "rows": rows,
-            "safe_rows": [self._safe_transaction_row(row) for row in rows],
             "edges": sorted(
                 edges,
                 key=lambda edge: (
@@ -2541,9 +2897,14 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
     ) -> list[dict[str, Any]]:
         rows_by_memory: dict[str, list[dict[str, Any]]] = {}
         for row in expected["rows"]:
-            rows_by_memory.setdefault(str(row["memory_id"]), []).append(
-                self._safe_transaction_row(row)
+            evidence = self._staged_row_evidence(
+                row, qdrant_payload=True, normalize_status=True
             )
+            if evidence is None:
+                raise VectorGraphBackendError(
+                    "expected staged claim evidence is invalid"
+                )
+            rows_by_memory.setdefault(str(row["memory_id"]), []).append(evidence)
         claims = []
         for memory_id, rows in sorted(rows_by_memory.items()):
             rows.sort(
@@ -2571,87 +2932,185 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             )
         return claims
 
-    @staticmethod
-    def _canonical_verification_row(row: Mapping[str, Any]) -> dict[str, Any]:
-        normalized = copy.deepcopy(dict(row))
-        if normalized.get("status") in {
-            "pending",
-            normalized.get("target_status"),
-        }:
-            normalized["status"] = "durable"
-        return normalized
+    def _canonical_staged_rows(
+        self,
+        rows: Iterable[Mapping[str, Any]],
+        *,
+        qdrant_payload: bool,
+        normalize_status: bool,
+    ) -> list[dict[str, Any]] | None:
+        canonical: list[dict[str, Any]] = []
+        for row in rows:
+            evidence = self._staged_row_evidence(
+                row,
+                qdrant_payload=qdrant_payload,
+                normalize_status=normalize_status,
+            )
+            if evidence is None:
+                return None
+            canonical.append(evidence)
+        canonical.sort(
+            key=lambda row: (
+                int(row["sequence"]),
+                str(row["record_kind"]),
+                str(row["memory_id"]),
+            )
+        )
+        return canonical
 
     @staticmethod
-    def _canonical_verification_edge(
-        edge: Mapping[str, Any], target_status: str
-    ) -> dict[str, Any]:
-        normalized = copy.deepcopy(dict(edge))
-        if normalized.get("status") in {"pending", target_status}:
-            normalized["status"] = "durable"
-        return normalized
+    def _canonical_staged_edge(
+        edge: Mapping[str, Any], target_statuses: Mapping[str, str]
+    ) -> dict[str, Any] | None:
+        required = {"txn_id", "kind", "source_id", "target_id", "status"}
+        if not required.issubset(edge):
+            return None
+        kind = str(edge["kind"])
+        if kind not in {"DERIVED_FROM", "SUPERSEDES"}:
+            return None
+        owner_id = str(
+            edge["target_id"] if kind == "DERIVED_FROM" else edge["source_id"]
+        )
+        target_status = str(target_statuses.get(owner_id, "active"))
+        if str(edge["status"]) not in {"pending", target_status}:
+            return None
+        return {
+            "txn_id": str(edge["txn_id"]),
+            "kind": kind,
+            "source_id": str(edge["source_id"]),
+            "target_id": str(edge["target_id"]),
+            "status": "durable",
+        }
+
+    def _canonical_staged_edges(
+        self,
+        edges: Iterable[Mapping[str, Any]],
+        target_statuses: Mapping[str, str],
+    ) -> list[dict[str, Any]] | None:
+        canonical: list[dict[str, Any]] = []
+        for edge in edges:
+            evidence = self._canonical_staged_edge(edge, target_statuses)
+            if evidence is None:
+                return None
+            canonical.append(evidence)
+        canonical.sort(
+            key=lambda edge: (
+                edge["kind"],
+                edge["source_id"],
+                edge["target_id"],
+                edge["txn_id"],
+            )
+        )
+        return canonical
+
+    @staticmethod
+    def _staged_edges_from_rows(
+        rows: Iterable[Mapping[str, Any]],
+    ) -> list[dict[str, Any]]:
+        edges: list[dict[str, Any]] = []
+        for row in rows:
+            if row.get("record_kind") != "memory":
+                continue
+            txn_id = str(row["txn_id"])
+            memory_id = str(row["memory_id"])
+            status = str(row["status"])
+            for source_id in sorted(
+                {str(item) for item in row.get("derived_from", [])}
+            ):
+                edges.append(
+                    {
+                        "txn_id": txn_id,
+                        "kind": "DERIVED_FROM",
+                        "source_id": source_id,
+                        "target_id": memory_id,
+                        "status": status,
+                    }
+                )
+            if row.get("supersedes_id") is not None:
+                edges.append(
+                    {
+                        "txn_id": txn_id,
+                        "kind": "SUPERSEDES",
+                        "source_id": memory_id,
+                        "target_id": str(row["supersedes_id"]),
+                        "status": status,
+                    }
+                )
+        return edges
 
     def _qdrant_matches(
-        self, state: Mapping[str, Any], expected: Mapping[str, Any]
+        self,
+        state: Mapping[str, Any],
+        expected: Mapping[str, Any],
+        *,
+        normalize_status: bool = False,
     ) -> bool:
         if not state.get("read_ok", False):
             return False
-        actual_rows = [
-            self._canonical_verification_row(row)
-            for row in state.get("objects", [])
-        ]
-        expected_rows = [
-            self._canonical_verification_row(row)
-            for row in expected["safe_rows"]
-        ]
-        return actual_rows == expected_rows
+        actual_rows = self._canonical_staged_rows(
+            state.get("rows", []),
+            qdrant_payload=True,
+            normalize_status=normalize_status,
+        )
+        expected_rows = self._canonical_staged_rows(
+            expected["rows"],
+            qdrant_payload=True,
+            normalize_status=normalize_status,
+        )
+        return actual_rows is not None and actual_rows == expected_rows
 
     def _neo4j_matches(
-        self, state: Mapping[str, Any], expected: Mapping[str, Any]
+        self,
+        state: Mapping[str, Any],
+        expected: Mapping[str, Any],
+        *,
+        normalize_status: bool = False,
     ) -> bool:
         if not state.get("read_ok", False):
             return False
-        actual_nodes = [
-            self._canonical_verification_row(row)
-            for row in state.get("nodes", [])
-        ]
-        expected_nodes = [
-            self._canonical_verification_row(row)
-            for row in expected["safe_rows"]
-        ]
+        actual_nodes = self._canonical_staged_rows(
+            state.get("nodes", []),
+            qdrant_payload=False,
+            normalize_status=normalize_status,
+        )
+        expected_nodes = self._canonical_staged_rows(
+            expected["rows"],
+            qdrant_payload=True,
+            normalize_status=normalize_status,
+        )
+        if actual_nodes is None or expected_nodes is None:
+            return False
         target_statuses = {
             str(row["memory_id"]): str(row["target_status"])
-            for row in expected["safe_rows"]
+            for row in expected["rows"]
             if row.get("record_kind") == "memory"
         }
-        actual_edges = [
-            self._canonical_verification_edge(
-                edge,
-                target_statuses.get(
-                    str(
-                        edge["target_id"]
-                        if edge["kind"] == "DERIVED_FROM"
-                        else edge["source_id"]
-                    ),
-                    "active",
-                ),
-            )
-            for edge in state.get("edges", [])
-        ]
-        expected_edges = [
-            self._canonical_verification_edge(
-                edge,
-                target_statuses.get(
-                    str(
-                        edge["target_id"]
-                        if edge["kind"] == "DERIVED_FROM"
-                        else edge["source_id"]
-                    ),
-                    "active",
-                ),
-            )
-            for edge in expected["edges"]
-        ]
+        actual_edges = self._canonical_staged_edges(
+            state.get("edges", []), target_statuses
+        )
+        expected_edges = self._canonical_staged_edges(
+            expected["edges"], target_statuses
+        )
         return actual_nodes == expected_nodes and actual_edges == expected_edges
+
+    def _transaction_evidence_matches(
+        self,
+        qdrant: Mapping[str, Any],
+        neo4j: Mapping[str, Any],
+        *,
+        normalize_status: bool,
+    ) -> bool:
+        if not qdrant.get("read_ok", False) or not neo4j.get("read_ok", False):
+            return False
+        expected = {
+            "rows": qdrant.get("rows", []),
+            "edges": self._staged_edges_from_rows(qdrant.get("rows", [])),
+        }
+        return self._qdrant_matches(
+            qdrant, expected, normalize_status=normalize_status
+        ) and self._neo4j_matches(
+            neo4j, expected, normalize_status=normalize_status
+        )
 
     def stage_transaction(
         self,
@@ -2708,7 +3167,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             except Exception as exc:
                 qdrant_errors.append(exc)
         if qdrant_errors and not self._qdrant_matches(
-            self._qdrant_transaction_state(txn_id), expected
+            self._qdrant_transaction_evidence(txn_id), expected
         ):
             raise qdrant_errors[0]
         qdrant_evidence = {
@@ -2741,7 +3200,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             except Exception as exc:
                 neo4j_errors.append(exc)
         if neo4j_errors and not self._neo4j_matches(
-            self._neo4j_transaction_state(txn_id), expected
+            self._neo4j_transaction_evidence(txn_id), expected
         ):
             raise neo4j_errors[0]
         neo4j_evidence = {
@@ -2754,23 +3213,29 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             phase_hook("after_neo4j_stage", neo4j_evidence)
         return {"qdrant": qdrant_evidence, "neo4j": neo4j_evidence}
 
-    def verify_transaction(
-        self, txn_id: str, intents: Sequence[Mapping[str, Any]]
+    def _verify_transaction(
+        self,
+        txn_id: str,
+        intents: Sequence[Mapping[str, Any]],
+        *,
+        normalize_status: bool,
     ) -> Mapping[str, Any]:
         txn_id = str(txn_id)
         try:
             expected = self._expected_transaction_state(txn_id, intents)
         except Exception:
             return {"status": "unknown", "txn_id": txn_id}
-        qdrant = self._qdrant_transaction_state(txn_id)
-        neo4j = self._neo4j_transaction_state(txn_id)
+        qdrant = self._qdrant_transaction_evidence(txn_id)
+        neo4j = self._neo4j_transaction_evidence(txn_id)
         if not qdrant.get("read_ok", False) or not neo4j.get("read_ok", False):
             status = "unknown"
         else:
-            qdrant_empty = not qdrant.get("objects", [])
+            qdrant_empty = not qdrant.get("rows", [])
             neo4j_empty = not neo4j.get("nodes", []) and not neo4j.get("edges", [])
-            if self._qdrant_matches(qdrant, expected) and self._neo4j_matches(
-                neo4j, expected
+            if self._qdrant_matches(
+                qdrant, expected, normalize_status=normalize_status
+            ) and self._neo4j_matches(
+                neo4j, expected, normalize_status=normalize_status
             ):
                 status = "complete"
             elif qdrant_empty and neo4j_empty:
@@ -2779,11 +3244,23 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 status = "partial"
         return {"status": status, "txn_id": txn_id}
 
+    def verify_transaction(
+        self, txn_id: str, intents: Sequence[Mapping[str, Any]]
+    ) -> Mapping[str, Any]:
+        txn_id = str(txn_id)
+        return self._verify_transaction(
+            txn_id,
+            intents,
+            normalize_status=self._decision(txn_id) == "COMMITTED",
+        )
+
     def finalize_transaction(
         self, txn_id: str, intents: Sequence[Mapping[str, Any]]
     ) -> Mapping[str, Any]:
         txn_id = str(txn_id)
-        verification = self.verify_transaction(txn_id, intents)
+        verification = self._verify_transaction(
+            txn_id, intents, normalize_status=True
+        )
         if verification["status"] != "complete":
             return verification
         expected = self._expected_transaction_state(txn_id, intents)

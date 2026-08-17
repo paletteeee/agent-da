@@ -444,6 +444,21 @@ class _FakeNeo4j:
             ],
         }
 
+    def retrieve_txn_ids_by_memory(self, namespace, memory_id):
+        if self.fail_readback:
+            raise TimeoutError("neo4j staged identity readback unavailable")
+        return {
+            "read_ok": True,
+            "txn_ids": sorted(
+                {
+                    str(row["txn_id"])
+                    for key, row in self.staged_memories.items()
+                    if key[0] == namespace
+                    and str(row.get("memory_id")) == str(memory_id)
+                }
+            ),
+        }
+
     def delete_many_by_txn(self, namespace, txn_id, idempotency_key):
         self.cleanup_count += 1
         if self.fail_cleanup:
@@ -506,14 +521,16 @@ class _MigrationTransaction:
                 )
             return _MigrationRows(rows)
         if "RETURN elementId(relationship) AS relationship_id" in query:
-            loser_ids = set(parameters["loser_ids"])
+            participant_ids = set(
+                parameters.get("participant_ids", parameters.get("loser_ids", []))
+            )
             rows = []
             for relationship_id, relationship in sorted(self.relationships.items()):
                 if relationship["type"] not in {"DERIVED_FROM", "SUPERSEDES"}:
                     continue
                 if (
-                    relationship["source_id"] not in loser_ids
-                    and relationship["target_id"] not in loser_ids
+                    relationship["source_id"] not in participant_ids
+                    and relationship["target_id"] not in participant_ids
                 ):
                     continue
                 rows.append(
@@ -547,9 +564,12 @@ class _MigrationTransaction:
             return _MigrationRows()
         if "SET winner:MemoryIdentity" in query:
             winner = self.nodes[parameters["winner_id"]]
-            winner["labels"].add("MemoryIdentity")
+            winner["labels"].update(parameters.get("merged_labels", []))
+            winner["properties"].update(
+                copy.deepcopy(parameters.get("merged_properties", {}))
+            )
             if parameters["canonical"]:
-                winner["properties"].setdefault("canonical", True)
+                winner["properties"]["canonical"] = True
             winner["properties"].pop("_migration_lock", None)
             return _MigrationRows()
         if "DETACH DELETE loser" in query:
@@ -608,6 +628,50 @@ class _MigrationDriver:
             return result
 
         def run(self, query, **_parameters):
+            if query.startswith(
+                "MATCH (m:MemoryIdentity:Memory {namespace:$namespace, memory_id:$memory_id})"
+            ):
+                namespace = _parameters["namespace"]
+                memory_id = _parameters["memory_id"]
+                for element_id, node in self.driver.nodes.items():
+                    properties = node["properties"]
+                    if (
+                        {"MemoryIdentity", "Memory"}.issubset(node["labels"])
+                        and properties.get("namespace") == namespace
+                        and properties.get("memory_id") == memory_id
+                        and properties.get("canonical", True)
+                    ):
+                        source_ids = sorted(
+                            self.driver.nodes[edge["target_id"]]["properties"]["memory_id"]
+                            for edge in self.driver.relationships.values()
+                            if edge["type"] == "DERIVED_FROM"
+                            and edge["source_id"] == element_id
+                        )
+                        supersedes_ids = sorted(
+                            self.driver.nodes[edge["target_id"]]["properties"]["memory_id"]
+                            for edge in self.driver.relationships.values()
+                            if edge["type"] == "SUPERSEDES"
+                            and edge["source_id"] == element_id
+                        )
+                        return _MigrationRows(
+                            [
+                                {
+                                    "status": properties.get("status"),
+                                    "version": properties.get("version", 1),
+                                    "source_ids": source_ids,
+                                    "supersedes_id": supersedes_ids[0]
+                                    if supersedes_ids
+                                    else None,
+                                    "state_hash": properties.get(
+                                        "canonical_state_hash"
+                                    ),
+                                    "operation_id": properties.get(
+                                        "canonical_operation_id"
+                                    ),
+                                }
+                            ]
+                        )
+                return _MigrationRows()
             if query.startswith("DROP CONSTRAINT memory_write_claim_unique"):
                 self.driver.constraints.discard("memory_write_claim_unique")
                 self.driver.events.append("claim_constraint_drop")
@@ -645,6 +709,16 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             "tool_name": tool_name,
             "arguments": arguments,
         }
+
+    def _assert_staged_fail_closed(self, backend, memory_id):
+        self.assertIsNone(backend.read_committed(memory_id))
+        self.assertNotIn(
+            memory_id,
+            [record["memory_id"] for record in backend.search_committed()],
+        )
+        with self.assertRaises(VectorGraphBackendError) as raised:
+            backend.current_version(memory_id)
+        self.assertEqual(raised.exception.code, "backend_state_unknown")
 
     def test_neo4j_healthcheck_reports_server_version(self):
         class Session:
@@ -992,6 +1066,307 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertEqual(driver.rollback_count, 1)
         self.assertEqual(driver.events, ["migration_begin", "migration_rollback"])
 
+    def test_neo4j_legacy_migration_preserves_canonical_winner_for_retrieval_and_reopen(self):
+        def node(labels, **properties):
+            return {
+                "labels": set(labels),
+                "properties": {
+                    "namespace": "tenant",
+                    "memory_id": "shared",
+                    **properties,
+                },
+            }
+
+        driver = _MigrationDriver(
+            {
+                "canonical-identity": node(
+                    {"MemoryIdentity", "IdentityMetadata"},
+                    canonical=True,
+                    version=5,
+                    status="active",
+                    value="new-value",
+                    agent_id="agent-new",
+                    scope="tenant:new",
+                    canonical_state_hash="hash-v5",
+                    canonical_source_ids=[],
+                    canonical_supersedes_id=None,
+                    identity_marker="keep-identity",
+                ),
+                "same-version-complement": node(
+                    {"Memory", "CanonicalMetadata"},
+                    canonical=True,
+                    version=5,
+                    status="active",
+                    value="new-value",
+                    agent_id="agent-new",
+                    scope="tenant:new",
+                    canonical_state_hash="hash-v5",
+                    audit_marker="merge-audit",
+                    ambiguous_metadata="left",
+                ),
+                "older-memory": node(
+                    {"Memory", "MemoryReference", "LegacyMetadata"},
+                    canonical=True,
+                    version=4,
+                    status="active",
+                    value="old-value",
+                    agent_id="agent-old",
+                    scope="tenant:old",
+                    canonical_state_hash="hash-v4",
+                    legacy_marker="merge-legacy",
+                    ambiguous_metadata="right",
+                ),
+            }
+        )
+        client = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
+        client.driver = driver
+
+        client._initialize_schema()
+
+        self.assertEqual(set(driver.nodes), {"canonical-identity"})
+        winner = driver.nodes["canonical-identity"]
+        self.assertEqual(
+            winner["labels"],
+            {
+                "MemoryIdentity",
+                "Memory",
+                "MemoryReference",
+                "IdentityMetadata",
+                "CanonicalMetadata",
+                "LegacyMetadata",
+            },
+        )
+        self.assertEqual(
+            {
+                field: winner["properties"].get(field)
+                for field in (
+                    "version",
+                    "value",
+                    "agent_id",
+                    "scope",
+                    "canonical_state_hash",
+                    "identity_marker",
+                    "audit_marker",
+                    "legacy_marker",
+                )
+            },
+            {
+                "version": 5,
+                "value": "new-value",
+                "agent_id": "agent-new",
+                "scope": "tenant:new",
+                "canonical_state_hash": "hash-v5",
+                "identity_marker": "keep-identity",
+                "audit_marker": "merge-audit",
+                "legacy_marker": "merge-legacy",
+            },
+        )
+        self.assertNotIn("ambiguous_metadata", winner["properties"])
+        self.assertNotIn("_migration_lock", winner["properties"])
+        self.assertEqual(
+            client.retrieve_memory("tenant", "shared"),
+            {
+                "status": "active",
+                "version": 5,
+                "source_ids": [],
+                "supersedes_id": None,
+                "state_hash": "hash-v5",
+                "operation_id": None,
+            },
+        )
+        self.assertEqual(
+            driver.constraints,
+            {"memory_identity_unique", "memory_write_claim_unique"},
+        )
+
+        first_state = copy.deepcopy(driver.nodes)
+        client._initialize_schema()
+
+        self.assertEqual(driver.nodes, first_state)
+        self.assertEqual(
+            client.retrieve_memory("tenant", "shared")["version"], 5
+        )
+
+    def test_neo4j_legacy_migration_does_not_backfill_newer_canonical_fields(self):
+        def node(element_labels, **properties):
+            return {
+                "labels": set(element_labels),
+                "properties": {
+                    "namespace": "tenant",
+                    "memory_id": "shared",
+                    **properties,
+                },
+            }
+
+        driver = _MigrationDriver(
+            {
+                "newer": node(
+                    {"MemoryIdentity"},
+                    version=6,
+                    status="active",
+                    value="new-value",
+                    canonical_state_hash="new-hash",
+                    newer_marker="keep-newer",
+                ),
+                "older": node(
+                    {"Memory", "LegacyMetadata"},
+                    canonical=True,
+                    version=5,
+                    status="active",
+                    value="old-value",
+                    agent_id="old-agent",
+                    scope="tenant:old",
+                    canonical_state_hash="old-hash",
+                    canonical_source_ids=["old-source"],
+                    canonical_supersedes_id="old-memory",
+                    legacy_marker="merge-safe-extra",
+                ),
+            }
+        )
+        client = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
+        client.driver = driver
+
+        client._initialize_schema()
+
+        self.assertEqual(set(driver.nodes), {"newer"})
+        winner = driver.nodes["newer"]
+        self.assertEqual(
+            winner["labels"],
+            {"MemoryIdentity", "Memory", "LegacyMetadata"},
+        )
+        self.assertEqual(winner["properties"]["version"], 6)
+        self.assertEqual(winner["properties"]["value"], "new-value")
+        self.assertTrue(winner["properties"]["canonical"])
+        self.assertEqual(
+            winner["properties"]["canonical_state_hash"], "new-hash"
+        )
+        self.assertEqual(
+            winner["properties"]["legacy_marker"], "merge-safe-extra"
+        )
+        for field in (
+            "agent_id",
+            "scope",
+            "canonical_source_ids",
+            "canonical_supersedes_id",
+        ):
+            self.assertNotIn(field, winner["properties"])
+        self.assertEqual(
+            client.retrieve_memory("tenant", "shared"),
+            {
+                "status": "active",
+                "version": 6,
+                "source_ids": [],
+                "supersedes_id": None,
+                "state_hash": "new-hash",
+                "operation_id": None,
+            },
+        )
+
+    def test_neo4j_legacy_migration_drops_collapsed_self_loops_and_duplicate_edges(self):
+        def node(memory_id):
+            return {
+                "labels": {"MemoryIdentity", "Memory"},
+                "properties": {
+                    "namespace": "tenant",
+                    "memory_id": memory_id,
+                    "canonical": True,
+                    "version": 2,
+                    "status": "active",
+                    "value": memory_id,
+                },
+            }
+
+        driver = _MigrationDriver(
+            {
+                "shared-a": node("shared"),
+                "shared-b": node("shared"),
+                "external": node("external"),
+            },
+            [
+                {
+                    "relationship_id": "collapsed-derived",
+                    "type": "DERIVED_FROM",
+                    "source_id": "shared-a",
+                    "target_id": "shared-b",
+                    "properties": {"reason": "collapse"},
+                },
+                {
+                    "relationship_id": "collapsed-supersedes",
+                    "type": "SUPERSEDES",
+                    "source_id": "shared-b",
+                    "target_id": "shared-a",
+                    "properties": {"reason": "collapse"},
+                },
+                {
+                    "relationship_id": "derived-existing",
+                    "type": "DERIVED_FROM",
+                    "source_id": "shared-a",
+                    "target_id": "external",
+                    "properties": {"direction": "outgoing", "weight": 1},
+                },
+                {
+                    "relationship_id": "derived-duplicate",
+                    "type": "DERIVED_FROM",
+                    "source_id": "shared-b",
+                    "target_id": "external",
+                    "properties": {"direction": "outgoing", "weight": 1},
+                },
+                {
+                    "relationship_id": "supersedes-existing",
+                    "type": "SUPERSEDES",
+                    "source_id": "external",
+                    "target_id": "shared-a",
+                    "properties": {"direction": "incoming", "weight": 2},
+                },
+                {
+                    "relationship_id": "supersedes-duplicate",
+                    "type": "SUPERSEDES",
+                    "source_id": "external",
+                    "target_id": "shared-b",
+                    "properties": {"direction": "incoming", "weight": 2},
+                },
+            ],
+        )
+        client = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
+        client.driver = driver
+
+        client._initialize_schema()
+
+        self.assertEqual(set(driver.nodes), {"shared-a", "external"})
+        relationships = [
+            (
+                edge["type"],
+                edge["source_id"],
+                edge["target_id"],
+                edge["properties"],
+            )
+            for edge in driver.relationships.values()
+        ]
+        self.assertEqual(
+            relationships,
+            [
+                (
+                    "DERIVED_FROM",
+                    "shared-a",
+                    "external",
+                    {"direction": "outgoing", "weight": 1},
+                ),
+                (
+                    "SUPERSEDES",
+                    "external",
+                    "shared-a",
+                    {"direction": "incoming", "weight": 2},
+                ),
+            ],
+        )
+        self.assertTrue(
+            all(source_id != target_id for _, source_id, target_id, _ in relationships)
+        )
+
+        first_state = copy.deepcopy(driver.relationships)
+        client._initialize_schema()
+        self.assertEqual(driver.relationships, first_state)
+
     def test_neo4j_transaction_cleanup_does_not_sweep_other_orphan_references(self):
         references = {"reference-owned-by-txn-b"}
 
@@ -1201,6 +1576,81 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             ],
         )
 
+    def test_qdrant_failure_does_not_multiply_or_relabel_neo4j_guard_retries(self):
+        observed = []
+
+        def requester(service, operation, function, key):
+            observed.append((service, operation))
+            if service == "qdrant" and operation == "write":
+                raise TimeoutError("persistent qdrant projection failure")
+            return function()
+
+        backend = VectorGraphMemoryBackend(
+            "projection-qdrant-failure",
+            "http://qdrant-proxy",
+            "bolt://neo4j-proxy",
+            ("neo4j", "password"),
+            proxy_requester=requester,
+            qdrant_client=_FakeQdrant(),
+            neo4j_client=_FakeNeo4j(),
+            max_retries=1,
+        )
+
+        with self.assertRaises(VectorGraphBackendError):
+            backend.write("shared", value="value")
+
+        self.assertEqual(observed.count(("qdrant", "write")), 2)
+        self.assertEqual(
+            observed.count(("neo4j", "write_projection_guard")), 1
+        )
+        self.assertEqual(observed.count(("qdrant", "write_read")), 1)
+        metrics = backend.metrics()
+        self.assertEqual(metrics["retry_count"], 1)
+        self.assertEqual(metrics["error_count"], 1)
+        self.assertEqual(metrics["operation_counts"]["qdrant:write"], 2)
+        self.assertEqual(
+            metrics["operation_counts"]["neo4j:write_projection_guard"], 1
+        )
+
+    def test_neo4j_guard_origin_failure_keeps_neo4j_retry_behavior(self):
+        observed = []
+        failures = {"remaining": 1}
+
+        def requester(service, operation, function, key):
+            observed.append((service, operation))
+            if (
+                service == "neo4j"
+                and operation == "write_projection_guard"
+                and failures["remaining"]
+            ):
+                failures["remaining"] -= 1
+                raise TimeoutError("one-shot neo4j guard failure")
+            return function()
+
+        backend = VectorGraphMemoryBackend(
+            "projection-neo4j-failure",
+            "http://qdrant-proxy",
+            "bolt://neo4j-proxy",
+            ("neo4j", "password"),
+            proxy_requester=requester,
+            qdrant_client=_FakeQdrant(),
+            neo4j_client=_FakeNeo4j(),
+            max_retries=1,
+        )
+
+        self.assertEqual(backend.write("shared", value="value")["value"], "value")
+
+        self.assertEqual(
+            observed.count(("neo4j", "write_projection_guard")), 2
+        )
+        self.assertEqual(observed.count(("qdrant", "write")), 1)
+        metrics = backend.metrics()
+        self.assertEqual(metrics["retry_count"], 1)
+        self.assertEqual(metrics["error_count"], 0)
+        self.assertEqual(
+            metrics["operation_counts"]["neo4j:write_projection_guard"], 2
+        )
+
     def test_direct_read_and_search_keep_proxy_and_request_metrics_boundaries(self):
         observed = []
 
@@ -1320,6 +1770,8 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             [
                 ("qdrant", "read_rows"),
                 ("neo4j", "read_canonical"),
+                ("neo4j", "read_staged_ids"),
+                ("qdrant", "read_staged"),
                 ("neo4j", "read_staged"),
                 ("neo4j", "read_staged"),
             ],
@@ -1432,6 +1884,315 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertIsNone(backend.read_committed("m-c"))
         self.assertNotIn("m-c", [item["memory_id"] for item in backend.search_committed()])
 
+    def test_decision_visibility_rejects_full_state_tampering_and_redacts_raw_evidence(self):
+        mutations = {
+            "agent_id": lambda row: row.__setitem__("agent_id", "agent-forged"),
+            "scope": lambda row: row.__setitem__("scope", "tenant:forged"),
+            "value": lambda row: row.__setitem__("value", "forged-value"),
+            "target_status": lambda row: row.__setitem__(
+                "target_status", "invalid"
+            ),
+            "sequence": lambda row: row.__setitem__("sequence", 99),
+            "operation": lambda row: row.__setitem__(
+                "operation", "memory_supersede"
+            ),
+            "provenance": lambda row: row.__setitem__(
+                "derived_from", ["forged-source"]
+            ),
+            "state_hash": lambda row: row.__setitem__(
+                "staged_state_hash", "forged-state-hash"
+            ),
+        }
+        for index, (field, mutate) in enumerate(mutations.items()):
+            with self.subTest(field=field):
+                qdrant = _FakeQdrant()
+                neo4j = _FakeNeo4j()
+                txn_id = f"txn-tamper-{index}"
+                backend = VectorGraphMemoryBackend(
+                    f"staged-tamper-{index}",
+                    "http://qdrant",
+                    "bolt://neo4j",
+                    ("neo4j", "password"),
+                    qdrant_client=qdrant,
+                    neo4j_client=neo4j,
+                    decision_resolver={txn_id: "COMMITTED"}.get,
+                )
+                intents = [
+                    self._intent(
+                        txn_id,
+                        1,
+                        "memory_write",
+                        memory_id="shared",
+                        value="original-value",
+                        agent_id="agent-original",
+                        scope="tenant:original",
+                    )
+                ]
+                backend.stage_transaction(txn_id, intents)
+                qdrant_row = next(
+                    point["payload"]
+                    for point in qdrant.points.values()
+                    if point["payload"].get("txn_id") == txn_id
+                )
+                neo4j_row = next(
+                    row
+                    for row in neo4j.staged_memories.values()
+                    if row.get("txn_id") == txn_id
+                )
+                original_state_hash = qdrant_row.get("staged_state_hash")
+
+                mutate(qdrant_row)
+
+                self._assert_staged_fail_closed(backend, "shared")
+                self.assertIsInstance(original_state_hash, str)
+                self.assertEqual(
+                    original_state_hash,
+                    neo4j_row["staged_state_hash"],
+                )
+                raw = backend.raw_transaction_state(txn_id, intents)
+                serialized = json.dumps(raw, sort_keys=True)
+                self.assertNotIn("original-value", serialized)
+                self.assertNotIn("agent-original", serialized)
+                self.assertNotIn("tenant:original", serialized)
+
+    def test_decision_visibility_rejects_a_missing_staged_node_in_either_store(self):
+        for missing_store in ("qdrant", "neo4j"):
+            with self.subTest(missing_store=missing_store):
+                qdrant = _FakeQdrant()
+                neo4j = _FakeNeo4j()
+                txn_id = f"txn-missing-{missing_store}"
+                backend = VectorGraphMemoryBackend(
+                    f"staged-missing-{missing_store}",
+                    "http://qdrant",
+                    "bolt://neo4j",
+                    ("neo4j", "password"),
+                    qdrant_client=qdrant,
+                    neo4j_client=neo4j,
+                    decision_resolver={txn_id: "COMMITTED"}.get,
+                )
+                intents = [
+                    self._intent(
+                        txn_id,
+                        1,
+                        "memory_write",
+                        memory_id="shared",
+                        value="value",
+                    )
+                ]
+                backend.stage_transaction(txn_id, intents)
+                if missing_store == "qdrant":
+                    qdrant.points = {
+                        key: row
+                        for key, row in qdrant.points.items()
+                        if row["payload"].get("txn_id") != txn_id
+                    }
+                else:
+                    neo4j.staged_memories = {
+                        key: row
+                        for key, row in neo4j.staged_memories.items()
+                        if row.get("txn_id") != txn_id
+                    }
+
+                self._assert_staged_fail_closed(backend, "shared")
+
+        qdrant = _FakeQdrant()
+        neo4j = _FakeNeo4j()
+        decisions = {
+            "txn-complete": "COMMITTED",
+            "txn-neo4j-only": "COMMITTED",
+        }
+        backend = VectorGraphMemoryBackend(
+            "staged-missing-among-multiple",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=qdrant,
+            neo4j_client=neo4j,
+            decision_resolver=decisions.get,
+        )
+        intents = [
+            self._intent(
+                "txn-complete",
+                1,
+                "memory_write",
+                memory_id="shared",
+                value="value",
+            )
+        ]
+        backend.stage_transaction("txn-complete", intents)
+        complete_key, complete_row = next(iter(neo4j.staged_memories.items()))
+        neo4j.staged_memories[
+            (complete_key[0], complete_key[1], "txn-neo4j-only", *complete_key[3:])
+        ] = {
+            **complete_row,
+            "txn_id": "txn-neo4j-only",
+        }
+
+        self._assert_staged_fail_closed(backend, "shared")
+
+    def test_decision_visibility_accepts_neo4j_omission_of_null_optional_properties(self):
+        txn_id = "txn-null-optional"
+        backend = VectorGraphMemoryBackend(
+            "staged-null-optional",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=self.qdrant,
+            neo4j_client=self.neo4j,
+            decision_resolver={txn_id: "COMMITTED"}.get,
+        )
+        intents = [
+            self._intent(
+                txn_id,
+                1,
+                "memory_write",
+                memory_id="shared",
+                value="value",
+            )
+        ]
+        backend.stage_transaction(txn_id, intents)
+        staged = next(
+            row
+            for row in self.neo4j.staged_memories.values()
+            if row.get("txn_id") == txn_id
+        )
+        staged.pop("supersedes_id")
+
+        self.assertEqual(backend.read_committed("shared")["value"], "value")
+        self.assertEqual(
+            [record["memory_id"] for record in backend.search_committed()],
+            ["shared"],
+        )
+        self.assertEqual(backend.current_version("shared"), 1)
+
+    def test_decision_visibility_accepts_qdrant_storage_namespace_envelope(self):
+        class NamespaceInjectingQdrant(_FakeQdrant):
+            def upsert(
+                self,
+                namespace,
+                point_id,
+                vector,
+                payload,
+                idempotency_key,
+            ):
+                super().upsert(
+                    namespace,
+                    point_id,
+                    vector,
+                    {**payload, "namespace": namespace},
+                    idempotency_key,
+                )
+
+        txn_id = "txn-storage-namespace"
+        backend = VectorGraphMemoryBackend(
+            "staged-storage-namespace",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=NamespaceInjectingQdrant(),
+            neo4j_client=_FakeNeo4j(),
+            decision_resolver={txn_id: "COMMITTED"}.get,
+        )
+        intents = [
+            self._intent(
+                txn_id,
+                1,
+                "memory_write",
+                memory_id="shared",
+                value="value",
+            )
+        ]
+
+        backend.stage_transaction(txn_id, intents)
+
+        self.assertEqual(backend.read_committed("shared")["value"], "value")
+        self.assertEqual(
+            [record["memory_id"] for record in backend.search_committed()],
+            ["shared"],
+        )
+        self.assertEqual(backend.current_version("shared"), 1)
+
+    def test_predecision_verification_rejects_a_physically_finalized_staged_row(self):
+        txn_id = "txn-early-finalization"
+        backend = VectorGraphMemoryBackend(
+            "staged-early-finalization",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=self.qdrant,
+            neo4j_client=self.neo4j,
+        )
+        intents = [
+            self._intent(
+                txn_id,
+                1,
+                "memory_write",
+                memory_id="shared",
+                value="value",
+            )
+        ]
+        backend.stage_transaction(txn_id, intents)
+        staged = next(
+            point["payload"]
+            for point in self.qdrant.points.values()
+            if point["payload"].get("txn_id") == txn_id
+        )
+        staged["status"] = "active"
+
+        self.assertEqual(
+            backend.verify_transaction(txn_id, intents)["status"],
+            "partial",
+        )
+
+    def test_decision_visibility_requires_the_exact_staged_edge_set(self):
+        for mutation in ("missing", "extra"):
+            with self.subTest(mutation=mutation):
+                qdrant = _FakeQdrant()
+                neo4j = _FakeNeo4j()
+                txn_id = f"txn-edge-{mutation}"
+                backend = VectorGraphMemoryBackend(
+                    f"staged-edge-{mutation}",
+                    "http://qdrant",
+                    "bolt://neo4j",
+                    ("neo4j", "password"),
+                    qdrant_client=qdrant,
+                    neo4j_client=neo4j,
+                    decision_resolver={txn_id: "COMMITTED"}.get,
+                )
+                backend.write("source", value="source")
+                intents = [
+                    self._intent(
+                        txn_id,
+                        1,
+                        "memory_derive",
+                        memory_id="target",
+                        source_ids=["source"],
+                        value="derived",
+                    )
+                ]
+                backend.stage_transaction(txn_id, intents)
+                if mutation == "missing":
+                    neo4j.staged_edges = [
+                        edge
+                        for edge in neo4j.staged_edges
+                        if not (
+                            edge["txn_id"] == txn_id
+                            and edge["kind"] == "DERIVED_FROM"
+                        )
+                    ]
+                else:
+                    neo4j.staged_edges.append(
+                        {
+                            "txn_id": txn_id,
+                            "kind": "SUPERSEDES",
+                            "source_id": "target",
+                            "target_id": "unexpected",
+                            "status": "pending",
+                        }
+                    )
+
+                self._assert_staged_fail_closed(backend, "target")
+
     def test_aborted_rewrite_does_not_report_the_old_committed_row_as_txn_visible(self):
         decisions = {"txn-rewrite": "ABORTED"}
         backend = VectorGraphMemoryBackend(
@@ -1534,6 +2295,117 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             next(item for item in raw["qdrant"]["objects"] if item["record_kind"] == "memory")["status"],
             "active",
         )
+
+    def test_committed_split_finalization_stays_logically_visible_and_retry_converges(self):
+        qdrant = _FakeQdrant()
+        neo4j = _FakeNeo4j()
+        failure_armed = {"value": True}
+
+        def phase_hook(phase, _evidence):
+            if phase == "after_commit_decision" and failure_armed["value"]:
+                neo4j.fail_upsert = True
+
+        with tempfile.TemporaryDirectory() as directory:
+            journal = TransactionJournal(Path(directory) / "split.sqlite3")
+            self.addCleanup(journal.close)
+            backend = VectorGraphMemoryBackend(
+                "txn-split-finalize",
+                "http://qdrant",
+                "bolt://neo4j",
+                ("neo4j", "password"),
+                qdrant_client=qdrant,
+                neo4j_client=neo4j,
+                max_retries=0,
+            )
+            gateway = TaskTransactionGateway(
+                journal=journal,
+                backend=backend,
+                task_id="task-split",
+                agent_id="agent",
+                txn_id="txn-split",
+                policy_snapshot_provider=lambda: {
+                    "version": 1,
+                    "denied_actions": [],
+                    "scope_overrides": {},
+                },
+                phase_hook=phase_hook,
+            )
+            gateway.call(
+                "memory_write",
+                {"memory_id": "shared", "value": "committed-value"},
+            )
+
+            with self.assertRaises(TaskTransactionError) as raised:
+                gateway.commit()
+            self.assertEqual(
+                raised.exception.code, "commit_decided_response_lost"
+            )
+            self.assertEqual(journal.load("txn-split").state, "COMMITTED")
+            self.assertNotIn(
+                "finalize_complete",
+                [phase["phase"] for phase in journal.phases("txn-split")],
+            )
+
+            split = backend.raw_transaction_state(
+                "txn-split", journal.intents("txn-split")
+            )
+            self.assertEqual(split["qdrant"]["objects"][0]["status"], "active")
+            self.assertEqual(split["neo4j"]["nodes"][0]["status"], "pending")
+            self.assertEqual(
+                backend.read_committed("shared")["value"], "committed-value"
+            )
+            self.assertEqual(
+                [record["memory_id"] for record in backend.search_committed()],
+                ["shared"],
+            )
+            self.assertEqual(backend.current_version("shared"), 1)
+
+            successor_intents = [
+                self._intent(
+                    "txn-successor",
+                    1,
+                    "memory_write",
+                    memory_id="shared",
+                    value="successor-value",
+                )
+            ]
+            neo4j.fail_upsert = False
+            backend.stage_transaction("txn-successor", successor_intents)
+            successor_raw = backend.raw_transaction_state(
+                "txn-successor", successor_intents
+            )
+            self.assertEqual(
+                (
+                    successor_raw["qdrant"]["objects"][0]["base_version"],
+                    successor_raw["qdrant"]["objects"][0]["version"],
+                ),
+                (1, 2),
+            )
+            self.assertEqual(
+                backend.cleanup_transaction(
+                    "txn-successor", successor_intents
+                )["status"],
+                "clean",
+            )
+
+            failure_armed["value"] = False
+            neo4j.fail_upsert = False
+            self.assertEqual(gateway.commit()["decision"], "COMMITTED")
+
+            converged = backend.raw_transaction_state(
+                "txn-split", journal.intents("txn-split")
+            )
+            self.assertEqual(converged["qdrant"]["objects"][0]["status"], "active")
+            self.assertEqual(converged["neo4j"]["nodes"][0]["status"], "active")
+            self.assertEqual(backend.current_version("shared"), 1)
+            self.assertEqual(backend.read_committed("shared")["version"], 1)
+            self.assertEqual(len(neo4j.cas_requests), 1)
+            self.assertEqual(
+                [phase["phase"] for phase in journal.phases("txn-split")].count(
+                    "finalize_complete"
+                ),
+                1,
+            )
 
     def test_newer_committed_overlay_hides_an_unfinalized_transaction_created_record(self):
         decisions = {"txn-create": "COMMITTED"}
