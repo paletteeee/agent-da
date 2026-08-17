@@ -70,6 +70,8 @@ def load_task_manifest(source: Mapping[str, Any] | Path) -> tuple[dict[str, Any]
     for field in ("seed", "split", "task_count", "task_level_split", "source_sha256"):
         if field in source:
             normalized[field] = source[field]
+    if "transaction_mode" in source:
+        normalized["transaction_mode"] = source["transaction_mode"]
     encoded = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     computed_digest = hashlib.sha256(encoded).hexdigest()
     provided_digest = source.get("manifest_hash")
@@ -170,6 +172,19 @@ _RAW_KEYS = frozenset(
         "api_key",
         "token",
         "secret",
+        "endpoint",
+        "backend_endpoint",
+    }
+)
+_TRANSACTION_SUMMARY_KEYS = frozenset(
+    {
+        "txn_id",
+        "state",
+        "decision",
+        "phases",
+        "intent_count",
+        "read_set_count",
+        "state_digest",
     }
 )
 
@@ -181,6 +196,8 @@ def _sanitize_value(value: Any, key: str | None = None) -> Any:
         cleaned = {}
         for child_key, child_value in value.items():
             if child_key in _RAW_KEYS:
+                continue
+            if key == "transaction" and child_key not in _TRANSACTION_SUMMARY_KEYS:
                 continue
             sanitized = _sanitize_value(child_value, str(child_key))
             if sanitized is not None:
@@ -583,6 +600,38 @@ def run_experiment_manifest(
                 backend = InstrumentedMemoryBackend()
             task_record = dict(task)
             task_id = str(task_record.get("task_id") or f"native_task_{index:04d}")
+            transaction_mode = str(
+                task_record.get(
+                    "transaction_mode",
+                    manifest.get("transaction_mode", "direct"),
+                )
+            )
+            transaction_options: dict[str, Any] = {
+                "transaction_mode": transaction_mode,
+            }
+            if transaction_mode == "task":
+                case_id = str(task_record.get("case_id") or task_id)
+                transaction_options.update(
+                    {
+                        "transaction_journal_path": out_dir
+                        / "journals"
+                        / f"{case_id}.sqlite3",
+                        "transaction_id": task_record.get("transaction_id")
+                        or f"txn_{case_id}",
+                    }
+                )
+                policy_provider = task_record.get(
+                    "policy_snapshot_provider",
+                    manifest.get("policy_snapshot_provider"),
+                )
+                if callable(policy_provider):
+                    transaction_options["policy_snapshot_provider"] = policy_provider
+                phase_hook = task_record.get(
+                    "transaction_phase_hook",
+                    manifest.get("transaction_phase_hook"),
+                )
+                if callable(phase_hook):
+                    transaction_options["transaction_phase_hook"] = phase_hook
             run_report = run_real_agent(
                 task_record,
                 model,
@@ -590,6 +639,7 @@ def run_experiment_manifest(
                 max_steps=int(task_record.get("max_steps", 12)),
                 seed=int(task_record.get("seed", index - 1)),
                 temperature=float(task_record.get("temperature", 0.0)),
+                **transaction_options,
             )
             raw_handle.write(json.dumps({"task_id": task_id, "run": run_report}, ensure_ascii=False) + "\n")
             native_event_count += len(run_report.get("events", []))
@@ -601,6 +651,8 @@ def run_experiment_manifest(
             }
             if run_report.get("failure_code") is not None:
                 task_summary["failure_code"] = run_report.get("failure_code")
+            if isinstance(run_report.get("transaction"), Mapping):
+                task_summary["transaction"] = dict(run_report["transaction"])
             task_summary["task_evaluator"] = evaluate_task_contract(task_record, run_report)
             events = run_report.get("events", [])
             if events:

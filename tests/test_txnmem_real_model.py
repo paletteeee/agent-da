@@ -36,6 +36,8 @@ from txnmem_real_experiment import (
     split_task_manifest,
 )
 from txnmem_failure_controller import FailureController, FailureInjectionError
+from txnmem_task_transaction import InMemoryTransactionBackend, TaskTransactionGateway
+from txnmem_transaction_journal import TransactionJournal
 
 
 class _FakeHTTPResponse:
@@ -238,6 +240,320 @@ class _ScriptedModel:
 
 
 class TxnMemRealAgentTests(unittest.TestCase):
+    @staticmethod
+    def _write_derive_responses():
+        return [
+            ModelResponse(
+                "",
+                [ToolCall("c1", "memory_write", {"memory_id": "source", "value": "s"})],
+            ),
+            ModelResponse(
+                "",
+                [
+                    ToolCall(
+                        "c2",
+                        "memory_derive",
+                        {"memory_id": "derived", "source_ids": ["source"], "value": "d"},
+                    )
+                ],
+            ),
+            ModelResponse("done", []),
+        ]
+
+    def test_explicit_direct_mode_is_report_and_snapshot_compatible_with_default(self):
+        task = {"task_id": "direct_compat", "prompt": "remember", "agent_id": "agent_model"}
+        default_backend = InstrumentedMemoryBackend()
+        direct_backend = InstrumentedMemoryBackend()
+
+        default_report = run_real_agent(
+            task,
+            _ScriptedModel(self._write_derive_responses()),
+            default_backend,
+            max_steps=5,
+        )
+        with TemporaryDirectory() as tmp:
+            journal_path = Path(tmp) / "must_not_exist.sqlite3"
+            direct_report = run_real_agent(
+                task,
+                _ScriptedModel(self._write_derive_responses()),
+                direct_backend,
+                max_steps=5,
+                transaction_mode="direct",
+                transaction_journal_path=journal_path,
+            )
+            self.assertFalse(journal_path.exists())
+
+        for field in ("status", "failure_code", "events", "steps"):
+            self.assertEqual(direct_report.get(field), default_report.get(field))
+        self.assertEqual(direct_backend.snapshot(), default_backend.snapshot())
+        self.assertNotIn("transaction", default_report)
+        self.assertNotIn("transaction", direct_report)
+
+    def test_explicit_direct_mode_keeps_event_failure_schedule_boundary(self):
+        backend = InstrumentedMemoryBackend()
+        report = run_real_agent(
+            {
+                "task_id": "direct_failure",
+                "prompt": "write",
+                "failure_schedule": [
+                    {"trigger": {"kind": "memory_write", "count": 1}, "action": {"type": "crash"}}
+                ],
+            },
+            _ScriptedModel(
+                [ModelResponse("", [ToolCall("c1", "memory_write", {"memory_id": "m1", "value": "v"})])]
+            ),
+            backend,
+            transaction_mode="direct",
+        )
+
+        self.assertEqual(report["failure_code"], "injected_crash")
+        self.assertEqual([event["kind"] for event in report["events"]], ["memory_write"])
+        self.assertNotIn("transaction", report)
+
+    def test_task_mode_commits_write_derive_before_completed_status(self):
+        backend = InMemoryTransactionBackend()
+        with TemporaryDirectory() as tmp:
+            report = run_real_agent(
+                {"task_id": "task_commit", "prompt": "remember", "agent_id": "agent_model"},
+                _ScriptedModel(self._write_derive_responses()),
+                backend,
+                max_steps=5,
+                transaction_mode="task",
+                transaction_journal_path=Path(tmp) / "journal.sqlite3",
+                transaction_id="txn_commit",
+            )
+
+        self.assertEqual(report["status"], "completed")
+        self.assertEqual(report["transaction"]["decision"], "committed")
+        self.assertEqual(
+            [event["kind"] for event in report["events"]],
+            ["begin_txn", "memory_write", "memory_derive", "commit"],
+        )
+        self.assertEqual(report["transaction"]["intent_count"], 2)
+        self.assertEqual(len(report["transaction"]["state_digest"]), 64)
+        self.assertEqual(backend.read_committed("derived")["derived_from"], ["source"])
+
+    def test_task_mode_requires_a_journal_and_never_falls_back(self):
+        with self.assertRaises(ValueError):
+            run_real_agent(
+                {"task_id": "task_missing_journal", "prompt": "remember"},
+                _ScriptedModel([ModelResponse("done", [])]),
+                InMemoryTransactionBackend(),
+                transaction_mode="task",
+            )
+
+        with self.assertRaises(ValueError):
+            run_real_agent(
+                {"task_id": "task_bad_mode", "prompt": "remember"},
+                _ScriptedModel([ModelResponse("done", [])]),
+                InstrumentedMemoryBackend(),
+                transaction_mode="best_effort",
+            )
+
+    def test_after_mutation_hook_is_one_based_in_direct_and_task_modes(self):
+        task = {"task_id": "mutation_hooks", "prompt": "write and derive"}
+        direct_phases = []
+        task_phases = []
+
+        direct_report = run_real_agent(
+            task,
+            _ScriptedModel(self._write_derive_responses()),
+            InstrumentedMemoryBackend(),
+            transaction_mode="direct",
+            transaction_phase_hook=lambda phase, evidence: direct_phases.append(
+                (phase, dict(evidence))
+            ),
+        )
+        with TemporaryDirectory() as tmp:
+            task_report = run_real_agent(
+                task,
+                _ScriptedModel(self._write_derive_responses()),
+                InMemoryTransactionBackend(),
+                transaction_mode="task",
+                transaction_journal_path=Path(tmp) / "journal.sqlite3",
+                transaction_phase_hook=lambda phase, evidence: task_phases.append(
+                    (phase, dict(evidence))
+                ),
+            )
+
+        self.assertEqual(direct_report["status"], "completed")
+        self.assertEqual(
+            [evidence["mutation_count"] for phase, evidence in direct_phases if phase == "after_mutation"],
+            [1, 2],
+        )
+        self.assertEqual(task_report["status"], "completed")
+        self.assertEqual(
+            [phase for phase, _evidence in task_phases],
+            [
+                "after_mutation",
+                "after_mutation",
+                "after_prepare",
+                "after_qdrant_stage",
+                "after_neo4j_stage",
+                "after_stage_verify",
+                "after_commit_decision",
+                "after_finalize",
+            ],
+        )
+
+    def test_after_mutation_failure_schedule_is_shared_by_direct_and_task_modes(self):
+        schedule = [
+            {"trigger": {"phase": "after_mutation", "count": 1}, "action": {"type": "crash"}}
+        ]
+        for mode, backend in (
+            ("direct", InstrumentedMemoryBackend()),
+            ("task", InMemoryTransactionBackend()),
+        ):
+            with self.subTest(mode=mode), TemporaryDirectory() as tmp:
+                kwargs = {"transaction_mode": mode}
+                if mode == "task":
+                    kwargs["transaction_journal_path"] = Path(tmp) / "journal.sqlite3"
+                report = run_real_agent(
+                    {
+                        "task_id": f"mutation_failure_{mode}",
+                        "prompt": "write",
+                        "failure_schedule": schedule,
+                    },
+                    _ScriptedModel(
+                        [
+                            ModelResponse(
+                                "",
+                                [ToolCall("c1", "memory_write", {"memory_id": "m1", "value": "v"})],
+                            )
+                        ]
+                    ),
+                    backend,
+                    **kwargs,
+                )
+                self.assertEqual(report["failure_code"], "injected_crash")
+                if mode == "task":
+                    self.assertEqual(report["transaction"]["decision"], "aborted")
+                    self.assertEqual(report["events"][-1]["kind"], "abort")
+
+    def test_task_mode_aborts_unknown_tool_and_hides_pending_state(self):
+        backend = InMemoryTransactionBackend()
+        with TemporaryDirectory() as tmp:
+            journal_path = Path(tmp) / "journal.sqlite3"
+            report = run_real_agent(
+                {"task_id": "task_unknown", "prompt": "write then fail"},
+                _ScriptedModel(
+                    [
+                        ModelResponse(
+                            "",
+                            [ToolCall("c1", "memory_write", {"memory_id": "pending", "value": "secret"})],
+                        ),
+                        ModelResponse("", [ToolCall("bad", "memory_delete", {})]),
+                    ]
+                ),
+                backend,
+                transaction_mode="task",
+                transaction_journal_path=journal_path,
+                transaction_id="txn_unknown",
+            )
+            journal = TransactionJournal(journal_path)
+            self.addCleanup(journal.close)
+            observer = TaskTransactionGateway(
+                journal=journal,
+                backend=backend,
+                task_id="observer",
+                agent_id="agent_model",
+                txn_id="txn_observer",
+                policy_snapshot_provider=lambda: {
+                    "version": 1,
+                    "denied_actions": [],
+                    "scope_overrides": {},
+                },
+            )
+            self.assertIsNone(observer.call("memory_read", {"memory_id": "pending"}))
+
+        self.assertEqual(report["failure_code"], "unknown_tool")
+        self.assertEqual(report["transaction"]["decision"], "aborted")
+        self.assertEqual(report["events"][-1]["kind"], "abort")
+
+    def test_task_mode_aborts_model_protocol_non_json_and_max_step_failures(self):
+        class ProtocolFailureModel:
+            def complete(self, *_args, **_kwargs):
+                raise ModelProtocolError("missing_choices", "missing")
+
+        cases = [
+            (
+                "model",
+                ProtocolFailureModel(),
+                InMemoryTransactionBackend(),
+                2,
+                "model_missing_choices",
+            ),
+            (
+                "non_json",
+                _ScriptedModel(
+                    [ModelResponse("", [ToolCall("c1", "memory_read", {"memory_id": "opaque"})])]
+                ),
+                InMemoryTransactionBackend(
+                    {"opaque": {"memory_id": "opaque", "value": object(), "version": 1}}
+                ),
+                2,
+                "non_json_tool_result",
+            ),
+            (
+                "max_steps",
+                _ScriptedModel(
+                    [ModelResponse("", [ToolCall("c1", "memory_write", {"memory_id": "pending", "value": "v"})])]
+                ),
+                InMemoryTransactionBackend(),
+                1,
+                "max_steps_exceeded",
+            ),
+        ]
+        for name, model, backend, max_steps, failure_code in cases:
+            with self.subTest(name=name), TemporaryDirectory() as tmp:
+                report = run_real_agent(
+                    {"task_id": f"task_{name}", "prompt": "run"},
+                    model,
+                    backend,
+                    max_steps=max_steps,
+                    transaction_mode="task",
+                    transaction_journal_path=Path(tmp) / "journal.sqlite3",
+                    transaction_id=f"txn_{name}",
+                )
+                self.assertEqual(report["failure_code"], failure_code)
+                self.assertEqual(report["transaction"]["decision"], "aborted")
+                self.assertEqual(report["events"][-1]["kind"], "abort")
+                self.assertIsNone(backend.read_committed("pending"))
+
+    def test_task_commit_revalidation_failure_keeps_final_text_but_fails_run(self):
+        snapshots = 0
+
+        def policy_snapshot():
+            nonlocal snapshots
+            snapshots += 1
+            return {
+                "version": snapshots,
+                "denied_actions": ["write"] if snapshots >= 3 else [],
+                "scope_overrides": {},
+            }
+
+        with TemporaryDirectory() as tmp:
+            report = run_real_agent(
+                {"task_id": "task_revalidation", "prompt": "write"},
+                _ScriptedModel(
+                    [
+                        ModelResponse(
+                            "",
+                            [ToolCall("c1", "memory_write", {"memory_id": "pending", "value": "v"})],
+                        ),
+                        ModelResponse("diagnostic final", []),
+                    ]
+                ),
+                InMemoryTransactionBackend(),
+                transaction_mode="task",
+                transaction_journal_path=Path(tmp) / "journal.sqlite3",
+                policy_snapshot_provider=policy_snapshot,
+            )
+
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["failure_code"], "policy_revalidation_failed")
+        self.assertEqual(report["final_text"], "diagnostic final")
+        self.assertEqual(report["transaction"]["decision"], "aborted")
     def test_tool_loop_aggregates_model_usage_across_steps(self):
         model = _ScriptedModel(
             [
