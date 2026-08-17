@@ -591,13 +591,6 @@ def run_experiment_manifest(
         for index, task in enumerate(tasks, start=1):
             if not isinstance(task, Mapping):
                 raise RealExperimentError("invalid_task", f"manifest task {index} must be a mapping")
-            backend = manifest.get("backend_factory", lambda: None)
-            if callable(backend):
-                backend = backend()
-            if backend is None:
-                from txnmem_backend import InstrumentedMemoryBackend
-
-                backend = InstrumentedMemoryBackend()
             task_record = dict(task)
             task_id = str(task_record.get("task_id") or f"native_task_{index:04d}")
             transaction_mode = str(
@@ -606,6 +599,18 @@ def run_experiment_manifest(
                     manifest.get("transaction_mode", "direct"),
                 )
             )
+            backend = manifest.get("backend_factory", lambda: None)
+            if callable(backend):
+                backend = backend()
+            if backend is None:
+                if transaction_mode == "task":
+                    from txnmem_task_transaction import InMemoryTransactionBackend
+
+                    backend = InMemoryTransactionBackend()
+                else:
+                    from txnmem_backend import InstrumentedMemoryBackend
+
+                    backend = InstrumentedMemoryBackend()
             transaction_options: dict[str, Any] = {
                 "transaction_mode": transaction_mode,
             }

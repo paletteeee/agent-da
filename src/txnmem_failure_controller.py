@@ -153,16 +153,34 @@ class FailureController:
             target = str(action.get("target", "write"))
             if gateway is None:
                 raise FailureInjectionError("missing_gateway", "policy revoke requires a tool gateway")
-            gateway.revoke_policy(target, trigger_event=trigger_evidence)
+            try:
+                gateway.revoke_policy(target, trigger_event=trigger_evidence)
+            except FailureInjectionError:
+                raise
+            except Exception as exc:
+                raise FailureInjectionError(
+                    "failure_action_failed", "policy revoke action failed"
+                ) from exc
         elif action_type == "invalidate":
             target = action.get("target")
             if not isinstance(target, str) or not target:
                 raise FailureInjectionError("missing_invalidation_target", "invalidate requires target")
             if backend is None:
                 raise FailureInjectionError("missing_backend", "invalidate requires backend")
-            backend.invalidate(
-                target,
-                agent_id=trigger_evidence.get("agent_id", "agent_model"),
-                projection="failure_injection",
-            )
+            try:
+                invalidate_committed = getattr(backend, "invalidate_committed", None)
+                if callable(invalidate_committed):
+                    invalidate_committed(target)
+                else:
+                    backend.invalidate(
+                        target,
+                        agent_id=trigger_evidence.get("agent_id", "agent_model"),
+                        projection="failure_injection",
+                    )
+            except FailureInjectionError:
+                raise
+            except Exception as exc:
+                raise FailureInjectionError(
+                    "failure_action_failed", "invalidate action failed"
+                ) from exc
         return record

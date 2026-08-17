@@ -27,6 +27,8 @@ class TransactionBackend(Protocol):
 
     def current_version(self, memory_id: str) -> int | None: ...
 
+    def invalidate_committed(self, memory_id: str) -> Mapping[str, Any]: ...
+
     def stage_transaction(
         self,
         txn_id: str,
@@ -286,6 +288,14 @@ class InMemoryTransactionBackend:
         record = self.committed.get(memory_id)
         return int(record.get("version", 1)) if record is not None else None
 
+    def invalidate_committed(self, memory_id: str) -> Mapping[str, Any]:
+        record = self.committed.get(memory_id)
+        if record is None:
+            raise KeyError(memory_id)
+        record["status"] = "invalid"
+        record["version"] = int(record.get("version", 1)) + 1
+        return copy.deepcopy(record)
+
     def _staged(self, txn_id: str) -> dict[str, Any]:
         return self.pending.setdefault(
             txn_id, {"qdrant": {}, "nodes": {}, "edges": [], "overlays": []}
@@ -544,6 +554,18 @@ class SQLiteStagingTransactionBackend:
             "SELECT payload_json FROM committed_records WHERE memory_id = ?", (memory_id,)
         ).fetchone()
         return int(json.loads(row[0]).get("version", 1)) if row is not None else None
+
+    def invalidate_committed(self, memory_id: str) -> Mapping[str, Any]:
+        row = self._connection.execute(
+            "SELECT payload_json FROM committed_records WHERE memory_id = ?", (memory_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(memory_id)
+        record = json.loads(row[0])
+        record["status"] = "invalid"
+        record["version"] = int(record.get("version", 1)) + 1
+        self._put_committed(record)
+        return copy.deepcopy(record)
 
     def stage_transaction(
         self,
@@ -1207,15 +1229,37 @@ class TaskTransactionGateway:
         policy_snapshot_provider: PolicySnapshotProvider,
         phase_hook: PhaseHook | None = None,
     ):
+        self.revoked_actions: set[str] = set()
+        self._policy_snapshot_provider = policy_snapshot_provider
         self.coordinator = TaskTransactionCoordinator(
             journal=journal,
             backend=backend,
             task_id=task_id,
             agent_id=agent_id,
             txn_id=txn_id,
-            policy_snapshot_provider=policy_snapshot_provider,
+            policy_snapshot_provider=self._policy_snapshot,
             phase_hook=phase_hook,
         )
+
+    def _policy_snapshot(self) -> Mapping[str, Any]:
+        provided = self._policy_snapshot_provider()
+        if not isinstance(provided, Mapping):
+            return provided
+        snapshot = copy.deepcopy(dict(provided))
+        if not self.revoked_actions:
+            return snapshot
+        denied_actions = snapshot.get("denied_actions", [])
+        if isinstance(denied_actions, list):
+            snapshot["denied_actions"] = sorted(
+                set(str(action) for action in denied_actions) | self.revoked_actions
+            )
+        version = snapshot.get("version")
+        if isinstance(version, int) and not isinstance(version, bool):
+            snapshot["version"] = version + len(self.revoked_actions)
+        return snapshot
+
+    def revoke_policy(self, action: str, *, trigger_event: Mapping[str, Any]) -> None:
+        self.revoked_actions.add(action)
 
     def call(self, name: str, arguments: Mapping[str, Any]) -> Any:
         if not isinstance(arguments, Mapping):

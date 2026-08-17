@@ -34,6 +34,44 @@ class RealExperimentTransactionTests(unittest.TestCase):
 
         self.assertEqual(normalized["transaction_mode"], "task")
 
+    def test_normalized_json_task_manifest_runs_without_injected_backend_factory(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            manifest_path = Path(tmp) / "manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "manifest_version": 1,
+                        "transaction_mode": "task",
+                        "tasks": [{"task_id": "cli_task", "prompt": "write"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            normalized, _digest = load_task_manifest(manifest_path)
+
+            result = run_experiment_manifest(
+                normalized,
+                _ScriptedModel(
+                    [
+                        ModelResponse(
+                            "",
+                            [ToolCall("c1", "memory_write", {"memory_id": "m1", "value": "v"})],
+                        ),
+                        ModelResponse("done", []),
+                    ]
+                ),
+                out_dir,
+            )
+
+            self.assertTrue((out_dir / "journals" / "cli_task.sqlite3").exists())
+        self.assertEqual(result["completed_task_count"], 1)
+        self.assertEqual(result["task_summaries"][0]["status"], "completed")
+        self.assertEqual(
+            result["task_summaries"][0]["transaction"]["decision"],
+            "committed",
+        )
+
     def test_task_manifest_uses_unique_per_case_journals_and_keeps_sanitized_summary(self):
         model = _ScriptedModel(
             [

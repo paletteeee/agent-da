@@ -430,6 +430,195 @@ class TxnMemRealAgentTests(unittest.TestCase):
                     self.assertEqual(report["transaction"]["decision"], "aborted")
                     self.assertEqual(report["events"][-1]["kind"], "abort")
 
+    def test_task_phase_policy_revoke_updates_commit_snapshot_and_aborts(self):
+        controller = FailureController(
+            [
+                {
+                    "trigger": {"phase": "after_mutation", "count": 1},
+                    "action": {"type": "policy_revoke", "target": "write"},
+                }
+            ]
+        )
+        backend = InMemoryTransactionBackend()
+        with TemporaryDirectory() as tmp:
+            report = run_real_agent(
+                {
+                    "task_id": "task_phase_revoke",
+                    "prompt": "write",
+                    "failure_controller": controller,
+                },
+                _ScriptedModel(
+                    [
+                        ModelResponse(
+                            "",
+                            [ToolCall("c1", "memory_write", {"memory_id": "pending", "value": "v"})],
+                        ),
+                        ModelResponse("final text", []),
+                    ]
+                ),
+                backend,
+                transaction_mode="task",
+                transaction_journal_path=Path(tmp) / "journal.sqlite3",
+            )
+
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["failure_code"], "policy_revalidation_failed")
+        self.assertEqual(report["transaction"]["decision"], "aborted")
+        self.assertEqual(report["events"][-1]["kind"], "abort")
+        self.assertIsNone(backend.read_committed("pending"))
+
+    def test_task_phase_invalidation_changes_committed_source_and_aborts_derive(self):
+        backend = InMemoryTransactionBackend(
+            {
+                "source": {
+                    "memory_id": "source",
+                    "value": "source",
+                    "status": "active",
+                    "version": 4,
+                    "derived_from": [],
+                }
+            }
+        )
+        with TemporaryDirectory() as tmp:
+            report = run_real_agent(
+                {
+                    "task_id": "task_phase_invalidate",
+                    "prompt": "derive",
+                    "failure_schedule": [
+                        {
+                            "trigger": {"phase": "after_mutation", "count": 1},
+                            "action": {"type": "invalidate", "target": "source"},
+                        }
+                    ],
+                },
+                _ScriptedModel(
+                    [
+                        ModelResponse(
+                            "",
+                            [
+                                ToolCall(
+                                    "c1",
+                                    "memory_derive",
+                                    {
+                                        "memory_id": "derived",
+                                        "source_ids": ["source"],
+                                        "value": "derived",
+                                    },
+                                )
+                            ],
+                        ),
+                        ModelResponse("final text", []),
+                    ]
+                ),
+                backend,
+                transaction_mode="task",
+                transaction_journal_path=Path(tmp) / "journal.sqlite3",
+            )
+
+        self.assertEqual(report["failure_code"], "source_invalidated")
+        self.assertEqual(report["transaction"]["decision"], "aborted")
+        self.assertEqual(report["events"][-1]["kind"], "abort")
+        self.assertIsNone(backend.read_committed("source"))
+        self.assertEqual(backend.current_version("source"), 5)
+        self.assertIsNone(backend.read_committed("derived"))
+
+    def test_task_phase_action_failure_is_coded_and_aborts_active_transaction(self):
+        class FailingInvalidationBackend(InMemoryTransactionBackend):
+            def invalidate_committed(self, memory_id):
+                raise RuntimeError(f"cannot invalidate {memory_id}")
+
+        with TemporaryDirectory() as tmp:
+            report = run_real_agent(
+                {
+                    "task_id": "task_action_failure",
+                    "prompt": "write",
+                    "failure_schedule": [
+                        {
+                            "trigger": {"phase": "after_mutation", "count": 1},
+                            "action": {"type": "invalidate", "target": "source"},
+                        }
+                    ],
+                },
+                _ScriptedModel(
+                    [
+                        ModelResponse(
+                            "",
+                            [ToolCall("c1", "memory_write", {"memory_id": "pending", "value": "v"})],
+                        ),
+                        ModelResponse("done", []),
+                    ]
+                ),
+                FailingInvalidationBackend(),
+                transaction_mode="task",
+                transaction_journal_path=Path(tmp) / "journal.sqlite3",
+            )
+
+        self.assertEqual(report["failure_code"], "failure_action_failed")
+        self.assertEqual(report["transaction"]["decision"], "aborted")
+        self.assertEqual(report["events"][-1]["kind"], "abort")
+
+    def test_task_mode_observes_legacy_event_kind_and_aborts_on_first_write(self):
+        controller = FailureController(
+            [{"trigger": {"kind": "memory_write", "count": 1}, "action": {"type": "crash"}}]
+        )
+        with TemporaryDirectory() as tmp:
+            report = run_real_agent(
+                {
+                    "task_id": "task_event_crash",
+                    "prompt": "write",
+                    "failure_controller": controller,
+                },
+                _ScriptedModel(
+                    [
+                        ModelResponse(
+                            "",
+                            [ToolCall("c1", "memory_write", {"memory_id": "pending", "value": "v"})],
+                        ),
+                        ModelResponse("done", []),
+                    ]
+                ),
+                InMemoryTransactionBackend(),
+                transaction_mode="task",
+                transaction_journal_path=Path(tmp) / "journal.sqlite3",
+            )
+
+        self.assertEqual(report.get("failure_code"), "injected_crash")
+        self.assertEqual(report["transaction"]["decision"], "aborted")
+        self.assertEqual(
+            [event["kind"] for event in report["events"]],
+            ["begin_txn", "memory_write", "abort"],
+        )
+        self.assertEqual(controller.counts["memory_write"], 1)
+
+    def test_task_mode_observes_each_logical_event_exactly_once(self):
+        controller = FailureController(
+            [{"trigger": {"kind": "memory_write", "count": 2}, "action": {"type": "crash"}}]
+        )
+        with TemporaryDirectory() as tmp:
+            report = run_real_agent(
+                {
+                    "task_id": "task_event_once",
+                    "prompt": "write",
+                    "failure_controller": controller,
+                },
+                _ScriptedModel(
+                    [
+                        ModelResponse(
+                            "",
+                            [ToolCall("c1", "memory_write", {"memory_id": "pending", "value": "v"})],
+                        ),
+                        ModelResponse("done", []),
+                    ]
+                ),
+                InMemoryTransactionBackend(),
+                transaction_mode="task",
+                transaction_journal_path=Path(tmp) / "journal.sqlite3",
+            )
+
+        self.assertEqual(report["status"], "completed")
+        self.assertEqual(report["transaction"]["decision"], "committed")
+        self.assertEqual(controller.counts["memory_write"], 1)
+
     def test_task_mode_aborts_unknown_tool_and_hides_pending_state(self):
         backend = InMemoryTransactionBackend()
         with TemporaryDirectory() as tmp:

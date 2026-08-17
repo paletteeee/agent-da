@@ -345,6 +345,15 @@ def run_real_agent(
             return gateway.validated_events()
         return backend.validated_events()
 
+    def observe_task_event() -> None:
+        if transaction_mode != "task" or failure_controller is None:
+            return
+        event = gateway.validated_events()[-1]
+        try:
+            failure_controller.observe(event, backend=backend, gateway=gateway)
+        except FailureInjectionError as exc:
+            raise TaskTransactionError(exc.code, str(exc)) from exc
+
     def failed(step: int, code: str, final_text: str | None = None) -> dict[str, Any]:
         if transaction_mode == "task":
             gateway.abort(code)
@@ -406,6 +415,7 @@ def run_real_agent(
             for call in tool_calls:
                 try:
                     result = gateway.call(call.name, call.arguments)
+                    observe_task_event()
                     if call.name in {
                         "memory_write",
                         "memory_derive",

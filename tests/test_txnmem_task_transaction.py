@@ -96,6 +96,12 @@ class TaskTransactionGatewayTests(unittest.TestCase):
         )
         self.assertEqual(self.journal.load("txn_task_1").state, "ACTIVE")
 
+    def test_invalid_policy_provider_keeps_coded_validation_error(self) -> None:
+        with self.assertRaises(TaskTransactionError) as raised:
+            self.gateway(policy_snapshot_provider=lambda: None)
+
+        self.assertEqual(raised.exception.code, "invalid_policy_snapshot")
+
     def test_mutations_are_pending_and_hidden_from_other_transactions(self) -> None:
         backend = InMemoryTransactionBackend()
         owner = self.gateway(backend=backend)
@@ -727,6 +733,26 @@ class DeterministicTransactionBackendRegressionTests(unittest.TestCase):
         )
         self.addCleanup(backend.close)
         return backend
+
+    def test_external_invalidation_updates_committed_status_and_version(self) -> None:
+        initial = {
+            "source": {
+                "memory_id": "source",
+                "value": "source",
+                "status": "active",
+                "version": 3,
+            }
+        }
+        for adapter in ("memory", "sqlite"):
+            with self.subTest(adapter=adapter):
+                backend = self._backend(adapter, f"external_invalidate_{adapter}", initial)
+
+                result = backend.invalidate_committed("source")
+
+                self.assertEqual(result["status"], "invalid")
+                self.assertEqual(result["version"], 4)
+                self.assertIsNone(backend.read_committed("source"))
+                self.assertEqual(backend.current_version("source"), 4)
 
     def test_finalized_stage_never_shadows_a_newer_committed_rewrite(self) -> None:
         for adapter in ("memory", "sqlite"):
