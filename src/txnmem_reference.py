@@ -388,6 +388,9 @@ def _execute_propagate(state: dict[str, Any], operation: dict[str, Any], txn_id:
 
 def _execute_supersede(state: dict[str, Any], operation: dict[str, Any], txn_id: str) -> None:
     txn = _txn(state, txn_id)
+    if not _policy_allows(state, operation, "supersede", operation.get("scope")):
+        _append_trace(state, operation, decision="denied", reason_codes=["POLICY_DENIED"])
+        return
     old_id = operation.get("old_memory_id") or operation.get("old_id")
     new_id = operation.get("new_memory_id") or operation.get("new_id")
     new_memory = operation.get("new_memory")
@@ -406,6 +409,7 @@ def _execute_supersede(state: dict[str, Any], operation: dict[str, Any], txn_id:
         _append_trace(state, operation, decision="denied", reason_codes=["SUPERSESSION_TARGET_MISSING"])
         return
     txn["supersessions"].append((old_id, new_id))
+    txn["authorized_actions"].add("supersede")
     _append_trace(state, operation, decision="allowed", affected_memory_ids=[old_id, new_id], reason_codes=[])
 
 

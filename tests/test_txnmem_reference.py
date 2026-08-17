@@ -183,6 +183,48 @@ class TxnMemReferenceTests(unittest.TestCase):
         outcome = oracle["allowed_outcomes"][0]
         self.assertEqual(outcome["txn_states"]["txn_1"], "aborted")
         self.assertEqual(outcome["committed_memory_ids"], [])
+
+    def test_scheduled_supersede_revoke_denies_before_or_aborts_after_operation(self):
+        schedules = (
+            (
+                "before",
+                {"trigger": {"before_operation": "supersede"}, "type": "revoke", "target": "supersede"},
+                "denied",
+                "committed",
+            ),
+            (
+                "after",
+                {"trigger": {"after_operation": "supersede"}, "type": "revoke", "target": "supersede"},
+                "allowed",
+                "aborted",
+            ),
+        )
+        for phase, schedule, operation_decision, transaction_state in schedules:
+            with self.subTest(phase=phase):
+                oracle = reference_outcome(
+                    self._instance(
+                        [
+                            {"op_id": "begin", "step": 1, "type": "begin_txn", "txn_id": "txn_1", "agent_id": "agent_1"},
+                            {"op_id": "supersede", "step": 2, "type": "supersede", "txn_id": "txn_1", "old_memory_id": "old", "new_memory_id": "new", "agent_id": "agent_1"},
+                            {"op_id": "commit", "step": 3, "type": "commit", "txn_id": "txn_1", "agent_id": "agent_1"},
+                        ],
+                        initial_memories=[
+                            {"memory_id": "old", "agent_id": "agent_1", "scope": "tenant:user_001", "status": "active"},
+                            {"memory_id": "new", "agent_id": "agent_1", "scope": "tenant:user_001", "status": "active"},
+                        ],
+                        failure_schedule=[schedule],
+                    )
+                )
+
+                outcome = oracle["allowed_outcomes"][0]
+                supersede_event = next(
+                    event
+                    for event in oracle["event_trace"]
+                    if event["operation_id"] == "supersede" and event["event_type"] == "supersede"
+                )
+                self.assertEqual(supersede_event["decision"], operation_decision)
+                self.assertEqual(outcome["txn_states"]["txn_1"], transaction_state)
+                self.assertEqual(outcome["superseded_memory_ids"], [])
     def test_reference_ignores_generator_expected_outcome(self):
         instance = generate_instance("atomic_multi_write", seed=0, config={"txn_size": 2})
         instance = copy.deepcopy(instance)
