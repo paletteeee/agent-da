@@ -22,6 +22,8 @@ class InstrumentedMemoryBackend:
 
     def __init__(self, memories: dict[str, dict[str, Any]] | None = None):
         self.memories = copy.deepcopy(memories or {})
+        for memory in self.memories.values():
+            memory.setdefault("version", 1)
         self.events: list[dict[str, Any]] = []
 
     def _event(self, kind: str, **fields: Any) -> dict[str, Any]:
@@ -41,6 +43,7 @@ class InstrumentedMemoryBackend:
         return self._event(kind, **fields)
 
     def write(self, memory_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
+        previous = self.memories.get(memory_id)
         memory = {
             "memory_id": memory_id,
             "value": value if value is not None else memory_id,
@@ -48,6 +51,7 @@ class InstrumentedMemoryBackend:
             "agent_id": fields.get("agent_id", "agent_1"),
             "scope": fields.get("scope", "tenant:user_001"),
             "derived_from": list(fields.get("source_ids", [])),
+            "version": int(previous.get("version", 1)) + 1 if previous else 1,
         }
         self.memories[memory_id] = memory
         self._event("memory_write", memory_id=memory_id, value=memory["value"], **fields)
@@ -90,6 +94,9 @@ class InstrumentedMemoryBackend:
             raise KeyError(old_memory_id)
         memory = self.write(new_memory_id, value=value, supersedes_id=old_memory_id, **fields)
         self.memories[old_memory_id]["status"] = "superseded"
+        self.memories[old_memory_id]["version"] = int(
+            self.memories[old_memory_id].get("version", 1)
+        ) + 1
         self._event(
             "memory_supersede",
             old_memory_id=old_memory_id,
@@ -101,6 +108,9 @@ class InstrumentedMemoryBackend:
     def invalidate(self, memory_id: str, **fields: Any) -> None:
         if memory_id in self.memories:
             self.memories[memory_id]["status"] = "invalid"
+            self.memories[memory_id]["version"] = int(
+                self.memories[memory_id].get("version", 1)
+            ) + 1
         self._event("invalidate", memory_id=memory_id, **fields)
 
     def snapshot(self) -> dict[str, Any]:
@@ -133,6 +143,10 @@ class SQLiteInstrumentedMemoryBackend(InstrumentedMemoryBackend):
         rows = self._connection.execute("SELECT payload FROM memories ORDER BY memory_id").fetchall()
         if rows:
             self.memories = {str(json.loads(row[0])["memory_id"]): json.loads(row[0]) for row in rows}
+            for memory in self.memories.values():
+                memory.setdefault("version", 1)
+                self._persist_memory(memory)
+            self._connection.commit()
         else:
             for memory in self.memories.values():
                 self._persist_memory(memory)
