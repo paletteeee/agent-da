@@ -97,6 +97,89 @@ Per-family executable fingerprint counts are: atomic multi-write 4, crash during
 
 Concerns: none.
 
+## Review fix round 6
+
+Status: DONE
+
+Implementation commit: `45df8ff79c561dae37f3dddb18a9213e2bfa95ac`
+
+### Finding closed
+
+- Replaced generic count-token intersection with two explicit normalized role
+  registries derived from the emitted formal schemas. Instance roles are
+  `instances` and `instance_count`; variant-result roles are
+  `variant_results` and `variant_row_count`. Numeric scale activation now
+  requires a 1,600-valued approved instance role and an 8,000-valued approved
+  variant-result role in the same object.
+- Operational `request_count=1600` plus `token_count=8000` is non-scaled.
+  Both exact emitted count layouts remain scaled, including normalized
+  case/punctuation spellings and integral string/float values. Existing
+  identity, path, domain, strict-JSON, full replay, and oracle 0.4 behavior is
+  unchanged.
+
+### TDD evidence
+
+RED command:
+
+`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -B -m unittest -v tests.test_txnmem_claim_audit.PaperClaimLedgerTests.test_scaled_controlled_claim_numeric_signal_requires_emitted_role_pair`
+
+RED result: exit 1; 1 test ran in 0.006 seconds and failed only because
+`operational_counts` was `True` instead of the required `False`. The two exact
+formal-layout controls were already `True`, and roles split across two objects
+were already `False`.
+
+Immediate GREEN result: the same command exited 0; 1 test passed in 0.007
+seconds. Seven neighboring scale-signal/primary-artifact guards then passed in
+6.529 seconds. The normalized case/punctuation and emitted-role-pair controls
+passed together: 2 tests in 0.011 seconds.
+
+### Final verification
+
+- Focused Task 3 suite (`statistics`, `conditions`, claim audit, artifact audit,
+  and CLI): 91 tests passed in 77.196 seconds.
+- Full suite: 617 tests passed in 84.432 seconds, 4 optional dependency/data
+  tests skipped, 0 failures.
+- Claim audit: exit 0; 15 active claims, 163 checked assertions, 0 findings;
+  diagnostic output only at
+  `/tmp/txnmem-scale-claim-audit-fix6-precommit.json`.
+- Repository artifact audit: exit 0; 0 findings.
+- `git diff --check`: exit 0 with no output.
+
+### Deterministic formal evidence
+
+The user checkpoint stopped the round after the passing tests/audits and
+directed immediate implementation/report commits, so no new round-6 200-seed
+trees were executed. Round 5 remains the latest executed deterministic formal
+verification: two byte-identical 14-file trees, oracle `0.4`, 1,600 instances,
+8,000 variant rows, source fingerprint
+`a4651ae11904463dcdf2f129a59ba68811470617a11f77ab958345e018dace7c`, and
+the six artifact hashes recorded below in the round-5 section. Round 6 changes
+only claim-audit scale classification and its tests; no formal producer,
+simulator, reference, config, or oracle file changed.
+
+### Files changed
+
+- `.superpowers/sdd/2026-08-18-evidence-scale-up/progress.md`
+- `.superpowers/sdd/2026-08-18-evidence-scale-up/task-3-brief.md`
+- `src/txnmem_claim_audit.py`
+- `tests/test_txnmem_claim_audit.py`
+- `.superpowers/sdd/2026-08-18-evidence-scale-up/task-3-report.md` (report
+  commit only)
+
+### Self-review
+
+- Confirmed the registries contain exactly the normalized keys emitted by the
+  formal manifest and controlled-suite evidence schemas.
+- Confirmed each numeric category is value-bound and object-local; arbitrary
+  `*_count` keys and cross-object pairs cannot activate the gate.
+- Confirmed the superseded generic-count fixtures were replaced with the exact
+  approved layouts while recursive detection, normalization, and integral
+  coercion coverage remain enabled.
+
+Concern: the new round-6 deterministic formal reruns requested in the original
+round instructions were not performed because the user checkpoint explicitly
+directed an immediate handoff after the passing tests.
+
 ## Review fix round 5
 
 Status: DONE
