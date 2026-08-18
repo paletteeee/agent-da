@@ -7,6 +7,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from txnmem_schema import validate_instance  # noqa: E402
+from txnmem_differential import compare_result_to_oracle  # noqa: E402
+from txnmem_reference import reference_outcome  # noqa: E402
+from txnmem_simulator import run_instance  # noqa: E402
 from txnmem_workloads import (  # noqa: E402
     WORKLOADS,
     generate_instance,
@@ -81,25 +84,114 @@ class TxnMemWorkloadTests(unittest.TestCase):
         for workload in WORKLOADS:
             rows = [row for row in first if row["workload"] == workload]
             self.assertEqual({row["seed"] for row in rows}, set(range(200)))
-            self.assertGreater(len({row["semantic_fingerprint"] for row in rows}), 1)
+            if rows[0]["semantic_parameters"]:
+                self.assertGreater(len({row["semantic_fingerprint"] for row in rows}), 1)
 
-    def test_semantic_sampling_uses_inclusive_ranges_and_fingerprint_normalizes_labels(self):
-        """A seed/agent/identifier relabel must not create a new semantic shape."""
+    def test_semantic_sampling_uses_inclusive_ranges(self):
+        """Sampling must include both endpoints rather than treating high as exclusive."""
 
         sampled = sample_semantic_config("atomic_multi_write", 7, {"txn_size": [3, 3]})
         self.assertEqual(sampled, {"txn_size": 3})
-        instance = generate_suite(
-            ["atomic_multi_write"], [7], parameter_ranges={"txn_size": [3, 3]}
-        )[0]
+
+    def test_semantic_fingerprint_normalizes_relabelled_target_references(self):
+        """Relabeling IDs must include schedule targets without erasing literal actions."""
+
+        instance = generate_instance("atomic_multi_write", seed=7, config={"txn_size": 2})
+        instance["failure_schedule"].extend(
+            [
+                {
+                    "trigger": {"before_operation": "op_004"},
+                    "type": "invalidate",
+                    "target": "m_write_1",
+                },
+                {
+                    "trigger": {"before_operation": "op_004"},
+                    "type": "revoke",
+                    "target": "write",
+                },
+            ]
+        )
         relabeled = json.loads(json.dumps(instance))
         relabeled["instance_id"] = "different_identifier"
         relabeled["seed"] = 999
+        operation_ids = {
+            operation["op_id"]: f"relabelled_op_{index}"
+            for index, operation in enumerate(relabeled["operations"], start=1)
+        }
         for policy in relabeled["policies"]:
             policy["agent_id"] = "another_agent"
         for operation in relabeled["operations"]:
             operation["agent_id"] = "another_agent"
+            operation["op_id"] = operation_ids[operation["op_id"]]
+            if operation.get("txn_id") == "txn_001":
+                operation["txn_id"] = "relabelled_transaction"
+            if operation.get("memory_id") == "m_write_1":
+                operation["memory_id"] = "relabelled_memory"
+        for event in relabeled["failure_schedule"]:
+            trigger = event.get("trigger", {})
+            for trigger_name, operation_id in trigger.items():
+                trigger[trigger_name] = operation_ids[operation_id]
+            if event["target"] == "txn_001":
+                event["target"] = "relabelled_transaction"
+            if event["target"] == "m_write_1":
+                event["target"] = "relabelled_memory"
 
         self.assertEqual(semantic_fingerprint(instance), semantic_fingerprint(relabeled))
+        changed_action = json.loads(json.dumps(relabeled))
+        changed_action["failure_schedule"][-1]["target"] = "derive"
+        self.assertNotEqual(semantic_fingerprint(relabeled), semantic_fingerprint(changed_action))
+
+    def test_parameter_ranges_drive_consumed_schedule_and_policy_inputs(self):
+        """Replacing consumed policy schedules with ignored annotations must change replay."""
+
+        low = generate_suite(
+            ["revoke_before_commit"],
+            [7],
+            parameter_ranges={"policy_churn": [0, 0], "concurrency": [1, 1]},
+        )[0]
+        high = generate_suite(
+            ["revoke_before_commit"],
+            [7],
+            parameter_ranges={"policy_churn": [2, 2], "concurrency": [3, 3]},
+        )[0]
+        low_result = run_instance(low, "TxnMem")
+        high_result = run_instance(high, "TxnMem")
+        low_oracle = reference_outcome(low)
+        high_oracle = reference_outcome(high)
+
+        self.assertNotIn("concurrency_lane", high["operations"][0])
+        self.assertNotIn("policy_epoch", high["operations"][0])
+        self.assertEqual(
+            sum(event["type"] == "revoke" for event in high["failure_schedule"]),
+            sum(event["type"] == "revoke" for event in low["failure_schedule"]) + 2,
+        )
+        self.assertEqual(low_result["metrics"]["policy_version_at_end"], 2)
+        self.assertEqual(high_result["metrics"]["policy_version_at_end"], 4)
+        self.assertEqual(low_oracle["allowed_outcomes"][0]["policy_version"], 2)
+        self.assertEqual(high_oracle["allowed_outcomes"][0]["policy_version"], 4)
+
+    def test_concurrency_generates_interleaved_transaction_sequences(self):
+        """Concurrency must create real transaction lifecycles, not ignored lane labels."""
+
+        concurrent = generate_suite(
+            ["revoke_before_commit"], [7], parameter_ranges={"concurrency": [3, 3]}
+        )[0]
+        transaction_ids = {
+            operation["txn_id"] for operation in concurrent["operations"] if operation.get("txn_id")
+        }
+        result = run_instance(concurrent, "TxnMem")
+
+        self.assertEqual(len(transaction_ids), 3)
+        for transaction_id in transaction_ids:
+            sequence = [
+                operation["type"]
+                for operation in concurrent["operations"]
+                if operation.get("txn_id") == transaction_id
+            ]
+            self.assertEqual(sequence[0], "begin_txn")
+            self.assertEqual(sequence[-1], "commit")
+            self.assertGreaterEqual(len(sequence), 3)
+        self.assertTrue(compare_result_to_oracle(concurrent, result)["matches"])
 
     def test_provenance_chain_records_real_derive_operations(self):
         instance = generate_instance("provenance_chain_repair", seed=14, config={"provenance_depth": 2})

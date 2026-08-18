@@ -43,6 +43,30 @@ class TxnMemDifferentialTests(unittest.TestCase):
         self.assertTrue(comparison["matches"])
         self.assertEqual(comparison["allowed_outcome_count"], 2)
 
+    def test_interleaved_abort_preserves_the_other_transaction_buffer(self):
+        """Aborting transaction A must neither commit nor clear transaction B's write."""
+
+        instance = generate_instance("atomic_multi_write", seed=3, config={"txn_size": 1})
+        agent = instance["policies"][0]["agent_id"]
+        instance["operations"] = [
+            {"op_id": "op_001", "step": 1, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_a"},
+            {"op_id": "op_002", "step": 2, "agent_id": agent, "type": "write", "txn_id": "txn_a", "memory_id": "m_a", "source_ids": [], "policy_version": 1},
+            {"op_id": "op_003", "step": 3, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_b"},
+            {"op_id": "op_004", "step": 4, "agent_id": agent, "type": "write", "txn_id": "txn_b", "memory_id": "m_b", "source_ids": [], "policy_version": 1},
+            {"op_id": "op_005", "step": 5, "agent_id": agent, "type": "abort", "txn_id": "txn_a"},
+            {"op_id": "op_006", "step": 6, "agent_id": agent, "type": "commit", "txn_id": "txn_b"},
+        ]
+        instance["failure_schedule"] = []
+
+        result = run_instance(instance, "TxnMem")
+        comparison = compare_result_to_oracle(instance, result)
+
+        self.assertEqual(result["committed_memory_ids"], ["m_b"])
+        self.assertEqual(
+            result["transaction_states"], {"txn_a": "aborted", "txn_b": "committed"}
+        )
+        self.assertTrue(comparison["matches"])
+
 
 if __name__ == "__main__":
     unittest.main()

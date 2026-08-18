@@ -131,13 +131,14 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
         memory["memory_id"]: copy.deepcopy(memory)
         for memory in instance["initial_memories"]
     }
-    buffered_writes: list[dict[str, Any]] = []
-    buffered_edges: list[dict[str, Any]] = []
+    buffered_writes: dict[str, list[dict[str, Any]]] = {}
+    buffered_edges: dict[str, list[dict[str, Any]]] = {}
     provenance_edges = copy.deepcopy(instance.get("provenance_edges", []))
     committed_memory_ids: list[str] = []
     trace: list[dict[str, Any]] = []
     current_policy_version = 1
-    begin_policy_version = 1
+    begin_policy_versions: dict[str, int] = {}
+    transaction_write_allowed: dict[str, bool] = {}
     write_allowed = True
     transaction_state = "active"
     transaction_states: dict[str, str] = {}
@@ -145,6 +146,16 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
     exposed_memory_ids: list[str] = []
     denied_reads = 0
     supersession_updates = 0
+
+    def transaction_id(operation: dict[str, Any]) -> str:
+        return str(operation.get("txn_id") or "implicit")
+
+    def ensure_transaction(txn_id: str) -> None:
+        buffered_writes.setdefault(txn_id, [])
+        buffered_edges.setdefault(txn_id, [])
+        begin_policy_versions.setdefault(txn_id, current_policy_version)
+        transaction_write_allowed.setdefault(txn_id, write_allowed)
+        transaction_states.setdefault(txn_id, "active")
 
     for operation in instance["operations"]:
         step = int(operation["step"])
@@ -161,9 +172,12 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
         trace.append({"step": step, "operation": op_type})
 
         if op_type == "begin_txn":
-            begin_policy_version = current_policy_version
-            if operation.get("txn_id"):
-                transaction_states[operation["txn_id"]] = "active"
+            txn_id = transaction_id(operation)
+            buffered_writes[txn_id] = []
+            buffered_edges[txn_id] = []
+            begin_policy_versions[txn_id] = current_policy_version
+            transaction_write_allowed[txn_id] = write_allowed
+            transaction_states[txn_id] = "active"
 
         elif op_type == "write":
             memory = _memory_from_operation(operation)
@@ -171,7 +185,9 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                 memories[memory["memory_id"]] = memory
                 _record_committed(committed_memory_ids, memory["memory_id"])
             else:
-                buffered_writes.append(memory)
+                txn_id = transaction_id(operation)
+                ensure_transaction(txn_id)
+                buffered_writes[txn_id].append(memory)
 
         elif op_type in {"search", "read", "get_by_id"}:
             requested_id = operation.get("memory_id")
@@ -194,10 +210,12 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                 trace.append({"step": step, "event": "exposed_read", "memory_id": found["memory_id"]})
 
         elif op_type == "supersede":
+            txn_id = transaction_id(operation)
+            ensure_transaction(txn_id)
             old_id = operation["old_memory_id"]
             new_id = operation["new_memory_id"]
             def visible_memory(memory_id: str) -> dict[str, Any] | None:
-                for pending in reversed(buffered_writes):
+                for pending in reversed(buffered_writes[txn_id]):
                     if pending["memory_id"] == memory_id:
                         return pending
                 return memories.get(memory_id)
@@ -215,7 +233,7 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                 # A native Agent may emit a write followed by a supersede and
                 # may repeat the write while retrying the tool call.  Keep the
                 # final visible write consistent with the supersession edge.
-                for pending in buffered_writes:
+                for pending in buffered_writes[txn_id]:
                     if pending["memory_id"] == old_id:
                         pending["status"] = "superseded"
                     elif pending["memory_id"] == new_id:
@@ -224,34 +242,43 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                 supersession_updates += 1
 
         elif op_type == "commit":
-            policy_changed = current_policy_version != begin_policy_version or not write_allowed
+            txn_id = transaction_id(operation)
+            ensure_transaction(txn_id)
+            policy_changed = (
+                current_policy_version != begin_policy_versions[txn_id]
+                or not transaction_write_allowed[txn_id]
+            )
             crash_on_commit = any(event["type"] in {"crash", "crash_during_commit"} for event in pre_events)
             if variant in POLICY_REVALIDATION_VARIANTS and policy_changed:
-                buffered_writes.clear()
-                buffered_edges.clear()
+                buffered_writes[txn_id].clear()
+                buffered_edges[txn_id].clear()
                 transaction_state = "aborted"
-                if operation.get("txn_id"):
-                    transaction_states[operation["txn_id"]] = "aborted"
+                transaction_states[txn_id] = "aborted"
             elif crash_on_commit and uses_transaction:
-                buffered_writes.clear()
-                buffered_edges.clear()
+                buffered_writes[txn_id].clear()
+                buffered_edges[txn_id].clear()
                 transaction_state = "aborted"
-                if operation.get("txn_id"):
-                    transaction_states[operation["txn_id"]] = "aborted"
+                transaction_states[txn_id] = "aborted"
             elif not uses_transaction:
                 transaction_state = "committed"
-                if operation.get("txn_id"):
-                    transaction_states[operation["txn_id"]] = "committed"
+                transaction_states[txn_id] = "committed"
             else:
-                for memory in buffered_writes:
+                for memory in buffered_writes[txn_id]:
                     memories[memory["memory_id"]] = memory
                     _record_committed(committed_memory_ids, memory["memory_id"])
-                buffered_writes.clear()
-                provenance_edges.extend(buffered_edges)
-                buffered_edges.clear()
+                buffered_writes[txn_id].clear()
+                provenance_edges.extend(buffered_edges[txn_id])
+                buffered_edges[txn_id].clear()
                 transaction_state = "committed"
-                if operation.get("txn_id"):
-                    transaction_states[operation["txn_id"]] = "committed"
+                transaction_states[txn_id] = "committed"
+
+        elif op_type == "abort":
+            txn_id = transaction_id(operation)
+            ensure_transaction(txn_id)
+            buffered_writes[txn_id].clear()
+            buffered_edges[txn_id].clear()
+            transaction_state = "aborted"
+            transaction_states[txn_id] = "aborted"
 
         elif op_type in {"derive", "propagate"}:
             memory = _memory_from_operation(operation)
@@ -269,8 +296,10 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                 for source_id in source_ids
             ]
             if uses_transaction:
-                buffered_writes.append(memory)
-                buffered_edges.extend(operation_edges)
+                txn_id = transaction_id(operation)
+                ensure_transaction(txn_id)
+                buffered_writes[txn_id].append(memory)
+                buffered_edges[txn_id].extend(operation_edges)
             else:
                 memories[memory["memory_id"]] = memory
                 _record_committed(committed_memory_ids, memory["memory_id"])
@@ -295,11 +324,12 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
         if any(event["type"] in {"crash", "crash_during_commit"} for event in pre_events + post_events):
             if op_type != "commit":
                 if uses_transaction:
-                    buffered_writes.clear()
-                    buffered_edges.clear()
+                    txn_id = transaction_id(operation)
+                    ensure_transaction(txn_id)
+                    buffered_writes[txn_id].clear()
+                    buffered_edges[txn_id].clear()
                     transaction_state = "aborted"
-                    if operation.get("txn_id"):
-                        transaction_states[operation["txn_id"]] = "aborted"
+                    transaction_states[txn_id] = "aborted"
                 elif committed_memory_ids:
                     transaction_state = "partial_commit"
                 else:
