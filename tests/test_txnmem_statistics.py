@@ -6,7 +6,8 @@ from txnmem_statistics import (
     controlled_diversity,
     controlled_violation_saturation,
 )
-from txnmem_workloads import WORKLOADS, generate_suite
+from txnmem_simulator import VARIANTS
+from txnmem_workloads import WORKLOADS, WORKLOAD_SEMANTIC_PARAMETERS, generate_suite
 
 
 class TxnMemStatisticsTests(unittest.TestCase):
@@ -18,7 +19,7 @@ class TxnMemStatisticsTests(unittest.TestCase):
                 for variant in ("Naive", "TxnMem"):
                     rows.append(
                         {
-                            "instance_id": f"{family}-{seed}",
+                            "instance_id": f"{family}_seed_{seed}",
                             "workload": family,
                             "seed": seed,
                             "variant": variant,
@@ -77,8 +78,12 @@ class TxnMemStatisticsTests(unittest.TestCase):
     def test_controlled_saturation_uses_balanced_nested_family_seed_prefixes(self):
         rows = self._controlled_rows()
 
-        first = controlled_violation_saturation(rows, [2, 4])
-        second = controlled_violation_saturation(reversed(rows), [2, 4])
+        domains = {
+            "approved_families": ("family_a", "family_b"),
+            "approved_variants": ("Naive", "TxnMem"),
+        }
+        first = controlled_violation_saturation(rows, [2, 4], **domains)
+        second = controlled_violation_saturation(reversed(rows), [2, 4], **domains)
 
         self.assertEqual(first, second)
         self.assertEqual(first["checkpoint_seed_counts"], [2, 4])
@@ -99,6 +104,10 @@ class TxnMemStatisticsTests(unittest.TestCase):
 
     def test_controlled_saturation_rejects_incomplete_or_ambiguous_cells(self):
         rows = self._controlled_rows()
+        domains = {
+            "approved_families": ("family_a", "family_b"),
+            "approved_variants": ("Naive", "TxnMem"),
+        }
         malformed = {
             "duplicate": [*rows, dict(rows[0])],
             "missing": rows[:-1],
@@ -117,10 +126,69 @@ class TxnMemStatisticsTests(unittest.TestCase):
         }
         for label, candidate in malformed.items():
             with self.subTest(label=label), self.assertRaises(ValueError):
-                controlled_violation_saturation(candidate, [2, 4])
+                controlled_violation_saturation(candidate, [2, 4], **domains)
         for checkpoints in ([], [0], [2, 2], [4, 2], [5]):
             with self.subTest(checkpoints=checkpoints), self.assertRaises(ValueError):
-                controlled_violation_saturation(rows, checkpoints)
+                controlled_violation_saturation(rows, checkpoints, **domains)
+
+    def test_controlled_saturation_rejects_whole_missing_or_extra_domains(self):
+        rows = self._controlled_rows()
+        domains = {
+            "approved_families": ("family_a", "family_b"),
+            "approved_variants": ("Naive", "TxnMem"),
+        }
+        extra_variant = [
+            *rows,
+            *[
+                {**row, "variant": "Unknown"}
+                for row in rows
+                if row["variant"] == "TxnMem"
+            ],
+        ]
+        extra_family = [
+            *rows,
+            *[
+                {
+                    **row,
+                    "instance_id": row["instance_id"].replace("family_b", "family_c"),
+                    "workload": "family_c",
+                }
+                for row in rows
+                if row["workload"] == "family_b"
+            ],
+        ]
+        malformed = {
+            "missing whole variant": [row for row in rows if row["variant"] != "Naive"],
+            "missing whole family": [row for row in rows if row["workload"] != "family_b"],
+            "extra complete variant": extra_variant,
+            "extra complete family": extra_family,
+        }
+        for label, candidate in malformed.items():
+            with self.subTest(label=label), self.assertRaises(ValueError):
+                controlled_violation_saturation(candidate, [4], **domains)
+
+        with self.assertRaises(ValueError):
+            controlled_violation_saturation(rows, [4])
+
+    def test_controlled_saturation_rejects_coordinate_and_binary_metric_tampering(self):
+        rows = self._controlled_rows()
+        domains = {
+            "approved_families": ("family_a", "family_b"),
+            "approved_variants": ("Naive", "TxnMem"),
+        }
+        wrong_coordinate = [dict(row) for row in rows]
+        wrong_coordinate[1]["instance_id"] = "different-id"
+        wrong_but_consistent = [
+            {**row, "instance_id": f"custom_{row['workload']}_{row['seed']}"}
+            for row in rows
+        ]
+        reused_id = [dict(row) for row in rows]
+        reused_id[4]["instance_id"] = reused_id[0]["instance_id"]
+        invalid_binary = [dict(row) for row in rows]
+        invalid_binary[0]["any_violation"] = 2
+        for candidate in (wrong_coordinate, wrong_but_consistent, reused_id, invalid_binary):
+            with self.assertRaises(ValueError):
+                controlled_violation_saturation(candidate, [4], **domains)
 
     def test_controlled_diversity_recomputes_executable_fingerprints_and_coverage(self):
         ranges = {
@@ -150,3 +218,78 @@ class TxnMemStatisticsTests(unittest.TestCase):
         tampered[0] = {**tampered[0], "semantic_fingerprint": "0" * 64}
         with self.assertRaisesRegex(ValueError, "semantic_fingerprint"):
             controlled_diversity(tampered)
+
+    def test_controlled_diversity_enforces_registered_family_parameters_and_config(self):
+        ranges = {
+            "txn_size": [1, 4],
+            "provenance_depth": [1, 4],
+            "branch_factor": [1, 3],
+            "policy_churn": [0, 2],
+            "concurrency": [1, 3],
+        }
+        instances = generate_suite(WORKLOADS, range(4), parameter_ranges=ranges)
+        branch_index = next(
+            index
+            for index, row in enumerate(instances)
+            if row["workload"] == "provenance_branch_repair"
+        )
+        family_contract = set(WORKLOAD_SEMANTIC_PARAMETERS["provenance_branch_repair"])
+        self.assertEqual(
+            set(instances[branch_index]["semantic_parameters"]), family_contract
+        )
+
+        missing_dimension = [dict(row) for row in instances]
+        missing_parameters = dict(missing_dimension[branch_index]["semantic_parameters"])
+        missing_parameters.pop("branch_factor")
+        missing_dimension[branch_index] = {
+            **missing_dimension[branch_index],
+            "semantic_parameters": missing_parameters,
+        }
+        unknown_dimension = [dict(row) for row in instances]
+        unknown_dimension[branch_index] = {
+            **unknown_dimension[branch_index],
+            "semantic_parameters": {
+                **unknown_dimension[branch_index]["semantic_parameters"],
+                "txn_size": 1,
+            },
+        }
+        config_mismatch = [dict(row) for row in instances]
+        config_mismatch[branch_index] = {
+            **config_mismatch[branch_index],
+            "config": {
+                **config_mismatch[branch_index]["config"],
+                "branch_factor": 99,
+            },
+        }
+        missing_seed = instances[:-1]
+        duplicate_seed = [*instances, dict(instances[0])]
+        for label, candidate in {
+            "missing dimension": missing_dimension,
+            "unknown dimension": unknown_dimension,
+            "config mismatch": config_mismatch,
+            "missing seed": missing_seed,
+            "duplicate seed": duplicate_seed,
+        }.items():
+            with self.subTest(label=label), self.assertRaises(ValueError):
+                controlled_diversity(candidate)
+
+    def test_default_saturation_domains_are_exact_registered_domains(self):
+        instances = generate_suite(WORKLOADS, range(1), parameter_ranges={
+            "txn_size": [1, 4], "provenance_depth": [1, 4],
+            "branch_factor": [1, 3], "policy_churn": [0, 2], "concurrency": [1, 3],
+        })
+        rows = [
+            {
+                "instance_id": instance["instance_id"],
+                "workload": instance["workload"],
+                "seed": instance["seed"],
+                "variant": variant,
+                "any_violation": 0,
+                "oracle_match": 1,
+            }
+            for instance in instances
+            for variant in VARIANTS
+        ]
+        report = controlled_violation_saturation(rows, [1])
+        self.assertEqual(report["families"], sorted(WORKLOADS))
+        self.assertEqual(report["variant_domain"], sorted(VARIANTS))

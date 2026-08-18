@@ -29,7 +29,12 @@ from txnmem_distributed import run_process_action_sequences
 from txnmem_distributed_protocol import run_protocol_matrix
 from txnmem_backend_performance import FaultScenario, benchmark_backend, run_fault_matrix
 from txnmem_benchmark_bridge import APPWORLD_TOOL_STRATEGIES
-from txnmem_conditions import canonical_fingerprint, file_sha256, source_identity
+from txnmem_conditions import (
+    canonical_fingerprint,
+    file_sha256,
+    source_identity,
+    verify_git_source_containment,
+)
 from txnmem_service_faults import ToxiproxyFaultController, deterministic_fault_matrix
 from txnmem_mutation import (
     build_minimal_mutant_witnesses,
@@ -261,6 +266,7 @@ def _build_parser() -> argparse.ArgumentParser:
     experiment.add_argument("--out-dir", type=Path, default=Path("."))
     experiment.add_argument("--seeds", type=int, default=10)
     experiment.add_argument("--variants", nargs="+", choices=VARIANTS, default=list(VARIANTS))
+    experiment.add_argument("--require-clean-source", action="store_true")
 
     mutation_witnesses = subparsers.add_parser(
         "mutation-witnesses",
@@ -469,21 +475,24 @@ class _OfflineFixtureModel:
         return ModelResponse("offline fixture completed", [])
 
 
-def _controlled_source_manifest() -> dict[str, Any]:
+_CONTROLLED_SOURCE_PATHS = (
+    "configs/workload_families.yaml",
+    "src/txnmem_conditions.py",
+    "src/txnmem_differential.py",
+    "src/txnmem_experiment.py",
+    "src/txnmem_invariants.py",
+    "src/txnmem_metrics.py",
+    "src/txnmem_reference.py",
+    "src/txnmem_schedules.py",
+    "src/txnmem_schema.py",
+    "src/txnmem_simulator.py",
+    "src/txnmem_statistics.py",
+    "src/txnmem_workloads.py",
+)
+
+
+def _controlled_source_manifest(config_path: Path) -> tuple[dict[str, Any], str | None]:
     source_root = Path(__file__).resolve().parent
-    components = {
-        name: source_root / f"{name}.py"
-        for name in (
-            "txnmem_differential",
-            "txnmem_experiment",
-            "txnmem_invariants",
-            "txnmem_metrics",
-            "txnmem_reference",
-            "txnmem_simulator",
-            "txnmem_statistics",
-            "txnmem_workloads",
-        )
-    }
     repository_root = source_root.parent
     completed = subprocess.run(
         ["git", "rev-parse", "HEAD"],
@@ -495,7 +504,31 @@ def _controlled_source_manifest() -> dict[str, Any]:
     commit = completed.stdout.strip()
     if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
         raise ValueError("controlled evidence requires a full lowercase Git source commit")
-    return {"commit": commit, "identity": source_identity(components)}
+    try:
+        config_relative = config_path.resolve().relative_to(repository_root.resolve()).as_posix()
+    except ValueError:
+        config_relative = None
+    source_paths = [path for path in _CONTROLLED_SOURCE_PATHS if path != "configs/workload_families.yaml"]
+    if config_relative is not None:
+        source_paths.append(config_relative)
+    components = {
+        path: file_sha256(repository_root / path)
+        for path in sorted(set(source_paths))
+        if (repository_root / path).is_file()
+    }
+    containment = verify_git_source_containment(repository_root, commit, components)
+    expected_paths = set(source_paths)
+    contained = (
+        config_relative is not None
+        and containment["contained_in_commit"]
+        and set(components) == expected_paths
+    )
+    return ({
+        "commit": commit,
+        "components": components,
+        "fingerprint": canonical_fingerprint(components),
+        "contained_in_commit": contained,
+    }, config_relative)
 
 
 def _controlled_artifact_entry(path: Path, relative_path: str, **counts: int) -> dict[str, Any]:
@@ -513,6 +546,8 @@ def _run_core_experiment(
     *,
     config_path: Path,
     workload_config: dict[str, Any],
+    source_manifest: dict[str, Any],
+    config_relative_path: str | None,
 ) -> int:
     variant_domain = list(variants)
     rows: list[dict[str, Any]] = []
@@ -535,7 +570,11 @@ def _run_core_experiment(
     checkpoints = [value for value in (10, 25, 50, 100, 150, 200) if value <= seed_count]
     if not checkpoints or checkpoints[-1] != seed_count:
         checkpoints.append(seed_count)
-    saturation = controlled_violation_saturation(rows, checkpoints)
+    saturation = controlled_violation_saturation(
+        rows,
+        checkpoints,
+        approved_variants=variant_domain,
+    )
     diversity = controlled_diversity(instances)
     write_summary(saturation, saturation_path)
     write_summary(diversity, diversity_path)
@@ -568,9 +607,10 @@ def _run_core_experiment(
     manifest = {
         "schema_version": 1,
         "runner_version": "controlled-experiment/1",
-        "source": _controlled_source_manifest(),
+        "source": source_manifest,
         "oracle_version": ORACLE_VERSION,
         "config": {
+            "relative_path": config_relative_path,
             "sha256": file_sha256(config_path),
             "canonical_fingerprint": canonical_fingerprint(workload_config),
         },
@@ -643,6 +683,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "experiment":
         workload_config = load_workload_config(args.config)
+        source_manifest, config_relative_path = _controlled_source_manifest(args.config)
+        if args.require_clean_source and not source_manifest["contained_in_commit"]:
+            raise ValueError("formal controlled evidence source is not contained in the declared commit")
         instances = generate_suite(
             WORKLOADS,
             _seed_range(args.seeds),
@@ -654,6 +697,8 @@ def main(argv: list[str] | None = None) -> int:
             args.out_dir,
             config_path=args.config,
             workload_config=workload_config,
+            source_manifest=source_manifest,
+            config_relative_path=config_relative_path,
         )
     if args.command == "mutation-witnesses":
         instances = _read_jsonl(args.instances)

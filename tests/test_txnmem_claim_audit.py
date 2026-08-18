@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -16,6 +17,10 @@ from txnmem_claim_audit import (  # noqa: E402
     audit_claim_ledger,
     build_controlled_suite_evidence,
 )
+from txnmem_conditions import canonical_fingerprint  # noqa: E402
+from txnmem_simulator import VARIANTS  # noqa: E402
+from txnmem_statistics import binomial_interval  # noqa: E402
+from txnmem_workloads import WORKLOADS, WORKLOAD_SEMANTIC_PARAMETERS, semantic_fingerprint  # noqa: E402
 
 
 class ControlledSuiteEvidenceTests(unittest.TestCase):
@@ -355,31 +360,272 @@ class PaperClaimLedgerTests(unittest.TestCase):
                 },
             )
 
+    SCALED_SOURCE_PATHS = (
+        "configs/controlled_scale_200.json",
+        "src/txnmem_conditions.py",
+        "src/txnmem_differential.py",
+        "src/txnmem_experiment.py",
+        "src/txnmem_invariants.py",
+        "src/txnmem_metrics.py",
+        "src/txnmem_reference.py",
+        "src/txnmem_schedules.py",
+        "src/txnmem_schema.py",
+        "src/txnmem_simulator.py",
+        "src/txnmem_statistics.py",
+        "src/txnmem_workloads.py",
+    )
+    PARAMETER_INTERVALS = {
+        "txn_size": [1, 4],
+        "provenance_depth": [1, 4],
+        "branch_factor": [1, 3],
+        "policy_churn": [0, 2],
+        "concurrency": [1, 3],
+    }
+
     def _make_scaled_controlled_claim(self, root: Path, ledger: Path) -> dict:
+        for relative in self.SCALED_SOURCE_PATHS:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if relative == "configs/controlled_scale_200.json":
+                path.write_bytes((ROOT / relative).read_bytes())
+            else:
+                path.write_text(f"# fixture for {relative}\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=root, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+        subprocess.run(["git", "add", *self.SCALED_SOURCE_PATHS], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "scaled source"], cwd=root, check=True)
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        components = {
+            relative: self._sha256(root / relative)
+            for relative in self.SCALED_SOURCE_PATHS
+        }
+
         controlled = root / "results/final_controlled_200"
+        data = controlled / "data"
         results = controlled / "results"
-        results.mkdir(parents=True, exist_ok=True)
+        figures = results / "figures"
+        data.mkdir(parents=True)
+        figures.mkdir(parents=True)
+        generated = data / "generated_instances.jsonl"
+        oracles = data / "reference_oracles.jsonl"
+        csv_path = results / "experiment_results.csv"
         saturation = results / "saturation.json"
         diversity = results / "diversity.json"
-        saturation.write_text(json.dumps({"checkpoint_seed_counts": [200]}), encoding="utf-8")
-        diversity.write_text(json.dumps({"family_count": 8}), encoding="utf-8")
+        svg = figures / "saturation.svg"
+
+        generated_rows = []
+        oracle_rows = []
+        for family in WORKLOADS:
+            for seed in range(200):
+                instance_id = f"{family}_seed_{seed}"
+                config = {
+                    "agent_count": 2,
+                    "txn_size": 1,
+                    "provenance_depth": 1,
+                    "branch_factor": 1,
+                    "policy_churn": 0,
+                    "concurrency": 1,
+                }
+                generated_row = {
+                        "instance_id": instance_id,
+                        "workload": family,
+                        "seed": seed,
+                        "config": config,
+                        "initial_memories": [],
+                        "operations": [],
+                        "policies": [],
+                        "failure_schedule": [],
+                        "provenance_edges": [],
+                        "semantic_parameters": {
+                            name: config[name]
+                            for name in WORKLOAD_SEMANTIC_PARAMETERS[family]
+                        },
+                        "semantic_fingerprint": "",
+                    }
+                generated_row["semantic_fingerprint"] = semantic_fingerprint(generated_row)
+                generated_rows.append(generated_row)
+                oracle_rows.append(
+                    {
+                        "instance_id": instance_id,
+                        "oracle_version": "0.4",
+                        "allowed_outcomes": [],
+                        "event_trace": [],
+                        "minimal_counterexample": None,
+                        "safety_invariants": [],
+                    }
+                )
+        generated.write_text(
+            "".join(json.dumps(row, sort_keys=True) + "\n" for row in generated_rows),
+            encoding="utf-8",
+        )
+        oracles.write_text(
+            "".join(json.dumps(row, sort_keys=True) + "\n" for row in oracle_rows),
+            encoding="utf-8",
+        )
+        csv_fields = [
+            "instance_id", "workload", "seed", "variant", "any_violation",
+            "oracle_version", "oracle_match",
+        ]
+        with csv_path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=csv_fields)
+            writer.writeheader()
+            for row in generated_rows:
+                for variant in VARIANTS:
+                    writer.writerow(
+                        {
+                            "instance_id": row["instance_id"],
+                            "workload": row["workload"],
+                            "seed": row["seed"],
+                            "variant": variant,
+                            "any_violation": 0,
+                            "oracle_version": "0.4",
+                            "oracle_match": 1,
+                        }
+                    )
+
+        checkpoints = [10, 25, 50, 100, 150, 200]
+        saturation_document = {
+            "schema_version": 1,
+            "evidence_id": "controlled_violation_saturation",
+            "confidence": 0.95,
+            "interval_method": "wilson_score",
+            "interpretation_boundary": "intervals describe only the tested controlled parameter space",
+            "families": sorted(WORKLOADS),
+            "seed_domain": list(range(200)),
+            "variant_domain": sorted(VARIANTS),
+            "checkpoint_seed_counts": checkpoints,
+            "checkpoints": [],
+        }
+        for checkpoint in checkpoints:
+            trials = len(WORKLOADS) * checkpoint
+            saturation_document["checkpoints"].append(
+                {
+                    "checkpoint_seed_count": checkpoint,
+                    "checkpoint_seed_unit": "seeds_per_family",
+                    "family_count": 8,
+                    "instance_count": trials,
+                    "instance_unit": "family_seed",
+                    "variants": [
+                        {
+                            "variant": variant,
+                            "variant_result_count": trials,
+                            "variant_result_unit": "family_seed_variant",
+                            "violations": 0,
+                            "violation_rate": 0.0,
+                            "violation_interval": binomial_interval(0, trials),
+                            "oracle_matches": trials,
+                            "oracle_match_rate": 1.0,
+                            "oracle_match_interval": binomial_interval(trials, trials),
+                        }
+                        for variant in sorted(VARIANTS)
+                    ],
+                }
+            )
+        saturation.write_text(json.dumps(saturation_document, sort_keys=True), encoding="utf-8")
+
+        family_documents = {}
+        for family in sorted(WORKLOADS):
+            parameter_names = sorted(WORKLOAD_SEMANTIC_PARAMETERS[family])
+            value_counts = {}
+            parameter_coverage = {}
+            combination_count = 1
+            for name in parameter_names:
+                low, high = self.PARAMETER_INTERVALS[name]
+                values = list(range(low, high + 1))
+                quotient, remainder = divmod(200, len(values))
+                value_counts[name] = {
+                    str(value): quotient + int(index < remainder)
+                    for index, value in enumerate(values)
+                }
+                combination_count *= len(values)
+                parameter_coverage[name] = {
+                    "approved_interval": [low, high],
+                    "approved_value_count": len(values),
+                    "observed_unique_value_count": len(values),
+                    "coverage_ratio": 1.0,
+                }
+            family_documents[family] = {
+                "family": family,
+                "instance_count": 200,
+                "unique_semantic_fingerprint_count": combination_count,
+                "semantic_fingerprint_source": "executable_state_operations_policies_schedules_provenance",
+                "parameter_value_counts": value_counts,
+                "parameter_coverage": parameter_coverage,
+                "parameter_combination_coverage": {
+                    "parameter_order": parameter_names,
+                    "approved_combination_count": combination_count,
+                    "observed_unique_combination_count": combination_count,
+                    "coverage_ratio": 1.0,
+                },
+            }
+        diversity.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "evidence_id": "controlled_diversity",
+                    "family_count": 8,
+                    "seed_count_per_family": 200,
+                    "instance_count": 1600,
+                    "approved_parameter_intervals": dict(sorted(self.PARAMETER_INTERVALS.items())),
+                    "families": family_documents,
+                },
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        svg.write_text('<svg xmlns="http://www.w3.org/2000/svg"></svg>\n', encoding="utf-8")
+
+        artifact_specs = {
+            "generated_instances.jsonl": (generated, "data/generated_instances.jsonl", {"line_count": 1600}),
+            "reference_oracles.jsonl": (oracles, "data/reference_oracles.jsonl", {"line_count": 1600}),
+            "experiment_results.csv": (csv_path, "results/experiment_results.csv", {"row_count": 8000}),
+            "saturation.json": (saturation, "results/saturation.json", {}),
+            "diversity.json": (diversity, "results/diversity.json", {}),
+            "saturation.svg": (svg, "results/figures/saturation.svg", {}),
+        }
+        artifacts = {
+            name: {
+                "relative_path": relative,
+                "sha256": self._sha256(path),
+                **counts,
+            }
+            for name, (path, relative, counts) in artifact_specs.items()
+        }
+        config_document = json.loads((root / "configs/controlled_scale_200.json").read_text())
         manifest = controlled / "run_manifest.json"
         manifest.write_text(
             json.dumps(
                 {
                     "schema_version": 1,
                     "runner_version": "controlled-experiment/1",
-                    "source": {"commit": "a" * 40},
-                    "artifacts": {
-                        "saturation.json": {
-                            "relative_path": "results/saturation.json",
-                            "sha256": self._sha256(saturation),
-                        },
-                        "diversity.json": {
-                            "relative_path": "results/diversity.json",
-                            "sha256": self._sha256(diversity),
-                        },
+                    "source": {
+                        "commit": commit,
+                        "components": components,
+                        "fingerprint": canonical_fingerprint(components),
+                        "contained_in_commit": True,
                     },
+                    "oracle_version": "0.4",
+                    "config": {
+                        "relative_path": "configs/controlled_scale_200.json",
+                        "sha256": self._sha256(root / "configs/controlled_scale_200.json"),
+                        "canonical_fingerprint": canonical_fingerprint(config_document),
+                    },
+                    "domains": {
+                        "families": sorted(WORKLOADS),
+                        "seeds": list(range(200)),
+                        "variants": list(VARIANTS),
+                    },
+                    "counts": {
+                        "families": 8,
+                        "seeds_per_family": 200,
+                        "instances": 1600,
+                        "variant_results": 8000,
+                    },
+                    "artifacts": artifacts,
                 },
                 sort_keys=True,
             ),
@@ -387,25 +633,53 @@ class PaperClaimLedgerTests(unittest.TestCase):
         )
         payload = json.loads(ledger.read_text(encoding="utf-8"))
         claim = payload["claims"][0]
-        claim["validation_profile"] = "controlled_scale_200"
-        claim["manifest"] = {
-            "path": "results/final_controlled_200/run_manifest.json",
-            "sha256": self._sha256(manifest),
-        }
-        claim["controlled_evidence"] = {
-            "saturation": {
-                "path": "results/final_controlled_200/results/saturation.json",
-                "sha256": self._sha256(saturation),
-            },
-            "diversity": {
-                "path": "results/final_controlled_200/results/diversity.json",
-                "sha256": self._sha256(diversity),
-            },
-        }
+        claim.update(
+            {
+                "claim_id": "controlled_scale_200",
+                "artifact_path": "results/final_controlled_200/results/saturation.json",
+                "artifact_sha256": self._sha256(saturation),
+                "assertions": [
+                    {
+                        "pointer": "/checkpoint_seed_counts",
+                        "operator": "equals",
+                        "expected": checkpoints,
+                    }
+                ],
+                "validation_profile": "controlled_scale_200",
+                "manifest": {
+                    "path": "results/final_controlled_200/run_manifest.json",
+                    "sha256": self._sha256(manifest),
+                },
+                "source_commit": commit,
+                "controlled_evidence": {
+                    name: {
+                        "path": f"results/final_controlled_200/{relative}",
+                        "sha256": self._sha256(path),
+                    }
+                    for name, (path, relative, _) in artifact_specs.items()
+                },
+            }
+        )
         ledger.write_text(json.dumps(payload), encoding="utf-8")
         return payload
 
-    def test_scaled_controlled_claim_requires_manifest_saturation_and_diversity_hashes(self):
+    def _rehash_scaled_bundle(self, root: Path, ledger: Path) -> dict:
+        payload = json.loads(ledger.read_text(encoding="utf-8"))
+        claim = payload["claims"][0]
+        manifest_path = root / claim["manifest"]["path"]
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for name, reference in claim["controlled_evidence"].items():
+            path = root / reference["path"]
+            digest = self._sha256(path)
+            reference["sha256"] = digest
+            manifest["artifacts"][name]["sha256"] = digest
+        manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+        claim["manifest"]["sha256"] = self._sha256(manifest_path)
+        claim["artifact_sha256"] = self._sha256(root / claim["artifact_path"])
+        ledger.write_text(json.dumps(payload), encoding="utf-8")
+        return payload
+
+    def test_scaled_controlled_claim_requires_exact_profile_and_complete_bundle(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             ledger, _ = self._fixture(root)
@@ -413,19 +687,22 @@ class PaperClaimLedgerTests(unittest.TestCase):
             passed = audit_claim_ledger(root, ledger)
 
             payload = json.loads(ledger.read_text(encoding="utf-8"))
-            payload["claims"][0].pop("controlled_evidence")
+            payload["claims"][0].pop("validation_profile")
             ledger.write_text(json.dumps(payload), encoding="utf-8")
-            missing = audit_claim_ledger(root, ledger)
+            missing_profile = audit_claim_ledger(root, ledger)
 
         self.assertEqual(passed["status"], "passed")
-        self.assertIn("controlled_evidence_missing", {item["code"] for item in missing["findings"]})
+        self.assertIn(
+            "controlled_profile_required",
+            {item["code"] for item in missing_profile["findings"]},
+        )
 
     def test_scaled_controlled_claim_cross_checks_bundle_hashes_against_manifest(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             ledger, _ = self._fixture(root)
             payload = self._make_scaled_controlled_claim(root, ledger)
-            payload["claims"][0]["controlled_evidence"]["diversity"]["sha256"] = "0" * 64
+            payload["claims"][0]["controlled_evidence"]["diversity.json"]["sha256"] = "0" * 64
             ledger.write_text(json.dumps(payload), encoding="utf-8")
 
             report = audit_claim_ledger(root, ledger)
@@ -433,6 +710,126 @@ class PaperClaimLedgerTests(unittest.TestCase):
         codes = {item["code"] for item in report["findings"]}
         self.assertIn("controlled_evidence_hash_mismatch", codes)
         self.assertIn("controlled_manifest_hash_mismatch", codes)
+
+    def test_scaled_controlled_claim_rejects_manifest_domain_count_config_and_source_tampering(self):
+        mutations = {
+            "domain": lambda document: document["domains"].__setitem__("variants", list(VARIANTS[:-1])),
+            "count": lambda document: document["counts"].__setitem__("instances", 1599),
+            "config": lambda document: document["config"].__setitem__("sha256", "0" * 64),
+            "source": lambda document: document["source"].__setitem__("contained_in_commit", False),
+            "component_hash": lambda document: document["source"]["components"].__setitem__(
+                "src/txnmem_workloads.py", "0" * 64
+            ),
+            "closure": lambda document: document["artifacts"].pop("saturation.svg"),
+            "oracle": lambda document: document.__setitem__("oracle_version", "0.3"),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger, _ = self._fixture(root)
+                self._make_scaled_controlled_claim(root, ledger)
+                payload = json.loads(ledger.read_text())
+                manifest_path = root / payload["claims"][0]["manifest"]["path"]
+                manifest = json.loads(manifest_path.read_text())
+                mutate(manifest)
+                manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+                payload["claims"][0]["manifest"]["sha256"] = self._sha256(manifest_path)
+                ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+                report = audit_claim_ledger(root, ledger)
+
+            self.assertEqual(report["status"], "failed")
+            self.assertIn("controlled_manifest_invalid", {item["code"] for item in report["findings"]})
+
+    def test_scaled_controlled_claim_rejects_saturation_arithmetic_and_diversity_contract_tampering(self):
+        for name in ("saturation.json", "diversity.json"):
+            with self.subTest(name=name), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger, _ = self._fixture(root)
+                self._make_scaled_controlled_claim(root, ledger)
+                payload = json.loads(ledger.read_text())
+                reference = payload["claims"][0]["controlled_evidence"][name]
+                path = root / reference["path"]
+                document = json.loads(path.read_text())
+                if name == "saturation.json":
+                    document["checkpoints"][0]["variants"][0]["variant_result_count"] -= 1
+                else:
+                    document["families"]["provenance_branch_repair"]["parameter_combination_coverage"]["approved_combination_count"] = 1
+                path.write_text(json.dumps(document, sort_keys=True), encoding="utf-8")
+                self._rehash_scaled_bundle(root, ledger)
+
+                report = audit_claim_ledger(root, ledger)
+
+            expected = "controlled_saturation_invalid" if name == "saturation.json" else "controlled_diversity_invalid"
+            self.assertIn(expected, {item["code"] for item in report["findings"]})
+
+    def test_scaled_controlled_claim_cross_checks_saturation_against_result_rows(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger, _ = self._fixture(root)
+            payload = self._make_scaled_controlled_claim(root, ledger)
+            reference = payload["claims"][0]["controlled_evidence"]["saturation.json"]
+            path = root / reference["path"]
+            document = json.loads(path.read_text())
+            variant = document["checkpoints"][0]["variants"][0]
+            variant["violations"] = 1
+            variant["violation_rate"] = 1 / 80
+            variant["violation_interval"] = binomial_interval(1, 80)
+            path.write_text(json.dumps(document, sort_keys=True), encoding="utf-8")
+            self._rehash_scaled_bundle(root, ledger)
+
+            report = audit_claim_ledger(root, ledger)
+
+        self.assertIn(
+            "controlled_manifest_invalid",
+            {item["code"] for item in report["findings"]},
+        )
+
+    def test_scaled_controlled_claim_rejects_malformed_paths_and_symlink_escapes(self):
+        for replacement in (
+            "/absolute/saturation.json",
+            "results/final_controlled_200/results/../saturation.json",
+        ):
+            with self.subTest(replacement=replacement), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger, _ = self._fixture(root)
+                payload = self._make_scaled_controlled_claim(root, ledger)
+                payload["claims"][0]["controlled_evidence"]["saturation.json"]["path"] = replacement
+                ledger.write_text(json.dumps(payload), encoding="utf-8")
+                report = audit_claim_ledger(root, ledger)
+            self.assertIn("invalid_path", {item["code"] for item in report["findings"]})
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger, _ = self._fixture(root)
+            payload = self._make_scaled_controlled_claim(root, ledger)
+            saturation_ref = payload["claims"][0]["controlled_evidence"]["saturation.json"]
+            saturation = root / saturation_ref["path"]
+            outside = root / "outside.json"
+            outside.write_bytes(saturation.read_bytes())
+            saturation.unlink()
+            saturation.symlink_to(outside)
+            ledger.write_text(json.dumps(payload), encoding="utf-8")
+            report = audit_claim_ledger(root, ledger)
+        self.assertIn("invalid_path", {item["code"] for item in report["findings"]})
+
+    def test_scaled_controlled_claim_rejects_truthy_malformed_or_extra_bundle_entries(self):
+        replacements = (
+            "truthy-not-an-object",
+            {"saturation.json": {"path": "x", "sha256": "0" * 64}},
+        )
+        for replacement in replacements:
+            with self.subTest(replacement=type(replacement).__name__), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger, _ = self._fixture(root)
+                payload = self._make_scaled_controlled_claim(root, ledger)
+                payload["claims"][0]["controlled_evidence"] = replacement
+                ledger.write_text(json.dumps(payload), encoding="utf-8")
+                report = audit_claim_ledger(root, ledger)
+            self.assertIn(
+                "controlled_evidence_missing",
+                {item["code"] for item in report["findings"]},
+            )
 
     def test_existing_ledger_assertions_cover_reviewed_artifact_values(self):
         ledger = json.loads((ROOT / "configs" / "paper_claims.json").read_text())

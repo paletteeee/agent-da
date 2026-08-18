@@ -10,6 +10,10 @@ import re
 import subprocess
 from typing import Iterable
 
+from txnmem_reference import ORACLE_VERSION
+from txnmem_workloads import WORKLOADS, WORKLOAD_SEMANTIC_PARAMETERS, semantic_fingerprint
+from txnmem_statistics import APPROVED_CONTROLLED_PARAMETER_INTERVALS
+
 
 _RAW_FILENAMES = {
     "locomo_paired_predictions.json",
@@ -21,6 +25,37 @@ _CONTROLLED_PUBLIC_ALLOWLIST = {
     ("final_controlled", "data", "reference_oracles.jsonl"),
     ("final_controlled_200", "data", "generated_instances.jsonl"),
     ("final_controlled_200", "data", "reference_oracles.jsonl"),
+}
+_RAW_CAPABLE_COMPONENTS = {
+    "raw", "trace", "traces", "event", "events", "prompt", "prompts",
+    "tool_arg", "tool_args", "arguments", "native",
+}
+_SAFE_AGGREGATE_FILENAMES = {
+    "trace_realism.json",
+    "trace_replay.csv",
+    "native_model_summary.json",
+    "native_batch_summary.json",
+    "native_memory_replay_summary.json",
+    "native_smoke_summary.json",
+    "blocked_report.json",
+    "performance.json",
+    "repetition_report.json",
+    "appworld_prompt_comparison.json",
+    "locomo_prompt_comparison.json",
+    "locomo_paired_repetition_summary.json",
+}
+_RAW_PAYLOAD_KEYS = {
+    "raw", "trace", "traces", "event", "events", "prompt", "prompts",
+    "messages", "arguments", "tool_args", "tool_arguments", "content",
+    "task_payload", "native_payload",
+}
+_TRACE_REPLAY_COLUMNS = {
+    "instance_id", "workload", "seed", "variant", "transaction_state",
+    "partial_update_rate", "invalid_commit_rate", "stale_write_rate",
+    "repair_recall", "leak_rate", "supersession_consistency",
+    "scope_bypass_rate", "latency", "any_violation", "violations",
+    "committed_count", "operation_count", "repair_count", "oracle_version",
+    "oracle_match", "allowed_outcome_count", "oracle_mismatches",
 }
 _SENSITIVE_KEY = re.compile(
     r'"(?:password|api_key|access_token|secret|messages|arguments|tool_args|prompt|content)"\s*:',
@@ -46,6 +81,101 @@ def _contains_sensitive_value(text: str) -> bool:
     return False
 
 
+def _contains_raw_payload(value: object) -> bool:
+    if isinstance(value, dict):
+        return any(
+            str(key).lower() in _RAW_PAYLOAD_KEYS or _contains_raw_payload(child)
+            for key, child in value.items()
+        )
+    if isinstance(value, list):
+        return any(_contains_raw_payload(item) for item in value)
+    return False
+
+
+def _safe_aggregate(path: Path) -> bool:
+    if path.name not in _SAFE_AGGREGATE_FILENAMES:
+        return False
+    if path.suffix.lower() == ".csv":
+        try:
+            header = path.read_text(encoding="utf-8").splitlines()[0].split(",")
+        except (OSError, IndexError):
+            return False
+        return set(header) == _TRACE_REPLAY_COLUMNS and len(header) == len(_TRACE_REPLAY_COLUMNS)
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(document, dict) and not _contains_raw_payload(document)
+
+
+def _controlled_artifact_valid(path: Path, relative_result_path: tuple[str, ...]) -> bool:
+    if relative_result_path not in _CONTROLLED_PUBLIC_ALLOWLIST:
+        return False
+    tree, _, name = relative_result_path
+    seed_count = 200 if tree == "final_controlled_200" else 50
+    expected_coordinates = {(family, seed) for family in WORKLOADS for seed in range(seed_count)}
+    expected_count = len(expected_coordinates)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        if len(lines) != expected_count or any(not line.strip() for line in lines):
+            return False
+        rows = [json.loads(line) for line in lines]
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not all(isinstance(row, dict) for row in rows):
+        return False
+    seen: set[tuple[str, int]] = set()
+    if name == "generated_instances.jsonl":
+        required = {
+            "instance_id", "workload", "seed", "config", "initial_memories",
+            "operations", "policies", "failure_schedule", "provenance_edges",
+        }
+        if tree == "final_controlled_200":
+            required |= {"semantic_parameters", "semantic_fingerprint"}
+        for row in rows:
+            if set(row) != required or _contains_raw_payload(row):
+                return False
+            coordinate = (row.get("workload"), row.get("seed"))
+            if coordinate not in expected_coordinates or coordinate in seen:
+                return False
+            if row.get("instance_id") != f"{coordinate[0]}_seed_{coordinate[1]}":
+                return False
+            if not isinstance(row.get("config"), dict):
+                return False
+            if tree == "final_controlled_200":
+                parameters = row.get("semantic_parameters")
+                fingerprint = row.get("semantic_fingerprint")
+                if (
+                    not isinstance(parameters, dict)
+                    or set(parameters) != set(WORKLOAD_SEMANTIC_PARAMETERS[coordinate[0]])
+                    or not isinstance(fingerprint, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None
+                    or fingerprint != semantic_fingerprint(row)
+                ):
+                    return False
+                for parameter, value in parameters.items():
+                    low, high = APPROVED_CONTROLLED_PARAMETER_INTERVALS[parameter]
+                    if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high or row["config"].get(parameter) != value:
+                        return False
+            seen.add(coordinate)
+    else:
+        required = {
+            "instance_id", "oracle_version", "allowed_outcomes", "event_trace",
+            "minimal_counterexample", "safety_invariants",
+        }
+        expected_oracle = ORACLE_VERSION if tree == "final_controlled_200" else "0.1"
+        id_coordinates = {
+            f"{family}_seed_{seed}": (family, seed)
+            for family, seed in expected_coordinates
+        }
+        for row in rows:
+            coordinate = id_coordinates.get(row.get("instance_id"))
+            if set(row) != required or coordinate is None or coordinate in seen or row.get("oracle_version") != expected_oracle:
+                return False
+            seen.add(coordinate)
+    return seen == expected_coordinates
+
+
 def audit_result_paths(paths: Iterable[str | Path]) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     for source in paths:
@@ -69,11 +199,23 @@ def audit_result_paths(paths: Iterable[str | Path]) -> list[dict[str, str]]:
         if resolved_relative != path.relative_to(audit_root):
             findings.append({"code": "result_path_escape", "path": str(path)})
             continue
+        raw_tokens = {
+            token
+            for part in result_parts
+            for token in re.split(r"[^a-z0-9]+", Path(part).stem.lower())
+            if token
+        }
         if (
             ("data" in result_parts and relative_result_path not in _CONTROLLED_PUBLIC_ALLOWLIST)
             or path.name in _RAW_FILENAMES
+            or (
+                bool(raw_tokens & _RAW_CAPABLE_COMPONENTS)
+                and not _safe_aggregate(path)
+            )
         ):
             findings.append({"code": "raw_result_path", "path": str(path)})
+        if relative_result_path in _CONTROLLED_PUBLIC_ALLOWLIST and not _controlled_artifact_valid(path, relative_result_path):
+            findings.append({"code": "controlled_artifact_schema", "path": str(path)})
         if not path.is_file() or path.suffix.lower() not in {".json", ".jsonl", ".csv"}:
             continue
         text = path.read_text(encoding="utf-8", errors="replace")

@@ -312,7 +312,26 @@ class TxnMemCliOutputTests(unittest.TestCase):
             self.assertEqual(manifest["runner_version"], "controlled-experiment/1")
             self.assertEqual(manifest["oracle_version"], "0.4")
             self.assertRegex(manifest["source"]["commit"], r"^[0-9a-f]{40}$")
-            self.assertRegex(manifest["source"]["identity"]["fingerprint"], r"^[0-9a-f]{64}$")
+            self.assertRegex(manifest["source"]["fingerprint"], r"^[0-9a-f]{64}$")
+            self.assertIsInstance(manifest["source"]["contained_in_commit"], bool)
+            self.assertEqual(
+                set(manifest["source"]["components"]),
+                {
+                    "configs/workload_families.yaml",
+                    "src/txnmem_conditions.py",
+                    "src/txnmem_differential.py",
+                    "src/txnmem_experiment.py",
+                    "src/txnmem_invariants.py",
+                    "src/txnmem_metrics.py",
+                    "src/txnmem_reference.py",
+                    "src/txnmem_schedules.py",
+                    "src/txnmem_schema.py",
+                    "src/txnmem_simulator.py",
+                    "src/txnmem_statistics.py",
+                    "src/txnmem_workloads.py",
+                },
+            )
+            self.assertEqual(manifest["config"]["relative_path"], "configs/workload_families.yaml")
             self.assertEqual(manifest["domains"]["seeds"], [0])
             self.assertEqual(manifest["counts"]["instances"], 8)
             self.assertEqual(manifest["counts"]["variant_results"], 40)
@@ -378,6 +397,35 @@ class TxnMemCliOutputTests(unittest.TestCase):
 
             self.assertNotEqual(completed.returncode, 0)
             self.assertFalse((Path(tmp) / "data/generated_instances.jsonl").exists())
+
+    def test_formal_source_gate_rejects_uncontained_config_before_artifact_writes(self):
+        base = json.loads((ROOT / "configs/controlled_scale_200.json").read_text(encoding="utf-8"))
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            external_config = tmp_path / "external.json"
+            external_config.write_text(json.dumps(base), encoding="utf-8")
+            out_dir = tmp_path / "out"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "src/txnmem_experiment.py",
+                    "experiment",
+                    "--config",
+                    str(external_config),
+                    "--out-dir",
+                    str(out_dir),
+                    "--seeds",
+                    "1",
+                    "--require-clean-source",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("contained", completed.stderr)
+            self.assertFalse(out_dir.exists())
 
     def test_mutation_witnesses_command_writes_replayable_report(self):
         with TemporaryDirectory() as tmp:

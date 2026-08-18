@@ -9,7 +9,8 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from txnmem_workloads import semantic_fingerprint
+from txnmem_simulator import VARIANTS
+from txnmem_workloads import WORKLOADS, WORKLOAD_SEMANTIC_PARAMETERS, semantic_fingerprint
 
 
 APPROVED_CONTROLLED_PARAMETER_INTERVALS = {
@@ -114,6 +115,9 @@ def controlled_violation_saturation(
     rows: Iterable[Mapping[str, Any]],
     checkpoints: Iterable[int],
     confidence: float = 0.95,
+    *,
+    approved_families: Iterable[str] | None = None,
+    approved_variants: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     """Aggregate complete family×seed×variant prefixes with Wilson intervals."""
 
@@ -127,6 +131,13 @@ def controlled_violation_saturation(
         or normalized_checkpoints != sorted(set(normalized_checkpoints))
     ):
         raise ValueError("checkpoints must be strictly increasing positive integers")
+
+    family_domain = tuple(WORKLOADS if approved_families is None else approved_families)
+    variant_domain = tuple(VARIANTS if approved_variants is None else approved_variants)
+    if not family_domain or len(set(family_domain)) != len(family_domain) or any(not isinstance(value, str) or not value for value in family_domain):
+        raise ValueError("approved family domain must contain unique nonempty names")
+    if not variant_domain or len(set(variant_domain)) != len(variant_domain) or any(not isinstance(value, str) or not value for value in variant_domain):
+        raise ValueError("approved variant domain must contain unique nonempty names")
 
     cells: dict[tuple[str, int, str], dict[str, Any]] = {}
     instance_coordinates: dict[str, tuple[str, int]] = {}
@@ -144,6 +155,8 @@ def controlled_violation_saturation(
         if not isinstance(instance_id, str) or not instance_id:
             raise ValueError("every result row must name an instance_id")
         seed = _controlled_seed(row.get("seed"))
+        if instance_id != f"{family}_seed_{seed}":
+            raise ValueError(f"instance_id does not match family/seed coordinate: {instance_id}")
         key = (family, seed, variant)
         if key in cells:
             raise ValueError(f"duplicate family/seed/variant row: {family}/{seed}/{variant}")
@@ -163,7 +176,11 @@ def controlled_violation_saturation(
         family_seeds[family].add(seed)
         variants.add(variant)
 
-    families = sorted(family_seeds)
+    if set(family_seeds) != set(family_domain):
+        raise ValueError("controlled workload family domain does not exactly match the approved domain")
+    if variants != set(variant_domain):
+        raise ValueError("controlled variant domain does not exactly match the approved domain")
+    families = sorted(family_domain)
     seed_domain = sorted(set().union(*family_seeds.values()))
     if seed_domain != list(range(len(seed_domain))):
         raise ValueError("controlled seed domain must be the contiguous prefix 0..N-1")
@@ -174,7 +191,7 @@ def controlled_violation_saturation(
         (family, seed, variant)
         for family in families
         for seed in seed_domain
-        for variant in variants
+        for variant in variant_domain
     }
     if set(cells) != expected_cells:
         missing = expected_cells - set(cells)
@@ -193,7 +210,7 @@ def controlled_violation_saturation(
         prefix = set(seed_domain[:checkpoint])
         instance_count = len(families) * checkpoint
         variant_reports: list[dict[str, Any]] = []
-        for variant in sorted(variants):
+        for variant in sorted(variant_domain):
             selected = [
                 cells[(family, seed, variant)]
                 for family in families
@@ -233,18 +250,25 @@ def controlled_violation_saturation(
         "interpretation_boundary": "intervals describe only the tested controlled parameter space",
         "families": families,
         "seed_domain": seed_domain,
-        "variant_domain": sorted(variants),
+        "variant_domain": sorted(variant_domain),
         "checkpoint_seed_counts": normalized_checkpoints,
         "checkpoints": checkpoint_reports,
     }
 
 
-def controlled_diversity(instances: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+def controlled_diversity(
+    instances: Iterable[Mapping[str, Any]],
+    *,
+    approved_families: Iterable[str] | None = None,
+) -> dict[str, Any]:
     """Report executable semantic and approved-parameter coverage per family."""
 
     materialized = [dict(instance) for instance in instances]
     if not materialized:
         raise ValueError("controlled diversity requires instances")
+    family_domain = tuple(WORKLOADS if approved_families is None else approved_families)
+    if not family_domain or len(set(family_domain)) != len(family_domain) or any(family not in WORKLOAD_SEMANTIC_PARAMETERS for family in family_domain):
+        raise ValueError("approved diversity families must be unique known workload families")
     by_family: dict[str, list[dict[str, Any]]] = defaultdict(list)
     seen_coordinates: set[tuple[str, int]] = set()
     family_seeds: dict[str, set[int]] = defaultdict(set)
@@ -253,6 +277,8 @@ def controlled_diversity(instances: Iterable[Mapping[str, Any]]) -> dict[str, An
         if not isinstance(family, str) or not family:
             raise ValueError("every controlled instance must name a workload family")
         seed = _controlled_seed(instance.get("seed"))
+        if instance.get("instance_id") != f"{family}_seed_{seed}":
+            raise ValueError(f"instance_id does not match family/seed coordinate: {family}/{seed}")
         coordinate = (family, seed)
         if coordinate in seen_coordinates:
             raise ValueError(f"duplicate controlled family/seed instance: {family}/{seed}")
@@ -262,8 +288,14 @@ def controlled_diversity(instances: Iterable[Mapping[str, Any]]) -> dict[str, An
         if recorded != computed:
             raise ValueError(f"semantic_fingerprint mismatch for {family}/{seed}")
         parameters = instance.get("semantic_parameters")
-        if not isinstance(parameters, Mapping) or not parameters:
+        if not isinstance(parameters, Mapping):
             raise ValueError(f"semantic_parameters missing for {family}/{seed}")
+        contract = set(WORKLOAD_SEMANTIC_PARAMETERS.get(family, ()))
+        if family not in family_domain or set(parameters) != contract:
+            raise ValueError(f"semantic parameter keys do not match family contract: {family}/{seed}")
+        config = instance.get("config")
+        if not isinstance(config, Mapping):
+            raise ValueError(f"config missing for {family}/{seed}")
         normalized_parameters: dict[str, int] = {}
         for name, value in parameters.items():
             if name not in APPROVED_CONTROLLED_PARAMETER_INTERVALS:
@@ -273,6 +305,8 @@ def controlled_diversity(instances: Iterable[Mapping[str, Any]]) -> dict[str, An
             low, high = APPROVED_CONTROLLED_PARAMETER_INTERVALS[name]
             if not low <= value <= high:
                 raise ValueError(f"semantic parameter {name} is outside its approved interval")
+            if config.get(name) != value:
+                raise ValueError(f"semantic parameter {name} does not match config for {family}/{seed}")
             normalized_parameters[str(name)] = value
         normalized = dict(instance)
         normalized["seed"] = seed
@@ -280,6 +314,8 @@ def controlled_diversity(instances: Iterable[Mapping[str, Any]]) -> dict[str, An
         by_family[family].append(normalized)
         family_seeds[family].add(seed)
 
+    if set(by_family) != set(family_domain):
+        raise ValueError("controlled diversity family domain does not exactly match the approved domain")
     seed_domain = sorted(set().union(*family_seeds.values()))
     if seed_domain != list(range(len(seed_domain))):
         raise ValueError("controlled diversity seed domain must be the contiguous prefix 0..N-1")
@@ -289,9 +325,7 @@ def controlled_diversity(instances: Iterable[Mapping[str, Any]]) -> dict[str, An
     family_reports: dict[str, Any] = {}
     for family in sorted(by_family):
         records = sorted(by_family[family], key=lambda row: row["seed"])
-        parameter_names = sorted(records[0]["semantic_parameters"])
-        if any(sorted(row["semantic_parameters"]) != parameter_names for row in records):
-            raise ValueError(f"semantic parameter domains vary within family: {family}")
+        parameter_names = sorted(WORKLOAD_SEMANTIC_PARAMETERS[family])
         value_counts: dict[str, dict[str, int]] = {}
         parameter_coverage: dict[str, dict[str, Any]] = {}
         approved_combination_count = 1

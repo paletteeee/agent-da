@@ -8,8 +8,14 @@ import hashlib
 import json
 import re
 from collections import defaultdict
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
+
+from txnmem_conditions import canonical_fingerprint, file_sha256, verify_git_source_containment
+from txnmem_reference import ORACLE_VERSION
+from txnmem_simulator import VARIANTS
+from txnmem_statistics import APPROVED_CONTROLLED_PARAMETER_INTERVALS, binomial_interval
+from txnmem_workloads import WORKLOADS, WORKLOAD_SEMANTIC_PARAMETERS, semantic_fingerprint
 
 
 _KNOWN_CLAIM_STATUSES = {"active"}
@@ -190,7 +196,18 @@ def _finding(
 
 
 def _rooted_path(root: Path, value: str) -> Path:
-    candidate = (root / value).resolve()
+    if not isinstance(value, str) or not value:
+        raise ValueError("path must be a nonempty canonical relative path")
+    lexical = PurePosixPath(value)
+    if lexical.is_absolute() or any(part in {"", ".", ".."} for part in lexical.parts) or lexical.as_posix() != value:
+        raise ValueError(f"path is not a canonical relative path: {value}")
+    unresolved = root / value
+    cursor = root
+    for part in lexical.parts:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            raise ValueError(f"path contains a symlink: {value}")
+    candidate = unresolved.resolve()
     try:
         candidate.relative_to(root)
     except ValueError as exc:
@@ -561,6 +578,325 @@ def _active_claim_schema_findings(
     return findings
 
 
+_SCALED_ARTIFACT_PATHS = {
+    "generated_instances.jsonl": "data/generated_instances.jsonl",
+    "reference_oracles.jsonl": "data/reference_oracles.jsonl",
+    "experiment_results.csv": "results/experiment_results.csv",
+    "saturation.json": "results/saturation.json",
+    "diversity.json": "results/diversity.json",
+    "saturation.svg": "results/figures/saturation.svg",
+}
+_SCALED_SOURCE_PATHS = {
+    "configs/controlled_scale_200.json",
+    "src/txnmem_conditions.py",
+    "src/txnmem_differential.py",
+    "src/txnmem_experiment.py",
+    "src/txnmem_invariants.py",
+    "src/txnmem_metrics.py",
+    "src/txnmem_reference.py",
+    "src/txnmem_schedules.py",
+    "src/txnmem_schema.py",
+    "src/txnmem_simulator.py",
+    "src/txnmem_statistics.py",
+    "src/txnmem_workloads.py",
+}
+_SCALED_CHECKPOINTS = [10, 25, 50, 100, 150, 200]
+
+
+def _scaled_claim_signal(claim: dict[str, Any], manifest_document: Any) -> bool:
+    if claim.get("validation_profile") == "controlled_scale_200" or "controlled_evidence" in claim:
+        return True
+    for field in ("artifact_path",):
+        value = claim.get(field)
+        if isinstance(value, str) and "final_controlled_200" in value:
+            return True
+    if any(
+        isinstance(claim.get(field), str) and "controlled_scale_200" in claim[field]
+        for field in ("claim_id", "run_command")
+    ):
+        return True
+    if isinstance(manifest_document, dict):
+        counts = manifest_document.get("counts")
+        return isinstance(counts, dict) and (
+            counts.get("instances") == 1600 or counts.get("variant_results") == 8000
+        )
+    return False
+
+
+def _scaled_saturation_valid(document: Any) -> bool:
+    if not isinstance(document, dict) or set(document) != {
+        "schema_version", "evidence_id", "confidence", "interval_method",
+        "interpretation_boundary", "families", "seed_domain", "variant_domain",
+        "checkpoint_seed_counts", "checkpoints",
+    }:
+        return False
+    if (
+        document.get("schema_version") != 1
+        or document.get("evidence_id") != "controlled_violation_saturation"
+        or document.get("confidence") != 0.95
+        or document.get("interval_method") != "wilson_score"
+        or document.get("families") != sorted(WORKLOADS)
+        or document.get("seed_domain") != list(range(200))
+        or document.get("variant_domain") != sorted(VARIANTS)
+        or document.get("checkpoint_seed_counts") != _SCALED_CHECKPOINTS
+        or not isinstance(document.get("interpretation_boundary"), str)
+        or not isinstance(document.get("checkpoints"), list)
+        or len(document["checkpoints"]) != len(_SCALED_CHECKPOINTS)
+    ):
+        return False
+    for checkpoint, report in zip(_SCALED_CHECKPOINTS, document["checkpoints"]):
+        trials = len(WORKLOADS) * checkpoint
+        if not isinstance(report, dict) or set(report) != {
+            "checkpoint_seed_count", "checkpoint_seed_unit", "family_count",
+            "instance_count", "instance_unit", "variants",
+        }:
+            return False
+        if (
+            report.get("checkpoint_seed_count") != checkpoint
+            or report.get("checkpoint_seed_unit") != "seeds_per_family"
+            or report.get("family_count") != len(WORKLOADS)
+            or report.get("instance_count") != trials
+            or report.get("instance_unit") != "family_seed"
+            or not isinstance(report.get("variants"), list)
+            or [item.get("variant") for item in report["variants"] if isinstance(item, dict)] != sorted(VARIANTS)
+        ):
+            return False
+        for item in report["variants"]:
+            if not isinstance(item, dict) or set(item) != {
+                "variant", "variant_result_count", "variant_result_unit", "violations",
+                "violation_rate", "violation_interval", "oracle_matches",
+                "oracle_match_rate", "oracle_match_interval",
+            }:
+                return False
+            violations = item.get("violations")
+            matches = item.get("oracle_matches")
+            if (
+                isinstance(violations, bool) or not isinstance(violations, int)
+                or isinstance(matches, bool) or not isinstance(matches, int)
+                or not 0 <= violations <= trials or not 0 <= matches <= trials
+                or item.get("variant_result_count") != trials
+                or item.get("variant_result_unit") != "family_seed_variant"
+                or item.get("violation_rate") != violations / trials
+                or item.get("oracle_match_rate") != matches / trials
+                or item.get("violation_interval") != binomial_interval(violations, trials)
+                or item.get("oracle_match_interval") != binomial_interval(matches, trials)
+            ):
+                return False
+    return True
+
+
+def _scaled_diversity_valid(document: Any) -> bool:
+    intervals = {
+        name: list(bounds)
+        for name, bounds in sorted(APPROVED_CONTROLLED_PARAMETER_INTERVALS.items())
+    }
+    if not isinstance(document, dict) or set(document) != {
+        "schema_version", "evidence_id", "family_count", "seed_count_per_family",
+        "instance_count", "approved_parameter_intervals", "families",
+    }:
+        return False
+    if (
+        document.get("schema_version") != 1
+        or document.get("evidence_id") != "controlled_diversity"
+        or document.get("family_count") != 8
+        or document.get("seed_count_per_family") != 200
+        or document.get("instance_count") != 1600
+        or document.get("approved_parameter_intervals") != intervals
+        or not isinstance(document.get("families"), dict)
+        or set(document["families"]) != set(WORKLOADS)
+    ):
+        return False
+    for family in WORKLOADS:
+        report = document["families"][family]
+        names = sorted(WORKLOAD_SEMANTIC_PARAMETERS[family])
+        if not isinstance(report, dict) or set(report) != {
+            "family", "instance_count", "unique_semantic_fingerprint_count",
+            "semantic_fingerprint_source", "parameter_value_counts",
+            "parameter_coverage", "parameter_combination_coverage",
+        }:
+            return False
+        if (
+            report.get("family") != family or report.get("instance_count") != 200
+            or not isinstance(report.get("unique_semantic_fingerprint_count"), int)
+            or report.get("semantic_fingerprint_source") != "executable_state_operations_policies_schedules_provenance"
+            or not isinstance(report.get("parameter_value_counts"), dict)
+            or set(report["parameter_value_counts"]) != set(names)
+            or not isinstance(report.get("parameter_coverage"), dict)
+            or set(report["parameter_coverage"]) != set(names)
+        ):
+            return False
+        approved_combinations = 1
+        for name in names:
+            low, high = APPROVED_CONTROLLED_PARAMETER_INTERVALS[name]
+            expected_values = {str(value) for value in range(low, high + 1)}
+            counts = report["parameter_value_counts"][name]
+            coverage = report["parameter_coverage"][name]
+            if (
+                not isinstance(counts, dict) or set(counts) != expected_values
+                or any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in counts.values())
+                or sum(counts.values()) != 200
+            ):
+                return False
+            unique = sum(value > 0 for value in counts.values())
+            approved = high - low + 1
+            approved_combinations *= approved
+            if coverage != {
+                "approved_interval": [low, high],
+                "approved_value_count": approved,
+                "observed_unique_value_count": unique,
+                "coverage_ratio": unique / approved,
+            }:
+                return False
+        combinations = report.get("parameter_combination_coverage")
+        if not isinstance(combinations, dict) or set(combinations) != {
+            "parameter_order", "approved_combination_count",
+            "observed_unique_combination_count", "coverage_ratio",
+        }:
+            return False
+        observed = combinations.get("observed_unique_combination_count")
+        if (
+            combinations.get("parameter_order") != names
+            or combinations.get("approved_combination_count") != approved_combinations
+            or isinstance(observed, bool) or not isinstance(observed, int)
+            or not 0 <= observed <= min(200, approved_combinations)
+            or combinations.get("coverage_ratio") != observed / approved_combinations
+            or report["unique_semantic_fingerprint_count"] != observed
+        ):
+            return False
+    return True
+
+
+def _scaled_raw_artifacts_valid(
+    paths: dict[str, Path], saturation_document: Any
+) -> bool:
+    expected = {(family, seed) for family in WORKLOADS for seed in range(200)}
+    instance_ids: dict[tuple[str, int], str] = {}
+    try:
+        generated_lines = paths["generated_instances.jsonl"].read_text(encoding="utf-8").splitlines()
+        oracle_lines = paths["reference_oracles.jsonl"].read_text(encoding="utf-8").splitlines()
+        if len(generated_lines) != 1600 or len(oracle_lines) != 1600:
+            return False
+        for line in generated_lines:
+            row = json.loads(line)
+            if not isinstance(row, dict) or set(row) != {
+                "instance_id", "workload", "seed", "config", "initial_memories",
+                "operations", "policies", "failure_schedule", "provenance_edges",
+                "semantic_parameters", "semantic_fingerprint",
+            }:
+                return False
+            coordinate = (row.get("workload"), row.get("seed"))
+            if coordinate not in expected or row.get("instance_id") != f"{coordinate[0]}_seed_{coordinate[1]}" or coordinate in instance_ids:
+                return False
+            if not isinstance(row.get("semantic_fingerprint"), str) or re.fullmatch(r"[0-9a-f]{64}", row["semantic_fingerprint"]) is None:
+                return False
+            if row["semantic_fingerprint"] != semantic_fingerprint(row):
+                return False
+            parameters = row.get("semantic_parameters")
+            config = row.get("config")
+            if not isinstance(parameters, dict) or set(parameters) != set(WORKLOAD_SEMANTIC_PARAMETERS[coordinate[0]]) or not isinstance(config, dict):
+                return False
+            for name, value in parameters.items():
+                low, high = APPROVED_CONTROLLED_PARAMETER_INTERVALS[name]
+                if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high or config.get(name) != value:
+                    return False
+            instance_ids[coordinate] = row["instance_id"]
+        if set(instance_ids) != expected:
+            return False
+        oracle_coordinates: set[tuple[str, int]] = set()
+        ids_to_coordinates = {value: key for key, value in instance_ids.items()}
+        for line in oracle_lines:
+            row = json.loads(line)
+            if not isinstance(row, dict) or set(row) != {
+                "instance_id", "oracle_version", "allowed_outcomes", "event_trace",
+                "minimal_counterexample", "safety_invariants",
+            } or row.get("oracle_version") != ORACLE_VERSION:
+                return False
+            coordinate = ids_to_coordinates.get(row.get("instance_id"))
+            if coordinate is None or coordinate in oracle_coordinates:
+                return False
+            oracle_coordinates.add(coordinate)
+        if oracle_coordinates != expected:
+            return False
+        with paths["experiment_results.csv"].open(encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            allowed_columns = {
+                "instance_id", "workload", "seed", "variant", "transaction_state",
+                "transaction_states", "partial_update_rate", "invalid_commit_rate",
+                "stale_write_rate", "repair_recall", "leak_rate",
+                "supersession_consistency", "scope_bypass_rate", "latency",
+                "any_violation", "violations", "committed_count", "operation_count",
+                "repair_count", "oracle_version", "oracle_match",
+                "allowed_outcome_count", "oracle_mismatches",
+            }
+            required_columns = {
+                "instance_id", "workload", "seed", "variant", "any_violation",
+                "oracle_version", "oracle_match",
+            }
+            if (
+                reader.fieldnames is None
+                or not required_columns <= set(reader.fieldnames) <= allowed_columns
+                or len(reader.fieldnames) != len(set(reader.fieldnames))
+            ):
+                return False
+            rows = list(reader)
+        if len(rows) != 8000:
+            return False
+        cells: set[tuple[str, int, str]] = set()
+        metrics: dict[tuple[str, int, str], tuple[int, int]] = {}
+        for row in rows:
+            try:
+                seed = int(row.get("seed", ""))
+                violation = _binary_integer(row.get("any_violation"), "any_violation")
+                match = _binary_integer(row.get("oracle_match"), "oracle_match")
+            except ValueError:
+                return False
+            coordinate = (row.get("workload"), seed)
+            cell = (*coordinate, row.get("variant"))
+            if coordinate not in expected or row.get("instance_id") != instance_ids[coordinate] or row.get("variant") not in VARIANTS or row.get("oracle_version") != ORACLE_VERSION or cell in cells:
+                return False
+            if violation not in {0, 1} or match not in {0, 1}:
+                return False
+            cells.add(cell)
+            metrics[cell] = (violation, match)
+        if cells != {(family, seed, variant) for family, seed in expected for variant in VARIANTS}:
+            return False
+        if not isinstance(saturation_document, dict):
+            return False
+        checkpoints = saturation_document.get("checkpoints")
+        if not isinstance(checkpoints, list):
+            return False
+        by_checkpoint = {
+            report.get("checkpoint_seed_count"): report
+            for report in checkpoints
+            if isinstance(report, dict)
+        }
+        for checkpoint in _SCALED_CHECKPOINTS:
+            report = by_checkpoint.get(checkpoint)
+            if not isinstance(report, dict) or not isinstance(report.get("variants"), list):
+                return False
+            by_variant = {
+                item.get("variant"): item
+                for item in report["variants"]
+                if isinstance(item, dict)
+            }
+            for variant in VARIANTS:
+                selected = [
+                    metrics[(family, seed, variant)]
+                    for family in WORKLOADS
+                    for seed in range(checkpoint)
+                ]
+                item = by_variant.get(variant)
+                if (
+                    not isinstance(item, dict)
+                    or item.get("violations") != sum(value[0] for value in selected)
+                    or item.get("oracle_matches") != sum(value[1] for value in selected)
+                ):
+                    return False
+        return True
+    except (OSError, json.JSONDecodeError, TypeError):
+        return False
+
+
 def _controlled_evidence_findings(
     root: Path,
     claim: dict[str, Any],
@@ -568,37 +904,31 @@ def _controlled_evidence_findings(
     manifest_path: Path | None,
     manifest_document: Any,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    if claim.get("validation_profile") != "controlled_scale_200":
+    if not _scaled_claim_signal(claim, manifest_document):
         return [], []
     findings: list[dict[str, Any]] = []
     checked: list[dict[str, str]] = []
+    if claim.get("validation_profile") != "controlled_scale_200":
+        findings.append(_finding("controlled_profile_required", "scaled controlled claims require validation_profile controlled_scale_200", claim_id=claim_id, field="validation_profile"))
     bundle = claim.get("controlled_evidence")
-    if not isinstance(bundle, dict):
-        return [
-            _finding(
-                "controlled_evidence_missing",
-                "scaled controlled claims require saturation and diversity evidence",
-                claim_id=claim_id,
-                field="controlled_evidence",
-            )
-        ], []
-    if set(bundle) != {"saturation", "diversity"}:
+    if not isinstance(bundle, dict) or set(bundle) != set(_SCALED_ARTIFACT_PATHS):
         findings.append(
             _finding(
                 "controlled_evidence_missing",
-                "controlled_evidence must contain exactly saturation and diversity",
+                "controlled_evidence must contain exactly the six scaled artifacts",
                 claim_id=claim_id,
                 field="controlled_evidence",
             )
         )
-    manifest_artifacts = (
-        manifest_document.get("artifacts", {})
-        if isinstance(manifest_document, dict)
-        else {}
-    )
-    if not isinstance(manifest_artifacts, dict):
-        manifest_artifacts = {}
-    for name in ("saturation", "diversity"):
+        return findings, checked
+    if manifest_path is None or not isinstance(manifest_document, dict):
+        findings.append(_finding("controlled_manifest_invalid", "scaled controlled manifest is missing or malformed", claim_id=claim_id))
+        return findings, checked
+    run_root = manifest_path.parent
+    parsed_documents: dict[str, Any] = {}
+    paths: dict[str, Path] = {}
+    manifest_artifacts = manifest_document.get("artifacts")
+    for name, expected_relative in _SCALED_ARTIFACT_PATHS.items():
         reference = bundle.get(name)
         if not isinstance(reference, dict) or set(reference) != {"path", "sha256"}:
             findings.append(
@@ -627,6 +957,10 @@ def _controlled_evidence_findings(
         except ValueError as exc:
             findings.append(_finding("invalid_path", str(exc), claim_id=claim_id))
             continue
+        expected_path = run_root / expected_relative
+        if evidence_path != expected_path:
+            findings.append(_finding("invalid_path", f"controlled artifact path is not canonical for {name}", claim_id=claim_id))
+            continue
         if not evidence_path.is_file():
             findings.append(
                 _finding(
@@ -637,6 +971,7 @@ def _controlled_evidence_findings(
             )
             continue
         actual_hash = _sha256(evidence_path)
+        paths[name] = evidence_path
         checked.append({"path": value, "sha256": actual_hash})
         if actual_hash != expected_hash:
             findings.append(
@@ -646,36 +981,19 @@ def _controlled_evidence_findings(
                     claim_id=claim_id,
                 )
             )
-        try:
-            parsed = json.loads(evidence_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            findings.append(
-                _finding(
-                    "controlled_evidence_parse_error",
-                    f"cannot parse controlled {name} JSON: {exc}",
-                    claim_id=claim_id,
-                )
-            )
-        else:
-            if not isinstance(parsed, dict):
-                findings.append(
-                    _finding(
-                        "controlled_evidence_parse_error",
-                        f"controlled {name} evidence must be a JSON object",
-                        claim_id=claim_id,
-                    )
-                )
-        manifest_entry = manifest_artifacts.get(f"{name}.json")
-        expected_relative = None
-        if manifest_path is not None:
+        if name.endswith(".json"):
             try:
-                expected_relative = evidence_path.relative_to(manifest_path.parent).as_posix()
-            except ValueError:
-                expected_relative = None
+                parsed_documents[name] = json.loads(evidence_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                findings.append(_finding("controlled_evidence_parse_error", f"cannot parse controlled {name}: {exc}", claim_id=claim_id))
+        manifest_entry = manifest_artifacts.get(name) if isinstance(manifest_artifacts, dict) else None
+        expected_counts = {"line_count": 1600} if name in {"generated_instances.jsonl", "reference_oracles.jsonl"} else ({"row_count": 8000} if name == "experiment_results.csv" else {})
         if (
             not isinstance(manifest_entry, dict)
+            or set(manifest_entry) != {"relative_path", "sha256", *expected_counts}
             or manifest_entry.get("sha256") != expected_hash
             or manifest_entry.get("relative_path") != expected_relative
+            or any(manifest_entry.get(key) != count for key, count in expected_counts.items())
         ):
             findings.append(
                 _finding(
@@ -684,24 +1002,46 @@ def _controlled_evidence_findings(
                     claim_id=claim_id,
                 )
             )
-    if isinstance(manifest_document, dict):
-        manifest_commit = manifest_document.get("source", {}).get("commit") if isinstance(manifest_document.get("source"), dict) else None
-        if manifest_commit != claim.get("source_commit"):
-            findings.append(
-                _finding(
-                    "controlled_manifest_source_mismatch",
-                    "run manifest source commit does not match the active claim",
-                    claim_id=claim_id,
-                )
-            )
-    else:
-        findings.append(
-            _finding(
-                "controlled_manifest_invalid",
-                "scaled controlled claim manifest is not valid JSON evidence",
-                claim_id=claim_id,
-            )
-        )
+    source = manifest_document.get("source")
+    config = manifest_document.get("config")
+    approved_config_path = root / "configs/controlled_scale_200.json"
+    manifest_valid = (
+        set(manifest_document) == {"schema_version", "runner_version", "source", "oracle_version", "config", "domains", "counts", "artifacts"}
+        and manifest_document.get("schema_version") == 1
+        and manifest_document.get("runner_version") == "controlled-experiment/1"
+        and manifest_document.get("oracle_version") == ORACLE_VERSION
+        and manifest_document.get("domains") == {"families": sorted(WORKLOADS), "seeds": list(range(200)), "variants": list(VARIANTS)}
+        and manifest_document.get("counts") == {"families": 8, "seeds_per_family": 200, "instances": 1600, "variant_results": 8000}
+        and isinstance(manifest_artifacts, dict) and set(manifest_artifacts) == set(_SCALED_ARTIFACT_PATHS)
+        and isinstance(source, dict) and set(source) == {"commit", "components", "fingerprint", "contained_in_commit"}
+        and source.get("commit") == claim.get("source_commit")
+        and source.get("contained_in_commit") is True
+        and isinstance(source.get("components"), dict) and set(source["components"]) == _SCALED_SOURCE_PATHS
+        and source.get("fingerprint") == canonical_fingerprint(source.get("components"))
+        and isinstance(config, dict) and set(config) == {"relative_path", "sha256", "canonical_fingerprint"}
+        and config.get("relative_path") == "configs/controlled_scale_200.json"
+        and approved_config_path.is_file()
+        and config.get("sha256") == file_sha256(approved_config_path)
+        and source.get("components", {}).get("configs/controlled_scale_200.json") == config.get("sha256")
+    )
+    if manifest_valid:
+        try:
+            approved_config = json.loads(approved_config_path.read_text(encoding="utf-8"))
+            manifest_valid = config.get("canonical_fingerprint") == canonical_fingerprint(approved_config)
+            containment = verify_git_source_containment(root, source["commit"], source["components"])
+            manifest_valid = manifest_valid and containment["contained_in_commit"]
+        except (OSError, json.JSONDecodeError, ValueError):
+            manifest_valid = False
+    if not manifest_valid:
+        findings.append(_finding("controlled_manifest_invalid", "scaled controlled manifest failed strict domain, config, source, or closure validation", claim_id=claim_id))
+    if "saturation.json" in parsed_documents and not _scaled_saturation_valid(parsed_documents["saturation.json"]):
+        findings.append(_finding("controlled_saturation_invalid", "scaled saturation schema or arithmetic is invalid", claim_id=claim_id))
+    if "diversity.json" in parsed_documents and not _scaled_diversity_valid(parsed_documents["diversity.json"]):
+        findings.append(_finding("controlled_diversity_invalid", "scaled diversity schema or denominator arithmetic is invalid", claim_id=claim_id))
+    if set(paths) == set(_SCALED_ARTIFACT_PATHS) and not _scaled_raw_artifacts_valid(
+        paths, parsed_documents.get("saturation.json")
+    ):
+        findings.append(_finding("controlled_manifest_invalid", "scaled raw artifacts do not form the exact 8x200x5 cube", claim_id=claim_id))
     return findings, checked
 
 
