@@ -26,7 +26,7 @@ class TxnMemDifferentialTests(unittest.TestCase):
         comparison = compare_result_to_oracle(instance, run_instance(instance, "TxnMem"))
 
         self.assertTrue(comparison["matches"])
-        self.assertEqual(comparison["oracle_version"], "0.3")
+        self.assertEqual(comparison["oracle_version"], "0.4")
 
     def test_naive_partial_write_is_rejected_by_w1_oracle(self):
         instance = generate_instance("atomic_multi_write", seed=1, config={"txn_size": 2})
@@ -240,6 +240,28 @@ class TxnMemDifferentialTests(unittest.TestCase):
 
         self.assertEqual(result["transaction_states"], {"txn_a": "aborted", "txn_b": "committed"})
         self.assertEqual(result["committed_memory_ids"], ["m_b"])
+        self.assertTrue(compare_result_to_oracle(instance, result)["matches"])
+
+    def test_pre_crash_preserves_committed_transaction_and_aborts_active_sibling(self):
+        """The simulator and active-only reference agree across a pre-boundary crash."""
+
+        instance = generate_instance("atomic_multi_write", seed=26, config={"txn_size": 1})
+        agent = instance["policies"][0]["agent_id"]
+        instance["operations"] = [
+            {"op_id": "op_001", "step": 1, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_a"},
+            {"op_id": "op_002", "step": 2, "agent_id": agent, "type": "write", "txn_id": "txn_a", "memory_id": "m_a", "source_ids": [], "policy_version": 1},
+            {"op_id": "op_003", "step": 3, "agent_id": agent, "type": "commit", "txn_id": "txn_a"},
+            {"op_id": "op_004", "step": 4, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_b"},
+            {"op_id": "op_005", "step": 5, "agent_id": agent, "type": "write", "txn_id": "txn_b", "memory_id": "m_b", "source_ids": [], "policy_version": 1},
+        ]
+        instance["failure_schedule"] = [
+            {"trigger": {"before_operation": "op_005"}, "type": "crash", "target": "txn_b"},
+        ]
+
+        result = run_instance(instance, "TxnMem")
+
+        self.assertEqual(result["transaction_states"], {"txn_a": "committed", "txn_b": "aborted"})
+        self.assertEqual(result["committed_memory_ids"], ["m_a"])
         self.assertTrue(compare_result_to_oracle(instance, result)["matches"])
 
     def test_transactional_invalidation_is_discarded_by_explicit_abort(self):

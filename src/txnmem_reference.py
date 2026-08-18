@@ -13,7 +13,7 @@ from collections import defaultdict, deque
 from typing import Any, Iterable
 
 
-ORACLE_VERSION = "0.3"
+ORACLE_VERSION = "0.4"
 _MUTATING_OPERATIONS = {"write", "stage_write", "derive", "propagate", "supersede"}
 _READ_OPERATIONS = {"read", "search", "get_by_id"}
 
@@ -543,8 +543,9 @@ def _run(instance: dict[str, Any], crash_resolution: str | None) -> dict[str, An
             and all(event.get("phase") is None for event in pre_crashes)
         )
         if pre_crashes and not ambiguous_commit_crash:
-            for txn_id in list(state["transactions"]):
-                _abort_transaction(state, txn_id, "CRASH_BEFORE_LINEARIZE")
+            for txn_id, txn in list(state["transactions"].items()):
+                if txn["status"] == "active":
+                    _abort_transaction(state, txn_id, "CRASH_BEFORE_LINEARIZE")
             _append_trace(state, operation, decision="aborted", reason_codes=["CRASH_BEFORE_LINEARIZE"])
             break
 

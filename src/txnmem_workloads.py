@@ -54,7 +54,19 @@ MEMORY_SHAPE_KEYS = frozenset(
         "derived_from",
     }
 )
-NESTED_NEW_MEMORY_SHAPE_KEYS = MEMORY_SHAPE_KEYS | {"source_ids"}
+NESTED_NEW_MEMORY_SHAPE_KEYS = frozenset(
+    {
+        "memory_id",
+        "output_id",
+        "agent_id",
+        "scope",
+        "entity_id",
+        "attribute",
+        "value",
+        "policy_version",
+        "source_ids",
+    }
+)
 OPERATION_SHAPE_KEYS = frozenset(
     {
         "op_id",
@@ -168,22 +180,24 @@ def _known_semantic_labels(instance: Mapping[str, Any]) -> dict[str, set[str]]:
     return known
 
 
-def _target_reference_category(event: Mapping[str, Any], known: Mapping[str, set[str]]) -> str | None:
+def _target_relations(
+    event: Mapping[str, Any], known: Mapping[str, set[str]]
+) -> dict[str, tuple[str, str | None]] | None:
     target = event.get("target")
     if not isinstance(target, str):
         return None
     event_type = event.get("type") or event.get("action")
     if event_type in {"crash", "crash_during_commit"}:
-        # Crash targets accept a transaction identifier, but values such as
-        # ``commit`` and operation names are literal crash selectors.  In
-        # particular, an incidental op_id named ``commit`` must not turn that
-        # literal selector into an identifier reference.
+        relations: dict[str, tuple[str, str | None]] = {}
         if target in known.get("crash_literal", set()):
-            return None
+            relations["literal_selector"] = (target, None)
         if target in known.get("transaction", set()):
-            return "transaction"
+            relations["transaction_reference"] = (target, "transaction")
+        if relations:
+            return relations
+        return {"raw_literal": (target, None)}
     if event_type == "invalidate" and target in known.get("memory", set()):
-        return "memory"
+        return {"memory_reference": (target, "memory")}
     return None
 
 
@@ -226,15 +240,17 @@ def _normalized_semantic_shape(instance: Mapping[str, Any]) -> dict[str, Any]:
 
     def normalize(value: Any, name: str | None = None, category: str | None = None) -> Any:
         if isinstance(value, Mapping):
-            target_category = _target_reference_category(value, known)
-            return {
-                str(key): normalize(
-                    item,
-                    str(key),
-                    target_category if key == "target" else None,
-                )
-                for key, item in sorted(value.items(), key=lambda item: str(item[0]))
-            }
+            target_relations = _target_relations(value, known)
+            normalized: dict[str, Any] = {}
+            for key, item in sorted(value.items(), key=lambda item: str(item[0])):
+                if key == "target" and target_relations is not None:
+                    normalized[str(key)] = {
+                        relation: normalize(target, category=target_category)
+                        for relation, (target, target_category) in sorted(target_relations.items())
+                    }
+                else:
+                    normalized[str(key)] = normalize(item, str(key))
+            return normalized
         if isinstance(value, list):
             return [normalize(item, name, category) for item in value]
         category = category or _semantic_id_category(name or "")

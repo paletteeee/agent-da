@@ -154,6 +154,115 @@ class TxnMemWorkloadTests(unittest.TestCase):
         }
 
         self.assertEqual(semantic_fingerprint(colliding), semantic_fingerprint(relabeled_operation))
+        self.assertEqual(run_instance(colliding, "TxnMem"), run_instance(relabeled_operation, "TxnMem"))
+        self.assertTrue(compare_result_to_oracle(colliding, run_instance(colliding, "TxnMem"))["matches"])
+        self.assertTrue(compare_result_to_oracle(relabeled_operation, run_instance(relabeled_operation, "TxnMem"))["matches"])
+
+    def test_crash_target_projection_records_transaction_and_literal_selector_roles(self):
+        """A txn/type collision must not collapse into the pure literal selector shape."""
+
+        collision = generate_instance("atomic_multi_write", seed=28, config={"txn_size": 1})
+        agent = collision["policies"][0]["agent_id"]
+        collision["initial_memories"] = [
+            {"memory_id": "m_root", "agent_id": agent, "scope": "tenant:user_001", "status": "active"},
+        ]
+        collision["operations"] = [
+            {"op_id": "op_001", "step": 1, "agent_id": agent, "type": "begin_txn", "txn_id": "write"},
+            {"op_id": "op_002", "step": 2, "agent_id": agent, "type": "read", "txn_id": "write", "memory_id": "m_root", "scope": "tenant:user_001"},
+            {"op_id": "op_003", "step": 3, "agent_id": agent, "type": "write", "txn_id": "write", "memory_id": "m_output", "source_ids": [], "policy_version": 1},
+            {"op_id": "op_004", "step": 4, "agent_id": agent, "type": "commit", "txn_id": "write"},
+        ]
+        collision["failure_schedule"] = [
+            {"trigger": {"before_operation": "op_002"}, "type": "crash", "target": "write"},
+        ]
+        literal_only = json.loads(json.dumps(collision))
+        for operation in literal_only["operations"]:
+            operation["txn_id"] = "txn_primary"
+
+        collision_result = run_instance(collision, "TxnMem")
+        literal_result = run_instance(literal_only, "TxnMem")
+
+        self.assertNotEqual(semantic_fingerprint(collision), semantic_fingerprint(literal_only))
+        self.assertNotEqual(collision_result["transaction_states"], literal_result["transaction_states"])
+        self.assertTrue(compare_result_to_oracle(collision, collision_result)["matches"])
+        self.assertTrue(compare_result_to_oracle(literal_only, literal_result)["matches"])
+
+    def test_crash_target_transaction_reference_normalizes_without_literal_role(self):
+        """A consistently relabeled transaction-only crash selector retains its shape."""
+
+        instance = generate_instance("atomic_multi_write", seed=29, config={"txn_size": 1})
+        agent = instance["policies"][0]["agent_id"]
+        instance["operations"] = [
+            {"op_id": "op_001", "step": 1, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_alpha"},
+            {"op_id": "op_002", "step": 2, "agent_id": agent, "type": "write", "txn_id": "txn_alpha", "memory_id": "m_output", "source_ids": [], "policy_version": 1},
+        ]
+        instance["failure_schedule"] = [
+            {"trigger": {"before_operation": "op_002"}, "type": "crash", "target": "txn_alpha"},
+        ]
+        relabeled = json.loads(json.dumps(instance))
+        for operation in relabeled["operations"]:
+            operation["txn_id"] = "txn_beta"
+        relabeled["failure_schedule"][0]["target"] = "txn_beta"
+
+        self.assertEqual(semantic_fingerprint(instance), semantic_fingerprint(relabeled))
+        first_result = run_instance(instance, "TxnMem")
+        second_result = run_instance(relabeled, "TxnMem")
+        self.assertEqual(first_result["transaction_state"], second_result["transaction_state"])
+        self.assertEqual(first_result["committed_memory_ids"], second_result["committed_memory_ids"])
+        self.assertTrue(compare_result_to_oracle(instance, first_result)["matches"])
+        self.assertTrue(compare_result_to_oracle(relabeled, second_result)["matches"])
+
+    def test_nested_new_memory_projection_tracks_only_staged_input_fields(self):
+        """Ignored nested fields neither alter shape nor executor output; staged inputs do."""
+
+        instance = generate_instance("supersession_consistency", seed=30)
+        agent = instance["policies"][0]["agent_id"]
+        supersede = next(operation for operation in instance["operations"] if operation["type"] == "supersede")
+        supersede["new_memory"] = {
+            "memory_id": "m_new",
+            "output_id": "m_new",
+            "agent_id": agent,
+            "scope": "tenant:user_001",
+            "entity_id": "user_001",
+            "attribute": "fact",
+            "value": "new_fact",
+            "policy_version": 1,
+            "source_ids": [],
+        }
+        baseline_fingerprint = semantic_fingerprint(instance)
+        baseline_reference = reference_outcome(instance)
+        baseline_simulator = run_instance(instance, "TxnMem")
+
+        for key, value in {
+            "status": "invalid",
+            "version": 99,
+            "derived_from": ["m_old"],
+            "supersedes_id": "not_the_old_id",
+        }.items():
+            with self.subTest(ignored_key=key):
+                changed = json.loads(json.dumps(instance))
+                nested = next(operation for operation in changed["operations"] if operation["type"] == "supersede")["new_memory"]
+                nested[key] = value
+                self.assertEqual(baseline_fingerprint, semantic_fingerprint(changed))
+                self.assertEqual(baseline_reference, reference_outcome(changed))
+                self.assertEqual(baseline_simulator, run_instance(changed, "TxnMem"))
+
+        for key, value in {
+            "memory_id": "m_inner",
+            "output_id": "m_inner",
+            "agent_id": "agent_other",
+            "scope": "tenant:other",
+            "entity_id": "other_user",
+            "attribute": "changed_attribute",
+            "value": "changed_value",
+            "policy_version": 2,
+            "source_ids": ["m_old"],
+        }.items():
+            with self.subTest(consumed_key=key):
+                changed = json.loads(json.dumps(instance))
+                nested = next(operation for operation in changed["operations"] if operation["type"] == "supersede")["new_memory"]
+                nested[key] = value
+                self.assertNotEqual(baseline_fingerprint, semantic_fingerprint(changed))
 
     def test_semantic_fingerprint_ignores_metadata_and_config_but_tracks_executable_shape(self):
         """Only replay-consumed shape contributes to semantic fingerprinting."""
@@ -268,8 +377,8 @@ class TxnMemWorkloadTests(unittest.TestCase):
             with self.subTest(changed=changed):
                 self.assertNotEqual(semantic_fingerprint(instance), semantic_fingerprint(changed))
 
-    def test_semantic_fingerprint_preserves_reserved_crash_literals_before_transaction_collisions(self):
-        """Operation-type selectors remain literal even when a transaction has that identifier."""
+    def test_semantic_fingerprint_records_reserved_literal_and_transaction_collision(self):
+        """A literal selector retains the colliding transaction-reference relation."""
 
         colliding = generate_instance("crash_during_commit", seed=13)
         for operation in colliding["operations"]:
@@ -278,7 +387,7 @@ class TxnMemWorkloadTests(unittest.TestCase):
         for operation in relabeled_transaction["operations"]:
             operation["txn_id"] = "txn_relabelled"
 
-        self.assertEqual(semantic_fingerprint(colliding), semantic_fingerprint(relabeled_transaction))
+        self.assertNotEqual(semantic_fingerprint(colliding), semantic_fingerprint(relabeled_transaction))
 
     def test_parameter_ranges_drive_consumed_schedule_and_policy_inputs(self):
         """Replacing consumed policy schedules with ignored annotations must change replay."""

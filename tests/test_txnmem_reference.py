@@ -137,7 +137,35 @@ class TxnMemReferenceTests(unittest.TestCase):
                 "graph_validity": True,
             },
         }])
-        self.assertEqual(oracle["oracle_version"], "0.3")
+        self.assertEqual(oracle["oracle_version"], "0.4")
+
+    def test_pre_boundary_process_crash_preserves_terminal_transactions(self):
+        """A process crash only aborts active work, never an earlier committed txn."""
+
+        oracle = reference_outcome(
+            self._instance(
+                [
+                    {"op_id": "begin_a", "step": 1, "type": "begin_txn", "txn_id": "txn_a", "agent_id": "agent_1"},
+                    {"op_id": "write_a", "step": 2, "type": "write", "txn_id": "txn_a", "memory_id": "m_a", "agent_id": "agent_1"},
+                    {"op_id": "commit_a", "step": 3, "type": "commit", "txn_id": "txn_a", "agent_id": "agent_1"},
+                    {"op_id": "begin_c", "step": 4, "type": "begin_txn", "txn_id": "txn_c", "agent_id": "agent_1"},
+                    {"op_id": "abort_c", "step": 5, "type": "abort", "txn_id": "txn_c", "agent_id": "agent_1"},
+                    {"op_id": "begin_b", "step": 6, "type": "begin_txn", "txn_id": "txn_b", "agent_id": "agent_1"},
+                    {"op_id": "write_b", "step": 7, "type": "write", "txn_id": "txn_b", "memory_id": "m_b", "agent_id": "agent_1"},
+                ],
+                failure_schedule=[
+                    {"trigger": {"before_operation": "write_b"}, "type": "crash", "target": "txn_b"},
+                ],
+            )
+        )
+
+        outcome = oracle["allowed_outcomes"][0]
+        self.assertEqual(
+            outcome["txn_states"],
+            {"txn_a": "committed", "txn_b": "aborted", "txn_c": "aborted"},
+        )
+        self.assertEqual(outcome["committed_memory_ids"], ["m_a"])
+        self.assertEqual(oracle["oracle_version"], "0.4")
 
     def test_unfinished_supersession_and_invalidation_transactions_abort_at_end_of_run(self):
         """Every staged mutation category is terminally aborted without a commit."""
@@ -168,7 +196,7 @@ class TxnMemReferenceTests(unittest.TestCase):
         self.assertEqual(supersession["superseded_memory_ids"], [])
         self.assertEqual(invalidation["txn_states"], {"txn_invalidate": "aborted"})
         self.assertEqual(invalidation["invalid_memory_ids"], [])
-        self.assertEqual(reference_outcome(self._instance([]))["oracle_version"], "0.3")
+        self.assertEqual(reference_outcome(self._instance([]))["oracle_version"], "0.4")
 
     def test_transactional_invalidation_applies_only_when_transaction_commits(self):
         initial_memories = [
