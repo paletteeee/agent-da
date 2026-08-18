@@ -97,6 +97,82 @@ Per-family executable fingerprint counts are: atomic multi-write 4, crash during
 
 Concerns: none.
 
+## Review fix round 4
+
+Status: DONE
+
+Implementation commit: `d09875dccaaa7d1c84efd6aadc43d8ff257ca75b`
+
+### Findings closed
+
+- Scaled-claim discovery now recursively inspects normalized mapping keys and values. Punctuation/case variants of `controlled_scale_200`, exact integral strings such as `"1600"`/`"8000"`, and integral floats such as `1600.0`/`8000.0` activate the strict profile. The numeric pair is scoped to count-like declarations, so unrelated limits do not become a scaled claim merely because the same numbers occur elsewhere.
+- Raw-path classification now preserves token order and compares both tokens and punctuation-free compounds. `Tool Args`, `tool_args`, `tool-arg`, and `tool.args` are equivalent raw-capable components.
+- Directory-wide historical exceptions were removed. Every retained sanitized aggregate is registered by exact result-relative path and exact known SHA-256, then schema-checked as a JSON aggregate or exact trace-replay CSV before it may override its raw-capable name/ancestor. Unregistered siblings under historical roots fail closed.
+- Current formal controlled records are independently regenerated from all eight registered families, seeds 0–199, and `APPROVED_CONTROLLED_PARAMETER_INTERVALS`. Generated instances and oracle 0.4 exports must canonical-compare exactly with those regenerated records, binding all dynamic IDs, state keys, schedules, policies, and outcomes. The historical 400-record/oracle 0.1 pair is accepted only through its explicit versioned whole-file SHA-256 compatibility contract plus its closed record schemas.
+
+### TDD evidence
+
+Primary adversarial RED command:
+
+`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -B -m unittest -v tests.test_txnmem_claim_audit.PaperClaimLedgerTests.test_scaled_controlled_claim_signal_normalizes_keys_and_integral_counts tests.test_txnmem_claim_audit.PaperClaimLedgerTests.test_scaled_controlled_claim_signal_does_not_combine_unrelated_counts tests.test_txnmem_artifact_audit.TxnMemArtifactAuditTests.test_raw_path_compounds_are_normalized_across_common_punctuation tests.test_txnmem_artifact_audit.TxnMemArtifactAuditTests.test_historical_aggregate_root_does_not_exempt_unregistered_siblings tests.test_txnmem_artifact_audit.TxnMemArtifactAuditTests.test_current_controlled_records_must_equal_regenerated_registered_records`
+
+Primary RED result: exit 1; 5 tests ran and exactly 5 failed for their intended boundaries: key/string/float scale signatures were missed, unrelated integer counts were globally combined, all four tool-argument spellings passed, an unregistered historical sibling passed, and mutually plausible generated/oracle tampering passed.
+
+Count-locality RED command:
+
+`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -B -m unittest -v tests.test_txnmem_claim_audit.PaperClaimLedgerTests.test_scaled_controlled_claim_signal_does_not_combine_unrelated_counts`
+
+Count-locality RED result: exit 1; 1 test ran and failed after placing unrelated 1,600/8,000 limits in the same mapping, proving the first coercion implementation remained over-broad.
+
+Adversarial GREEN result: the exact primary five-test command exited 0; 5 tests passed. The scale normalization/locality/previous recursion command exited 0; 3 tests passed.
+
+### Final verification
+
+Focused command:
+
+`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -B -m unittest -q tests.test_txnmem_statistics tests.test_txnmem_conditions tests.test_txnmem_claim_audit tests.test_txnmem_artifact_audit tests.test_cli_outputs`
+
+Focused result: exit 0; 86 tests passed in 42.326 seconds.
+
+Full command:
+
+`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -B -m unittest discover -s tests -q`
+
+Full result: exit 0; 612 tests ran, 4 optional dependency/data tests skipped, 0 failures, in 47.928 seconds.
+
+- Claim audit: exit 0; 15 active claims, 163 checked assertions, 0 findings; report exists only at `/tmp/txnmem-scale-claim-audit-fix4-precommit.json`.
+- Repository artifact audit: exit 0; 0 findings.
+- `git diff --check` and `git diff HEAD^ --check`: exit 0 with no output.
+- No formal result artifact was added to Git.
+
+### Deterministic committed-HEAD verification
+
+- Run A: `/tmp/txnmem-fix4-formal-a.czflsO/results/final_controlled_200`
+- Run B: `/tmp/txnmem-fix4-formal-b.CexIBg/results/final_controlled_200`
+- Both used `experiment --config configs/controlled_scale_200.json --seeds 200 --require-clean-source` from implementation commit `d09875dccaaa7d1c84efd6aadc43d8ff257ca75b`; both exited 0 with 1,600 instances and 8,000 result rows.
+- `diff -rq` over the two complete 14-file trees exited 0 with no output.
+- Both manifests declare `contained_in_commit=true`, source fingerprint `a4651ae11904463dcdf2f129a59ba68811470617a11f77ab958345e018dace7c`, oracle `0.4`, config SHA-256 `76cd8b4231f57d1fa28a24594635104bbcd69cdc52638f9459db730ed58edc9e`, config fingerprint `cf330f6c51b33e79df6ae5f20be46486bc3cdd0e34dd6b0ad1f0f63108fc20b9`, eight families, 200 seeds/family, 1,600 instances, 8,000 rows, and six manifest artifacts.
+- The generated-instance and reference-oracle JSONL files from both trees were passed together to `audit_result_paths`: 4 paths checked, 0 findings.
+
+### Files changed
+
+- `src/txnmem_claim_audit.py`
+- `src/txnmem_artifact_audit.py`
+- `tests/test_txnmem_claim_audit.py`
+- `tests/test_txnmem_artifact_audit.py`
+- `.superpowers/sdd/2026-08-18-evidence-scale-up/task-3-brief.md`
+- `.superpowers/sdd/2026-08-18-evidence-scale-up/progress.md`
+- `.superpowers/sdd/2026-08-18-evidence-scale-up/task-3-report.md`
+
+### Self-review
+
+- Confirmed all prior round-1/2/3 focused regressions remain green and historical non-scaled claim behavior is unchanged.
+- Confirmed current 1,600-instance authenticity is based on deterministic regeneration rather than text markers, while the legacy 400 corpus is immutable under an explicit versioned compatibility identity.
+- Confirmed exact historical aggregate registrations cannot authorize siblings, descendants, or changed bytes.
+- Confirmed Task 1/2 workload semantics and oracle version 0.4 were not modified.
+
+Concern: registered historical aggregate byte changes now require an intentional path/hash/schema registry update; this is the intended fail-closed maintenance boundary, not a runtime blocker.
+
 ## Review fix round 3
 
 Status: DONE
