@@ -97,6 +97,125 @@ Per-family executable fingerprint counts are: atomic multi-write 4, crash during
 
 Concerns: none.
 
+## Review fix round 5
+
+Status: DONE
+
+Implementation commit: `0dbf6f599ecd3903ffcf7b7adc752afecd8fc410`
+
+### Findings closed
+
+- The scaled claim audit now re-executes every registered variant for every
+  regenerated formal instance and compares the complete parsed CSV row to the
+  canonical `result_row` export. This covers coordinates, transaction state(s),
+  every violation/metric field, operation/repair/commit counts, deterministic
+  latency, and all oracle fields. Saturation is derived only from canonical
+  replay rows after exact equality succeeds.
+- One recursive strict JSON loader now rejects duplicate keys at every object
+  depth. Claim audit uses it for the ledger, supersession index, active JSON
+  artifact, manifest, approved config, saturation/diversity JSON, and every
+  generated-instance/reference-oracle JSONL member before controlled closure
+  validation. Artifact audit uses the same loader for controlled JSON/JSONL
+  members, including the formal manifest and summary JSON files.
+- Controlled-scale identity is recognized as a case/punctuation-insensitive
+  normalized subsequence inside paths, run commands, mapping keys, and values.
+  The numeric 1,600/8,000 signature is now limited to normalized semantic
+  count-role tokens, so incidental `account`/`discount` substrings do not
+  activate the scaled bundle gate.
+- Raw path classification now matches denied semantic stems inside normalized
+  compounds, closing `promptMessages`, `payloadStore`,
+  `conversationArchive`, `transcriptBundle`, `dialogueExport`, and
+  `chatHistory` while retaining exact registered aggregate exemptions.
+
+### TDD evidence
+
+Adversarial RED command:
+
+`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -B -m unittest -v tests.test_txnmem_claim_audit.PaperClaimLedgerTests.test_scaled_controlled_claim_replays_full_result_truth_before_saturation tests.test_txnmem_claim_audit.PaperClaimLedgerTests.test_controlled_claim_and_artifact_audits_reject_recursive_duplicate_keys tests.test_txnmem_claim_audit.PaperClaimLedgerTests.test_scaled_controlled_claim_signal_normalizes_embedded_identity_and_count_roles tests.test_txnmem_artifact_audit.TxnMemArtifactAuditTests.test_raw_path_denied_stems_match_camel_case_and_concatenated_components`
+
+RED result: exit 1; 4 tests ran in 7.852 seconds and exactly 4 failed
+for the intended bypasses. A TxnMem `any_violation` edit with matching
+saturation/hash edits passed, nested duplicate `operations`/`event_trace`
+keys passed both audits, all four embedded identity locations were missed
+while `account=1600` plus `discount=8000` falsely triggered, and all six raw
+compound paths passed.
+
+Immediate GREEN result: the same four-test command exited 0; 4 tests passed
+in 5.274 seconds. Post-self-review cleanup GREEN: 4 tests passed in 5.261
+seconds.
+
+### Final verification
+
+- Baseline before edits: 612 tests ran, 4 optional tests skipped, 0 failures.
+- Complete claim/artifact modules: 56 tests passed in 73.274 seconds.
+- Focused Task 3 command (`statistics`, `conditions`, claim audit, artifact
+  audit, and CLI): 90 tests passed in 77.562 seconds.
+- Full suite: 616 tests ran in 81.316 seconds, 4 optional dependency/data
+  tests skipped, 0 failures.
+- Claim audit: exit 0; 15 active claims, 0 findings; diagnostic output only at
+  `/tmp/txnmem-scale-claim-audit-fix5-precommit.json`.
+- Repository artifact audit: exit 0; 0 findings.
+- `git diff --check`: exit 0 with no output.
+
+### Deterministic committed-HEAD verification
+
+- Run A: `/tmp/txnmem-fix5-formal-a.dbpvgM/results/final_controlled_200`
+- Run B: `/tmp/txnmem-fix5-formal-b.J2Ikft/results/final_controlled_200`
+- Both used `experiment --config configs/controlled_scale_200.json --seeds
+  200 --require-clean-source` from implementation commit
+  `0dbf6f599ecd3903ffcf7b7adc752afecd8fc410`; each exited 0 with 1,600
+  instances and 8,000 result rows.
+- `diff -rq` over both complete 14-file trees exited 0 with no output.
+- Both manifests declare `contained_in_commit=true`, source fingerprint
+  `a4651ae11904463dcdf2f129a59ba68811470617a11f77ab958345e018dace7c`,
+  oracle `0.4`, config SHA-256
+  `76cd8b4231f57d1fa28a24594635104bbcd69cdc52638f9459db730ed58edc9e`,
+  config fingerprint
+  `cf330f6c51b33e79df6ae5f20be46486bc3cdd0e34dd6b0ad1f0f63108fc20b9`,
+  eight families, seeds 0-199, all five registered variants, and six manifest
+  artifacts.
+- Direct claim-closure validation returned `true` for saturation schema,
+  diversity schema, regenerated diversity equality, SVG validity, and full
+  8,000-row replay on both trees. The four generated/oracle JSONL paths passed
+  artifact audit with 0 findings.
+
+Six-artifact hashes (identical in both trees):
+
+- `generated_instances.jsonl`: `46bfb35ad694e551ab2191b2b0a2e9747ff0fb074c5fdbd0fcff9b17889d939d`
+- `reference_oracles.jsonl`: `0d4df56fa5afbe0820b0bf1bf5838703972dfa0210c28ca35a9ce95ded134409`
+- `experiment_results.csv`: `6541b46e61531e7adb368bd4eec806010f4d6403902cb40ce32f080b6ffa8c7a`
+- `saturation.json`: `8f3475f219e33a63fb0a7628b1791c3c01bb8db1077cec2738044f621758a3be`
+- `diversity.json`: `0d232a35fe18e7eff3c0deb499fe49c6361594aad52db1b610e97c52e5ca68e9`
+- `saturation.svg`: `db213c021926e1a9909057acb13db12f12536968c74fa29d86fb35cf223d5c98`
+
+Manifest SHA-256: `ad57213e74e378d937d9254d59c265ddcb9b2f7ecd343ec31955cdc43eb67f29`.
+
+### Files changed
+
+- `.superpowers/sdd/2026-08-18-evidence-scale-up/progress.md`
+- `.superpowers/sdd/2026-08-18-evidence-scale-up/task-3-brief.md`
+- `src/txnmem_claim_audit.py`
+- `src/txnmem_artifact_audit.py`
+- `tests/test_txnmem_claim_audit.py`
+- `tests/test_txnmem_artifact_audit.py`
+- `.superpowers/sdd/2026-08-18-evidence-scale-up/task-3-report.md` (report commit only)
+
+### Self-review
+
+- Re-read the round-5 brief/rulings and checked each required field/path/parser
+  boundary against the committed diff.
+- Confirmed exact row equality uses canonical CSV string semantics and that
+  saturation consumes only replayed values after equality succeeds.
+- Confirmed duplicate-key rejection is recursive through `object_pairs_hook`
+  and shared by both audits.
+- Confirmed prior tests remain enabled, no test was weakened, no formal result
+  artifact entered Git, and simulator/reference behavior plus oracle 0.4 are
+  unchanged.
+
+Concern: this session exposed no subagent/spawn tool for an independent review
+seat, so the required self-review was performed directly against the complete
+committed diff. No implementation concern remains.
+
 ## Review fix round 4
 
 Status: DONE
