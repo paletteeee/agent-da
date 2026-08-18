@@ -191,6 +191,83 @@ class TxnMemWorkloadTests(unittest.TestCase):
         self.assertNotEqual(semantic_fingerprint(instance), semantic_fingerprint(changed_operation))
         self.assertNotEqual(semantic_fingerprint(instance), semantic_fingerprint(changed_schedule))
 
+    def test_semantic_fingerprint_ignores_unknown_keys_inside_executable_containers(self):
+        """Debug/annotation payloads at every nested level cannot inflate diversity."""
+
+        instance = generate_instance("supersession_consistency", seed=26)
+        agent = instance["policies"][0]["agent_id"]
+        supersede = next(operation for operation in instance["operations"] if operation["type"] == "supersede")
+        supersede["new_memory"] = {
+            "memory_id": "m_new",
+            "agent_id": agent,
+            "scope": "tenant:user_001",
+            "value": "replacement",
+            "source_ids": ["m_old"],
+        }
+        instance["provenance_edges"] = [
+            {"source_id": "m_old", "derived_id": "m_new", "relation": "read_derive"},
+        ]
+        instance["failure_schedule"] = [
+            {"trigger": {"after_operation": instance["operations"][0]["op_id"]}, "type": "delay"},
+        ]
+        injected = json.loads(json.dumps(instance))
+        injected["initial_memories"][0]["debug"] = {"source": "fixture"}
+        injected["operations"][0]["annotation"] = "ignored"
+        next(operation for operation in injected["operations"] if operation["type"] == "supersede")["new_memory"]["debug"] = True
+        injected["policies"][0]["debug"] = ["ignored"]
+        injected["failure_schedule"][0]["annotation"] = "ignored"
+        injected["failure_schedule"][0]["trigger"]["debug"] = "ignored"
+        injected["provenance_edges"][0]["debug"] = "ignored"
+
+        self.assertEqual(semantic_fingerprint(instance), semantic_fingerprint(injected))
+
+    def test_semantic_fingerprint_tracks_consumed_fields_in_each_executable_container(self):
+        """Allowlisted executable values remain shape-sensitive, including nested memory data."""
+
+        instance = generate_instance("supersession_consistency", seed=27)
+        agent = instance["policies"][0]["agent_id"]
+        supersede = next(operation for operation in instance["operations"] if operation["type"] == "supersede")
+        supersede["new_memory"] = {
+            "memory_id": "m_new",
+            "agent_id": agent,
+            "scope": "tenant:user_001",
+            "value": "replacement",
+            "source_ids": ["m_old"],
+        }
+        instance["provenance_edges"] = [
+            {"source_id": "m_old", "derived_id": "m_new", "relation": "read_derive"},
+        ]
+        instance["failure_schedule"] = [
+            {"trigger": {"after_operation": instance["operations"][0]["op_id"]}, "type": "delay"},
+        ]
+        variants = []
+
+        changed_memory = json.loads(json.dumps(instance))
+        changed_memory["initial_memories"][0]["value"] = "changed_initial_value"
+        variants.append(changed_memory)
+        changed_operation = json.loads(json.dumps(instance))
+        changed_operation["operations"][1]["value"] = "changed_operation_value"
+        variants.append(changed_operation)
+        changed_nested_memory = json.loads(json.dumps(instance))
+        next(operation for operation in changed_nested_memory["operations"] if operation["type"] == "supersede")["new_memory"]["value"] = "changed_nested_value"
+        variants.append(changed_nested_memory)
+        changed_nested_sources = json.loads(json.dumps(instance))
+        next(operation for operation in changed_nested_sources["operations"] if operation["type"] == "supersede")["new_memory"]["source_ids"] = ["m_new"]
+        variants.append(changed_nested_sources)
+        changed_policy = json.loads(json.dumps(instance))
+        changed_policy["policies"][0]["effect"] = "deny"
+        variants.append(changed_policy)
+        changed_schedule = json.loads(json.dumps(instance))
+        changed_schedule["failure_schedule"][0]["phase"] = "after_commit"
+        variants.append(changed_schedule)
+        changed_edge = json.loads(json.dumps(instance))
+        changed_edge["provenance_edges"][0]["relation"] = "propagate"
+        variants.append(changed_edge)
+
+        for changed in variants:
+            with self.subTest(changed=changed):
+                self.assertNotEqual(semantic_fingerprint(instance), semantic_fingerprint(changed))
+
     def test_semantic_fingerprint_preserves_reserved_crash_literals_before_transaction_collisions(self):
         """Operation-type selectors remain literal even when a transaction has that identifier."""
 

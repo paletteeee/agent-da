@@ -39,6 +39,61 @@ EXECUTABLE_SHAPE_FIELDS = (
     "failure_schedule",
     "provenance_edges",
 )
+MEMORY_SHAPE_KEYS = frozenset(
+    {
+        "memory_id",
+        "agent_id",
+        "scope",
+        "entity_id",
+        "attribute",
+        "value",
+        "status",
+        "version",
+        "policy_version",
+        "supersedes_id",
+        "derived_from",
+    }
+)
+NESTED_NEW_MEMORY_SHAPE_KEYS = MEMORY_SHAPE_KEYS | {"source_ids"}
+OPERATION_SHAPE_KEYS = frozenset(
+    {
+        "op_id",
+        "step",
+        "agent_id",
+        "type",
+        "txn_id",
+        "memory_id",
+        "output_id",
+        "source_id",
+        "source_ids",
+        "scope",
+        "target_scope",
+        "entity_id",
+        "attribute",
+        "value",
+        "policy_version",
+        "supersedes_id",
+        "old_memory_id",
+        "old_id",
+        "new_memory_id",
+        "new_id",
+        "new_memory",
+        "query",
+        "abort_reason",
+        "root_id",
+        "root_ids",
+    }
+)
+POLICY_SHAPE_KEYS = frozenset(
+    {"policy_id", "version", "agent_id", "action", "scope", "effect", "effective_step"}
+)
+SCHEDULE_SHAPE_KEYS = frozenset(
+    {"type", "action", "target", "memory_id", "trigger", "step", "phase"}
+)
+TRIGGER_SHAPE_KEYS = frozenset({"before_operation", "after_operation"})
+PROVENANCE_EDGE_SHAPE_KEYS = frozenset(
+    {"source_id", "derived_id", "relation", "operation_id", "txn_id"}
+)
 
 
 def _merged_config(config: dict[str, Any] | None) -> dict[str, Any]:
@@ -70,9 +125,9 @@ def sample_semantic_config(
 
 
 def _semantic_id_category(name: str) -> str | None:
-    if name in {"memory_id", "old_memory_id", "new_memory_id", "supersedes_id", "source_id", "derived_id", "output_id"}:
+    if name in {"memory_id", "old_memory_id", "old_id", "new_memory_id", "new_id", "supersedes_id", "source_id", "derived_id", "output_id", "root_id"}:
         return "memory"
-    if name in {"source_ids", "derived_from"}:
+    if name in {"source_ids", "derived_from", "root_ids"}:
         return "memory"
     if name in {"op_id", "operation_id", "before_operation", "after_operation"}:
         return "operation"
@@ -134,9 +189,38 @@ def _target_reference_category(event: Mapping[str, Any], known: Mapping[str, set
 
 def _normalized_semantic_shape(instance: Mapping[str, Any]) -> dict[str, Any]:
     labels: dict[str, dict[str, str]] = {}
+
+    def allow_mapping(value: Any, allowed_keys: frozenset[str]) -> dict[str, Any]:
+        if not isinstance(value, Mapping):
+            return {}
+        return {str(key): item for key, item in value.items() if key in allowed_keys}
+
+    def allow_memory(value: Any) -> dict[str, Any]:
+        return allow_mapping(value, MEMORY_SHAPE_KEYS)
+
+    def allow_operation(value: Any) -> dict[str, Any]:
+        operation = allow_mapping(value, OPERATION_SHAPE_KEYS)
+        if "new_memory" in operation:
+            operation["new_memory"] = allow_mapping(
+                operation["new_memory"], NESTED_NEW_MEMORY_SHAPE_KEYS
+            )
+        return operation
+
+    def allow_schedule(value: Any) -> dict[str, Any]:
+        event = allow_mapping(value, SCHEDULE_SHAPE_KEYS)
+        if "trigger" in event:
+            event["trigger"] = allow_mapping(event["trigger"], TRIGGER_SHAPE_KEYS)
+        return event
+
     executable_shape = {
-        field: instance.get(field, [])
-        for field in EXECUTABLE_SHAPE_FIELDS
+        "initial_memories": [allow_memory(item) for item in instance.get("initial_memories", [])],
+        "operations": [allow_operation(item) for item in instance.get("operations", [])],
+        "policies": [allow_mapping(item, POLICY_SHAPE_KEYS) for item in instance.get("policies", [])],
+        "failure_schedule": [allow_schedule(item) for item in instance.get("failure_schedule", [])],
+        "provenance_edges": [
+            allow_mapping(item, PROVENANCE_EDGE_SHAPE_KEYS)
+            for item in instance.get("provenance_edges", [])
+        ],
     }
     known = _known_semantic_labels(executable_shape)
 

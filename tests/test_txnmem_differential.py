@@ -1,5 +1,6 @@
 import sys
 import unittest
+import copy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -325,6 +326,123 @@ class TxnMemDifferentialTests(unittest.TestCase):
         self.assertEqual(result["final_memories"]["m_old"]["status"], "invalid")
         self.assertEqual(result["final_memories"]["m_new"]["status"], "active")
         self.assertTrue(compare_result_to_oracle(instance, result)["matches"])
+
+    def test_after_operation_revoke_revalidates_the_staged_write(self):
+        """A post-write revoke must be consumed before the transaction commits."""
+
+        instance = generate_instance("atomic_multi_write", seed=21, config={"txn_size": 1})
+        agent = instance["policies"][0]["agent_id"]
+        instance["operations"] = [
+            {"op_id": "op_001", "step": 1, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_a"},
+            {"op_id": "op_002", "step": 2, "agent_id": agent, "type": "write", "txn_id": "txn_a", "memory_id": "m_staged", "source_ids": [], "policy_version": 1},
+            {"op_id": "op_003", "step": 3, "agent_id": agent, "type": "commit", "txn_id": "txn_a"},
+        ]
+        instance["failure_schedule"] = [
+            {"trigger": {"after_operation": "op_002"}, "type": "revoke", "target": "write"},
+        ]
+
+        result = run_instance(instance, "TxnMem")
+
+        self.assertEqual(result["transaction_states"], {"txn_a": "aborted"})
+        self.assertNotIn("m_staged", result["final_memories"])
+        self.assertIn({"step": 2, "event": "revoke", "policy_version": 2}, result["trace"])
+        self.assertTrue(compare_result_to_oracle(instance, result)["matches"])
+
+    def test_after_read_invalidation_changes_version_before_revalidation(self):
+        """A scheduled post-read invalidation must abort the later reader commit."""
+
+        instance = generate_instance("atomic_multi_write", seed=22, config={"txn_size": 1})
+        agent = instance["policies"][0]["agent_id"]
+        instance["initial_memories"] = [
+            {"memory_id": "m_root", "agent_id": agent, "scope": "tenant:user_001", "status": "active", "version": 1},
+        ]
+        instance["operations"] = [
+            {"op_id": "op_001", "step": 1, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_reader"},
+            {"op_id": "op_002", "step": 2, "agent_id": agent, "type": "read", "txn_id": "txn_reader", "memory_id": "m_root", "scope": "tenant:user_001"},
+            {"op_id": "op_003", "step": 3, "agent_id": agent, "type": "commit", "txn_id": "txn_reader"},
+        ]
+        instance["failure_schedule"] = [
+            {"trigger": {"after_operation": "op_002"}, "type": "invalidate", "target": "m_root"},
+        ]
+
+        result = run_instance(instance, "TxnMem")
+
+        self.assertEqual(result["transaction_states"], {"txn_reader": "aborted"})
+        self.assertEqual(result["final_memories"]["m_root"]["status"], "invalid")
+        self.assertEqual(result["final_memories"]["m_root"]["version"], 2)
+        self.assertTrue(compare_result_to_oracle(instance, result)["matches"])
+
+    def test_post_events_apply_in_order_before_the_process_crash(self):
+        """Post-boundary policy, delay, and invalidation each happen once before crash."""
+
+        instance = generate_instance("atomic_multi_write", seed=23, config={"txn_size": 1})
+        agent = instance["policies"][0]["agent_id"]
+        instance["initial_memories"] = [
+            {"memory_id": "m_root", "agent_id": agent, "scope": "tenant:user_001", "status": "active", "version": 1},
+        ]
+        instance["operations"] = [
+            {"op_id": "op_001", "step": 1, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_a"},
+            {"op_id": "op_002", "step": 2, "agent_id": agent, "type": "write", "txn_id": "txn_a", "memory_id": "m_staged", "source_ids": [], "policy_version": 1},
+        ]
+        instance["failure_schedule"] = [
+            {"trigger": {"after_operation": "op_002"}, "type": "revoke", "target": "write"},
+            {"trigger": {"after_operation": "op_002"}, "type": "delay"},
+            {"trigger": {"after_operation": "op_002"}, "type": "invalidate", "target": "m_root"},
+            {"trigger": {"after_operation": "op_002"}, "type": "crash", "target": "txn_a"},
+        ]
+
+        result = run_instance(instance, "TxnMem")
+        event_names = [entry.get("event") for entry in result["trace"] if entry.get("event")]
+
+        self.assertEqual(result["transaction_states"], {"txn_a": "aborted"})
+        self.assertEqual(result["final_memories"]["m_root"]["status"], "invalid")
+        self.assertEqual(result["final_memories"]["m_root"]["version"], 2)
+        self.assertEqual(event_names, ["revoke", "delay", "invalidate", "crash"])
+        self.assertTrue(compare_result_to_oracle(instance, result)["matches"])
+
+    def test_unbegun_transaction_labeled_invalidation_is_immediate_autocommit_repair(self):
+        """An invalidate label alone must not create a staged transaction boundary."""
+
+        instance = generate_instance("provenance_chain_repair", seed=24, config={"provenance_depth": 1})
+        agent = instance["policies"][0]["agent_id"]
+        instance["initial_memories"] = [
+            {"memory_id": "root", "agent_id": agent, "scope": "tenant:user_001", "status": "active", "version": 1},
+            {"memory_id": "child", "agent_id": agent, "scope": "tenant:user_001", "status": "active", "version": 1},
+        ]
+        instance["provenance_edges"] = [
+            {"source_id": "root", "derived_id": "child", "relation": "read_derive"},
+        ]
+        instance["operations"] = [
+            {"op_id": "op_001", "step": 1, "agent_id": agent, "type": "invalidate", "txn_id": "txn_unbegun", "memory_id": "root"},
+        ]
+        instance["failure_schedule"] = []
+
+        result = run_instance(instance, "TxnMem")
+
+        self.assertEqual(result["transaction_states"], {})
+        self.assertEqual(result["final_memories"]["root"]["status"], "invalid")
+        self.assertEqual(result["final_memories"]["root"]["version"], 2)
+        self.assertEqual(result["final_memories"]["child"]["status"], "invalid")
+        self.assertEqual(result["metrics"]["repair_count"], 1)
+        self.assertTrue(compare_result_to_oracle(instance, result)["matches"])
+
+    def test_differential_rejects_missing_or_extra_transaction_state_ids(self):
+        """Candidate transaction domains must exactly match an allowed oracle outcome."""
+
+        instance = generate_instance("atomic_multi_write", seed=25, config={"txn_size": 1})
+        result = run_instance(instance, "TxnMem")
+        extra = copy.deepcopy(result)
+        extra["transaction_states"]["txn_extra"] = "completed"
+        missing = copy.deepcopy(result)
+        missing["transaction_states"] = {}
+
+        extra_comparison = compare_result_to_oracle(instance, extra)
+        missing_comparison = compare_result_to_oracle(instance, missing)
+
+        self.assertFalse(extra_comparison["matches"])
+        self.assertIn("transaction_state", extra_comparison["mismatches"])
+        self.assertFalse(missing_comparison["matches"])
+        self.assertIn("transaction_state", missing_comparison["mismatches"])
 
 
 if __name__ == "__main__":

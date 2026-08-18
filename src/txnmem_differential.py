@@ -23,7 +23,7 @@ def _implementation_snapshot(instance: dict[str, Any], result: dict[str, Any]) -
     txn_ids = _explicit_txn_ids(instance)
     transaction_state = result.get("transaction_state")
     txn_states = {txn_id: transaction_state for txn_id in txn_ids} if txn_ids else {}
-    if result.get("transaction_states"):
+    if "transaction_states" in result:
         txn_states = dict(result["transaction_states"])
     has_read_operation = any(
         operation.get("type") in {"read", "search", "get_by_id"}
@@ -60,13 +60,8 @@ def _implementation_snapshot(instance: dict[str, Any], result: dict[str, Any]) -
 
 def _matches_outcome(candidate: dict[str, Any], outcome: dict[str, Any]) -> tuple[bool, list[str]]:
     mismatches: list[str] = []
-    if outcome.get("txn_states"):
-        for txn_id, expected_state in outcome["txn_states"].items():
-            if txn_id == "implicit" and txn_id not in candidate["txn_states"]:
-                continue
-            if candidate["txn_states"].get(txn_id) != expected_state:
-                mismatches.append("transaction_state")
-                break
+    if candidate["txn_states"] != outcome.get("txn_states", {}):
+        mismatches.append("transaction_state")
     for field in (
         "committed_memory_ids",
         "visible_memory_ids",

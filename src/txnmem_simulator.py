@@ -199,10 +199,46 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                 abort_transaction(txn_id)
 
     def crash_applies(event: dict[str, Any], operation: dict[str, Any]) -> bool:
-        if event["type"] not in {"crash", "crash_during_commit"}:
+        if (event.get("type") or event.get("action")) not in {"crash", "crash_during_commit"}:
             return False
         target = event.get("target")
         return target in {None, operation.get("txn_id"), operation.get("type"), "commit"}
+
+    def apply_schedule_event(event: dict[str, Any], operation: dict[str, Any]) -> None:
+        """Apply one non-crash schedule event at its causal boundary."""
+
+        nonlocal current_policy_version, repair_count, transaction_state
+        event_type = event.get("type") or event.get("action")
+        step = int(operation["step"])
+        if event_type in {"revoke", "policy_change"}:
+            current_policy_version += 1
+            target = event.get("target") or event.get("action")
+            if target in {"read", "search", "write", "derive", "propagate", "supersede"}:
+                revoked_actions.add(target)
+            trace.append(
+                {
+                    "step": step,
+                    "event": "revoke" if event_type == "revoke" else "policy_change",
+                    "policy_version": current_policy_version,
+                }
+            )
+        elif event_type == "delay":
+            trace.append({"step": step, "event": "delay"})
+        elif event_type == "invalidate":
+            memory_id = event.get("target") or event.get("memory_id")
+            memory = memories.get(memory_id)
+            if memory is None:
+                trace.append({"step": step, "event": "denied_invalidate", "memory_id": memory_id})
+                return
+            if memory.get("status") != "invalid":
+                memory["status"] = "invalid"
+                memory["version"] = int(memory.get("version", 1)) + 1
+            if variant in REPAIR_VARIANTS:
+                repair_count += _apply_repair(instance, memories, provenance_edges)
+                transaction_state = "repaired"
+            else:
+                transaction_state = "invalidated"
+            trace.append({"step": step, "event": "invalidate", "memory_id": memory_id})
 
     def read_dependency_changed(txn_id: str) -> bool:
         for memory_id, (version, scope, status) in transaction_read_versions[txn_id].items():
@@ -222,14 +258,7 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
         step = int(operation["step"])
         pre_events = events_for_operation(instance, operation, "before")
         for event in pre_events:
-            if event["type"] == "revoke":
-                current_policy_version += 1
-                target = event.get("target")
-                if target in {"read", "search", "write", "derive", "propagate", "supersede"}:
-                    revoked_actions.add(target)
-                trace.append({"step": step, "event": "revoke", "policy_version": current_policy_version})
-            elif event["type"] == "delay":
-                trace.append({"step": step, "event": "delay"})
+            apply_schedule_event(event, operation)
 
         op_type = operation["type"]
         trace.append({"step": step, "operation": op_type})
@@ -432,6 +461,8 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                     transaction_state = "invalidated"
 
         post_events = events_for_operation(instance, operation, "after")
+        for event in post_events:
+            apply_schedule_event(event, operation)
         if any(crash_applies(event, operation) for event in post_events):
             if uses_transaction:
                 abort_active_transactions()
