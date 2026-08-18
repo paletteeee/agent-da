@@ -285,6 +285,17 @@ def generate_instance(
             _memory("m_old", agent_id=agent, value="old_fact"),
             _memory("m_new", agent_id=agent, status="pending", value="new_fact", supersedes_id="m_old"),
         ]
+        instance["policies"].append(
+            {
+                "policy_id": "p_supersede",
+                "version": 1,
+                "agent_id": agent,
+                "action": "supersede",
+                "scope": "tenant:user_001",
+                "effect": "allow",
+                "effective_step": 0,
+            }
+        )
         instance["operations"] = [
             _operation(1, 1, agent, "begin_txn", txn_id="txn_super"),
             _operation(2, 2, agent, "write", txn_id="txn_super", memory_id="m_new", source_ids=[], policy_version=1, supersedes_id="m_old"),

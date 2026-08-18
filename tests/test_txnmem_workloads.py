@@ -10,6 +10,10 @@ from txnmem_workloads import WORKLOADS, generate_instance, generate_suite  # noq
 
 
 class TxnMemWorkloadTests(unittest.TestCase):
+    def test_supersession_workload_declares_supersede_policy(self):
+        instance = generate_instance("supersession_consistency", 0)
+        assert any(p["action"] == "supersede" and p["effect"] == "allow" for p in instance["policies"])
+
     def test_all_workloads_are_deterministic_and_schema_valid(self):
         self.assertEqual(len(WORKLOADS), 8)
         for workload in WORKLOADS:
