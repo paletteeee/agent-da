@@ -4,10 +4,21 @@ from __future__ import annotations
 
 import copy
 import math
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
+
+from txnmem_workloads import semantic_fingerprint
+
+
+APPROVED_CONTROLLED_PARAMETER_INTERVALS = {
+    "txn_size": (1, 4),
+    "provenance_depth": (1, 4),
+    "branch_factor": (1, 3),
+    "policy_churn": (0, 2),
+    "concurrency": (1, 3),
+}
 
 
 def binomial_interval(successes: int, trials: int, confidence: float = 0.95) -> dict[str, float]:
@@ -75,6 +86,260 @@ def _normal_quantile(probability: float) -> float:
     numerator = (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q
     denominator = ((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1.0
     return numerator / denominator
+
+
+def _controlled_binary(value: Any, field: str) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int) and value in {0, 1}:
+        return value
+    if isinstance(value, str) and value in {"0", "1"}:
+        return int(value)
+    raise ValueError(f"{field} must be 0 or 1")
+
+
+def _controlled_seed(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("seed must be a non-negative integer")
+    try:
+        seed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("seed must be a non-negative integer") from exc
+    if seed < 0 or str(seed) != str(value):
+        raise ValueError("seed must be a canonical non-negative integer")
+    return seed
+
+
+def controlled_violation_saturation(
+    rows: Iterable[Mapping[str, Any]],
+    checkpoints: Iterable[int],
+    confidence: float = 0.95,
+) -> dict[str, Any]:
+    """Aggregate complete family×seed×variant prefixes with Wilson intervals."""
+
+    materialized = [dict(row) for row in rows]
+    if not materialized:
+        raise ValueError("controlled saturation requires result rows")
+    normalized_checkpoints = list(checkpoints)
+    if (
+        not normalized_checkpoints
+        or any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in normalized_checkpoints)
+        or normalized_checkpoints != sorted(set(normalized_checkpoints))
+    ):
+        raise ValueError("checkpoints must be strictly increasing positive integers")
+
+    cells: dict[tuple[str, int, str], dict[str, Any]] = {}
+    instance_coordinates: dict[str, tuple[str, int]] = {}
+    coordinate_instances: dict[tuple[str, int], str] = {}
+    family_seeds: dict[str, set[int]] = defaultdict(set)
+    variants: set[str] = set()
+    for row in materialized:
+        family = row.get("workload")
+        variant = row.get("variant")
+        instance_id = row.get("instance_id")
+        if not isinstance(family, str) or not family:
+            raise ValueError("every result row must name a workload family")
+        if not isinstance(variant, str) or not variant:
+            raise ValueError("every result row must name a variant")
+        if not isinstance(instance_id, str) or not instance_id:
+            raise ValueError("every result row must name an instance_id")
+        seed = _controlled_seed(row.get("seed"))
+        key = (family, seed, variant)
+        if key in cells:
+            raise ValueError(f"duplicate family/seed/variant row: {family}/{seed}/{variant}")
+        coordinate = (family, seed)
+        previous_coordinate = instance_coordinates.setdefault(instance_id, coordinate)
+        if previous_coordinate != coordinate:
+            raise ValueError(f"instance_id spans multiple family/seed cells: {instance_id}")
+        previous_instance = coordinate_instances.setdefault(coordinate, instance_id)
+        if previous_instance != instance_id:
+            raise ValueError(f"family/seed cell has multiple instance IDs: {family}/{seed}")
+        cells[key] = {
+            **row,
+            "seed": seed,
+            "any_violation": _controlled_binary(row.get("any_violation"), "any_violation"),
+            "oracle_match": _controlled_binary(row.get("oracle_match"), "oracle_match"),
+        }
+        family_seeds[family].add(seed)
+        variants.add(variant)
+
+    families = sorted(family_seeds)
+    seed_domain = sorted(set().union(*family_seeds.values()))
+    if seed_domain != list(range(len(seed_domain))):
+        raise ValueError("controlled seed domain must be the contiguous prefix 0..N-1")
+    for family in families:
+        if family_seeds[family] != set(seed_domain):
+            raise ValueError("controlled family seed domains are imbalanced")
+    expected_cells = {
+        (family, seed, variant)
+        for family in families
+        for seed in seed_domain
+        for variant in variants
+    }
+    if set(cells) != expected_cells:
+        missing = expected_cells - set(cells)
+        extra = set(cells) - expected_cells
+        raise ValueError(
+            "controlled rows are not a complete family-by-seed-by-variant cube "
+            f"(missing={len(missing)}, extra={len(extra)})"
+        )
+    if normalized_checkpoints[-1] > len(seed_domain):
+        raise ValueError("checkpoint exceeds the complete seed domain")
+    # Validate confidence even if future schema changes produce no variants.
+    binomial_interval(0, 1, confidence)
+
+    checkpoint_reports: list[dict[str, Any]] = []
+    for checkpoint in normalized_checkpoints:
+        prefix = set(seed_domain[:checkpoint])
+        instance_count = len(families) * checkpoint
+        variant_reports: list[dict[str, Any]] = []
+        for variant in sorted(variants):
+            selected = [
+                cells[(family, seed, variant)]
+                for family in families
+                for seed in seed_domain
+                if seed in prefix
+            ]
+            violations = sum(row["any_violation"] for row in selected)
+            oracle_matches = sum(row["oracle_match"] for row in selected)
+            variant_reports.append(
+                {
+                    "variant": variant,
+                    "variant_result_count": len(selected),
+                    "variant_result_unit": "family_seed_variant",
+                    "violations": violations,
+                    "violation_rate": violations / len(selected),
+                    "violation_interval": binomial_interval(violations, len(selected), confidence),
+                    "oracle_matches": oracle_matches,
+                    "oracle_match_rate": oracle_matches / len(selected),
+                    "oracle_match_interval": binomial_interval(oracle_matches, len(selected), confidence),
+                }
+            )
+        checkpoint_reports.append(
+            {
+                "checkpoint_seed_count": checkpoint,
+                "checkpoint_seed_unit": "seeds_per_family",
+                "family_count": len(families),
+                "instance_count": instance_count,
+                "instance_unit": "family_seed",
+                "variants": variant_reports,
+            }
+        )
+    return {
+        "schema_version": 1,
+        "evidence_id": "controlled_violation_saturation",
+        "confidence": float(confidence),
+        "interval_method": "wilson_score",
+        "interpretation_boundary": "intervals describe only the tested controlled parameter space",
+        "families": families,
+        "seed_domain": seed_domain,
+        "variant_domain": sorted(variants),
+        "checkpoint_seed_counts": normalized_checkpoints,
+        "checkpoints": checkpoint_reports,
+    }
+
+
+def controlled_diversity(instances: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Report executable semantic and approved-parameter coverage per family."""
+
+    materialized = [dict(instance) for instance in instances]
+    if not materialized:
+        raise ValueError("controlled diversity requires instances")
+    by_family: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    seen_coordinates: set[tuple[str, int]] = set()
+    family_seeds: dict[str, set[int]] = defaultdict(set)
+    for instance in materialized:
+        family = instance.get("workload")
+        if not isinstance(family, str) or not family:
+            raise ValueError("every controlled instance must name a workload family")
+        seed = _controlled_seed(instance.get("seed"))
+        coordinate = (family, seed)
+        if coordinate in seen_coordinates:
+            raise ValueError(f"duplicate controlled family/seed instance: {family}/{seed}")
+        seen_coordinates.add(coordinate)
+        recorded = instance.get("semantic_fingerprint")
+        computed = semantic_fingerprint(instance)
+        if recorded != computed:
+            raise ValueError(f"semantic_fingerprint mismatch for {family}/{seed}")
+        parameters = instance.get("semantic_parameters")
+        if not isinstance(parameters, Mapping) or not parameters:
+            raise ValueError(f"semantic_parameters missing for {family}/{seed}")
+        normalized_parameters: dict[str, int] = {}
+        for name, value in parameters.items():
+            if name not in APPROVED_CONTROLLED_PARAMETER_INTERVALS:
+                raise ValueError(f"unapproved semantic parameter: {name}")
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"semantic parameter {name} must be an integer")
+            low, high = APPROVED_CONTROLLED_PARAMETER_INTERVALS[name]
+            if not low <= value <= high:
+                raise ValueError(f"semantic parameter {name} is outside its approved interval")
+            normalized_parameters[str(name)] = value
+        normalized = dict(instance)
+        normalized["seed"] = seed
+        normalized["semantic_parameters"] = normalized_parameters
+        by_family[family].append(normalized)
+        family_seeds[family].add(seed)
+
+    seed_domain = sorted(set().union(*family_seeds.values()))
+    if seed_domain != list(range(len(seed_domain))):
+        raise ValueError("controlled diversity seed domain must be the contiguous prefix 0..N-1")
+    if any(seeds != set(seed_domain) for seeds in family_seeds.values()):
+        raise ValueError("controlled diversity family seed domains are imbalanced")
+
+    family_reports: dict[str, Any] = {}
+    for family in sorted(by_family):
+        records = sorted(by_family[family], key=lambda row: row["seed"])
+        parameter_names = sorted(records[0]["semantic_parameters"])
+        if any(sorted(row["semantic_parameters"]) != parameter_names for row in records):
+            raise ValueError(f"semantic parameter domains vary within family: {family}")
+        value_counts: dict[str, dict[str, int]] = {}
+        parameter_coverage: dict[str, dict[str, Any]] = {}
+        approved_combination_count = 1
+        combinations: set[tuple[int, ...]] = set()
+        for name in parameter_names:
+            low, high = APPROVED_CONTROLLED_PARAMETER_INTERVALS[name]
+            counts = Counter(row["semantic_parameters"][name] for row in records)
+            value_counts[name] = {str(value): counts[value] for value in sorted(counts)}
+            approved_value_count = high - low + 1
+            approved_combination_count *= approved_value_count
+            parameter_coverage[name] = {
+                "approved_interval": [low, high],
+                "approved_value_count": approved_value_count,
+                "observed_unique_value_count": len(counts),
+                "coverage_ratio": len(counts) / approved_value_count,
+            }
+        combinations = {
+            tuple(row["semantic_parameters"][name] for name in parameter_names)
+            for row in records
+        }
+        family_reports[family] = {
+            "family": family,
+            "instance_count": len(records),
+            "unique_semantic_fingerprint_count": len(
+                {row["semantic_fingerprint"] for row in records}
+            ),
+            "semantic_fingerprint_source": "executable_state_operations_policies_schedules_provenance",
+            "parameter_value_counts": value_counts,
+            "parameter_coverage": parameter_coverage,
+            "parameter_combination_coverage": {
+                "parameter_order": parameter_names,
+                "approved_combination_count": approved_combination_count,
+                "observed_unique_combination_count": len(combinations),
+                "coverage_ratio": len(combinations) / approved_combination_count,
+            },
+        }
+    return {
+        "schema_version": 1,
+        "evidence_id": "controlled_diversity",
+        "family_count": len(family_reports),
+        "seed_count_per_family": len(seed_domain),
+        "instance_count": len(materialized),
+        "approved_parameter_intervals": {
+            name: list(bounds)
+            for name, bounds in sorted(APPROVED_CONTROLLED_PARAMETER_INTERVALS.items())
+        },
+        "families": family_reports,
+    }
 
 
 def aggregate_native_repetitions(reports: Iterable[Mapping[str, Any]]) -> dict[str, Any]:

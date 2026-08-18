@@ -8,6 +8,7 @@ import csv
 import hashlib
 import json
 import os
+import subprocess
 from collections import Counter
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
@@ -18,6 +19,7 @@ from txnmem_metrics import (
     result_row,
     summarize,
     write_repair_figure,
+    write_saturation_figure,
     write_summary,
     write_violation_figure,
 )
@@ -27,7 +29,7 @@ from txnmem_distributed import run_process_action_sequences
 from txnmem_distributed_protocol import run_protocol_matrix
 from txnmem_backend_performance import FaultScenario, benchmark_backend, run_fault_matrix
 from txnmem_benchmark_bridge import APPWORLD_TOOL_STRATEGIES
-from txnmem_conditions import canonical_fingerprint, source_identity
+from txnmem_conditions import canonical_fingerprint, file_sha256, source_identity
 from txnmem_service_faults import ToxiproxyFaultController, deterministic_fault_matrix
 from txnmem_mutation import (
     build_minimal_mutant_witnesses,
@@ -51,7 +53,7 @@ from txnmem_real_experiment import (
     run_experiment_manifest,
 )
 from txnmem_public_native import run_public_native_manifest
-from txnmem_reference import reference_outcome
+from txnmem_reference import ORACLE_VERSION, reference_outcome
 from txnmem_schema import DEFAULT_CONFIG, load_workload_config
 from txnmem_simulator import VARIANTS, run_instance
 from txnmem_trace_pipeline import (
@@ -61,6 +63,7 @@ from txnmem_trace_pipeline import (
     trace_inventory,
 )
 from txnmem_workloads import WORKLOADS, generate_instance, generate_suite
+from txnmem_statistics import controlled_diversity, controlled_violation_saturation
 
 
 CORE_WORKLOADS = (
@@ -466,19 +469,77 @@ class _OfflineFixtureModel:
         return ModelResponse("offline fixture completed", [])
 
 
+def _controlled_source_manifest() -> dict[str, Any]:
+    source_root = Path(__file__).resolve().parent
+    components = {
+        name: source_root / f"{name}.py"
+        for name in (
+            "txnmem_differential",
+            "txnmem_experiment",
+            "txnmem_invariants",
+            "txnmem_metrics",
+            "txnmem_reference",
+            "txnmem_simulator",
+            "txnmem_statistics",
+            "txnmem_workloads",
+        )
+    }
+    repository_root = source_root.parent
+    completed = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repository_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    commit = completed.stdout.strip()
+    if len(commit) != 40 or any(character not in "0123456789abcdef" for character in commit):
+        raise ValueError("controlled evidence requires a full lowercase Git source commit")
+    return {"commit": commit, "identity": source_identity(components)}
+
+
+def _controlled_artifact_entry(path: Path, relative_path: str, **counts: int) -> dict[str, Any]:
+    return {
+        "relative_path": relative_path,
+        "sha256": file_sha256(path),
+        **counts,
+    }
+
+
 def _run_core_experiment(
-    instances: list[dict[str, Any]], variants: Iterable[str], out_dir: Path
+    instances: list[dict[str, Any]],
+    variants: Iterable[str],
+    out_dir: Path,
+    *,
+    config_path: Path,
+    workload_config: dict[str, Any],
 ) -> int:
+    variant_domain = list(variants)
     rows: list[dict[str, Any]] = []
     for instance in instances:
-        for variant in variants:
+        for variant in variant_domain:
             rows.append(result_row(instance, run_instance(instance, variant)))
-    write_jsonl(instances, out_dir / "data" / "generated_instances.jsonl")
+    instances_path = out_dir / "data" / "generated_instances.jsonl"
+    oracles_path = out_dir / "data" / "reference_oracles.jsonl"
+    results_path = out_dir / "results" / "experiment_results.csv"
+    saturation_path = out_dir / "results" / "saturation.json"
+    diversity_path = out_dir / "results" / "diversity.json"
+    saturation_figure_path = out_dir / "results" / "figures" / "saturation.svg"
+    write_jsonl(instances, instances_path)
     write_jsonl(
         [reference_outcome(instance) for instance in instances],
-        out_dir / "data" / "reference_oracles.jsonl",
+        oracles_path,
     )
-    write_csv(rows, out_dir / "results" / "experiment_results.csv")
+    write_csv(rows, results_path)
+    seed_count = len({int(instance["seed"]) for instance in instances})
+    checkpoints = [value for value in (10, 25, 50, 100, 150, 200) if value <= seed_count]
+    if not checkpoints or checkpoints[-1] != seed_count:
+        checkpoints.append(seed_count)
+    saturation = controlled_violation_saturation(rows, checkpoints)
+    diversity = controlled_diversity(instances)
+    write_summary(saturation, saturation_path)
+    write_summary(diversity, diversity_path)
+    write_saturation_figure(saturation, saturation_figure_path)
     summary = summarize(rows, ("workload", "variant"))
     write_summary(summary, out_dir / "results" / "summary.json")
     write_summary(
@@ -502,6 +563,50 @@ def _run_core_experiment(
     write_summary(realism, out_dir / "results" / "realism.json")
     write_violation_figure(summary, out_dir / "results" / "figures" / "violation_rate.svg")
     write_repair_figure(summary, out_dir / "results" / "figures" / "repair_recall.svg")
+    family_domain = sorted({str(instance["workload"]) for instance in instances})
+    seed_domain = sorted({int(instance["seed"]) for instance in instances})
+    manifest = {
+        "schema_version": 1,
+        "runner_version": "controlled-experiment/1",
+        "source": _controlled_source_manifest(),
+        "oracle_version": ORACLE_VERSION,
+        "config": {
+            "sha256": file_sha256(config_path),
+            "canonical_fingerprint": canonical_fingerprint(workload_config),
+        },
+        "domains": {
+            "families": family_domain,
+            "seeds": seed_domain,
+            "variants": variant_domain,
+        },
+        "counts": {
+            "families": len(family_domain),
+            "seeds_per_family": len(seed_domain),
+            "instances": len(instances),
+            "variant_results": len(rows),
+        },
+        "artifacts": {
+            "generated_instances.jsonl": _controlled_artifact_entry(
+                instances_path, "data/generated_instances.jsonl", line_count=len(instances)
+            ),
+            "reference_oracles.jsonl": _controlled_artifact_entry(
+                oracles_path, "data/reference_oracles.jsonl", line_count=len(instances)
+            ),
+            "experiment_results.csv": _controlled_artifact_entry(
+                results_path, "results/experiment_results.csv", row_count=len(rows)
+            ),
+            "saturation.json": _controlled_artifact_entry(
+                saturation_path, "results/saturation.json"
+            ),
+            "diversity.json": _controlled_artifact_entry(
+                diversity_path, "results/diversity.json"
+            ),
+            "saturation.svg": _controlled_artifact_entry(
+                saturation_figure_path, "results/figures/saturation.svg"
+            ),
+        },
+    }
+    write_summary(manifest, out_dir / "run_manifest.json")
     print(f"generated {len(instances)} instances -> {out_dir / 'data' / 'generated_instances.jsonl'}")
     print(f"wrote {len(rows)} result rows -> {out_dir / 'results' / 'experiment_results.csv'}")
     print(f"wrote summary and figures -> {out_dir / 'results'}")
@@ -543,7 +648,13 @@ def main(argv: list[str] | None = None) -> int:
             _seed_range(args.seeds),
             parameter_ranges=workload_config.get("parameter_ranges"),
         )
-        return _run_core_experiment(instances, args.variants, args.out_dir)
+        return _run_core_experiment(
+            instances,
+            args.variants,
+            args.out_dir,
+            config_path=args.config,
+            workload_config=workload_config,
+        )
     if args.command == "mutation-witnesses":
         instances = _read_jsonl(args.instances)
         report = build_minimal_mutant_witnesses(instances)

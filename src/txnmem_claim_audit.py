@@ -27,6 +27,7 @@ _KNOWN_VALIDATION_PROFILES = {
     "toxiproxy_state_verified",
     "qwen_vector_graph_e2e_5",
     "minimal_mutant_witnesses",
+    "controlled_scale_200",
 }
 _ACTIVE_CLAIM_FIELDS = {
     "claim_id",
@@ -41,6 +42,7 @@ _ACTIVE_CLAIM_FIELDS = {
     "source_commit",
     "claim_boundary",
     "validation_profile",
+    "controlled_evidence",
 }
 
 
@@ -559,6 +561,150 @@ def _active_claim_schema_findings(
     return findings
 
 
+def _controlled_evidence_findings(
+    root: Path,
+    claim: dict[str, Any],
+    claim_id: str,
+    manifest_path: Path | None,
+    manifest_document: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    if claim.get("validation_profile") != "controlled_scale_200":
+        return [], []
+    findings: list[dict[str, Any]] = []
+    checked: list[dict[str, str]] = []
+    bundle = claim.get("controlled_evidence")
+    if not isinstance(bundle, dict):
+        return [
+            _finding(
+                "controlled_evidence_missing",
+                "scaled controlled claims require saturation and diversity evidence",
+                claim_id=claim_id,
+                field="controlled_evidence",
+            )
+        ], []
+    if set(bundle) != {"saturation", "diversity"}:
+        findings.append(
+            _finding(
+                "controlled_evidence_missing",
+                "controlled_evidence must contain exactly saturation and diversity",
+                claim_id=claim_id,
+                field="controlled_evidence",
+            )
+        )
+    manifest_artifacts = (
+        manifest_document.get("artifacts", {})
+        if isinstance(manifest_document, dict)
+        else {}
+    )
+    if not isinstance(manifest_artifacts, dict):
+        manifest_artifacts = {}
+    for name in ("saturation", "diversity"):
+        reference = bundle.get(name)
+        if not isinstance(reference, dict) or set(reference) != {"path", "sha256"}:
+            findings.append(
+                _finding(
+                    "controlled_evidence_missing",
+                    f"controlled {name} reference must contain exactly path and sha256",
+                    claim_id=claim_id,
+                    field="controlled_evidence",
+                )
+            )
+            continue
+        value = reference.get("path")
+        expected_hash = reference.get("sha256")
+        if not isinstance(value, str) or not value or not isinstance(expected_hash, str) or re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None:
+            findings.append(
+                _finding(
+                    "controlled_evidence_missing",
+                    f"controlled {name} path/hash is malformed",
+                    claim_id=claim_id,
+                    field="controlled_evidence",
+                )
+            )
+            continue
+        try:
+            evidence_path = _rooted_path(root, value)
+        except ValueError as exc:
+            findings.append(_finding("invalid_path", str(exc), claim_id=claim_id))
+            continue
+        if not evidence_path.is_file():
+            findings.append(
+                _finding(
+                    "controlled_evidence_missing",
+                    f"controlled evidence file not found: {value}",
+                    claim_id=claim_id,
+                )
+            )
+            continue
+        actual_hash = _sha256(evidence_path)
+        checked.append({"path": value, "sha256": actual_hash})
+        if actual_hash != expected_hash:
+            findings.append(
+                _finding(
+                    "controlled_evidence_hash_mismatch",
+                    f"controlled evidence SHA-256 mismatch: {value}",
+                    claim_id=claim_id,
+                )
+            )
+        try:
+            parsed = json.loads(evidence_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            findings.append(
+                _finding(
+                    "controlled_evidence_parse_error",
+                    f"cannot parse controlled {name} JSON: {exc}",
+                    claim_id=claim_id,
+                )
+            )
+        else:
+            if not isinstance(parsed, dict):
+                findings.append(
+                    _finding(
+                        "controlled_evidence_parse_error",
+                        f"controlled {name} evidence must be a JSON object",
+                        claim_id=claim_id,
+                    )
+                )
+        manifest_entry = manifest_artifacts.get(f"{name}.json")
+        expected_relative = None
+        if manifest_path is not None:
+            try:
+                expected_relative = evidence_path.relative_to(manifest_path.parent).as_posix()
+            except ValueError:
+                expected_relative = None
+        if (
+            not isinstance(manifest_entry, dict)
+            or manifest_entry.get("sha256") != expected_hash
+            or manifest_entry.get("relative_path") != expected_relative
+        ):
+            findings.append(
+                _finding(
+                    "controlled_manifest_hash_mismatch",
+                    f"run manifest does not bind controlled {name} evidence",
+                    claim_id=claim_id,
+                )
+            )
+    if isinstance(manifest_document, dict):
+        manifest_commit = manifest_document.get("source", {}).get("commit") if isinstance(manifest_document.get("source"), dict) else None
+        if manifest_commit != claim.get("source_commit"):
+            findings.append(
+                _finding(
+                    "controlled_manifest_source_mismatch",
+                    "run manifest source commit does not match the active claim",
+                    claim_id=claim_id,
+                )
+            )
+    else:
+        findings.append(
+            _finding(
+                "controlled_manifest_invalid",
+                "scaled controlled claim manifest is not valid JSON evidence",
+                claim_id=claim_id,
+            )
+        )
+    return findings, checked
+
+
 def audit_claim_ledger(
     root: str | Path,
     ledger_path: str | Path,
@@ -818,6 +964,8 @@ def audit_claim_ledger(
                 )
             )
 
+        manifest_path: Path | None = None
+        manifest_document: Any = None
         manifest = claim.get("manifest")
         if isinstance(manifest, dict):
             manifest_value = manifest.get("path")
@@ -855,6 +1003,22 @@ def audit_claim_ledger(
                                 claim_id=claim_id,
                             )
                         )
+                    else:
+                        try:
+                            manifest_document = json.loads(
+                                manifest_path.read_text(encoding="utf-8")
+                            )
+                        except (OSError, json.JSONDecodeError):
+                            manifest_document = None
+        controlled_findings, controlled_checked = _controlled_evidence_findings(
+            root,
+            claim,
+            claim_id,
+            manifest_path,
+            manifest_document,
+        )
+        findings.extend(controlled_findings)
+        checked_artifacts.extend(controlled_checked)
         source_commit = claim.get("source_commit")
         if isinstance(source_commit, str) and source_commit and not re.fullmatch(r"[0-9a-f]{40}", source_commit):
             findings.append(

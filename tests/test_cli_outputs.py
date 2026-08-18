@@ -302,7 +302,31 @@ class TxnMemCliOutputTests(unittest.TestCase):
             self.assertTrue((Path(tmp) / "results/mutation_report.json").exists())
             self.assertTrue((Path(tmp) / "results/schedule_baseline.json").exists())
             self.assertTrue((Path(tmp) / "results/realism.json").exists())
+            self.assertTrue((Path(tmp) / "results/saturation.json").exists())
+            self.assertTrue((Path(tmp) / "results/diversity.json").exists())
+            self.assertTrue((Path(tmp) / "results/figures/saturation.svg").exists())
+            self.assertTrue((Path(tmp) / "run_manifest.json").exists())
             self.assertTrue(list((Path(tmp) / "results/figures").glob("*.svg")))
+            manifest = json.loads((Path(tmp) / "run_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["schema_version"], 1)
+            self.assertEqual(manifest["runner_version"], "controlled-experiment/1")
+            self.assertEqual(manifest["oracle_version"], "0.4")
+            self.assertRegex(manifest["source"]["commit"], r"^[0-9a-f]{40}$")
+            self.assertRegex(manifest["source"]["identity"]["fingerprint"], r"^[0-9a-f]{64}$")
+            self.assertEqual(manifest["domains"]["seeds"], [0])
+            self.assertEqual(manifest["counts"]["instances"], 8)
+            self.assertEqual(manifest["counts"]["variant_results"], 40)
+            for name in (
+                "generated_instances.jsonl",
+                "reference_oracles.jsonl",
+                "experiment_results.csv",
+                "saturation.json",
+                "diversity.json",
+                "saturation.svg",
+            ):
+                artifact = manifest["artifacts"][name]
+                self.assertNotIn(str(Path(tmp)), json.dumps(artifact))
+                self.assertRegex(artifact["sha256"], r"^[0-9a-f]{64}$")
 
     def test_experiment_config_changes_generated_operation_and_config_distribution(self):
         """Ignoring --config would make these intentionally opposite ranges identical."""

@@ -355,6 +355,85 @@ class PaperClaimLedgerTests(unittest.TestCase):
                 },
             )
 
+    def _make_scaled_controlled_claim(self, root: Path, ledger: Path) -> dict:
+        controlled = root / "results/final_controlled_200"
+        results = controlled / "results"
+        results.mkdir(parents=True, exist_ok=True)
+        saturation = results / "saturation.json"
+        diversity = results / "diversity.json"
+        saturation.write_text(json.dumps({"checkpoint_seed_counts": [200]}), encoding="utf-8")
+        diversity.write_text(json.dumps({"family_count": 8}), encoding="utf-8")
+        manifest = controlled / "run_manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "runner_version": "controlled-experiment/1",
+                    "source": {"commit": "a" * 40},
+                    "artifacts": {
+                        "saturation.json": {
+                            "relative_path": "results/saturation.json",
+                            "sha256": self._sha256(saturation),
+                        },
+                        "diversity.json": {
+                            "relative_path": "results/diversity.json",
+                            "sha256": self._sha256(diversity),
+                        },
+                    },
+                },
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        payload = json.loads(ledger.read_text(encoding="utf-8"))
+        claim = payload["claims"][0]
+        claim["validation_profile"] = "controlled_scale_200"
+        claim["manifest"] = {
+            "path": "results/final_controlled_200/run_manifest.json",
+            "sha256": self._sha256(manifest),
+        }
+        claim["controlled_evidence"] = {
+            "saturation": {
+                "path": "results/final_controlled_200/results/saturation.json",
+                "sha256": self._sha256(saturation),
+            },
+            "diversity": {
+                "path": "results/final_controlled_200/results/diversity.json",
+                "sha256": self._sha256(diversity),
+            },
+        }
+        ledger.write_text(json.dumps(payload), encoding="utf-8")
+        return payload
+
+    def test_scaled_controlled_claim_requires_manifest_saturation_and_diversity_hashes(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger, _ = self._fixture(root)
+            self._make_scaled_controlled_claim(root, ledger)
+            passed = audit_claim_ledger(root, ledger)
+
+            payload = json.loads(ledger.read_text(encoding="utf-8"))
+            payload["claims"][0].pop("controlled_evidence")
+            ledger.write_text(json.dumps(payload), encoding="utf-8")
+            missing = audit_claim_ledger(root, ledger)
+
+        self.assertEqual(passed["status"], "passed")
+        self.assertIn("controlled_evidence_missing", {item["code"] for item in missing["findings"]})
+
+    def test_scaled_controlled_claim_cross_checks_bundle_hashes_against_manifest(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger, _ = self._fixture(root)
+            payload = self._make_scaled_controlled_claim(root, ledger)
+            payload["claims"][0]["controlled_evidence"]["diversity"]["sha256"] = "0" * 64
+            ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+            report = audit_claim_ledger(root, ledger)
+
+        codes = {item["code"] for item in report["findings"]}
+        self.assertIn("controlled_evidence_hash_mismatch", codes)
+        self.assertIn("controlled_manifest_hash_mismatch", codes)
+
     def test_existing_ledger_assertions_cover_reviewed_artifact_values(self):
         ledger = json.loads((ROOT / "configs" / "paper_claims.json").read_text())
         claims = {claim["claim_id"]: claim for claim in ledger["claims"]}

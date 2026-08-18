@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+from collections.abc import Mapping
 from collections import defaultdict, deque
 from pathlib import Path
 from statistics import mean, pstdev
@@ -169,3 +170,77 @@ def write_violation_figure(summary: dict[str, Any], path: Path) -> None:
 
 def write_repair_figure(summary: dict[str, Any], path: Path) -> None:
     _write_bar_figure(summary, path, "repair_recall", "Mean provenance repair recall")
+
+
+def write_saturation_figure(saturation: Mapping[str, Any], path: Path) -> None:
+    """Render a deterministic dependency-free SVG from saturation JSON data."""
+
+    checkpoints = list(saturation.get("checkpoints", []))
+    if not checkpoints:
+        raise ValueError("saturation report has no checkpoints")
+    seed_counts = [int(checkpoint["checkpoint_seed_count"]) for checkpoint in checkpoints]
+    variant_domain = list(saturation.get("variant_domain", []))
+    if not variant_domain:
+        raise ValueError("saturation report has no variants")
+    width, height = 900, 520
+    left, right, top, bottom = 80.0, 30.0, 60.0, 100.0
+    chart_width = width - left - right
+    chart_height = height - top - bottom
+    minimum_seed = min(seed_counts)
+    maximum_seed = max(seed_counts)
+
+    def x_position(seed_count: int) -> float:
+        if maximum_seed == minimum_seed:
+            return left + chart_width / 2.0
+        return left + chart_width * (seed_count - minimum_seed) / (maximum_seed - minimum_seed)
+
+    def y_position(rate: float) -> float:
+        return top + chart_height * (1.0 - rate)
+
+    colors = ("#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf")
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        '<title>Controlled evidence saturation</title>',
+        '<text x="20" y="30" font-family="sans-serif" font-size="20">Controlled evidence saturation</text>',
+        f'<line x1="{left:.1f}" y1="{top:.1f}" x2="{left:.1f}" y2="{top + chart_height:.1f}" stroke="#333"/>',
+        f'<line x1="{left:.1f}" y1="{top + chart_height:.1f}" x2="{left + chart_width:.1f}" y2="{top + chart_height:.1f}" stroke="#333"/>',
+    ]
+    for index in range(5):
+        rate = index / 4.0
+        y = y_position(rate)
+        parts.append(f'<line x1="{left:.1f}" y1="{y:.1f}" x2="{left + chart_width:.1f}" y2="{y:.1f}" stroke="#ddd"/>')
+        parts.append(f'<text x="{left - 12:.1f}" y="{y + 4:.1f}" text-anchor="end" font-family="sans-serif" font-size="11">{rate:.2f}</text>')
+    for seed_count in seed_counts:
+        x = x_position(seed_count)
+        parts.append(f'<text x="{x:.1f}" y="{top + chart_height + 22:.1f}" text-anchor="middle" font-family="sans-serif" font-size="11">{seed_count}</text>')
+    parts.append(f'<text x="{left + chart_width / 2:.1f}" y="{height - 52}" text-anchor="middle" font-family="sans-serif" font-size="12">checkpoint seeds per family</text>')
+    parts.append(f'<text x="18" y="{top + chart_height / 2:.1f}" transform="rotate(-90 18 {top + chart_height / 2:.1f})" text-anchor="middle" font-family="sans-serif" font-size="12">rate</text>')
+
+    by_checkpoint = {
+        int(checkpoint["checkpoint_seed_count"]): {
+            str(row["variant"]): row for row in checkpoint.get("variants", [])
+        }
+        for checkpoint in checkpoints
+    }
+    for variant_index, variant in enumerate(variant_domain):
+        color = colors[variant_index % len(colors)]
+        for metric, dash in (("violation_rate", ""), ("oracle_match_rate", ' stroke-dasharray="6 4"')):
+            points = []
+            for seed_count in seed_counts:
+                row = by_checkpoint[seed_count].get(str(variant))
+                if row is None:
+                    raise ValueError(f"saturation checkpoint missing variant: {variant}")
+                rate = float(row[metric])
+                if not 0.0 <= rate <= 1.0:
+                    raise ValueError(f"invalid saturation rate: {metric}")
+                points.append(f"{x_position(seed_count):.3f},{y_position(rate):.3f}")
+            parts.append(
+                f'<polyline points="{" ".join(points)}" fill="none" stroke="{color}" stroke-width="2"{dash}/>'
+            )
+        legend_y = height - 30 + (variant_index // 3) * 18
+        legend_x = 85 + (variant_index % 3) * 270
+        parts.append(f'<line x1="{legend_x}" y1="{legend_y}" x2="{legend_x + 22}" y2="{legend_y}" stroke="{color}" stroke-width="3"/>')
+        parts.append(f'<text x="{legend_x + 28}" y="{legend_y + 4}" font-family="sans-serif" font-size="11">{html.escape(str(variant))}</text>')
+    parts.append('</svg>\n')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(parts), encoding="utf-8")
