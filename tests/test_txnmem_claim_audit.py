@@ -683,6 +683,64 @@ class PaperClaimLedgerTests(unittest.TestCase):
             self.assertIn("controlled_profile_required", codes)
             self.assertIn("controlled_evidence_missing", codes)
 
+    def test_scaled_controlled_claim_signal_normalizes_keys_and_integral_counts(self):
+        documents = (
+            {
+                "task_count": 5,
+                "renamed": {"Controlled.Scale-200": False},
+            },
+            {
+                "task_count": 5,
+                "renamed": {"count_a": "1600", "count_b": "8000"},
+            },
+            {
+                "task_count": 5,
+                "renamed": {"count_a": 1600.0, "count_b": 8000.0},
+            },
+        )
+        for document in documents:
+            with self.subTest(document=document), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger, _ = self._fixture(root)
+                artifact = root / "results/evidence.json"
+                artifact.write_text(json.dumps(document), encoding="utf-8")
+                payload = json.loads(ledger.read_text())
+                payload["claims"][0]["artifact_sha256"] = self._sha256(artifact)
+                ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+                report = audit_claim_ledger(root, ledger)
+
+            codes = {item["code"] for item in report["findings"]}
+            self.assertIn("controlled_profile_required", codes)
+            self.assertIn("controlled_evidence_missing", codes)
+
+    def test_scaled_controlled_claim_signal_does_not_combine_unrelated_counts(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger, _ = self._fixture(root)
+            artifact = root / "results/evidence.json"
+            artifact.write_text(
+                json.dumps(
+                    {
+                        "task_count": 5,
+                        "benchmark_metadata": {
+                            "sample_limit": 1600,
+                            "timeout_ms": 8000,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            payload = json.loads(ledger.read_text())
+            payload["claims"][0]["artifact_sha256"] = self._sha256(artifact)
+            ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+            report = audit_claim_ledger(root, ledger)
+
+        codes = {item["code"] for item in report["findings"]}
+        self.assertNotIn("controlled_profile_required", codes)
+        self.assertNotIn("controlled_evidence_missing", codes)
+
     def test_scaled_controlled_claim_rejects_primary_seventh_artifact(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

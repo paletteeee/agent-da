@@ -96,3 +96,11 @@ Ruling: Treat stored reference oracles and CSV `oracle_match` flags as untrusted
 Ruling: A raw-capable ancestor path always dominates a schema-safe aggregate filename; safe basenames never sanitize `payloads`, `conversations`, `transcripts`, prompts/messages, or equivalent parent directories — cost if wrong: sanitized aggregates must live only in approved aggregate directories.
 
 Ruling: Controlled JSONL exceptions use record-type-specific closed recursive schemas derived from executable workload and reference-oracle exports; generic scalar/list acceptance and blacklist-only nested checks are insufficient — cost if wrong: adding a new legitimate executable field requires an intentional schema and regression update.
+
+Ruling: Normalize and recursively inspect both mapping keys and values when detecting formal scale identity; integral floats and numeric strings equal to 1,600/8,000, plus punctuation/case variants of `controlled_scale_200`, trigger the exact scaled bundle gate — cost if wrong: loosely typed legacy JSON cannot evade validation and may need canonicalization.
+
+Ruling: Normalize every path component both as tokens and as a punctuation-free compound before raw-capability classification, so `Tool Args`, `tool_args`, `tool-arg`, and `tool.args` are equivalent — cost if wrong: unusual but safe directory names that normalize to a raw channel must be renamed.
+
+Ruling: Historical public-result exceptions are exact file-and-schema entries, never directory-wide exemptions; a safe aggregate basename or historical parent cannot authorize arbitrary sibling files — cost if wrong: every new sanitized aggregate requires an explicit validator entry.
+
+Ruling: For the current formal 1,600-instance controlled corpus, regenerate each instance from the registered family, seed, and approved config and require canonical equality; dynamic IDs/keys in stored oracles must be referentially closed to that regenerated instance and the regenerated reference result — cost if wrong: edited or hand-authored formal instances become diagnostic only, while legacy 400-instance evidence needs a separately versioned exact compatibility contract.

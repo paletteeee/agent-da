@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
+import hashlib
 import ipaddress
 import json
 import math
@@ -11,7 +13,7 @@ import re
 import subprocess
 from typing import Iterable
 
-from txnmem_reference import ORACLE_VERSION
+from txnmem_reference import ORACLE_VERSION, reference_outcome
 from txnmem_schema import DEFAULT_CONFIG
 from txnmem_workloads import (
     MEMORY_SHAPE_KEYS,
@@ -23,6 +25,7 @@ from txnmem_workloads import (
     TRIGGER_SHAPE_KEYS,
     WORKLOADS,
     WORKLOAD_SEMANTIC_PARAMETERS,
+    generate_suite,
     semantic_fingerprint,
 )
 from txnmem_statistics import APPROVED_CONTROLLED_PARAMETER_INTERVALS
@@ -39,6 +42,10 @@ _CONTROLLED_PUBLIC_ALLOWLIST = {
     ("final_controlled_200", "data", "generated_instances.jsonl"),
     ("final_controlled_200", "data", "reference_oracles.jsonl"),
 }
+_LEGACY_CONTROLLED_400_SHA256 = {
+    "generated_instances.jsonl": "d2fb1041989f4d42de6527c67c49e38c23af965bf21dc0a3d3064514f73a12ee",
+    "reference_oracles.jsonl": "f8a936049cbc263a50b8e6149ca1156c53380fe5770391bcfac9f37bde47fbab",
+}
 _RAW_CAPABLE_COMPONENTS = {
     "raw", "trace", "traces", "event", "events", "prompt", "prompts",
     "message", "messages", "payload", "payloads", "conversation",
@@ -46,26 +53,39 @@ _RAW_CAPABLE_COMPONENTS = {
     "dialogue", "dialogues", "tool_arg", "tool_args", "tool_argument",
     "tool_arguments", "arguments", "native",
 }
-_SAFE_AGGREGATE_FILENAMES = {
-    "trace_realism.json",
-    "trace_replay.csv",
-    "native_model_summary.json",
-    "native_batch_summary.json",
-    "native_memory_replay_summary.json",
-    "native_smoke_summary.json",
-    "blocked_report.json",
-    "performance.json",
-    "repetition_report.json",
-    "appworld_prompt_comparison.json",
-    "locomo_prompt_comparison.json",
-    "locomo_paired_repetition_summary.json",
-}
-_SAFE_AGGREGATE_ANCESTORS = {
-    "native_memory_replay",
-    "native_repetitions5",
-    "official_trace_runs",
-    "prompt_profile_formal_v4",
-    "public_native",
+_REGISTERED_SAFE_AGGREGATES = {
+    ("appworld_projection_regenerated", "results", "trace_realism.json"): "4686ce1d7f1fb9dcbfc28d0550222370cac92fa6b1cdbec4dabf13fd30560929",
+    ("appworld_projection_regenerated", "results", "trace_replay.csv"): "bdfe5855fecbfcfd2655e36e29168948e8e5aab7ccab1e5f24a697f032e87e1a",
+    ("joint_realism", "locomo", "results", "trace_realism.json"): "979126497d980cab295c4b92caa49cda3effa62e888f4d257bdf82a163ad3f58",
+    ("joint_realism", "locomo", "results", "trace_replay.csv"): "7a3e38b0c53a803d48f1ff205acb575c44c332ab36e59f7ed1e9046c25f3b793",
+    ("joint_realism", "tau_bench", "results", "trace_realism.json"): "8036fe1e95a614a9651f895abee490e6038b211e42adb1b229fd4031794a7dee",
+    ("joint_realism", "tau_bench", "results", "trace_replay.csv"): "910937b0240c946dcad6700f09eda073974fe169cae2f9d3959e4305a6555093",
+    ("official_trace_runs", "appworld", "performance.json"): "9d70b55367c6f66c59a7a644c857d20bba6d52ba6fc60a28926c5da998b74aaa",
+    ("official_trace_runs", "appworld", "trace_realism.json"): "4430d476162bc3fda23d5e4a0e381d4254e3d993fe2776e9d74bceb4af5e30bf",
+    ("official_trace_runs", "appworld", "trace_replay.csv"): "634fc23d800f37cfcb8fa0c114927e694147efdae446e7aadb1bad1c77a13781",
+    ("official_trace_runs", "locomo", "performance.json"): "5df93bdd6ec55a9b90eec9c9830673c915474dc73ea8b2668ea56e1e4add91d4",
+    ("official_trace_runs", "locomo", "trace_realism.json"): "f374ad0da201e2f3ec6d571c56b9013ee57a506f9acef4d213821ff6b9ea59f1",
+    ("official_trace_runs", "locomo", "trace_replay.csv"): "f1b0c7de47b9304e7f80c3509fd49e2adcc4fbcd7f0c7600d257e59c1b18a13b",
+    ("official_trace_runs", "locomo_joint_bootstrap", "results", "trace_realism.json"): "503ed7cb0ef6a191f8785e8352267c743b6e3386f614cbd73323278718733cbf",
+    ("official_trace_runs", "tau_bench", "performance.json"): "07f0c24d58b461544d9b0c7dc02adfe35881ce8238d04026f59d81c1d8f1fc07",
+    ("official_trace_runs", "tau_bench", "trace_realism.json"): "439ecf1b35893dd5298917fe2652aeecb2fb647e803a7bbf929128e92eb9f3ca",
+    ("official_trace_runs", "tau_bench", "trace_replay.csv"): "ca548f855b034f7d68e234950286ab62b7f51a8a4f030a1f2cb0d3db606caab5",
+    ("official_trace_runs", "tau_bench_joint_bootstrap", "results", "trace_realism.json"): "b58e69b0cdf1d1ee573a644a8fa4669f397841093b2deafe69fd43a2cb749db4",
+    ("prompt_profile_formal_v4", "appworld_baseline", "native_batch_summary.json"): "364babb57da1b96f6c1801167361111d6587886e403fd8c8b363ae8a0448bd0f",
+    ("prompt_profile_formal_v4", "appworld_prompt_comparison.json"): "ce9ec092782a75d6b5c7adc519407b9ec8bfc8384c84549edf8b536242de88d0",
+    ("prompt_profile_formal_v4", "appworld_tuned", "native_batch_summary.json"): "4b1d7e80132c1334c2f9a8f34fe391bde95c027c2fea33690c9ce05ed4fe5d7c",
+    ("prompt_profile_formal_v4", "locomo_baseline", "locomo_paired_repetition_summary.json"): "96eb77412a553929b8f9fbcac749126d473d342175f37c4b83b0d00938597473",
+    ("prompt_profile_formal_v4", "locomo_prompt_comparison.json"): "e635c8f73b8482ea01d0aa5fc228ffb031ea707759959bb0b43cdd72428406ee",
+    ("prompt_profile_formal_v4", "locomo_tuned", "locomo_paired_repetition_summary.json"): "e6c037a692f1c46ad04e89f3d2c029b84081f70a508a34ed797f90eb76224de8",
+    ("remaining_tasks", "native_memory_replay", "appworld", "results", "native_model_summary.json"): "2356dfc4a78083b945402ce3c28add3feda4478fd99930f459b0143b4a60bad2",
+    ("remaining_tasks", "native_memory_replay", "locomo", "results", "native_model_summary.json"): "b1375123f74d4dbe8a8d72c5a484ba41b3985478ddb4fa1c17477db4a8e6349b",
+    ("remaining_tasks", "native_memory_replay", "native_memory_replay_summary.json"): "79dcdf9334d91efc0f5a5c8a9d29ecf7802879519a4d9b9e5be0f1901aa0a292",
+    ("remaining_tasks", "native_memory_replay", "tau", "results", "native_model_summary.json"): "4366fb9a1e4abc6db979bd192a14e585655a786f079bcc40456cfe19412021b6",
+    ("remaining_tasks", "native_repetitions5", "repetition_report.json"): "bc68cd36f7d22f857aabb7885f47cf66f65597ba4ce084f825a7d56ad8eb0b3e",
+    ("remaining_tasks", "public_native", "appworld", "results", "blocked_report.json"): "217a2a5698a724862340780a2cfb714bc7ea87489147127392a5e43e9c631b81",
+    ("remaining_tasks", "public_native", "locomo", "results", "blocked_report.json"): "8032ad0a39ee04827d0c4d151714b49f166833696e00192b1f3796876711b5d9",
+    ("remaining_tasks", "public_native", "native_smoke_summary.json"): "01b7bee2dc4f58c050bed9c568ee920d162762a33a79f602b6c1c11d9ceed6ba",
+    ("remaining_tasks", "public_native", "tau_bench", "results", "blocked_report.json"): "c05154bc142fde2501a4ac60baaa1ec30a843148dd8675ed47cbd79be5ad1d6b",
 }
 _RAW_PAYLOAD_KEYS = {
     "raw", "trace", "traces", "event", "events", "prompt", "prompts",
@@ -165,20 +185,44 @@ def _contains_raw_payload(value: object) -> bool:
     return False
 
 
-def _safe_aggregate(path: Path) -> bool:
-    if path.name not in _SAFE_AGGREGATE_FILENAMES:
+def _safe_aggregate(
+    path: Path, relative_result_path: tuple[str, ...]
+) -> bool:
+    expected_sha256 = _REGISTERED_SAFE_AGGREGATES.get(relative_result_path)
+    if expected_sha256 is None:
+        return False
+    try:
+        payload = path.read_bytes()
+    except OSError:
+        return False
+    if hashlib.sha256(payload).hexdigest() != expected_sha256:
         return False
     if path.suffix.lower() == ".csv":
         try:
-            header = path.read_text(encoding="utf-8").splitlines()[0].split(",")
-        except (OSError, IndexError):
+            header = payload.decode("utf-8").splitlines()[0].split(",")
+        except (UnicodeDecodeError, IndexError):
             return False
         return set(header) == _TRACE_REPLAY_COLUMNS and len(header) == len(_TRACE_REPLAY_COLUMNS)
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        document = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return False
     return isinstance(document, dict) and not _contains_raw_payload(document)
+
+
+def _component_has_raw_capability(component: str) -> bool:
+    ordered_tokens = [
+        token
+        for token in re.split(r"[^a-z0-9]+", component.lower())
+        if token
+    ]
+    tokens = set(ordered_tokens)
+    compound = "".join(ordered_tokens)
+    normalized_raw = {
+        re.sub(r"[^a-z0-9]+", "", marker)
+        for marker in _RAW_CAPABLE_COMPONENTS
+    }
+    return bool(tokens & _RAW_CAPABLE_COMPONENTS) or compound in normalized_raw
 
 
 def _plain_int(value: object) -> bool:
@@ -358,6 +402,35 @@ def _controlled_instance_containers_valid(row: dict[str, object]) -> bool:
     return not _contains_raw_payload(row) and not _contains_raw_value_marker(row)
 
 
+def _canonical_record(value: object) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+@lru_cache(maxsize=1)
+def _registered_scaled_records(
+) -> tuple[dict[tuple[str, int], str], dict[str, str]]:
+    instances = generate_suite(
+        WORKLOADS,
+        range(200),
+        parameter_ranges=APPROVED_CONTROLLED_PARAMETER_INTERVALS,
+    )
+    generated = {
+        (instance["workload"], instance["seed"]): _canonical_record(instance)
+        for instance in instances
+    }
+    oracles: dict[str, str] = {}
+    for instance in instances:
+        oracle = reference_outcome(instance)
+        oracles[instance["instance_id"]] = _canonical_record(oracle)
+    return generated, oracles
+
+
 def controlled_generated_record_valid(row: object, *, scaled: bool) -> bool:
     required = {
         "instance_id", "workload", "seed", "config", "initial_memories",
@@ -365,7 +438,7 @@ def controlled_generated_record_valid(row: object, *, scaled: bool) -> bool:
     }
     if scaled:
         required |= {"semantic_parameters", "semantic_fingerprint"}
-    return (
+    if not (
         isinstance(row, dict)
         and set(row) == required
         and _string(row.get("instance_id"))
@@ -373,7 +446,13 @@ def controlled_generated_record_valid(row: object, *, scaled: bool) -> bool:
         and _plain_int(row.get("seed"))
         and _controlled_instance_containers_valid(row)
         and not _contains_raw_value_marker(row)
-    )
+    ):
+        return False
+    if not scaled:
+        return True
+    generated, _ = _registered_scaled_records()
+    coordinate = (row["workload"], row["seed"])
+    return generated.get(coordinate) == _canonical_record(row)
 
 
 def _oracle_safety_valid(value: object) -> bool:
@@ -453,13 +532,20 @@ def controlled_oracle_record_valid(
         return False
     outcomes = row.get("allowed_outcomes")
     trace = row.get("event_trace")
-    return (
+    if not (
         isinstance(outcomes, list)
         and bool(outcomes)
         and all(_oracle_outcome_valid(outcome) for outcome in outcomes)
         and isinstance(trace, list)
         and all(_oracle_trace_event_valid(event) for event in trace)
-    )
+    ):
+        return False
+    if expected_oracle_version == "0.1":
+        return True
+    if expected_oracle_version != ORACLE_VERSION:
+        return False
+    _, oracles = _registered_scaled_records()
+    return oracles.get(row["instance_id"]) == _canonical_record(row)
 
 
 def _controlled_artifact_valid(path: Path, relative_result_path: tuple[str, ...]) -> bool:
@@ -470,11 +556,14 @@ def _controlled_artifact_valid(path: Path, relative_result_path: tuple[str, ...]
     expected_coordinates = {(family, seed) for family in WORKLOADS for seed in range(seed_count)}
     expected_count = len(expected_coordinates)
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        payload = path.read_bytes()
+        if tree == "final_controlled" and hashlib.sha256(payload).hexdigest() != _LEGACY_CONTROLLED_400_SHA256[name]:
+            return False
+        lines = payload.decode("utf-8").splitlines()
         if len(lines) != expected_count or any(not line.strip() for line in lines):
             return False
         rows = [json.loads(line) for line in lines]
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return False
     if not all(isinstance(row, dict) for row in rows):
         return False
@@ -551,26 +640,16 @@ def audit_result_paths(paths: Iterable[str | Path]) -> list[dict[str, str]]:
         if resolved_relative != path.relative_to(audit_root):
             findings.append({"code": "result_path_escape", "path": str(path)})
             continue
-        ancestor_tokens = {
-            token
+        raw_ancestor = any(
+            _component_has_raw_capability(part)
             for part in result_parts[:-1]
-            if Path(part).stem.lower() not in _SAFE_AGGREGATE_ANCESTORS
-            for token in re.split(r"[^a-z0-9]+", Path(part).stem.lower())
-            if token
-        }
-        filename_tokens = {
-            token
-            for token in re.split(r"[^a-z0-9]+", path.stem.lower())
-            if token
-        }
+        )
+        raw_filename = _component_has_raw_capability(path.stem)
+        registered_safe_aggregate = _safe_aggregate(path, relative_result_path)
         if (
             ("data" in result_parts and relative_result_path not in _CONTROLLED_PUBLIC_ALLOWLIST)
             or path.name in _RAW_FILENAMES
-            or bool(ancestor_tokens & _RAW_CAPABLE_COMPONENTS)
-            or (
-                bool(filename_tokens & _RAW_CAPABLE_COMPONENTS)
-                and not _safe_aggregate(path)
-            )
+            or ((raw_ancestor or raw_filename) and not registered_safe_aggregate)
         ):
             findings.append({"code": "raw_result_path", "path": str(path)})
         if relative_result_path in _CONTROLLED_PUBLIC_ALLOWLIST and not _controlled_artifact_valid(path, relative_result_path):

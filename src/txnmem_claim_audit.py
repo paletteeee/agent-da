@@ -6,6 +6,7 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import re
 from collections import defaultdict
 from pathlib import Path, PurePosixPath
@@ -625,29 +626,63 @@ def _document_declares_scaled_controlled(document: Any) -> bool:
         "instances": 1600,
         "variant_results": 8000,
     }
-    stack = [document]
-    scalar_integers: set[int] = set()
-    domain_markers = {"families": False, "seeds": False, "variants": False}
-    while stack:
-        value = stack.pop()
-        if isinstance(value, str):
-            identity = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
-            if identity in {"controlled_scale_200", "final_controlled_200"}:
-                return True
-            continue
+    def normalized_identity(value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+    def exact_integral(value: Any) -> int | None:
         if isinstance(value, bool):
-            continue
+            return None
         if isinstance(value, int):
-            scalar_integers.add(value)
-            continue
+            return value
+        if isinstance(value, float):
+            return int(value) if math.isfinite(value) and value.is_integer() else None
+        if isinstance(value, str) and re.fullmatch(
+            r"(?:0|[1-9][0-9]*)(?:\.0+)?", value
+        ):
+            return int(value.split(".", 1)[0])
+        return None
+
+    def declares(value: Any) -> bool:
+        if normalized_identity(value) in {
+            "controlledscale200",
+            "finalcontrolled200",
+        }:
+            return True
         if isinstance(value, list):
-            domain_markers["families"] |= value == sorted(WORKLOADS)
-            domain_markers["seeds"] |= value == list(range(200))
-            domain_markers["variants"] |= value in (list(VARIANTS), sorted(VARIANTS))
-            stack.extend(value)
-            continue
+            return any(declares(item) for item in value)
         if not isinstance(value, dict):
-            continue
+            return False
+        immediate_scalars = [
+            item
+            for item in (*value.keys(), *value.values())
+            if not isinstance(item, (dict, list))
+        ]
+        if any(
+            normalized_identity(item)
+            in {"controlledscale200", "finalcontrolled200"}
+            for item in immediate_scalars
+        ):
+            return True
+        count_key_markers = {"count", "instance", "row", "result", "record"}
+        local_integers = set()
+        for key, item in value.items():
+            normalized_key = normalized_identity(key) or ""
+            if not any(marker in normalized_key for marker in count_key_markers):
+                continue
+            integral = exact_integral(item)
+            if integral is not None:
+                local_integers.add(integral)
+        if {1600, 8000} <= local_integers:
+            return True
+        local_lists = [item for item in value.values() if isinstance(item, list)]
+        if (
+            sorted(WORKLOADS) in local_lists
+            and list(range(200)) in local_lists
+            and any(item in (list(VARIANTS), sorted(VARIANTS)) for item in local_lists)
+        ):
+            return True
         if value.get("domains") == exact_domains or value.get("counts") == exact_counts:
             return True
         evidence_id = value.get("evidence_id")
@@ -677,11 +712,9 @@ def _document_declares_scaled_controlled(document: Any) -> bool:
             and set(value["families"]) == set(WORKLOADS)
         ):
             return True
-        stack.extend(value.values())
-    return (
-        {1600, 8000} <= scalar_integers
-        or all(domain_markers.values())
-    )
+        return any(declares(item) for item in value.values())
+
+    return declares(document)
 
 
 def _scaled_claim_signal(

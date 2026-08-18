@@ -4,20 +4,45 @@ import json
 import unittest
 
 from txnmem_artifact_audit import audit_result_paths
-from txnmem_workloads import semantic_fingerprint
+from txnmem_reference import reference_outcome
+from txnmem_statistics import APPROVED_CONTROLLED_PARAMETER_INTERVALS
+from txnmem_workloads import WORKLOADS, generate_suite, semantic_fingerprint
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class TxnMemArtifactAuditTests(unittest.TestCase):
-    WORKLOAD_PARAMETERS = {
-        "atomic_multi_write": ("txn_size",),
-        "crash_during_commit": ("txn_size",),
-        "revoke_before_commit": ("policy_churn", "concurrency"),
-        "scope_bypass": ("concurrency",),
-        "supersession_consistency": ("concurrency",),
-        "provenance_chain_repair": ("provenance_depth", "concurrency"),
-        "provenance_branch_repair": ("provenance_depth", "branch_factor", "concurrency"),
-        "mixed_stress": ("txn_size",),
-    }
+    _CONTROLLED_TEXT = {}
+
+    @classmethod
+    def _controlled_text(cls, scaled: bool) -> tuple[str, str]:
+        if scaled not in cls._CONTROLLED_TEXT:
+            if not scaled:
+                legacy = ROOT / "results/final_controlled/data"
+                cls._CONTROLLED_TEXT[False] = (
+                    (legacy / "generated_instances.jsonl").read_text(
+                        encoding="utf-8"
+                    ),
+                    (legacy / "reference_oracles.jsonl").read_text(
+                        encoding="utf-8"
+                    ),
+                )
+                return cls._CONTROLLED_TEXT[False]
+            instances = generate_suite(
+                WORKLOADS,
+                range(200),
+                parameter_ranges=APPROVED_CONTROLLED_PARAMETER_INTERVALS,
+            )
+            oracles = []
+            for instance in instances:
+                oracle = reference_outcome(instance)
+                oracles.append(oracle)
+            cls._CONTROLLED_TEXT[scaled] = (
+                "".join(json.dumps(row, sort_keys=True) + "\n" for row in instances),
+                "".join(json.dumps(row, sort_keys=True) + "\n" for row in oracles),
+            )
+        return cls._CONTROLLED_TEXT[scaled]
 
     @classmethod
     def _write_controlled_pair(cls, root: Path, tree: str, seed_count: int) -> list[Path]:
@@ -26,77 +51,12 @@ class TxnMemArtifactAuditTests(unittest.TestCase):
         generated = data / "generated_instances.jsonl"
         oracles = data / "reference_oracles.jsonl"
         scaled = tree == "final_controlled_200"
-        generated_rows = []
-        oracle_rows = []
-        for family, parameters in cls.WORKLOAD_PARAMETERS.items():
-            for seed in range(seed_count):
-                instance_id = f"{family}_seed_{seed}"
-                config = {
-                    "agent_count": 2,
-                    "txn_size": 1,
-                    "provenance_depth": 1,
-                    "branch_factor": 1,
-                    "policy_churn": 0,
-                    "concurrency": 1,
-                }
-                row = {
-                    "instance_id": instance_id,
-                    "workload": family,
-                    "seed": seed,
-                    "config": config,
-                    "initial_memories": [],
-                    "operations": [],
-                    "policies": [],
-                    "failure_schedule": [],
-                    "provenance_edges": [],
-                }
-                if scaled:
-                    row["semantic_parameters"] = {name: config[name] for name in parameters}
-                    row["semantic_fingerprint"] = semantic_fingerprint(row)
-                generated_rows.append(row)
-                oracle_rows.append(
-                    {
-                        "instance_id": instance_id,
-                        "oracle_version": "0.4" if scaled else "0.1",
-                        "allowed_outcomes": [
-                            {
-                                "txn_states": {},
-                                "committed_memory_ids": [],
-                                "visible_memory_ids": [],
-                                "invalid_memory_ids": [],
-                                "superseded_memory_ids": [],
-                                "provenance_edges": [],
-                                "policy_version": 1,
-                                "invariants": {
-                                    "atomicity": True,
-                                    "commit_authorization": True,
-                                    "no_invalid_visibility": True,
-                                    "supersession_consistency": True,
-                                    "provenance_closure": True,
-                                    "graph_validity": True,
-                                },
-                            }
-                        ],
-                        "event_trace": [],
-                        "minimal_counterexample": None,
-                        "safety_invariants": {
-                            "atomicity": True,
-                            "commit_authorization": True,
-                            "no_invalid_visibility": True,
-                            "supersession_consistency": True,
-                            "provenance_closure": True,
-                            "graph_validity": True,
-                        },
-                    }
-                )
-        generated.write_text(
-            "".join(json.dumps(row, sort_keys=True) + "\n" for row in generated_rows),
-            encoding="utf-8",
-        )
-        oracles.write_text(
-            "".join(json.dumps(row, sort_keys=True) + "\n" for row in oracle_rows),
-            encoding="utf-8",
-        )
+        expected_seed_count = 200 if scaled else 50
+        if seed_count != expected_seed_count:
+            raise ValueError("controlled fixture seed count does not match its tree")
+        generated_text, oracle_text = cls._controlled_text(scaled)
+        generated.write_text(generated_text, encoding="utf-8")
+        oracles.write_text(oracle_text, encoding="utf-8")
         return [generated, oracles]
 
     def test_safe_sanitized_summary_passes(self):
@@ -184,6 +144,26 @@ class TxnMemArtifactAuditTests(unittest.TestCase):
             {str(path) for path in paths},
         )
 
+    def test_raw_path_compounds_are_normalized_across_common_punctuation(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = (
+                root / "results/public/Tool Args/summary.json",
+                root / "results/public/tool_args/summary.json",
+                root / "results/public/tool-arg/summary.json",
+                root / "results/public/tool.args/summary.json",
+            )
+            for path in paths:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('{"status":"sanitized"}', encoding="utf-8")
+
+            findings = audit_result_paths(paths)
+
+        self.assertEqual(
+            {item["path"] for item in findings if item["code"] == "raw_result_path"},
+            {str(path) for path in paths},
+        )
+
     def test_allowlisted_controlled_filename_rejects_public_payload_and_wrong_count(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -264,9 +244,11 @@ class TxnMemArtifactAuditTests(unittest.TestCase):
             root = Path(tmp)
             safe = root / "results/official_trace_runs/appworld/trace_realism.json"
             safe.parent.mkdir(parents=True)
-            safe.write_text(
-                '{"trace_grounded_status":"trace_supplied","instance_count":168}',
-                encoding="utf-8",
+            safe.write_bytes(
+                (
+                    ROOT
+                    / "results/official_trace_runs/appworld/trace_realism.json"
+                ).read_bytes()
             )
             unsafe = root / "results/official_trace_runs/locomo/trace_realism.json"
             unsafe.parent.mkdir(parents=True)
@@ -311,11 +293,31 @@ class TxnMemArtifactAuditTests(unittest.TestCase):
             )
             for path in paths:
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text('{"status":"sanitized"}', encoding="utf-8")
+                relative = path.relative_to(root)
+                path.write_bytes((ROOT / relative).read_bytes())
 
             findings = audit_result_paths(paths)
 
         self.assertEqual(findings, [])
+
+    def test_historical_aggregate_root_does_not_exempt_unregistered_siblings(self):
+        with TemporaryDirectory() as tmp:
+            path = (
+                Path(tmp)
+                / "results/official_trace_runs/appworld/private_records.json"
+            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                '{"utterances":["The traveler asked to change a reservation."]}',
+                encoding="utf-8",
+            )
+
+            findings = audit_result_paths([path])
+
+        self.assertIn(
+            "raw_result_path",
+            {item["code"] for item in findings},
+        )
 
     def test_controlled_instances_reject_list_payloads_in_typed_fields(self):
         mutations = (
@@ -420,6 +422,101 @@ class TxnMemArtifactAuditTests(unittest.TestCase):
             }
             oracles.write_text(
                 "".join(json.dumps(row, sort_keys=True) + "\n" for row in oracle_rows),
+                encoding="utf-8",
+            )
+
+            findings = audit_result_paths([generated, oracles])
+
+        self.assertEqual(
+            {
+                item["path"]
+                for item in findings
+                if item["code"] == "controlled_artifact_schema"
+            },
+            {str(generated), str(oracles)},
+        )
+
+    def test_current_controlled_records_must_equal_regenerated_registered_records(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            generated, oracles = self._write_controlled_pair(
+                root, "final_controlled_200", 200
+            )
+            generated_rows = [
+                json.loads(line) for line in generated.read_text().splitlines()
+            ]
+            write = next(
+                operation
+                for operation in generated_rows[0]["operations"]
+                if operation["type"] == "write"
+            )
+            write["value"] = "Please remember the traveler prefers a window seat."
+            generated_rows[0]["semantic_fingerprint"] = semantic_fingerprint(
+                generated_rows[0]
+            )
+            generated.write_text(
+                "".join(
+                    json.dumps(row, sort_keys=True) + "\n"
+                    for row in generated_rows
+                ),
+                encoding="utf-8",
+            )
+            oracle_rows = [
+                json.loads(line) for line in oracles.read_text().splitlines()
+            ]
+            oracle_rows[0]["allowed_outcomes"][0]["txn_states"][
+                "traveler_preference"
+            ] = "pending"
+            oracles.write_text(
+                "".join(
+                    json.dumps(row, sort_keys=True) + "\n" for row in oracle_rows
+                ),
+                encoding="utf-8",
+            )
+
+            findings = audit_result_paths([generated, oracles])
+
+        self.assertEqual(
+            {
+                item["path"]
+                for item in findings
+                if item["code"] == "controlled_artifact_schema"
+            },
+            {str(generated), str(oracles)},
+        )
+
+    def test_legacy_controlled_records_use_the_versioned_400_record_contract(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            generated, oracles = self._write_controlled_pair(
+                root, "final_controlled", 50
+            )
+            generated_rows = [
+                json.loads(line) for line in generated.read_text().splitlines()
+            ]
+            write = next(
+                operation
+                for operation in generated_rows[0]["operations"]
+                if operation["type"] == "write"
+            )
+            write["value"] = "Please remember the traveler prefers a window seat."
+            generated.write_text(
+                "".join(
+                    json.dumps(row, sort_keys=True) + "\n"
+                    for row in generated_rows
+                ),
+                encoding="utf-8",
+            )
+            oracle_rows = [
+                json.loads(line) for line in oracles.read_text().splitlines()
+            ]
+            oracle_rows[0]["allowed_outcomes"][0]["txn_states"][
+                "traveler_preference"
+            ] = "pending"
+            oracles.write_text(
+                "".join(
+                    json.dumps(row, sort_keys=True) + "\n" for row in oracle_rows
+                ),
                 encoding="utf-8",
             )
 

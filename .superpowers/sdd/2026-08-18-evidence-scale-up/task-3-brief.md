@@ -79,3 +79,19 @@ generic nested scalar/list acceptance for controlled instance and oracle JSONL
 with explicit recursive schemas for operations, policies, schedules,
 provenance, allowed outcomes, and event traces; reject dialogue/payload fields
 hidden in any executable or trace container.
+
+#### Review fix round 4 — canonical coercion, exact exemptions, and regenerated instances
+
+Scale detection recursively scans normalized mapping keys as well as values and
+coerces exact integral numeric strings/floats, so alternate encodings of the
+formal 1,600/8,000 signature and punctuation/case variants of
+`controlled_scale_200` cannot bypass the gate. Normalize raw path components
+as both tokens and punctuation-free compounds; compound tool-argument names
+must fail. Replace all directory-wide historical exemptions with exact
+file-and-schema allowlist entries. For current 1,600-instance controlled files,
+regenerate each workload from its registered family, seed and approved config
+and require canonical equality before accepting the record. Bind oracle dynamic
+keys/IDs and exported states to the regenerated instance/reference result.
+Legacy 400-instance evidence remains accepted only through its explicit
+versioned compatibility contract, never through arbitrary nested values or
+directory ancestry.
