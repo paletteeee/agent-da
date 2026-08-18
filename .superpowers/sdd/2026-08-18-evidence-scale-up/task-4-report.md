@@ -65,9 +65,16 @@ No model endpoint was configured or called. Importing the legacy τ package emit
 
 ## Authorized-server preflight
 
-Direct SSH to the configured server reached the authentication prompt, but no approved key/session was available. The attempt was stopped without recording or passing a password. The Task 4 brief records a prior authorized-server check with the same τ/AppWorld source hashes, but this report does not represent that prior observation as a fresh controller run.
+The controller re-established the authorized SSH session and ran a fresh
+read-only source check on the configured server. No model or benchmark process
+was started. The server copy reported:
 
-Required fresh remote command remains read-only: verify `/data/txnmem`, count τ `TASKS_TEST` and AppWorld `test_normal` IDs, and hash the two source files without starting a model or benchmark run.
+- AppWorld `test_normal`: 168 IDs, 168 unique; split SHA-256 `c3af41497b6f2f0860a2ff8c09b335dca527e2cf48e59b4aabdb301b6b68db8f`.
+- AppWorld version: `0.2.0`; version-file SHA-256 `911fc0c48cb0c70601db5775a9bef1b740dc4cc9f9b46389b9f0563fe7eb94d7`.
+- τ-bench retail/test: 115 tasks; source SHA-256 `6f09468923c6cfb6162e94fe659264d6aee70816c18d51278fb4a581db7765a4`.
+
+All counts and source hashes match the local formal preflight exactly. The
+authorized-server source-identity gate is therefore complete.
 
 ## Files changed from the Task 3 base
 
@@ -91,4 +98,4 @@ Required fresh remote command remains read-only: verify `/data/txnmem`, count τ
 - Runtime benchmark/domain/split scope is checked before adapter/model execution for new formal manifests, while the compatibility marker keeps legacy single-batch semantics unchanged.
 - No raw public prompts, tool arguments, benchmark payloads, endpoint, credential, or formal result artifact was added to Git.
 
-Implementation concern: none. External completion gate: fresh authorized-server preflight requires approved SSH authentication.
+Implementation concern: none. External completion gate: none for Task 4.
