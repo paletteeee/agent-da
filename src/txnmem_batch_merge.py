@@ -18,12 +18,14 @@ def _official_status(value: Any) -> str:
     if not isinstance(value, Mapping):
         return "blocked"
     status = value.get("status")
-    if status in {"available", "blocked", "error"}:
-        return str(status)
+    if status == "available":
+        return "available"
+    if status in {"error", "evaluator_error"}:
+        return "error"
+    if status in {"blocked", "unavailable"}:
+        return "blocked"
     if value.get("error") is not None:
         return "error"
-    if isinstance(value.get("success"), bool):
-        return "available"
     return "blocked"
 
 

@@ -159,6 +159,22 @@ fi
 
 IFS=',' read -r -a TXNMEM_SELECTED_BENCHMARKS <<< "$TXNMEM_BENCHMARKS"
 
+if [ "$TXNMEM_GENERATE_ONLY" -eq 0 ] && [ "$TXNMEM_RESUME" -eq 0 ]; then
+  for TXNMEM_BENCHMARK_ITEM in "${TXNMEM_SELECTED_BENCHMARKS[@]}"; do
+    TXNMEM_BENCHMARK="${TXNMEM_BENCHMARK_ITEM//[[:space:]]/}"
+    TXNMEM_JOB="${TXNMEM_BENCHMARK//-/_}"
+    case "$TXNMEM_JOB" in
+      tau_bench|appworld|locomo) ;;
+      *) echo "error: unsupported benchmark: $TXNMEM_BENCHMARK" >&2; exit 2 ;;
+    esac
+    TXNMEM_MERGED_PATH="$TXNMEM_OUT_DIR/merged/$TXNMEM_JOB.json"
+    if [ -e "$TXNMEM_MERGED_PATH" ] || [ -L "$TXNMEM_MERGED_PATH" ]; then
+      echo "error: refusing to overwrite existing merge without --resume: $TXNMEM_MERGED_PATH" >&2
+      exit 2
+    fi
+  done
+fi
+
 bind_shard_report() {
   "$TXNMEM_PYTHON" - "$1" "$2" "$3" <<'PY'
 import json
@@ -253,7 +269,7 @@ for TXNMEM_BENCHMARK_ITEM in "${TXNMEM_SELECTED_BENCHMARKS[@]}"; do
       --endpoint "$TXNMEM_ENDPOINT" \
       --model "$TXNMEM_MODEL" \
       --appworld-root "$TXNMEM_APPWORLD_ROOT" \
-      "${TXNMEM_LOCOMO_EVALUATOR_ARGS[@]}"
+      ${TXNMEM_LOCOMO_EVALUATOR_ARGS[@]+"${TXNMEM_LOCOMO_EVALUATOR_ARGS[@]}"}
     bind_shard_report "$TXNMEM_SHARD_PATH" "$TXNMEM_RAW_REPORT" "$TXNMEM_BOUND_REPORT"
   done
 done
@@ -270,6 +286,16 @@ import sys
 from pathlib import Path
 
 from txnmem_batch_merge import merge_native_shards
+
+
+def reject_duplicate_keys(pairs):
+    document = {}
+    for key, value in pairs:
+        if key in document:
+            raise ValueError(f"duplicate JSON key: {key}")
+        document[key] = value
+    return document
+
 
 out_dir = Path(sys.argv[1])
 job = sys.argv[2]
@@ -293,8 +319,11 @@ if path.exists():
     if not resume:
         raise SystemExit(f"refusing to overwrite existing merge without --resume: {path}")
     try:
-        existing = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        existing = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=reject_duplicate_keys,
+        )
+    except (OSError, ValueError) as exc:
         raise SystemExit(f"existing resume merge is malformed: {path}") from exc
     if existing != merged:
         raise SystemExit(f"existing resume merge does not match recomputation: {path}")

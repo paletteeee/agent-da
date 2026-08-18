@@ -126,3 +126,9 @@ Ruling: Failed, evaluator-error and blocked task rows remain one task each in th
 Ruling: A merged task counts as official success only when every repetition has execution `status=completed`, official evaluator `status=available`, and `success=true`; evaluator output can never override a failed/error/blocked execution — cost if wrong: inconsistent task/evaluator records lower success rather than being optimistically resolved.
 
 Ruling: The merged aggregate is a protected formal artifact: without `--resume` an existing merge path is never overwritten; with `--resume` an existing byte-equivalent/canonically equal merge is accepted, while any mismatch fails closed — cost if wrong: intentional replacement requires a fresh output directory or explicit cleanup outside the formal workflow.
+
+Ruling: Official evaluator evidence is fail-closed: only the explicit status `available` can contribute success; missing, unavailable, evaluator-error, or unknown statuses remain denominator failures even if `success=true` is present — cost if wrong: legacy evaluator rows without an explicit availability status must be regenerated or remain unsuccessful.
+
+Ruling: Protect an existing merged formal artifact before launching any shard or model process in both merge-only and normal execution; `--resume` is the only permitted reuse path — cost if wrong: a refused rerun could otherwise spend GPU time or create shard side effects before discovering that its final destination is immutable.
+
+Ruling: Existing merge artifacts must be parsed with recursive duplicate-key rejection before resume equality is evaluated, and the launcher must remain executable under the host Bash 3.2 with empty optional argument lists — cost if wrong: ambiguous JSON or platform-specific array behavior could bypass or abort the formal replay contract.

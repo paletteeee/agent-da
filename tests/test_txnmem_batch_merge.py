@@ -158,6 +158,43 @@ class NativeShardMergeTests(unittest.TestCase):
         self.assertEqual(merged["official"]["successes"], 0)
         self.assertEqual(merged["official"]["failures"], 4)
 
+    def test_merge_requires_explicit_available_evaluator_status_for_success(self):
+        merge_native_shards = self._merge_function()
+        parent = self._parent_manifest()
+        cases = {
+            "missing": (
+                {"success": True},
+                {"available": 1, "blocked": 2, "error": 1},
+            ),
+            "unavailable": (
+                {"status": "unavailable", "success": True},
+                {"available": 1, "blocked": 2, "error": 1},
+            ),
+            "evaluator_error": (
+                {"status": "evaluator_error", "success": True},
+                {"available": 1, "blocked": 1, "error": 2},
+            ),
+            "unknown": (
+                {"status": "unexpected", "success": True},
+                {"available": 1, "blocked": 2, "error": 1},
+            ),
+        }
+
+        for case, (official, expected_status_counts) in cases.items():
+            with self.subTest(case=case):
+                reports = self._reports(parent)
+                reports[0]["task_summaries"][0]["official"] = official
+
+                merged = merge_native_shards(parent, reports)
+
+                self.assertEqual(merged["official"]["trials"], 4)
+                self.assertEqual(merged["official"]["successes"], 0)
+                self.assertEqual(merged["official"]["failures"], 4)
+                self.assertEqual(
+                    merged["official"]["evaluator_status_counts"],
+                    expected_status_counts,
+                )
+
     def test_merge_requires_every_repetition_execution_to_complete_for_success(self):
         merge_native_shards = self._merge_function()
         parent = self._parent_manifest()

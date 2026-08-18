@@ -191,6 +191,68 @@ os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
         path.chmod(0o755)
         return path
 
+    def _native_batch_python_shim(self, path: Path) -> Path:
+        path.write_text(
+            f"""#!{sys.executable}
+import json
+import os
+from pathlib import Path
+import sys
+
+if len(sys.argv) > 1 and Path(sys.argv[1]).name == "txnmem_experiment.py":
+    arguments = sys.argv[2:]
+
+    def option(name):
+        return arguments[arguments.index(name) + 1]
+
+    manifest = json.loads(Path(option("--manifest")).read_text(encoding="utf-8"))
+    repetitions = int(option("--repetitions"))
+    rows = []
+    for _repetition in range(repetitions):
+        for task in manifest["tasks"]:
+            rows.append({{
+                "task_id": task["task_id"],
+                "status": "completed",
+                "official": {{"status": "available", "success": True}},
+            }})
+    output = Path(option("--out-dir")) / "results" / "native_batch_summary.json"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps({{
+        "manifest_sha256": manifest["manifest_hash"],
+        "condition_fingerprint": "f" * 64,
+        "repetitions": repetitions,
+        "task_summaries": rows,
+    }}), encoding="utf-8")
+    Path(os.environ["TXNMEM_TEST_MODEL_LOG"]).write_text(
+        json.dumps(arguments), encoding="utf-8"
+    )
+    raise SystemExit(0)
+os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
+""",
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+        return path
+
+    def _model_side_effect_python_shim(self, path: Path) -> Path:
+        path.write_text(
+            f"""#!{sys.executable}
+import os
+from pathlib import Path
+import sys
+
+if len(sys.argv) > 1 and Path(sys.argv[1]).name == "txnmem_experiment.py":
+    Path(os.environ["TXNMEM_TEST_MODEL_MARKER"]).write_text(
+        "runner invoked\\n", encoding="utf-8"
+    )
+    raise SystemExit("model execution forbidden by protected-merge test")
+os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
+""",
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+        return path
+
     def test_manifest_is_deterministic_and_contains_hash_and_task_split(self):
         with TemporaryDirectory() as tmp:
             source = self._locomo_source(Path(tmp))
@@ -432,6 +494,38 @@ os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
                     self.assertNotEqual(rejected.returncode, 0)
                     self.assertEqual(merge_path.read_bytes(), existing)
 
+    def test_scale_script_resume_rejects_nested_duplicate_key_merge(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            self._write_merge_fixture(out_dir)
+            arguments = [
+                "--merge-only",
+                "--benchmarks",
+                "tau-bench",
+                "--out-dir",
+                str(out_dir),
+                "--shard-count",
+                "2",
+            ]
+            first = self._run_scale_script(arguments)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            merge_path = out_dir / "merged" / "tau_bench.json"
+            original = merge_path.read_text(encoding="utf-8")
+            needle = '  "task_aggregate": {\n'
+            self.assertIn(needle, original)
+            ambiguous = original.replace(
+                needle,
+                needle + '    "denominator": 4,\n',
+                1,
+            )
+            self.assertEqual(json.loads(ambiguous), json.loads(original))
+            merge_path.write_text(ambiguous, encoding="utf-8")
+
+            rejected = self._run_scale_script([*arguments, "--resume"])
+
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertEqual(merge_path.read_text(encoding="utf-8"), ambiguous)
+
     def test_scale_script_normal_resume_verifies_merge_without_model_calls(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -495,6 +589,82 @@ os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
                 self.assertNotEqual(rejected.returncode, 0)
                 self.assertEqual(merge_path.read_bytes(), sentinel)
                 self.assertNotIn("model execution forbidden", rejected.stderr)
+
+    def test_scale_script_executes_with_empty_optional_evaluator_args_on_bash_3_2(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tau_root = self._formal_tau_source(root / "tau-source")
+            out_dir = root / "out"
+            model_log = root / "model-invocation.json"
+            python_shim = self._native_batch_python_shim(root / "native-batch-python")
+            environment = {
+                "TXNMEM_PYTHON": str(python_shim),
+                "TXNMEM_TAU_ROOT": str(tau_root),
+                "TXNMEM_LOCOMO_EVALUATOR_COMMAND": "",
+                "TXNMEM_TEST_MODEL_LOG": str(model_log),
+            }
+
+            completed = self._run_scale_script(
+                [
+                    "--endpoint",
+                    "no-model-call://local-shim",
+                    "--model",
+                    "local-shim",
+                    "--benchmarks",
+                    "tau-bench",
+                    "--out-dir",
+                    str(out_dir),
+                    "--shard-count",
+                    "1",
+                ],
+                environment=environment,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            invocation = json.loads(model_log.read_text(encoding="utf-8"))
+            self.assertNotIn("--locomo-evaluator-command", invocation)
+            self.assertTrue((out_dir / "merged" / "tau_bench.json").is_file())
+
+    def test_scale_script_refuses_protected_merge_before_model_execution(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tau_root = self._formal_tau_source(root / "tau-source")
+            out_dir = root / "out"
+            merge_path = out_dir / "merged" / "tau_bench.json"
+            merge_path.parent.mkdir(parents=True)
+            sentinel = b'{"sentinel":"protected before execution"}\n'
+            merge_path.write_bytes(sentinel)
+            model_marker = root / "model-invoked"
+            python_shim = self._model_side_effect_python_shim(
+                root / "model-side-effect-python"
+            )
+            environment = {
+                "TXNMEM_PYTHON": str(python_shim),
+                "TXNMEM_TAU_ROOT": str(tau_root),
+                "TXNMEM_LOCOMO_EVALUATOR_COMMAND": "",
+                "TXNMEM_TEST_MODEL_MARKER": str(model_marker),
+            }
+
+            rejected = self._run_scale_script(
+                [
+                    "--endpoint",
+                    "no-model-call://must-refuse-first",
+                    "--model",
+                    "must-not-run",
+                    "--benchmarks",
+                    "tau-bench",
+                    "--out-dir",
+                    str(out_dir),
+                    "--shard-count",
+                    "1",
+                ],
+                environment=environment,
+            )
+
+            self.assertFalse(model_marker.exists(), rejected.stderr)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("refusing to overwrite existing merge", rejected.stderr)
+            self.assertEqual(merge_path.read_bytes(), sentinel)
 
     def test_scale_script_generate_and_merge_only_are_no_model_exact_count_paths(self):
         with TemporaryDirectory() as tmp:
