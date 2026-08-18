@@ -155,6 +155,40 @@ class TxnMemWorkloadTests(unittest.TestCase):
 
         self.assertEqual(semantic_fingerprint(colliding), semantic_fingerprint(relabeled_operation))
 
+    def test_semantic_fingerprint_ignores_metadata_and_config_but_tracks_executable_shape(self):
+        """Only replay-consumed shape contributes to semantic fingerprinting."""
+
+        metadata_only = generate_suite(
+            ["crash_during_commit"], [12], parameter_ranges={"txn_size": [1, 1]}
+        )[0]
+        changed_metadata = json.loads(json.dumps(metadata_only))
+        changed_metadata["config"]["txn_size"] = 99
+        changed_metadata["semantic_parameters"] = {"txn_size": 99}
+        changed_metadata["seed"] = 999
+        changed_metadata["instance_id"] = "metadata_only_change"
+        low = generate_suite(
+            ["crash_during_commit"], [12], parameter_ranges={"txn_size": [1, 1]}
+        )[0]
+        high = generate_suite(
+            ["crash_during_commit"], [12], parameter_ranges={"txn_size": [4, 4]}
+        )[0]
+
+        self.assertEqual(semantic_fingerprint(metadata_only), semantic_fingerprint(changed_metadata))
+        self.assertNotEqual(semantic_fingerprint(low), semantic_fingerprint(high))
+        self.assertNotEqual(len(low["operations"]), len(high["operations"]))
+
+    def test_semantic_fingerprint_preserves_reserved_crash_literals_before_transaction_collisions(self):
+        """Operation-type selectors remain literal even when a transaction has that identifier."""
+
+        colliding = generate_instance("crash_during_commit", seed=13)
+        for operation in colliding["operations"]:
+            operation["txn_id"] = "commit"
+        relabeled_transaction = json.loads(json.dumps(colliding))
+        for operation in relabeled_transaction["operations"]:
+            operation["txn_id"] = "txn_relabelled"
+
+        self.assertEqual(semantic_fingerprint(colliding), semantic_fingerprint(relabeled_transaction))
+
     def test_parameter_ranges_drive_consumed_schedule_and_policy_inputs(self):
         """Replacing consumed policy schedules with ignored annotations must change replay."""
 
@@ -254,6 +288,31 @@ class TxnMemWorkloadTests(unittest.TestCase):
         )
         self.assertLess(primary_read_position, first_concurrent_commit)
         self.assertTrue(compare_result_to_oracle(concurrent, run_instance(concurrent, "TxnMem"))["matches"])
+
+    def test_revoke_and_supersession_concurrency_lanes_commit_real_memory_effects(self):
+        """These lanes carry observable writes rather than miss-only probes and empty commits."""
+
+        for workload in ("revoke_before_commit", "supersession_consistency"):
+            instance = generate_suite(
+                [workload], [14], parameter_ranges={"concurrency": [3, 3]}
+            )[0]
+            result = run_instance(instance, "TxnMem")
+            lane_ids = {
+                operation["txn_id"]
+                for operation in instance["operations"]
+                if operation.get("txn_id", "").endswith(("_concurrent_2", "_concurrent_3"))
+            }
+            lane_writes = [
+                operation["memory_id"]
+                for operation in instance["operations"]
+                if operation.get("txn_id") in lane_ids and operation["type"] == "write"
+            ]
+
+            self.assertEqual(len(lane_ids), 2)
+            self.assertEqual(len(lane_writes), 2)
+            self.assertTrue(set(lane_writes) <= set(result["committed_memory_ids"]))
+            self.assertTrue(all(result["transaction_states"][lane] == "committed" for lane in lane_ids))
+            self.assertTrue(compare_result_to_oracle(instance, result)["matches"])
 
     def test_provenance_chain_records_real_derive_operations(self):
         instance = generate_instance("provenance_chain_repair", seed=14, config={"provenance_depth": 2})

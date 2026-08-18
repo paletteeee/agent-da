@@ -133,6 +133,7 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
     }
     buffered_writes: dict[str, list[dict[str, Any]]] = {}
     buffered_edges: dict[str, list[dict[str, Any]]] = {}
+    buffered_supersessions: dict[str, list[tuple[str, str]]] = {}
     provenance_edges = copy.deepcopy(instance.get("provenance_edges", []))
     committed_memory_ids: list[str] = []
     trace: list[dict[str, Any]] = []
@@ -153,6 +154,7 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
     def ensure_transaction(txn_id: str) -> None:
         buffered_writes.setdefault(txn_id, [])
         buffered_edges.setdefault(txn_id, [])
+        buffered_supersessions.setdefault(txn_id, [])
         transaction_authorized_actions.setdefault(txn_id, set())
         transaction_read_versions.setdefault(txn_id, {})
         transaction_states.setdefault(txn_id, "active")
@@ -162,6 +164,7 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
         ensure_transaction(txn_id)
         buffered_writes[txn_id].clear()
         buffered_edges[txn_id].clear()
+        buffered_supersessions[txn_id].clear()
         transaction_states[txn_id] = "aborted"
         transaction_state = "aborted"
 
@@ -230,6 +233,7 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
         elif op_type == "begin_txn":
             buffered_writes[txn_id] = []
             buffered_edges[txn_id] = []
+            buffered_supersessions[txn_id] = []
             transaction_authorized_actions[txn_id] = set()
             transaction_read_versions[txn_id] = {}
             transaction_states[txn_id] = "active"
@@ -282,36 +286,24 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
             ensure_transaction(txn_id)
             if "supersede" in revoked_actions:
                 trace.append({"step": step, "event": "denied_supersede"})
-                continue
-            old_id = operation["old_memory_id"]
-            new_id = operation["new_memory_id"]
-            def visible_memory(memory_id: str) -> dict[str, Any] | None:
-                for pending in reversed(buffered_writes[txn_id]):
-                    if pending["memory_id"] == memory_id:
-                        return pending
-                return memories.get(memory_id)
+            else:
+                old_id = operation["old_memory_id"]
+                new_id = operation["new_memory_id"]
 
-            old_memory = visible_memory(old_id)
-            if old_memory is None:
-                raise KeyError(f"unknown memory_id: {old_id}")
-            new_memory = visible_memory(new_id)
-            if new_memory is None:
-                raise KeyError(f"unknown memory_id: {new_id}")
-            if variant in SUPERSESSION_VARIANTS:
-                old_memory["status"] = "superseded"
-                new_memory["status"] = "active"
-                new_memory["supersedes_id"] = old_id
-                # A native Agent may emit a write followed by a supersede and
-                # may repeat the write while retrying the tool call.  Keep the
-                # final visible write consistent with the supersession edge.
-                for pending in buffered_writes[txn_id]:
-                    if pending["memory_id"] == old_id:
-                        pending["status"] = "superseded"
-                    elif pending["memory_id"] == new_id:
-                        pending["status"] = "active"
-                        pending["supersedes_id"] = old_id
-                supersession_updates += 1
-                transaction_authorized_actions[txn_id].add("supersede")
+                def visible_memory(memory_id: str) -> dict[str, Any] | None:
+                    for pending in reversed(buffered_writes[txn_id]):
+                        if pending["memory_id"] == memory_id:
+                            return pending
+                    return memories.get(memory_id)
+
+                if visible_memory(old_id) is None:
+                    raise KeyError(f"unknown memory_id: {old_id}")
+                if visible_memory(new_id) is None:
+                    raise KeyError(f"unknown memory_id: {new_id}")
+                if variant in SUPERSESSION_VARIANTS:
+                    buffered_supersessions[txn_id].append((old_id, new_id))
+                    supersession_updates += 1
+                    transaction_authorized_actions[txn_id].add("supersede")
 
         elif op_type == "commit":
             ensure_transaction(txn_id)
@@ -332,6 +324,16 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                 buffered_writes[txn_id].clear()
                 provenance_edges.extend(buffered_edges[txn_id])
                 buffered_edges[txn_id].clear()
+                for old_id, new_id in buffered_supersessions[txn_id]:
+                    old_memory = memories.get(old_id)
+                    new_memory = memories.get(new_id)
+                    if old_memory is None or new_memory is None:
+                        raise KeyError(f"unknown supersession target: {old_id}->{new_id}")
+                    old_memory["status"] = "superseded"
+                    old_memory["version"] = int(old_memory.get("version", 1)) + 1
+                    new_memory["status"] = "active"
+                    new_memory["supersedes_id"] = old_id
+                buffered_supersessions[txn_id].clear()
                 transaction_state = "committed"
                 transaction_states[txn_id] = "committed"
 
@@ -391,14 +393,14 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
 
         post_events = events_for_operation(instance, operation, "after")
         if any(crash_applies(event, operation) for event in post_events):
-            if op_type != "commit":
-                if uses_transaction:
-                    abort_active_transactions()
+            if uses_transaction:
+                abort_active_transactions()
+                if transaction_states.get(txn_id) != "committed":
                     transaction_state = "aborted"
-                elif committed_memory_ids:
-                    transaction_state = "partial_commit"
-                else:
-                    transaction_state = "crashed"
+            elif committed_memory_ids:
+                transaction_state = "partial_commit"
+            else:
+                transaction_state = "crashed"
             trace.append({"step": step, "event": "crash"})
             break
 

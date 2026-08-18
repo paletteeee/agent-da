@@ -97,6 +97,12 @@ def _known_semantic_labels(instance: Mapping[str, Any]) -> dict[str, set[str]]:
             known.setdefault(category, set()).add(value)
 
     collect(instance)
+    known["crash_literal"] = {
+        str(operation.get("type"))
+        for operation in instance.get("operations", [])
+        if operation.get("type") is not None
+    }
+    known["crash_literal"].add("commit")
     return known
 
 
@@ -110,6 +116,8 @@ def _target_reference_category(event: Mapping[str, Any], known: Mapping[str, set
         # ``commit`` and operation names are literal crash selectors.  In
         # particular, an incidental op_id named ``commit`` must not turn that
         # literal selector into an identifier reference.
+        if target in known.get("crash_literal", set()):
+            return None
         if target in known.get("transaction", set()):
             return "transaction"
     if event_type == "invalidate" and target in known.get("memory", set()):
@@ -122,7 +130,7 @@ def _normalized_semantic_shape(instance: Mapping[str, Any]) -> dict[str, Any]:
     known = _known_semantic_labels(instance)
 
     def normalize(value: Any, name: str | None = None, category: str | None = None) -> Any:
-        if name in {"instance_id", "seed", "semantic_fingerprint"}:
+        if name in {"config", "instance_id", "seed", "semantic_fingerprint", "semantic_parameters"}:
             return None
         if isinstance(value, Mapping):
             target_category = _target_reference_category(value, known)
@@ -133,7 +141,7 @@ def _normalized_semantic_shape(instance: Mapping[str, Any]) -> dict[str, Any]:
                     target_category if key == "target" else None,
                 )
                 for key, item in sorted(value.items(), key=lambda item: str(item[0]))
-                if key not in {"instance_id", "seed", "semantic_fingerprint"}
+                if key not in {"config", "instance_id", "seed", "semantic_fingerprint", "semantic_parameters"}
             }
         if isinstance(value, list):
             return [normalize(item, name, category) for item in value]
@@ -253,6 +261,10 @@ def _interleave_concurrent_transactions(instance: dict[str, Any], concurrency: i
         "provenance_chain_repair",
         "provenance_branch_repair",
     }
+    transactional_write_workload = instance["workload"] in {
+        "revoke_before_commit",
+        "supersession_consistency",
+    }
     for lane in range(2, concurrency + 1):
         txn_id = f"{primary_txn_id}_concurrent_{lane}"
         work = (
@@ -267,6 +279,20 @@ def _interleave_concurrent_transactions(instance: dict[str, Any], concurrency: i
                 "scope": "tenant:user_001",
             }
             if provenance_workload
+            else {
+                "op_id": f"concurrent_{lane}_write",
+                "agent_id": agent,
+                "type": "write",
+                "txn_id": txn_id,
+                "memory_id": (
+                    f"m_concurrent_supersession_{lane}"
+                    if instance["workload"] == "supersession_consistency"
+                    else f"m_concurrent_write_{lane}"
+                ),
+                "source_ids": [],
+                "policy_version": 1,
+            }
+            if transactional_write_workload
             else {
                 "op_id": f"concurrent_{lane}_read",
                 "agent_id": agent,

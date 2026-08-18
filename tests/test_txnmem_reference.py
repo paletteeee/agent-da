@@ -103,6 +103,42 @@ class TxnMemReferenceTests(unittest.TestCase):
         ]
         self.assertEqual([event["reason_codes"] for event in terminal_events], [["TERMINAL_TRANSACTION"], ["TERMINAL_TRANSACTION"]])
 
+    def test_post_commit_process_crash_keeps_committer_and_aborts_active_siblings(self):
+        """This normative crash boundary is not an ambiguous pre-linearization outcome."""
+
+        oracle = reference_outcome(
+            self._instance(
+                [
+                    {"op_id": "begin_a", "step": 1, "type": "begin_txn", "txn_id": "txn_a", "agent_id": "agent_1"},
+                    {"op_id": "begin_b", "step": 2, "type": "begin_txn", "txn_id": "txn_b", "agent_id": "agent_1"},
+                    {"op_id": "write_b", "step": 3, "type": "write", "txn_id": "txn_b", "memory_id": "m_b", "agent_id": "agent_1"},
+                    {"op_id": "commit_b", "step": 4, "type": "commit", "txn_id": "txn_b", "agent_id": "agent_1"},
+                ],
+                failure_schedule=[
+                    {"trigger": {"after_operation": "commit_b"}, "type": "crash", "target": "txn_b", "phase": "after_operation"}
+                ],
+            )
+        )
+
+        self.assertEqual(oracle["allowed_outcomes"], [{
+            "txn_states": {"txn_a": "aborted", "txn_b": "committed"},
+            "committed_memory_ids": ["m_b"],
+            "visible_memory_ids": ["m_b"],
+            "invalid_memory_ids": [],
+            "superseded_memory_ids": [],
+            "provenance_edges": [],
+            "policy_version": 1,
+            "invariants": {
+                "atomicity": True,
+                "commit_authorization": True,
+                "no_invalid_visibility": True,
+                "supersession_consistency": True,
+                "provenance_closure": True,
+                "graph_validity": True,
+            },
+        }])
+        self.assertEqual(oracle["oracle_version"], "0.2")
+
     def test_transactional_invalidation_applies_only_when_transaction_commits(self):
         initial_memories = [
             {"memory_id": "root", "agent_id": "agent_1", "scope": "tenant:user_001", "status": "active"},

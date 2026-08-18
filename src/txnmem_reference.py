@@ -13,7 +13,7 @@ from collections import defaultdict, deque
 from typing import Any, Iterable
 
 
-ORACLE_VERSION = "0.1"
+ORACLE_VERSION = "0.2"
 _MUTATING_OPERATIONS = {"write", "stage_write", "derive", "propagate", "supersede"}
 _READ_OPERATIONS = {"read", "search", "get_by_id"}
 
@@ -590,8 +590,8 @@ def _run(instance: dict[str, Any], crash_resolution: str | None) -> dict[str, An
         for event in post_events:
             _apply_schedule_event(state, event, operation)
         if any(_crash_applies(event, operation) for event in post_events):
-            if operation.get("type") != "commit":
-                for txn_id in list(state["transactions"]):
+            for txn_id, txn in list(state["transactions"].items()):
+                if txn["status"] == "active":
                     _abort_transaction(state, txn_id, "CRASH_BEFORE_LINEARIZE")
             stopped = True
 
