@@ -1,12 +1,14 @@
 # Task 4 implementation report
 
-Status: IMPLEMENTATION GREEN; AUTHORIZED-SERVER PREFLIGHT PENDING SSH AUTHENTICATION
+Status: IMPLEMENTATION AND REVIEW FIX ROUND 1 GREEN; AUTHORIZED-SERVER PREFLIGHT COMPLETE
 
 Base HEAD: `94b42759ff9434e506f6ade992a4206140fdaa72`
 
 Primary implementation commit: `06de7289ad99eb5362f879ed3352b1ce22ba4b2c`
 
 Blocker-fix commit: `274f509773a6a01cb4e69bc3cbf6547f4676283c`
+
+Review-fix round 1 implementation commit: `504abff49ad8d9340d3d0e5d589bd5a4130fc491`
 
 ## Scope implemented
 
@@ -35,6 +37,11 @@ Local adversarial RED command:
 
 Result: exit 1; 29 tests ran in 2.943 seconds; 2 failures and 4 errors reproduced the six boundaries. Exact observations were `KeyError: 'raw_task_id'`, `KeyError: 'domain'`, official successes `1 != 0`, no `ValueError` for the executed-shard mismatch, and both τ mismatch paths proceeding into the runner. After correcting the mock so the latter test failed on behavior rather than serialization, the isolated test produced two intended subtest failures, each `0 != 2`.
 
+Review fix round 1 used two separate RED cycles:
+
+- Execution-gated success: the isolated adversarial test ran once in 0.002 seconds and failed four subtests, each with `AssertionError: 1 != 0`, for execution statuses `failed`, `error`, `blocked`, and `evaluator_error`. Every fixture kept `official.status=available` and `official.success=true`, and only one of two repetitions was changed from `completed`.
+- Protected merge output: after correcting a fixture-only `FileExistsError`, three real shell integration tests ran in 1.977 seconds and failed six behavioral assertions. A repeated merge-only run returned 0 without `--resume`; canonical-equal files were rewritten in merge-only and normal modes; malformed and valid-different sentinels returned 0 and were overwritten. The normal-mode fixture used pre-bound reports and a Python shim that aborts if `txnmem_experiment.py` is invoked, so no model call was made.
+
 ## GREEN evidence
 
 - Immediate regression GREEN: 11 tests passed in 0.086 seconds for all merge blocker tests and both CLI scope/condition tests.
@@ -43,6 +50,16 @@ Result: exit 1; 29 tests ran in 2.943 seconds; 2 failures and 4 errors reproduce
 - Claim audit: exit 0; 15 active claims, 0 findings; diagnostic output only at `/tmp/txnmem-task4-claim-audit.json`.
 - Artifact audit: exit 0; 0 findings.
 - `bash -n scripts/run_native_scale.sh` and `git diff --check`: exit 0 with no output.
+
+Review fix round 1 fresh GREEN evidence:
+
+- Execution-status regression: 1 test passed in 0.001 seconds; the complete merge module then passed 10 tests in 0.003 seconds.
+- Merge-output regressions: 3 shell integration tests passed in 1.226 seconds with no model call.
+- Complete affected set (`tests.test_cli_outputs`, `tests.test_benchmark_bridge`, `tests.test_native_scale_manifest`, `tests.test_txnmem_batch_merge`): exit 0; 79 tests ran in 4.433 seconds; 4 optional dependency/data tests skipped; 0 failures/errors.
+- Full suite: exit 0; 647 tests ran in 101.506 seconds; 4 optional dependency/data tests skipped; 0 failures/errors.
+- Claim audit: exit 0; 15 active claims, 0 findings; diagnostic output only at `/tmp/txnmem-task4-fix1-claim-audit.json`.
+- Artifact audit: exit 0; 0 findings.
+- Fresh `bash -n scripts/run_native_scale.sh`, `git diff --check`, and staged diff check: exit 0 with no output.
 
 ## Local no-model formal preflight
 
@@ -96,6 +113,9 @@ authorized-server source-identity gate is therefore complete.
 - Parent and shard hashes are canonical content hashes. Merge now independently regenerates the expected shard hash from the frozen parent and rejects report rebinding.
 - Raw official IDs come only from the hashed parent manifest; a conflicting report-supplied raw ID is rejected.
 - Runtime benchmark/domain/split scope is checked before adapter/model execution for new formal manifests, while the compatibility marker keeps legacy single-batch semantics unchanged.
+- A task contributes one official success only when every repetition has execution `status=completed`, normalized official evaluator status `available`, and boolean `success=true`; all other executions remain denominator failures.
+- Merged artifacts now use parsed canonical equality under `--resume`. Equal content is accepted without a write; malformed or different content is rejected unchanged; any existing destination is rejected unchanged without resume in both merge-only and normal paths.
+- Normal-path output-contract tests use pre-bound reports and explicitly abort if a model runner is invoked. No endpoint or model was called during review-fix verification.
 - No raw public prompts, tool arguments, benchmark payloads, endpoint, credential, or formal result artifact was added to Git.
 
-Implementation concern: none. External completion gate: none for Task 4.
+Implementation concern: none. External completion gate: none for Task 4. Process note: the code-review skill's independent reviewer subagent was unavailable in this session, so the final requirement/mutation/security review was performed directly and is not represented as an independent review.
