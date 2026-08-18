@@ -304,6 +304,57 @@ class TxnMemCliOutputTests(unittest.TestCase):
             self.assertTrue((Path(tmp) / "results/realism.json").exists())
             self.assertTrue(list((Path(tmp) / "results/figures").glob("*.svg")))
 
+    def test_experiment_config_changes_generated_operation_and_config_distribution(self):
+        """Ignoring --config would make these intentionally opposite ranges identical."""
+
+        base = json.loads((ROOT / "configs/workload_families.yaml").read_text(encoding="utf-8"))
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            low_config = {**base, "parameter_ranges": {
+                "txn_size": [1, 1], "provenance_depth": [1, 1],
+                "branch_factor": [1, 1], "policy_churn": [0, 0], "concurrency": [1, 1],
+            }}
+            high_config = {**base, "parameter_ranges": {
+                "txn_size": [4, 4], "provenance_depth": [4, 4],
+                "branch_factor": [3, 3], "policy_churn": [2, 2], "concurrency": [3, 3],
+            }}
+            low_path = tmp_path / "low.json"
+            high_path = tmp_path / "high.json"
+            low_path.write_text(json.dumps(low_config), encoding="utf-8")
+            high_path.write_text(json.dumps(high_config), encoding="utf-8")
+            for name, config_path in (("low", low_path), ("high", high_path)):
+                completed = subprocess.run(
+                    [
+                        sys.executable, "src/txnmem_experiment.py", "experiment",
+                        "--config", str(config_path), "--out-dir", str(tmp_path / name),
+                        "--seeds", "1", "--variants", "TxnMem",
+                    ],
+                    cwd=ROOT, capture_output=True, text=True,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+            low_rows = [json.loads(line) for line in (tmp_path / "low/data/generated_instances.jsonl").read_text(encoding="utf-8").splitlines()]
+            high_rows = [json.loads(line) for line in (tmp_path / "high/data/generated_instances.jsonl").read_text(encoding="utf-8").splitlines()]
+
+        self.assertNotEqual(
+            [row["config"] for row in low_rows], [row["config"] for row in high_rows]
+        )
+        self.assertNotEqual(
+            [row["operations"] for row in low_rows], [row["operations"] for row in high_rows]
+        )
+
+    def test_experiment_rejects_non_positive_seed_count_before_writing_artifacts(self):
+        with TemporaryDirectory() as tmp:
+            completed = subprocess.run(
+                [
+                    sys.executable, "src/txnmem_experiment.py", "experiment",
+                    "--out-dir", tmp, "--seeds", "0",
+                ],
+                cwd=ROOT, capture_output=True, text=True,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertFalse((Path(tmp) / "data/generated_instances.jsonl").exists())
+
     def test_mutation_witnesses_command_writes_replayable_report(self):
         with TemporaryDirectory() as tmp:
             instances = Path(tmp) / "instances.jsonl"

@@ -216,6 +216,12 @@ def run_suite(
     return rows
 
 
+def _seed_range(seed_count: int) -> range:
+    if seed_count <= 0:
+        raise ValueError("seed count must be positive")
+    return range(seed_count)
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     instances: list[dict[str, Any]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -505,7 +511,7 @@ def _run_core_experiment(
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.command == "generate":
-        instances = generate_suite(args.workloads, range(args.seeds))
+        instances = generate_suite(args.workloads, _seed_range(args.seeds))
         write_jsonl(instances, args.out)
         print(f"wrote {len(instances)} instances -> {args.out}")
         return 0
@@ -520,7 +526,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {len(rows)} result rows -> {args.results}")
         return 0
     if args.command in {"pilot", "formal"}:
-        instances = generate_suite(args.workloads, range(args.seeds))
+        instances = generate_suite(args.workloads, _seed_range(args.seeds))
         rows = [
             result_row(instance, run_instance(instance, variant))
             for instance in instances
@@ -531,8 +537,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {len(instances)} instances and {len(rows)} result rows -> {args.out_dir}")
         return 0
     if args.command == "experiment":
-        load_workload_config(args.config)
-        instances = generate_suite(WORKLOADS, range(args.seeds))
+        workload_config = load_workload_config(args.config)
+        instances = generate_suite(
+            WORKLOADS,
+            _seed_range(args.seeds),
+            parameter_ranges=workload_config.get("parameter_ranges"),
+        )
         return _run_core_experiment(instances, args.variants, args.out_dir)
     if args.command == "mutation-witnesses":
         instances = _read_jsonl(args.instances)

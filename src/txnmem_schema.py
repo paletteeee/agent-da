@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 
@@ -41,6 +42,42 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "policy_churn": 0,
 }
 
+SEMANTIC_PARAMETER_NAMES = (
+    "txn_size",
+    "provenance_depth",
+    "branch_factor",
+    "policy_churn",
+    "concurrency",
+)
+
+
+def validate_parameter_ranges(
+    ranges: Mapping[str, Sequence[int]],
+) -> dict[str, tuple[int, int]]:
+    """Validate inclusive integer intervals used for semantic sampling."""
+
+    if not isinstance(ranges, Mapping):
+        raise ValueError("parameter_ranges must be a mapping")
+    validated: dict[str, tuple[int, int]] = {}
+    for name in sorted(ranges):
+        if name not in SEMANTIC_PARAMETER_NAMES:
+            raise ValueError(f"unsupported parameter range: {name}")
+        bounds = ranges[name]
+        if isinstance(bounds, (str, bytes)) or not isinstance(bounds, Sequence) or len(bounds) != 2:
+            raise ValueError(f"parameter range for {name} must be [low, high]")
+        low, high = bounds
+        if isinstance(low, bool) or isinstance(high, bool) or not isinstance(low, int) or not isinstance(high, int):
+            raise ValueError(f"parameter range for {name} must contain integers")
+        if low > high:
+            raise ValueError(f"parameter range for {name} must satisfy low <= high")
+        if name == "policy_churn":
+            if low < 0:
+                raise ValueError("policy_churn range must be >= 0")
+        elif low < 1:
+            raise ValueError(f"{name} range must be >= 1")
+        validated[name] = (low, high)
+    return validated
+
 
 def _load_yaml_fallback(path: Path) -> dict[str, Any]:
     try:
@@ -68,6 +105,8 @@ def load_workload_config(path: Path) -> dict[str, Any]:
     missing = set(CONFIG_WORKLOADS) - set(loaded["workloads"])
     if missing:
         raise ValueError(f"workload configuration is missing: {sorted(missing)}")
+    if "parameter_ranges" in loaded:
+        loaded["parameter_ranges"] = validate_parameter_ranges(loaded["parameter_ranges"])
     return loaded
 
 
@@ -97,6 +136,20 @@ def validate_instance(instance: dict[str, Any]) -> None:
             raise ValueError(f"{name} must be >= 1")
     if "policy_churn" in config and int(config["policy_churn"]) < 0:
         raise ValueError("policy_churn must be >= 0")
+    semantic_parameters = instance.get("semantic_parameters")
+    semantic_fingerprint = instance.get("semantic_fingerprint")
+    if (semantic_parameters is None) != (semantic_fingerprint is None):
+        raise ValueError("semantic_parameters and semantic_fingerprint must be provided together")
+    if semantic_parameters is not None:
+        if not isinstance(semantic_parameters, dict):
+            raise ValueError("semantic_parameters must be a mapping")
+        validate_parameter_ranges(
+            {name: [value, value] for name, value in semantic_parameters.items()}
+        )
+        if not isinstance(semantic_fingerprint, str) or len(semantic_fingerprint) != 64 or any(
+            character not in "0123456789abcdef" for character in semantic_fingerprint
+        ):
+            raise ValueError("semantic_fingerprint must be a lowercase SHA-256 hex digest")
 
     initial_memories = _require_list(instance, "initial_memories")
     operations = _require_list(instance, "operations")

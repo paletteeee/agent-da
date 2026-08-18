@@ -1,12 +1,28 @@
 import sys
 import unittest
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from txnmem_schema import validate_instance  # noqa: E402
-from txnmem_workloads import WORKLOADS, generate_instance, generate_suite  # noqa: E402
+from txnmem_workloads import (  # noqa: E402
+    WORKLOADS,
+    generate_instance,
+    generate_suite,
+    sample_semantic_config,
+    semantic_fingerprint,
+)
+
+
+PARAMETER_RANGES = {
+    "txn_size": [1, 4],
+    "provenance_depth": [1, 4],
+    "branch_factor": [1, 3],
+    "policy_churn": [0, 2],
+    "concurrency": [1, 3],
+}
 
 
 class TxnMemWorkloadTests(unittest.TestCase):
@@ -43,6 +59,47 @@ class TxnMemWorkloadTests(unittest.TestCase):
     def test_generate_suite_returns_workload_seed_cartesian_product(self):
         suite = generate_suite(["atomic_multi_write", "scope_bypass"], [1, 2])
         self.assertEqual([item["seed"] for item in suite], [1, 2, 1, 2])
+
+    def test_parameter_ranges_are_consumed_deterministically(self):
+        """Dropping range sampling would collapse the 8x200 semantic population."""
+
+        first = generate_suite(WORKLOADS, range(200), parameter_ranges=PARAMETER_RANGES)
+        second = generate_suite(WORKLOADS, range(200), parameter_ranges=PARAMETER_RANGES)
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(first), 8 * 200)
+        self.assertEqual(len({row["instance_id"] for row in first}), 8 * 200)
+        self.assertGreater(len({row["semantic_fingerprint"] for row in first}), len(WORKLOADS))
+        for name, (low, high) in PARAMETER_RANGES.items():
+            sampled = {
+                row["semantic_parameters"][name]
+                for row in first
+                if name in row["semantic_parameters"]
+            }
+            self.assertTrue(sampled <= set(range(low, high + 1)))
+            self.assertEqual({low, high}, {low, high} & sampled)
+        for workload in WORKLOADS:
+            rows = [row for row in first if row["workload"] == workload]
+            self.assertEqual({row["seed"] for row in rows}, set(range(200)))
+            self.assertGreater(len({row["semantic_fingerprint"] for row in rows}), 1)
+
+    def test_semantic_sampling_uses_inclusive_ranges_and_fingerprint_normalizes_labels(self):
+        """A seed/agent/identifier relabel must not create a new semantic shape."""
+
+        sampled = sample_semantic_config("atomic_multi_write", 7, {"txn_size": [3, 3]})
+        self.assertEqual(sampled, {"txn_size": 3})
+        instance = generate_suite(
+            ["atomic_multi_write"], [7], parameter_ranges={"txn_size": [3, 3]}
+        )[0]
+        relabeled = json.loads(json.dumps(instance))
+        relabeled["instance_id"] = "different_identifier"
+        relabeled["seed"] = 999
+        for policy in relabeled["policies"]:
+            policy["agent_id"] = "another_agent"
+        for operation in relabeled["operations"]:
+            operation["agent_id"] = "another_agent"
+
+        self.assertEqual(semantic_fingerprint(instance), semantic_fingerprint(relabeled))
 
     def test_provenance_chain_records_real_derive_operations(self):
         instance = generate_instance("provenance_chain_repair", seed=14, config={"provenance_depth": 2})

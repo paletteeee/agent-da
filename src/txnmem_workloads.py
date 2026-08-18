@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import random
+from collections.abc import Mapping, Sequence
 from typing import Any, Iterable
 
-from txnmem_schema import DEFAULT_CONFIG, validate_instance
+from txnmem_schema import DEFAULT_CONFIG, validate_instance, validate_parameter_ranges
 
 
 WORKLOADS = (
@@ -19,6 +22,17 @@ WORKLOADS = (
     "mixed_stress",
 )
 
+WORKLOAD_SEMANTIC_PARAMETERS = {
+    "atomic_multi_write": ("txn_size", "concurrency"),
+    "crash_during_commit": ("concurrency",),
+    "revoke_before_commit": ("policy_churn",),
+    "scope_bypass": ("concurrency",),
+    "supersession_consistency": ("policy_churn",),
+    "provenance_chain_repair": ("provenance_depth",),
+    "provenance_branch_repair": ("provenance_depth", "branch_factor"),
+    "mixed_stress": ("txn_size", "provenance_depth", "branch_factor", "policy_churn", "concurrency"),
+}
+
 
 def _merged_config(config: dict[str, Any] | None) -> dict[str, Any]:
     merged = dict(DEFAULT_CONFIG)
@@ -30,6 +44,74 @@ def _merged_config(config: dict[str, Any] | None) -> dict[str, Any]:
     if int(merged["policy_churn"]) < 0:
         raise ValueError("policy_churn must be >= 0")
     return merged
+
+
+def sample_semantic_config(
+    workload: str, seed: int, ranges: Mapping[str, Sequence[int]]
+) -> dict[str, int]:
+    """Sample every inclusive range with a process-stable SHA-256 source."""
+
+    validated = validate_parameter_ranges(ranges)
+    sampled: dict[str, int] = {}
+    for name in WORKLOAD_SEMANTIC_PARAMETERS.get(workload, ()):
+        if name not in validated:
+            continue
+        low, high = validated[name]
+        digest = hashlib.sha256(f"{workload}\0{seed}\0{name}".encode("utf-8")).digest()
+        sampled[name] = low + (int.from_bytes(digest, "big") % (high - low + 1))
+    return sampled
+
+
+def _semantic_id_category(name: str) -> str | None:
+    if name in {"memory_id", "old_memory_id", "new_memory_id", "supersedes_id", "source_id", "derived_id", "output_id"}:
+        return "memory"
+    if name in {"source_ids", "derived_from"}:
+        return "memory"
+    if name in {"op_id", "operation_id", "before_operation", "after_operation"}:
+        return "operation"
+    if name == "txn_id":
+        return "transaction"
+    if name == "policy_id":
+        return "policy"
+    if name == "agent_id":
+        return "agent"
+    if name == "entity_id":
+        return "entity"
+    return None
+
+
+def _normalized_semantic_shape(instance: Mapping[str, Any]) -> dict[str, Any]:
+    labels: dict[str, dict[str, str]] = {}
+
+    def normalize(value: Any, name: str | None = None) -> Any:
+        if name in {"instance_id", "seed", "semantic_fingerprint"}:
+            return None
+        if isinstance(value, Mapping):
+            return {
+                str(key): normalize(item, str(key))
+                for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+                if key not in {"instance_id", "seed", "semantic_fingerprint"}
+            }
+        if isinstance(value, list):
+            return [normalize(item, name) for item in value]
+        category = _semantic_id_category(name or "")
+        if category is not None and isinstance(value, str):
+            category_labels = labels.setdefault(category, {})
+            if value not in category_labels:
+                category_labels[value] = f"{category}_{len(category_labels) + 1:03d}"
+            return category_labels[value]
+        return value
+
+    return normalize(instance)
+
+
+def semantic_fingerprint(instance: Mapping[str, Any]) -> str:
+    """Fingerprint the instance shape without incidental IDs, seeds, or agent labels."""
+
+    encoded = json.dumps(
+        _normalized_semantic_shape(instance), ensure_ascii=True, separators=(",", ":"), sort_keys=True
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _memory(memory_id: str, status: str = "active", **extra: Any) -> dict[str, Any]:
@@ -111,6 +193,16 @@ def _base_instance(workload: str, seed: int, config: dict[str, Any]) -> dict[str
         "failure_schedule": [],
         "provenance_edges": [],
     }
+
+
+def _annotate_semantic_schedule(instance: dict[str, Any], config: dict[str, Any]) -> None:
+    """Record deterministic lanes and policy epochs without changing replay semantics."""
+
+    concurrency = int(config["concurrency"])
+    policy_churn = int(config["policy_churn"])
+    for index, operation in enumerate(instance["operations"]):
+        operation["concurrency_lane"] = (index % concurrency) + 1
+        operation["policy_epoch"] = index % (policy_churn + 1)
 
 
 def _generate_chain(instance: dict[str, Any], agent: str, depth: int) -> None:
@@ -341,9 +433,27 @@ def generate_suite(
     workloads: Iterable[str] = WORKLOADS,
     seeds: Iterable[int] = range(10),
     config: dict[str, Any] | None = None,
+    parameter_ranges: Mapping[str, Sequence[int]] | None = None,
 ) -> list[dict[str, Any]]:
     instances: list[dict[str, Any]] = []
+    validated_ranges = (
+        validate_parameter_ranges(parameter_ranges) if parameter_ranges is not None else None
+    )
     for workload in workloads:
         for seed in seeds:
-            instances.append(generate_instance(workload, int(seed), config=config))
+            normalized_seed = int(seed)
+            if validated_ranges is None:
+                instances.append(generate_instance(workload, normalized_seed, config=config))
+                continue
+            semantic_parameters = sample_semantic_config(workload, normalized_seed, validated_ranges)
+            instance = generate_instance(
+                workload,
+                normalized_seed,
+                config={**(config or {}), **semantic_parameters},
+            )
+            _annotate_semantic_schedule(instance, instance["config"])
+            instance["semantic_parameters"] = semantic_parameters
+            instance["semantic_fingerprint"] = semantic_fingerprint(instance)
+            validate_instance(instance)
+            instances.append(instance)
     return instances
