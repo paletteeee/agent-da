@@ -61,7 +61,14 @@ class TxnMemArtifactAuditTests(unittest.TestCase):
                         "allowed_outcomes": [],
                         "event_trace": [],
                         "minimal_counterexample": None,
-                        "safety_invariants": [],
+                        "safety_invariants": {
+                            "atomicity": True,
+                            "commit_authorization": True,
+                            "no_invalid_visibility": True,
+                            "supersession_consistency": True,
+                            "provenance_closure": True,
+                            "graph_validity": True,
+                        },
                     }
                 )
         generated.write_text(
@@ -142,6 +149,11 @@ class TxnMemArtifactAuditTests(unittest.TestCase):
                 root / "results/public_scale/appworld/events.csv",
                 root / "results/public_scale/locomo/prompts/report.json",
                 root / "results/public_scale/tau_bench/native/task.json",
+                root / "results/public_scale/appworld/payloads/summary.json",
+                root / "results/public_scale/locomo/conversations/summary.json",
+                root / "results/public_scale/tau_bench/transcripts/summary.json",
+                root / "results/public_scale/appworld/messages/summary.json",
+                root / "results/public_scale/locomo/prompt_messages/summary.json",
             ]
             for path in paths:
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -168,6 +180,66 @@ class TxnMemArtifactAuditTests(unittest.TestCase):
         codes = {finding["code"] for finding in findings}
         self.assertIn("controlled_artifact_schema", codes)
         self.assertIn("sensitive_result_key", codes)
+
+    def test_controlled_exceptions_reject_nested_unknown_and_raw_payload_content(self):
+        mutations = (
+            lambda row: row["config"].__setitem__(
+                "customer", {"conversation": "private benchmark dialogue"}
+            ),
+            lambda row: row.__setitem__(
+                "operations",
+                [
+                    {
+                        "op_id": "op_hidden",
+                        "step": 0,
+                        "type": "write",
+                        "value": {"customer": {"transcript": "hidden"}},
+                    }
+                ],
+            ),
+        )
+        for mutate in mutations:
+            with self.subTest(mutation=mutate.__code__.co_firstlineno), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                generated, _ = self._write_controlled_pair(
+                    root, "final_controlled_200", 200
+                )
+                rows = [json.loads(line) for line in generated.read_text().splitlines()]
+                mutate(rows[0])
+                rows[0]["semantic_fingerprint"] = semantic_fingerprint(rows[0])
+                generated.write_text(
+                    "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+                    encoding="utf-8",
+                )
+
+                findings = audit_result_paths([generated])
+
+            self.assertIn(
+                "controlled_artifact_schema",
+                {item["code"] for item in findings},
+            )
+
+    def test_controlled_oracle_exception_rejects_nested_conversation_payload(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _, oracles = self._write_controlled_pair(
+                root, "final_controlled_200", 200
+            )
+            rows = [json.loads(line) for line in oracles.read_text().splitlines()]
+            rows[0]["event_trace"] = [
+                {"conversation": {"messages": ["private benchmark dialogue"]}}
+            ]
+            oracles.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+
+            findings = audit_result_paths([oracles])
+
+        self.assertIn(
+            "controlled_artifact_schema",
+            {item["code"] for item in findings},
+        )
 
     def test_schema_safe_trace_aggregate_is_explicitly_allowed_but_payload_is_not(self):
         with TemporaryDirectory() as tmp:

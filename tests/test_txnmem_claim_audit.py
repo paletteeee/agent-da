@@ -19,8 +19,8 @@ from txnmem_claim_audit import (  # noqa: E402
 )
 from txnmem_conditions import canonical_fingerprint  # noqa: E402
 from txnmem_simulator import VARIANTS  # noqa: E402
-from txnmem_statistics import binomial_interval  # noqa: E402
-from txnmem_workloads import WORKLOADS, WORKLOAD_SEMANTIC_PARAMETERS, semantic_fingerprint  # noqa: E402
+from txnmem_statistics import binomial_interval, controlled_diversity  # noqa: E402
+from txnmem_workloads import WORKLOADS, generate_suite  # noqa: E402
 
 
 class ControlledSuiteEvidenceTests(unittest.TestCase):
@@ -417,47 +417,29 @@ class PaperClaimLedgerTests(unittest.TestCase):
         diversity = results / "diversity.json"
         svg = figures / "saturation.svg"
 
-        generated_rows = []
-        oracle_rows = []
-        for family in WORKLOADS:
-            for seed in range(200):
-                instance_id = f"{family}_seed_{seed}"
-                config = {
-                    "agent_count": 2,
-                    "txn_size": 1,
-                    "provenance_depth": 1,
-                    "branch_factor": 1,
-                    "policy_churn": 0,
-                    "concurrency": 1,
-                }
-                generated_row = {
-                        "instance_id": instance_id,
-                        "workload": family,
-                        "seed": seed,
-                        "config": config,
-                        "initial_memories": [],
-                        "operations": [],
-                        "policies": [],
-                        "failure_schedule": [],
-                        "provenance_edges": [],
-                        "semantic_parameters": {
-                            name: config[name]
-                            for name in WORKLOAD_SEMANTIC_PARAMETERS[family]
-                        },
-                        "semantic_fingerprint": "",
-                    }
-                generated_row["semantic_fingerprint"] = semantic_fingerprint(generated_row)
-                generated_rows.append(generated_row)
-                oracle_rows.append(
-                    {
-                        "instance_id": instance_id,
-                        "oracle_version": "0.4",
-                        "allowed_outcomes": [],
-                        "event_trace": [],
-                        "minimal_counterexample": None,
-                        "safety_invariants": [],
-                    }
-                )
+        generated_rows = generate_suite(
+            WORKLOADS,
+            range(200),
+            parameter_ranges=self.PARAMETER_INTERVALS,
+        )
+        oracle_rows = [
+            {
+                "instance_id": row["instance_id"],
+                "oracle_version": "0.4",
+                "allowed_outcomes": [],
+                "event_trace": [],
+                "minimal_counterexample": None,
+                "safety_invariants": {
+                    "atomicity": True,
+                    "commit_authorization": True,
+                    "no_invalid_visibility": True,
+                    "supersession_consistency": True,
+                    "provenance_closure": True,
+                    "graph_validity": True,
+                },
+            }
+            for row in generated_rows
+        ]
         generated.write_text(
             "".join(json.dumps(row, sort_keys=True) + "\n" for row in generated_rows),
             encoding="utf-8",
@@ -527,54 +509,8 @@ class PaperClaimLedgerTests(unittest.TestCase):
             )
         saturation.write_text(json.dumps(saturation_document, sort_keys=True), encoding="utf-8")
 
-        family_documents = {}
-        for family in sorted(WORKLOADS):
-            parameter_names = sorted(WORKLOAD_SEMANTIC_PARAMETERS[family])
-            value_counts = {}
-            parameter_coverage = {}
-            combination_count = 1
-            for name in parameter_names:
-                low, high = self.PARAMETER_INTERVALS[name]
-                values = list(range(low, high + 1))
-                quotient, remainder = divmod(200, len(values))
-                value_counts[name] = {
-                    str(value): quotient + int(index < remainder)
-                    for index, value in enumerate(values)
-                }
-                combination_count *= len(values)
-                parameter_coverage[name] = {
-                    "approved_interval": [low, high],
-                    "approved_value_count": len(values),
-                    "observed_unique_value_count": len(values),
-                    "coverage_ratio": 1.0,
-                }
-            family_documents[family] = {
-                "family": family,
-                "instance_count": 200,
-                "unique_semantic_fingerprint_count": combination_count,
-                "semantic_fingerprint_source": "executable_state_operations_policies_schedules_provenance",
-                "parameter_value_counts": value_counts,
-                "parameter_coverage": parameter_coverage,
-                "parameter_combination_coverage": {
-                    "parameter_order": parameter_names,
-                    "approved_combination_count": combination_count,
-                    "observed_unique_combination_count": combination_count,
-                    "coverage_ratio": 1.0,
-                },
-            }
         diversity.write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "evidence_id": "controlled_diversity",
-                    "family_count": 8,
-                    "seed_count_per_family": 200,
-                    "instance_count": 1600,
-                    "approved_parameter_intervals": dict(sorted(self.PARAMETER_INTERVALS.items())),
-                    "families": family_documents,
-                },
-                sort_keys=True,
-            ),
+            json.dumps(controlled_diversity(generated_rows), sort_keys=True),
             encoding="utf-8",
         )
         svg.write_text('<svg xmlns="http://www.w3.org/2000/svg"></svg>\n', encoding="utf-8")
@@ -697,6 +633,56 @@ class PaperClaimLedgerTests(unittest.TestCase):
             {item["code"] for item in missing_profile["findings"]},
         )
 
+    def test_scaled_controlled_claim_signal_comes_from_renamed_artifact_declarations(self):
+        documents = (
+            {
+                "task_count": 5,
+                "domains": {
+                    "families": sorted(WORKLOADS),
+                    "seeds": list(range(200)),
+                    "variants": list(VARIANTS),
+                },
+                "counts": {
+                    "families": 8,
+                    "seeds_per_family": 200,
+                    "instances": 1600,
+                    "variant_results": 8000,
+                },
+            },
+            {
+                "task_count": 5,
+                "evidence_id": "controlled_violation_saturation",
+                "families": sorted(WORKLOADS),
+                "seed_domain": list(range(200)),
+                "variant_domain": sorted(VARIANTS),
+                "checkpoint_seed_counts": [10, 25, 50, 100, 150, 200],
+            },
+            {
+                "task_count": 5,
+                "evidence_id": "controlled_suite",
+                "instance_count": 1600,
+                "workload_family_count": 8,
+                "seed_count": 200,
+                "variant_count": 5,
+                "variant_row_count": 8000,
+            },
+        )
+        for document in documents:
+            with self.subTest(identity=document.get("evidence_id", "domains")), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger, _ = self._fixture(root)
+                artifact = root / "results/evidence.json"
+                artifact.write_text(json.dumps(document), encoding="utf-8")
+                payload = json.loads(ledger.read_text())
+                payload["claims"][0]["artifact_sha256"] = self._sha256(artifact)
+                ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+                report = audit_claim_ledger(root, ledger)
+
+            codes = {item["code"] for item in report["findings"]}
+            self.assertIn("controlled_profile_required", codes)
+            self.assertIn("controlled_evidence_missing", codes)
+
     def test_scaled_controlled_claim_cross_checks_bundle_hashes_against_manifest(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -784,6 +770,48 @@ class PaperClaimLedgerTests(unittest.TestCase):
             "controlled_manifest_invalid",
             {item["code"] for item in report["findings"]},
         )
+
+    def test_scaled_controlled_claim_cross_checks_diversity_against_generated_instances(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger, _ = self._fixture(root)
+            payload = self._make_scaled_controlled_claim(root, ledger)
+            reference = payload["claims"][0]["controlled_evidence"]["diversity.json"]
+            path = root / reference["path"]
+            document = json.loads(path.read_text())
+            counts = document["families"]["atomic_multi_write"]["parameter_value_counts"]["txn_size"]
+            counts["1"] -= 1
+            counts["2"] += 1
+            path.write_text(json.dumps(document, sort_keys=True), encoding="utf-8")
+            self._rehash_scaled_bundle(root, ledger)
+
+            report = audit_claim_ledger(root, ledger)
+
+        self.assertIn(
+            "controlled_diversity_invalid",
+            {item["code"] for item in report["findings"]},
+        )
+
+    def test_scaled_controlled_claim_requires_a_real_svg_root(self):
+        replacements = (
+            "not svg at all",
+            '<html xmlns="http://www.w3.org/1999/xhtml"></html>',
+        )
+        for replacement in replacements:
+            with self.subTest(replacement=replacement[:8]), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger, _ = self._fixture(root)
+                payload = self._make_scaled_controlled_claim(root, ledger)
+                reference = payload["claims"][0]["controlled_evidence"]["saturation.svg"]
+                (root / reference["path"]).write_text(replacement, encoding="utf-8")
+                self._rehash_scaled_bundle(root, ledger)
+
+                report = audit_claim_ledger(root, ledger)
+
+            self.assertIn(
+                "controlled_svg_invalid",
+                {item["code"] for item in report["findings"]},
+            )
 
     def test_scaled_controlled_claim_rejects_malformed_paths_and_symlink_escapes(self):
         for replacement in (

@@ -10,11 +10,16 @@ import re
 from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from typing import Any
+import xml.etree.ElementTree as ET
 
 from txnmem_conditions import canonical_fingerprint, file_sha256, verify_git_source_containment
 from txnmem_reference import ORACLE_VERSION
 from txnmem_simulator import VARIANTS
-from txnmem_statistics import APPROVED_CONTROLLED_PARAMETER_INTERVALS, binomial_interval
+from txnmem_statistics import (
+    APPROVED_CONTROLLED_PARAMETER_INTERVALS,
+    binomial_interval,
+    controlled_diversity,
+)
 from txnmem_workloads import WORKLOADS, WORKLOAD_SEMANTIC_PARAMETERS, semantic_fingerprint
 
 
@@ -603,7 +608,57 @@ _SCALED_SOURCE_PATHS = {
 _SCALED_CHECKPOINTS = [10, 25, 50, 100, 150, 200]
 
 
-def _scaled_claim_signal(claim: dict[str, Any], manifest_document: Any) -> bool:
+def _document_declares_scaled_controlled(document: Any) -> bool:
+    if not isinstance(document, dict):
+        return False
+    exact_domains = {
+        "families": sorted(WORKLOADS),
+        "seeds": list(range(200)),
+        "variants": list(VARIANTS),
+    }
+    exact_counts = {
+        "families": 8,
+        "seeds_per_family": 200,
+        "instances": 1600,
+        "variant_results": 8000,
+    }
+    if document.get("domains") == exact_domains or document.get("counts") == exact_counts:
+        return True
+    evidence_id = document.get("evidence_id")
+    if evidence_id == "controlled_scale_200":
+        return True
+    if evidence_id == "controlled_suite":
+        return all(
+            document.get(field) == expected
+            for field, expected in {
+                "instance_count": 1600,
+                "workload_family_count": 8,
+                "seed_count": 200,
+                "variant_count": 5,
+                "variant_row_count": 8000,
+            }.items()
+        )
+    if evidence_id == "controlled_violation_saturation":
+        return (
+            document.get("families") == sorted(WORKLOADS)
+            and document.get("seed_domain") == list(range(200))
+            and document.get("variant_domain") == sorted(VARIANTS)
+            and document.get("checkpoint_seed_counts") == _SCALED_CHECKPOINTS
+        )
+    if evidence_id == "controlled_diversity":
+        return (
+            document.get("family_count") == 8
+            and document.get("seed_count_per_family") == 200
+            and document.get("instance_count") == 1600
+            and isinstance(document.get("families"), dict)
+            and set(document["families"]) == set(WORKLOADS)
+        )
+    return False
+
+
+def _scaled_claim_signal(
+    claim: dict[str, Any], manifest_document: Any, artifact_document: Any
+) -> bool:
     if claim.get("validation_profile") == "controlled_scale_200" or "controlled_evidence" in claim:
         return True
     for field in ("artifact_path",):
@@ -615,12 +670,7 @@ def _scaled_claim_signal(claim: dict[str, Any], manifest_document: Any) -> bool:
         for field in ("claim_id", "run_command")
     ):
         return True
-    if isinstance(manifest_document, dict):
-        counts = manifest_document.get("counts")
-        return isinstance(counts, dict) and (
-            counts.get("instances") == 1600 or counts.get("variant_results") == 8000
-        )
-    return False
+    return _document_declares_scaled_controlled(manifest_document) or _document_declares_scaled_controlled(artifact_document)
 
 
 def _scaled_saturation_valid(document: Any) -> bool:
@@ -897,14 +947,36 @@ def _scaled_raw_artifacts_valid(
         return False
 
 
+def _scaled_diversity_matches_generated(path: Path, document: Any) -> bool:
+    if not isinstance(document, dict):
+        return False
+    try:
+        instances = [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+        ]
+        return controlled_diversity(instances) == document
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return False
+
+
+def _scaled_svg_valid(path: Path) -> bool:
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError):
+        return False
+    return root.tag == "{http://www.w3.org/2000/svg}svg"
+
+
 def _controlled_evidence_findings(
     root: Path,
     claim: dict[str, Any],
     claim_id: str,
     manifest_path: Path | None,
     manifest_document: Any,
+    artifact_document: Any,
 ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    if not _scaled_claim_signal(claim, manifest_document):
+    if not _scaled_claim_signal(claim, manifest_document, artifact_document):
         return [], []
     findings: list[dict[str, Any]] = []
     checked: list[dict[str, str]] = []
@@ -1038,6 +1110,16 @@ def _controlled_evidence_findings(
         findings.append(_finding("controlled_saturation_invalid", "scaled saturation schema or arithmetic is invalid", claim_id=claim_id))
     if "diversity.json" in parsed_documents and not _scaled_diversity_valid(parsed_documents["diversity.json"]):
         findings.append(_finding("controlled_diversity_invalid", "scaled diversity schema or denominator arithmetic is invalid", claim_id=claim_id))
+    if (
+        "generated_instances.jsonl" in paths
+        and "diversity.json" in parsed_documents
+        and not _scaled_diversity_matches_generated(
+            paths["generated_instances.jsonl"], parsed_documents["diversity.json"]
+        )
+    ):
+        findings.append(_finding("controlled_diversity_invalid", "scaled diversity does not match generated instance truth", claim_id=claim_id))
+    if "saturation.svg" in paths and not _scaled_svg_valid(paths["saturation.svg"]):
+        findings.append(_finding("controlled_svg_invalid", "scaled saturation figure is not a genuine SVG rooted document", claim_id=claim_id))
     if set(paths) == set(_SCALED_ARTIFACT_PATHS) and not _scaled_raw_artifacts_valid(
         paths, parsed_documents.get("saturation.json")
     ):
@@ -1356,6 +1438,7 @@ def audit_claim_ledger(
             claim_id,
             manifest_path,
             manifest_document,
+            document,
         )
         findings.extend(controlled_findings)
         checked_artifacts.extend(controlled_checked)
