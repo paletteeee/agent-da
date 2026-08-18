@@ -1,0 +1,59 @@
+{
+  "schema_version": 2,
+  "seed": 17,
+  "repetitions_per_scenario": 30,
+  "workload_events": 2,
+  "state_oracle": "post_operation_dual_backend_readback",
+  "request_path": {
+    "qdrant": "client -> toxiproxy -> qdrant:6333",
+    "neo4j": "client -> toxiproxy -> neo4j:7687"
+  },
+  "scenarios": [
+    {
+      "name": "normal",
+      "service": "none",
+      "trigger_operation": "none",
+      "trigger_ordinal": 1,
+      "action": "none",
+      "recovery_action": "none",
+      "expected_state": "complete"
+    },
+    {
+      "name": "delay",
+      "service": "qdrant",
+      "trigger_operation": "write",
+      "trigger_ordinal": 1,
+      "action": "delay",
+      "recovery_action": "continue",
+      "expected_state": "complete"
+    },
+    {
+      "name": "timeout",
+      "service": "qdrant",
+      "trigger_operation": "write",
+      "trigger_ordinal": 1,
+      "action": "timeout",
+      "recovery_action": "abort",
+      "expected_state": "absent"
+    },
+    {
+      "name": "connection_drop",
+      "service": "neo4j",
+      "trigger_operation": "commit",
+      "trigger_ordinal": 1,
+      "action": "connection_drop",
+      "recovery_action": "abort",
+      "expected_state": "absent"
+    },
+    {
+      "name": "retry_success",
+      "service": "qdrant",
+      "trigger_operation": "write",
+      "trigger_ordinal": 1,
+      "action": "connection_drop",
+      "recovery_action": "retry_once",
+      "expected_state": "complete"
+    }
+  ],
+  "claim_boundary": "single-host real Qdrant/Neo4j with deterministic Toxiproxy fault injection and post-operation readback for the tested workload and five scenarios; not general distributed transactions, cross-host fault tolerance, availability, linearizability, or production latency"
+}

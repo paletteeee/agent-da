@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "evidence_boundary": "sanitized run manifest; task prompts and model messages are intentionally excluded",
+  "source_manifest": {
+    "remote_path": "<remote-run-dir>/results/native_scale/manifests/tau_bench.json",
+    "file_sha256": "748835fbe87ff6a66a289ec87f98c1fbdadca192299b7d726dd8a815baa1419a",
+    "canonical_manifest_hash": "b794d7578aeaacf5efdcd3a9ebe708fcbd52f54d3a5f64a142c13371057e012e",
+    "benchmark_source_sha256": "1b288c5c6dc91655abdae3474cbf42b538161efeb662d6a532048a74937c0a94",
+    "dataset": "tau-bench-airline-test",
+    "task_id_format": "tau-airline-test-%04d"
+  },
+  "runs": {
+    "tau_bench_native_50": {
+      "task_index_start": 0,
+      "task_index_end": 49,
+      "task_count": 50,
+      "seed": 17,
+      "memory_backend": "sqlite",
+      "model_id": "qwen2.5-7b-instruct",
+      "model_revision": "7b44fc9c62f21ea990dc4290f251f127c53a06eb1b9f170f75a20f1cd29f26b4",
+      "model_server_build": "vllm:0.8.5.post1"
+    },
+    "qwen_vector_graph_e2e_5": {
+      "task_index_start": 0,
+      "task_index_end": 4,
+      "task_count": 5,
+      "run_id": "20260811-formal-v2",
+      "memory_backend": "qdrant+neo4j",
+      "model_id": "qwen2.5-7b-instruct",
+      "model_revision": "7b44fc9c62f21ea990dc4290f251f127c53a06eb1b9f170f75a20f1cd29f26b4",
+      "model_server_build": "vllm:0.8.5.post1"
+    },
+    "appworld_prompt_profiles": {
+      "task_count": 20,
+      "profiles": ["baseline", "tuned"],
+      "tool_strategy": "instruction_inferred",
+      "memory_backend": "sqlite",
+      "manifest_sha256": "df292af96d911a8264f3dc4f59ed15a4eff12632ab01b9d49ea51ecf7c3591e9",
+      "model_id": "qwen2.5-7b-instruct"
+    },
+    "locomo_prompt_profiles": {
+      "conversation_count": 10,
+      "question_count_per_repetition": 1986,
+      "repetition_seeds": [17, 1017, 2017],
+      "profiles": ["baseline", "tuned"],
+      "memory_backend": "sqlite",
+      "model_id": "qwen2.5-7b-instruct"
+    },
+    "cross_host_model_load_v8": {
+      "repetitions": 3,
+      "duration_seconds_per_repetition": 600,
+      "configured_concurrency": 4,
+      "agent_worker_host_count": 1,
+      "model_server_host_count": 1,
+      "network_transport": "ssh_local_port_forward",
+      "manifest_sha256": "ddb81e70222b2c95b96a573d7569e55acdf8987df19b4d8e2e2cc7ede50d4c0c",
+      "model_id": "qwen2.5-7b-instruct",
+      "model_revision": "7b44fc9c62f21ea990dc4290f251f127c53a06eb1b9f170f75a20f1cd29f26b4",
+      "model_server_build": "vllm:0.8.5.post1"
+    },
+    "joint_realism": {
+      "synthetic_instance_count": 400,
+      "features": [
+        "operation_count",
+        "transaction_size",
+        "policy_change_rate",
+        "provenance_depth",
+        "branch_factor",
+        "agent_count"
+      ],
+      "calibration_test_split_unit": "episode",
+      "tau_permutations": 999,
+      "locomo_permutations": 1999,
+      "appworld_permutations": 1999
+    }
+  }
+}

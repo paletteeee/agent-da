@@ -1,0 +1,695 @@
+{
+  "all_prefix_minimal": true,
+  "mutant_count": 4,
+  "schema_version": 1,
+  "source_instance_count": 400,
+  "source_instances_path": "results/final_controlled/data/generated_instances.jsonl",
+  "source_instances_sha256": "d2fb1041989f4d42de6527c67c49e38c23af965bf21dc0a3d3064514f73a12ee",
+  "validation": {
+    "method": "replay_target_violation_and_one_step_shorter_prefix",
+    "status": "passed"
+  },
+  "witness_count": 4,
+  "witnesses": {
+    "bypass_scope_check": {
+      "minimal_instance": {
+        "config": {
+          "agent_count": 2,
+          "branch_factor": 1,
+          "concurrency": 1,
+          "policy_churn": 0,
+          "provenance_depth": 2,
+          "txn_size": 2
+        },
+        "failure_schedule": [],
+        "initial_memories": [
+          {
+            "agent_id": "agent_2",
+            "attribute": "fact",
+            "derived_from": [],
+            "entity_id": "user_001",
+            "memory_id": "m_private",
+            "policy_version": 1,
+            "scope": "tenant:user_001",
+            "status": "active",
+            "supersedes_id": null,
+            "value": "private_fact"
+          }
+        ],
+        "instance_id": "scope_bypass_seed_0",
+        "operations": [
+          {
+            "agent_id": "agent_2",
+            "op_id": "op_001",
+            "query": "private_fact",
+            "scope": "tenant:user_002",
+            "step": 1,
+            "type": "search"
+          }
+        ],
+        "policies": [
+          {
+            "action": "write",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_write",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "read",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_read",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "derive",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_derive",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "propagate",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_propagate",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "search",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_scope",
+            "scope": "tenant:user_002",
+            "version": 1
+          }
+        ],
+        "provenance_edges": [],
+        "seed": 0,
+        "workload": "scope_bypass"
+      },
+      "minimal_instance_sha256": "a98276be75803f2edc30aedc28a7396a6dded6b0f50ba1df98affe1d03849afb",
+      "minimal_operation_count": 1,
+      "minimality": {
+        "method": "shortest_operation_prefix_reproducing_target_violation",
+        "predecessor_operation_count": 0,
+        "predecessor_reproduces_target_violation": false
+      },
+      "mutant": "bypass_scope_check",
+      "observed": {
+        "candidate": {
+          "committed_memory_ids": [],
+          "invalid_memory_ids": [],
+          "superseded_memory_ids": [],
+          "txn_states": {},
+          "visible_memory_ids": [
+            "m_private"
+          ]
+        },
+        "committed_memory_ids": [],
+        "oracle_mismatches": [
+          "visible_memory_ids"
+        ],
+        "reproduces": true,
+        "transaction_state": "completed",
+        "violations": [
+          "scope_leak_violation"
+        ]
+      },
+      "reference_expected": {
+        "allowed_outcome_count": 1,
+        "allowed_outcomes": [
+          {
+            "committed_memory_ids": [],
+            "invalid_memory_ids": [],
+            "superseded_memory_ids": [],
+            "txn_states": {
+              "implicit": "completed"
+            },
+            "visible_memory_ids": []
+          }
+        ],
+        "oracle_version": "0.1"
+      },
+      "shrink_trace": [
+        {
+          "operation_count": 1,
+          "oracle_mismatches": [
+            "visible_memory_ids"
+          ],
+          "reproduces_target_violation": true,
+          "violations": [
+            "scope_leak_violation"
+          ]
+        }
+      ],
+      "source_instance_id": "scope_bypass_seed_0",
+      "source_instance_sha256": "fb081d5d2cf07db3115a81b23eea96edc4a94b268c9d348a9614128e92db1468",
+      "source_operation_count": 2,
+      "target_violation": "scope_leak_violation",
+      "variant": "Naive"
+    },
+    "disable_provenance_traversal": {
+      "minimal_instance": {
+        "config": {
+          "agent_count": 2,
+          "branch_factor": 1,
+          "concurrency": 1,
+          "policy_churn": 0,
+          "provenance_depth": 2,
+          "txn_size": 2
+        },
+        "failure_schedule": [],
+        "initial_memories": [
+          {
+            "agent_id": "agent_2",
+            "attribute": "fact",
+            "derived_from": [],
+            "entity_id": "user_001",
+            "memory_id": "m_root",
+            "policy_version": 1,
+            "scope": "tenant:user_001",
+            "status": "active",
+            "supersedes_id": null,
+            "value": "source_v1"
+          }
+        ],
+        "instance_id": "provenance_branch_repair_seed_0",
+        "operations": [
+          {
+            "agent_id": "agent_2",
+            "op_id": "op_001",
+            "step": 1,
+            "txn_id": "txn_derive",
+            "type": "begin_txn"
+          },
+          {
+            "agent_id": "agent_2",
+            "memory_id": "m_root",
+            "op_id": "op_002",
+            "scope": "tenant:user_001",
+            "step": 2,
+            "txn_id": "txn_derive",
+            "type": "read"
+          },
+          {
+            "agent_id": "agent_2",
+            "memory_id": "m_branch_1_1",
+            "op_id": "op_003",
+            "scope": "tenant:user_001",
+            "source_ids": [
+              "m_root"
+            ],
+            "step": 3,
+            "txn_id": "txn_derive",
+            "type": "derive",
+            "value": "branch_1_v1"
+          },
+          {
+            "agent_id": "agent_2",
+            "memory_id": "m_branch_1_1",
+            "op_id": "op_004",
+            "scope": "tenant:user_001",
+            "step": 4,
+            "txn_id": "txn_derive",
+            "type": "read"
+          },
+          {
+            "agent_id": "agent_2",
+            "memory_id": "m_branch_1_2",
+            "op_id": "op_005",
+            "scope": "tenant:user_001",
+            "source_ids": [
+              "m_branch_1_1"
+            ],
+            "step": 5,
+            "txn_id": "txn_derive",
+            "type": "derive",
+            "value": "branch_1_v2"
+          },
+          {
+            "agent_id": "agent_2",
+            "op_id": "op_006",
+            "step": 6,
+            "txn_id": "txn_derive",
+            "type": "commit"
+          }
+        ],
+        "policies": [
+          {
+            "action": "write",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_write",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "read",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_read",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "derive",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_derive",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "propagate",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_propagate",
+            "scope": "tenant:user_001",
+            "version": 1
+          }
+        ],
+        "provenance_edges": [],
+        "seed": 0,
+        "workload": "provenance_branch_repair"
+      },
+      "minimal_instance_sha256": "edfcda1018b5ce4f0ef3b40de8b2f0bd7db7af53edef3b2a8ef4c93376d8e469",
+      "minimal_operation_count": 6,
+      "minimality": {
+        "method": "shortest_operation_prefix_reproducing_target_violation",
+        "predecessor_operation_count": 5,
+        "predecessor_reproduces_target_violation": false
+      },
+      "mutant": "disable_provenance_traversal",
+      "observed": {
+        "candidate": {
+          "committed_memory_ids": [
+            "m_branch_1_1",
+            "m_branch_1_2"
+          ],
+          "invalid_memory_ids": [],
+          "superseded_memory_ids": [],
+          "txn_states": {
+            "txn_derive": "committed"
+          },
+          "visible_memory_ids": [
+            "m_root"
+          ]
+        },
+        "committed_memory_ids": [
+          "m_branch_1_1",
+          "m_branch_1_2"
+        ],
+        "oracle_mismatches": [
+          "visible_memory_ids"
+        ],
+        "reproduces": true,
+        "transaction_state": "committed",
+        "violations": [
+          "provenance_closure_violation"
+        ]
+      },
+      "reference_expected": {
+        "allowed_outcome_count": 1,
+        "allowed_outcomes": [
+          {
+            "committed_memory_ids": [
+              "m_branch_1_1",
+              "m_branch_1_2"
+            ],
+            "invalid_memory_ids": [],
+            "superseded_memory_ids": [],
+            "txn_states": {
+              "txn_derive": "committed"
+            },
+            "visible_memory_ids": [
+              "m_branch_1_1",
+              "m_root"
+            ]
+          }
+        ],
+        "oracle_version": "0.1"
+      },
+      "shrink_trace": [
+        {
+          "operation_count": 1,
+          "oracle_mismatches": [
+            "transaction_state"
+          ],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 2,
+          "oracle_mismatches": [
+            "transaction_state"
+          ],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 3,
+          "oracle_mismatches": [
+            "transaction_state"
+          ],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 4,
+          "oracle_mismatches": [
+            "transaction_state"
+          ],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 5,
+          "oracle_mismatches": [
+            "transaction_state"
+          ],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 6,
+          "oracle_mismatches": [
+            "visible_memory_ids"
+          ],
+          "reproduces_target_violation": true,
+          "violations": [
+            "provenance_closure_violation"
+          ]
+        }
+      ],
+      "source_instance_id": "provenance_branch_repair_seed_0",
+      "source_instance_sha256": "a3eebd955ea439cb26e20e7cb423cf90da46a31ce8c231444f1cf40ba5040728",
+      "source_operation_count": 7,
+      "target_violation": "provenance_closure_violation",
+      "variant": "TxnMem-NoRepair"
+    },
+    "partial_commit": {
+      "minimal_instance": {
+        "config": {
+          "agent_count": 2,
+          "branch_factor": 1,
+          "concurrency": 1,
+          "policy_churn": 0,
+          "provenance_depth": 2,
+          "txn_size": 2
+        },
+        "failure_schedule": [
+          {
+            "phase": "after_operation",
+            "target": "txn_001",
+            "trigger": {
+              "after_operation": "op_002"
+            },
+            "type": "crash"
+          }
+        ],
+        "initial_memories": [],
+        "instance_id": "atomic_multi_write_seed_0",
+        "operations": [
+          {
+            "agent_id": "agent_2",
+            "op_id": "op_001",
+            "step": 1,
+            "txn_id": "txn_001",
+            "type": "begin_txn"
+          },
+          {
+            "agent_id": "agent_2",
+            "memory_id": "m_write_1",
+            "op_id": "op_002",
+            "policy_version": 1,
+            "source_ids": [],
+            "step": 2,
+            "txn_id": "txn_001",
+            "type": "write"
+          }
+        ],
+        "policies": [
+          {
+            "action": "write",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_write",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "read",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_read",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "derive",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_derive",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "propagate",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_propagate",
+            "scope": "tenant:user_001",
+            "version": 1
+          }
+        ],
+        "provenance_edges": [],
+        "seed": 0,
+        "workload": "atomic_multi_write"
+      },
+      "minimal_instance_sha256": "077bc4ccfbede8110cdb96073a861a32b57cd80af9ab2b1686d46496dbbf6db2",
+      "minimal_operation_count": 2,
+      "minimality": {
+        "method": "shortest_operation_prefix_reproducing_target_violation",
+        "predecessor_operation_count": 1,
+        "predecessor_reproduces_target_violation": false
+      },
+      "mutant": "partial_commit",
+      "observed": {
+        "candidate": {
+          "committed_memory_ids": [
+            "m_write_1"
+          ],
+          "invalid_memory_ids": [],
+          "superseded_memory_ids": [],
+          "txn_states": {
+            "txn_001": "active"
+          },
+          "visible_memory_ids": [
+            "m_write_1"
+          ]
+        },
+        "committed_memory_ids": [
+          "m_write_1"
+        ],
+        "oracle_mismatches": [
+          "transaction_state",
+          "committed_memory_ids",
+          "visible_memory_ids"
+        ],
+        "reproduces": true,
+        "transaction_state": "partial_commit",
+        "violations": [
+          "atomicity_violation"
+        ]
+      },
+      "reference_expected": {
+        "allowed_outcome_count": 1,
+        "allowed_outcomes": [
+          {
+            "committed_memory_ids": [],
+            "invalid_memory_ids": [],
+            "superseded_memory_ids": [],
+            "txn_states": {
+              "txn_001": "aborted"
+            },
+            "visible_memory_ids": []
+          }
+        ],
+        "oracle_version": "0.1"
+      },
+      "shrink_trace": [
+        {
+          "operation_count": 1,
+          "oracle_mismatches": [
+            "transaction_state"
+          ],
+          "reproduces_target_violation": false,
+          "violations": [
+            "atomicity_violation"
+          ]
+        },
+        {
+          "operation_count": 2,
+          "oracle_mismatches": [
+            "transaction_state",
+            "committed_memory_ids",
+            "visible_memory_ids"
+          ],
+          "reproduces_target_violation": true,
+          "violations": [
+            "atomicity_violation"
+          ]
+        }
+      ],
+      "source_instance_id": "atomic_multi_write_seed_0",
+      "source_instance_sha256": "858293dfa123b73e27b6d6923bffd9d4e7bef2c8fb785127f3aa6b50066dc163",
+      "source_operation_count": 4,
+      "target_violation": "atomicity_violation",
+      "variant": "TxnMem-NoTxn"
+    },
+    "remove_commit_revalidation": {
+      "minimal_instance": {
+        "config": {
+          "agent_count": 2,
+          "branch_factor": 1,
+          "concurrency": 1,
+          "policy_churn": 0,
+          "provenance_depth": 2,
+          "txn_size": 2
+        },
+        "failure_schedule": [],
+        "initial_memories": [],
+        "instance_id": "revoke_before_commit_seed_0",
+        "operations": [
+          {
+            "agent_id": "agent_2",
+            "op_id": "op_001",
+            "step": 1,
+            "txn_id": "txn_001",
+            "type": "begin_txn"
+          }
+        ],
+        "policies": [
+          {
+            "action": "write",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_write",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "read",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_read",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "derive",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_derive",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "propagate",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "p_propagate",
+            "scope": "tenant:user_001",
+            "version": 1
+          }
+        ],
+        "provenance_edges": [],
+        "seed": 0,
+        "workload": "revoke_before_commit"
+      },
+      "minimal_instance_sha256": "279dac49db5bafb6e76c34691ea252c40199775bf0047af51aabb1a5a9919bf7",
+      "minimal_operation_count": 1,
+      "minimality": {
+        "method": "shortest_operation_prefix_reproducing_target_violation",
+        "predecessor_operation_count": 0,
+        "predecessor_reproduces_target_violation": false
+      },
+      "mutant": "remove_commit_revalidation",
+      "observed": {
+        "candidate": {
+          "committed_memory_ids": [],
+          "invalid_memory_ids": [],
+          "superseded_memory_ids": [],
+          "txn_states": {
+            "txn_001": "active"
+          },
+          "visible_memory_ids": []
+        },
+        "committed_memory_ids": [],
+        "oracle_mismatches": [
+          "transaction_state"
+        ],
+        "reproduces": true,
+        "transaction_state": "completed",
+        "violations": [
+          "invalid_commit_violation"
+        ]
+      },
+      "reference_expected": {
+        "allowed_outcome_count": 1,
+        "allowed_outcomes": [
+          {
+            "committed_memory_ids": [],
+            "invalid_memory_ids": [],
+            "superseded_memory_ids": [],
+            "txn_states": {
+              "txn_001": "completed"
+            },
+            "visible_memory_ids": []
+          }
+        ],
+        "oracle_version": "0.1"
+      },
+      "shrink_trace": [
+        {
+          "operation_count": 1,
+          "oracle_mismatches": [
+            "transaction_state"
+          ],
+          "reproduces_target_violation": true,
+          "violations": [
+            "invalid_commit_violation"
+          ]
+        }
+      ],
+      "source_instance_id": "revoke_before_commit_seed_0",
+      "source_instance_sha256": "0b883296698b3a7ac14442e8ed8724477e9da0d73832c8d5ddcd09b8daa6f911",
+      "source_operation_count": 3,
+      "target_violation": "invalid_commit_violation",
+      "variant": "TxnMem-NoPolicyCommit"
+    }
+  }
+}

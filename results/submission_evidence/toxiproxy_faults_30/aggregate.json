@@ -1,0 +1,95 @@
+{
+  "all_scenarios_evidence_valid": true,
+  "backend_health": {
+    "neo4j": {
+      "available": true,
+      "version": "5.22.0"
+    },
+    "qdrant": {
+      "available": true,
+      "version": "1.11.5"
+    }
+  },
+  "claim_boundary": "single-host proxy/fault-response observations; post-fault Qdrant/Neo4j persistent state was not independently verified; not atomicity/availability/latency evidence",
+  "evidence_id": "toxiproxy_fault_path_30",
+  "production_latency_claim": false,
+  "repetitions_per_scenario": 30,
+  "run_command": "TXNMEM_NEO4J_URI=bolt://127.0.0.1:27687 TXNMEM_TOXIPROXY_URL=http://127.0.0.1:8474 PYTHONPATH=<remote-run-dir>/src <runtime>/bin/python <remote-run-dir>/src/txnmem_experiment.py backend-performance --backend vector-graph --service-url http://127.0.0.1:26333 --events 2 --repetitions 30 --out-dir <remote-run-dir>/results/toxiproxy_formal30",
+  "scenario_count": 5,
+  "scenarios": {
+    "connection_drop": {
+      "abort_count": 30,
+      "error_count": 30,
+      "fault_observed_count": 30,
+      "proxy_path_verified_count": 30,
+      "repetitions": 30,
+      "retry_count": 0,
+      "retry_success_count": 0,
+      "success_count": 0,
+      "toxic_cleared_count": 30,
+      "toxic_installed_count": 30,
+      "trigger_fired_count": 30
+    },
+    "delay": {
+      "abort_count": 0,
+      "error_count": 0,
+      "fault_observed_count": 30,
+      "proxy_path_verified_count": 30,
+      "repetitions": 30,
+      "retry_count": 0,
+      "retry_success_count": 0,
+      "success_count": 30,
+      "toxic_cleared_count": 30,
+      "toxic_installed_count": 30,
+      "trigger_fired_count": 30
+    },
+    "normal": {
+      "abort_count": 0,
+      "error_count": 0,
+      "fault_observed_count": 0,
+      "proxy_path_verified_count": 30,
+      "repetitions": 30,
+      "retry_count": 0,
+      "retry_success_count": 0,
+      "success_count": 30,
+      "toxic_cleared_count": 0,
+      "toxic_installed_count": 0,
+      "trigger_fired_count": 0
+    },
+    "retry_success": {
+      "abort_count": 0,
+      "error_count": 0,
+      "fault_observed_count": 30,
+      "proxy_path_verified_count": 30,
+      "repetitions": 30,
+      "retry_count": 30,
+      "retry_success_count": 30,
+      "success_count": 30,
+      "toxic_cleared_count": 30,
+      "toxic_installed_count": 30,
+      "trigger_fired_count": 30
+    },
+    "timeout": {
+      "abort_count": 30,
+      "error_count": 30,
+      "fault_observed_count": 30,
+      "proxy_path_verified_count": 30,
+      "repetitions": 30,
+      "retry_count": 0,
+      "retry_success_count": 0,
+      "success_count": 0,
+      "toxic_cleared_count": 30,
+      "toxic_installed_count": 30,
+      "trigger_fired_count": 30
+    }
+  },
+  "schema_version": 1,
+  "source_artifact": {
+    "path": "results/submission_evidence/source_summaries/toxiproxy_faults30.source.json",
+    "sha256": "b8b9f4a56223a6db38f9d43bbc7d90ecd265e2fe8facf6f84362d81cbcc98cff"
+  },
+  "source_commit": "c299fdd64188874c1d39222a9d9a4e9dc5fd0566",
+  "status": "complete_fault_path_observations",
+  "total_repetitions": 150,
+  "toxiproxy_version": "2.5.0"
+}

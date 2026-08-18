@@ -40,6 +40,22 @@ class TxnMemSimulatorTests(unittest.TestCase):
             all(memory["status"] == "invalid" for memory in result["final_memories"].values())
         )
 
+    def test_derive_operations_materialize_committed_provenance_edges(self):
+        instance = generate_instance(
+            "provenance_chain_repair", 25, {"provenance_depth": 2}
+        )
+        result = run_instance(instance, "TxnMem")
+
+        self.assertEqual(len(result["provenance_edges"]), 2)
+        self.assertEqual(result["provenance_edges"][0]["source_id"], "m_root")
+        self.assertEqual(result["final_memories"]["m_derived_2"]["status"], "invalid")
+
+    def test_search_handles_structured_tool_memory_values(self):
+        instance = generate_instance("scope_bypass", 31)
+        instance["initial_memories"][0]["value"] = {"tool_name": "search_products", "arguments": {}}
+        result = run_instance(instance, "TxnMem")
+        self.assertEqual(result["metrics"]["exposed_memory_ids"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

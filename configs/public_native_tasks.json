@@ -1,0 +1,20 @@
+{
+  "manifest_version": 1,
+  "datasets": [
+    {
+      "dataset": "tau-bench",
+      "source": "external_data/raw/tau_gpt4o_airline.json",
+      "limit": 2
+    },
+    {
+      "dataset": "appworld",
+      "source": "external_data/raw/appworld_reference_api.json",
+      "limit": 2
+    },
+    {
+      "dataset": "locomo",
+      "source": "external_data/raw/locomo10.json",
+      "limit": 2
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "completed": true,
+  "concurrency_model": "process_backend_linearization",
+  "event_count": 3,
+  "failed_worker_ids": [],
+  "linearization_indexes": [
+    1,
+    2,
+    3
+  ],
+  "production_latency_claim": false,
+  "submitted_operation_count": 3,
+  "trace_ground_truth_native": false,
+  "unacknowledged_operation_ids": [],
+  "unique_event_ids": true,
+  "worker_count": 2,
+  "worker_event_counts": {
+    "worker_0": 2,
+    "worker_1": 1
+  }
+}

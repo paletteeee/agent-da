@@ -1,0 +1,290 @@
+{
+  "bootstrap_repetitions": 2000,
+  "bootstrap_seed": 17,
+  "calibration": {
+    "agent_count": 1,
+    "branch_factor": 1,
+    "concurrency": 1,
+    "policy_churn": 2,
+    "provenance_depth": 1,
+    "txn_size": 1
+  },
+  "comparison_method": "feature-wise bootstrap mean intervals; no high-dimensional joint-test claim",
+  "evidence": {
+    "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+    "instance_count": 175,
+    "oracle_match_by_variant": {
+      "Naive": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      },
+      "TxnMem": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      },
+      "TxnMem-NoPolicyCommit": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      },
+      "TxnMem-NoRepair": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      },
+      "TxnMem-NoTxn": {
+        "matched": 175,
+        "rate": 1.0,
+        "total": 175
+      }
+    },
+    "production_latency_claim": false,
+    "replay_envelope_operation_count": 350,
+    "replay_operation_count": 1270,
+    "source_operation_count": 920,
+    "trace_ground_truth_native": false
+  },
+  "features": {
+    "agent_count": {
+      "mean_abs_diff": 0.0,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count_left": 400,
+        "sample_count_right": 175,
+        "seed": 5064,
+        "upper": 0.0
+      },
+      "relative_mean_abs_diff": 0.0,
+      "synthetic_mean": 1.0,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.0,
+        "lower": 1.0,
+        "sample_count": 400,
+        "seed": 5062,
+        "upper": 1.0
+      },
+      "synthetic_std": 0.0,
+      "trace_mean": 1.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.0,
+        "lower": 1.0,
+        "sample_count": 175,
+        "seed": 5063,
+        "upper": 1.0
+      },
+      "trace_std": 0.0
+    },
+    "branch_factor": {
+      "mean_abs_diff": 0.25,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.25,
+        "lower": 0.2075,
+        "sample_count_left": 400,
+        "sample_count_right": 175,
+        "seed": 4055,
+        "upper": 0.2925
+      },
+      "relative_mean_abs_diff": 0.25,
+      "synthetic_mean": 0.25,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.25,
+        "lower": 0.21,
+        "sample_count": 400,
+        "seed": 4053,
+        "upper": 0.2925
+      },
+      "synthetic_std": 0.4330127018922193,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 175,
+        "seed": 4054,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "operation_count": {
+      "mean_abs_diff": 3.007142857142857,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 3.007142857142857,
+        "lower": 2.385357142857143,
+        "sample_count_left": 400,
+        "sample_count_right": 175,
+        "seed": 19,
+        "upper": 3.6257142857142863
+      },
+      "relative_mean_abs_diff": 0.41437007874015747,
+      "synthetic_mean": 4.25,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 4.25,
+        "lower": 4.085,
+        "sample_count": 400,
+        "seed": 17,
+        "upper": 4.42
+      },
+      "synthetic_std": 1.713913650100261,
+      "trace_mean": 7.257142857142857,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 7.257142857142857,
+        "lower": 6.6971428571428575,
+        "sample_count": 175,
+        "seed": 18,
+        "upper": 7.84
+      },
+      "trace_std": 4.018122213478453
+    },
+    "policy_change_rate": {
+      "mean_abs_diff": 0.10749582560296847,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.10749582560296847,
+        "lower": 0.08991064292850005,
+        "sample_count_left": 400,
+        "sample_count_right": 175,
+        "seed": 2037,
+        "upper": 0.12643966351109207
+      },
+      "relative_mean_abs_diff": 0.10749582560296847,
+      "synthetic_mean": 0.07291666666666666,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.07291666666666666,
+        "lower": 0.060625,
+        "sample_count": 400,
+        "seed": 2035,
+        "upper": 0.08562499999999999
+      },
+      "synthetic_std": 0.1280021429942136,
+      "trace_mean": 0.18041249226963513,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.18041249226963513,
+        "lower": 0.16750941122369695,
+        "sample_count": 175,
+        "seed": 2036,
+        "upper": 0.19447874347874347
+      },
+      "trace_std": 0.09023047400920252
+    },
+    "provenance_depth": {
+      "mean_abs_diff": 0.5,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.5,
+        "lower": 0.42,
+        "sample_count_left": 400,
+        "sample_count_right": 175,
+        "seed": 3046,
+        "upper": 0.59
+      },
+      "relative_mean_abs_diff": 0.5,
+      "synthetic_mean": 0.5,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.5,
+        "lower": 0.42,
+        "sample_count": 400,
+        "seed": 3044,
+        "upper": 0.585
+      },
+      "synthetic_std": 0.8660254037844386,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 175,
+        "seed": 3045,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "transaction_size": {
+      "mean_abs_diff": 0.11714285714285722,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.11714285714285722,
+        "lower": 0.005714285714285783,
+        "sample_count_left": 400,
+        "sample_count_right": 175,
+        "seed": 1028,
+        "upper": 0.3492857142857142
+      },
+      "relative_mean_abs_diff": 0.07809523809523815,
+      "synthetic_mean": 1.5,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.5,
+        "lower": 1.43,
+        "sample_count": 400,
+        "seed": 1026,
+        "upper": 1.57
+      },
+      "synthetic_std": 0.7071067811865476,
+      "trace_mean": 1.3828571428571428,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.3828571428571428,
+        "lower": 1.1657142857142857,
+        "sample_count": 175,
+        "seed": 1027,
+        "upper": 1.6171428571428572
+      },
+      "trace_std": 1.5516784855275205
+    }
+  },
+  "joint_feature_comparison": true,
+  "mean_feature_relative_abs_diff": 0.22499352373972734,
+  "split": {
+    "holdout_fraction": 0.2,
+    "holdout_record_count": 40,
+    "seed": 17,
+    "train_record_count": 160
+  },
+  "synthetic_count": 400,
+  "synthetic_source": "results/formal_bootstrap_stats/data/generated_instances.jsonl",
+  "trace_count": 175,
+  "trace_grounded_status": "trace_supplied",
+  "trace_inventory": {
+    "adapters": [
+      "tau-bench"
+    ],
+    "event_count": 920,
+    "instance_count": 175,
+    "sources": [
+      "tau-bench-official-trace-grounded"
+    ],
+    "status": "trace_supplied"
+  }
+}

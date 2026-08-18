@@ -1,0 +1,54 @@
+{
+  "manifest_version": 1,
+  "dataset_name": "tau-bench-airline-test",
+  "tasks": [
+    {
+      "task_id": "tau-airline-test-0000",
+      "instruction": "Your user id is mia_li_3668. You want to fly from New York to Seattle on May 20 (one way). You do not want to fly before 11am est. You want to fly in economy. You prefer direct flights but one stopover also fine. If there are multiple options, you prefer the one with the lowest price. You have 3 baggages. You do not want insurance. You want to use your two certificates to pay. If only one certificate can be used, you prefer using the larger one, and pay the rest with your 7447 card. You are reactive to the agent and will not say anything that is not asked. Your birthday is in your user profile so you do not prefer to provide it.",
+      "prompt": "Your user id is mia_li_3668. You want to fly from New York to Seattle on May 20 (one way). You do not want to fly before 11am est. You want to fly in economy. You prefer direct flights but one stopover also fine. If there are multiple options, you prefer the one with the lowest price. You have 3 baggages. You do not want insurance. You want to use your two certificates to pay. If only one certificate can be used, you prefer using the larger one, and pay the rest with your 7447 card. You are reactive to the agent and will not say anything that is not asked. Your birthday is in your user profile so you do not prefer to provide it.",
+      "agent_id": "agent_1",
+      "seed": 0,
+      "temperature": 0.0,
+      "max_steps": 30,
+      "failure_schedule": [],
+      "acceptance": {
+        "expected_status": "completed"
+      },
+      "domain": "airline",
+      "task_split": "test",
+      "task_index": 0
+    },
+    {
+      "task_id": "tau-airline-test-0001",
+      "instruction": "Your user id is olivia_gonzalez_2305, you currently reside in Newark, and you will have a crazy half-day trip to Texas. It is in your reservations but you don't remember the reservation id. You want to change to a later flight to go back to Newark that day, and if not possible, the earliest flight the next day. Your current return flight departs 3pm. You do not accept JFK, only EWR. You are reactive to the agent and will not say anything that is not asked. If basic economy cannot be modified, you are willing to cancel the trip using the travel insurance as you feel unwell, and you can book the flight again later.",
+      "prompt": "Your user id is olivia_gonzalez_2305, you currently reside in Newark, and you will have a crazy half-day trip to Texas. It is in your reservations but you don't remember the reservation id. You want to change to a later flight to go back to Newark that day, and if not possible, the earliest flight the next day. Your current return flight departs 3pm. You do not accept JFK, only EWR. You are reactive to the agent and will not say anything that is not asked. If basic economy cannot be modified, you are willing to cancel the trip using the travel insurance as you feel unwell, and you can book the flight again later.",
+      "agent_id": "agent_1",
+      "seed": 0,
+      "temperature": 0.0,
+      "max_steps": 30,
+      "failure_schedule": [],
+      "acceptance": {
+        "expected_status": "completed"
+      },
+      "domain": "airline",
+      "task_split": "test",
+      "task_index": 1
+    },
+    {
+      "task_id": "tau-airline-test-0002",
+      "instruction": "Your user id is omar_davis_3817, you just faced some money issue and want to downgrade all business flights to economy, without changing the flights or passengers. You are fine with refunding to original payment for each reservation. You want to know how much money you have saved in total. You are emotional and a bit angry, but you are willing to cooperate with the agent.",
+      "prompt": "Your user id is omar_davis_3817, you just faced some money issue and want to downgrade all business flights to economy, without changing the flights or passengers. You are fine with refunding to original payment for each reservation. You want to know how much money you have saved in total. You are emotional and a bit angry, but you are willing to cooperate with the agent.",
+      "agent_id": "agent_1",
+      "seed": 0,
+      "temperature": 0.0,
+      "max_steps": 30,
+      "failure_schedule": [],
+      "acceptance": {
+        "expected_status": "completed"
+      },
+      "domain": "airline",
+      "task_split": "test",
+      "task_index": 2
+    }
+  ]
+}

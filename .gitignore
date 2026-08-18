@@ -1,5 +1,40 @@
+.DS_Store
 __pycache__/
-*.pyc
-data/
-results/
-logs/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.worktrees/
+external_data
+results/real_model_*/
+results/real_model_*
+results/*_download.log
+results/vllm_server.log
+data/native_model_traces.jsonl
+
+# Generated controlled-suite raw inputs and repeated runs; keep compact reports tracked.
+results/final_controlled/data/
+results/final_controlled/results/experiment_results.csv
+results/final_controlled/results/figures/
+results/final_controlled_rep*/
+
+# Native-model manifests contain prompts; commit only sanitized aggregate summaries.
+results/real_model_qwen2.5_7b_aggregate_final/*_manifest.json
+
+# Regenerated AppWorld projection instances contain source-level API paths;
+# commit only the redacted inventory and aggregate replay statistics.
+results/appworld_projection_regenerated/data/
+results/joint_realism/*/data/
+
+# Multi-agent load traces retain prompts and model transcripts; commit summaries only.
+results/cross_host_model_load_*/data/
+
+# All experiment-local data directories and raw prediction/trace files are non-committable.
+results/**/data/
+results/**/locomo_paired_predictions.json
+results/**/native_model_traces.jsonl
+results/**/model_load_traces.jsonl
+results/remote_experiment_inputs/
+
+results/real_backend_faults_state_verified_30_v2/pid
+results/real_backend_faults_state_verified_30_v2/run.log

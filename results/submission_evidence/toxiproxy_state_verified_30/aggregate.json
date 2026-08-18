@@ -1,0 +1,153 @@
+{
+  "all_observed_states_consistent": true,
+  "all_scenarios_evidence_valid": true,
+  "all_scenarios_state_verified": true,
+  "backend_health": {
+    "neo4j": {
+      "available": true,
+      "version": "5.22.0"
+    },
+    "qdrant": {
+      "available": true,
+      "version": "1.11.5"
+    }
+  },
+  "claim_boundary": "single-host real Qdrant/Neo4j with deterministic Toxiproxy fault injection and post-operation readback for the tested workload and five scenarios; not general distributed transactions, cross-host fault tolerance, availability, linearizability, or production latency",
+  "evidence_id": "toxiproxy_state_verified_30",
+  "production_latency_claim": false,
+  "repetitions_per_scenario": 30,
+  "run_command": "COMPOSE_PROGRESS=plain TXNMEM_PYTHON=.venv/bin/python TXNMEM_REPETITIONS=30 TXNMEM_EVENTS=2 TXNMEM_OUT_DIR=results/real_backend_faults_state_verified_30_v2 bash scripts/run_real_backend_smoke.sh",
+  "runtime_attestation": {
+    "host_identity_sha256": "1358d948740ffa62665f51c2a339603716327440d52f5ea0db84400aaf61b5d4",
+    "image_digests": {
+      "neo4j": "9317a2941a9641169aa2ea8470cdda184ff7a9ee1914b5429126d0db4828edd2",
+      "qdrant": "7a4788934788a7ed9cbf6b8cc3ca1ee880dcd969cf8c6639dc7d0e446cbd4b47",
+      "toxiproxy": "927c797a2115a193ae3a527e5a36782b938419904ac6706ca0efa029ebea58cb"
+    },
+    "sha256": "5402e322864c858b42ed32bc6a6a266a1d608952502d0d4bf74dd5ff4d1133b2"
+  },
+  "scenario_count": 5,
+  "scenarios": {
+    "connection_drop": {
+      "abort_count": 30,
+      "error_count": 30,
+      "evidence_valid_count": 30,
+      "fault_evidence_count": 30,
+      "fault_observed_count": 30,
+      "proxy_path_verified_count": 30,
+      "repetitions": 30,
+      "retry_count": 0,
+      "retry_success_count": 0,
+      "state_counts": {
+        "absent": 30,
+        "complete": 0,
+        "partial": 0,
+        "unknown": 0
+      },
+      "success_count": 0,
+      "toxic_cleared_count": 30,
+      "toxic_installed_count": 30,
+      "trigger_fired_count": 30
+    },
+    "delay": {
+      "abort_count": 0,
+      "error_count": 0,
+      "evidence_valid_count": 30,
+      "fault_evidence_count": 30,
+      "fault_observed_count": 30,
+      "proxy_path_verified_count": 30,
+      "repetitions": 30,
+      "retry_count": 0,
+      "retry_success_count": 0,
+      "state_counts": {
+        "absent": 0,
+        "complete": 30,
+        "partial": 0,
+        "unknown": 0
+      },
+      "success_count": 30,
+      "toxic_cleared_count": 30,
+      "toxic_installed_count": 30,
+      "trigger_fired_count": 30
+    },
+    "normal": {
+      "abort_count": 0,
+      "error_count": 0,
+      "evidence_valid_count": 30,
+      "fault_evidence_count": 30,
+      "fault_observed_count": 0,
+      "proxy_path_verified_count": 30,
+      "repetitions": 30,
+      "retry_count": 0,
+      "retry_success_count": 0,
+      "state_counts": {
+        "absent": 0,
+        "complete": 30,
+        "partial": 0,
+        "unknown": 0
+      },
+      "success_count": 30,
+      "toxic_cleared_count": 0,
+      "toxic_installed_count": 0,
+      "trigger_fired_count": 0
+    },
+    "retry_success": {
+      "abort_count": 0,
+      "error_count": 0,
+      "evidence_valid_count": 30,
+      "fault_evidence_count": 30,
+      "fault_observed_count": 30,
+      "proxy_path_verified_count": 30,
+      "repetitions": 30,
+      "retry_count": 30,
+      "retry_success_count": 30,
+      "state_counts": {
+        "absent": 0,
+        "complete": 30,
+        "partial": 0,
+        "unknown": 0
+      },
+      "success_count": 30,
+      "toxic_cleared_count": 30,
+      "toxic_installed_count": 30,
+      "trigger_fired_count": 30
+    },
+    "timeout": {
+      "abort_count": 30,
+      "error_count": 30,
+      "evidence_valid_count": 30,
+      "fault_evidence_count": 30,
+      "fault_observed_count": 30,
+      "proxy_path_verified_count": 30,
+      "repetitions": 30,
+      "retry_count": 0,
+      "retry_success_count": 0,
+      "state_counts": {
+        "absent": 30,
+        "complete": 0,
+        "partial": 0,
+        "unknown": 0
+      },
+      "success_count": 0,
+      "toxic_cleared_count": 30,
+      "toxic_installed_count": 30,
+      "trigger_fired_count": 30
+    }
+  },
+  "schema_version": 2,
+  "source_artifact": {
+    "basename": "backend_performance.json",
+    "sha256": "2ec4db6df575a61b8c203777e0c552bc061e9af44f6f1c8cfb3ec719a3800220"
+  },
+  "source_commit": "33a334dc7c4e6d2e0250bb54cd25f0e2f080ed5d",
+  "state_totals": {
+    "absent": 60,
+    "complete": 90,
+    "partial": 0,
+    "unknown": 0
+  },
+  "status": "complete_state_verified_fault_observations",
+  "total_repetitions": 150,
+  "toxiproxy_version": "2.5.0",
+  "workload_events": 2
+}

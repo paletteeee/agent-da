@@ -1,0 +1,144 @@
+{
+  "status": "completed_with_external_blockers",
+  "public_native_boundary": {
+    "implementation": "completed",
+    "tau-bench": "runtime_installed_and_native_smoke_completed",
+    "appworld": "runtime_installed_and_native_smoke_completed",
+    "locomo": "native_contextual_smoke_completed",
+    "projection_fallback": false,
+    "raw_traces_remote_only": true,
+    "formal_claim": "native_workflow_runtime_smoke_only_not_public_benchmark_accuracy",
+    "smoke_summary": {
+      "tau-bench": {
+        "task_count": 3,
+        "completed_task_count": 3,
+        "native_event_count": 20,
+        "evaluation_error_count": 0,
+        "official_rewards": [0.0, 0.0, 0.0],
+        "task_evaluator_success": "3/3",
+        "txnmem_oracle_match": "3/3"
+      },
+      "appworld": {
+        "task_count": 2,
+        "completed_task_count": 2,
+        "native_event_count": 4,
+        "evaluation_error_count": 0,
+        "official_pass_count": "0/14",
+        "task_evaluator_success": "2/2",
+        "txnmem_oracle_match": "2/2"
+      },
+      "locomo": {
+        "conversation_count": 5,
+        "completed_conversation_count": 4,
+        "native_event_count": 40,
+        "evaluation_error_count": 0,
+        "model_network_error_count": 1,
+        "txnmem_oracle_match": "4/5",
+        "variant_oracle_match_counts": {
+          "Naive": "5/5",
+          "TxnMem": "4/5",
+          "TxnMem-NoPolicyCommit": "4/5",
+          "TxnMem-NoRepair": "4/5",
+          "TxnMem-NoTxn": "5/5"
+        }
+      }
+    }
+  },
+  "native_memory_backend_smoke": {
+    "status": "completed_small_scale",
+    "backend": "SQLiteInstrumentedMemoryBackend",
+    "model_id": "qwen2.5-7b-instruct",
+    "raw_traces_remote_only": true,
+    "official_accuracy_claim": false,
+    "aggregate_report": "results/remaining_tasks/native_memory_replay/native_memory_replay_summary.json",
+    "runs": {
+      "tau-bench": {
+        "task_count": 1,
+        "completed_task_count": 1,
+        "native_event_count": 4,
+        "evaluation_error_count": 0,
+        "official_reward": 0.0,
+        "txnmem_oracle_match": "1/1"
+      },
+      "appworld": {
+        "task_count": 1,
+        "completed_task_count": 1,
+        "native_event_count": 1,
+        "evaluation_error_count": 0,
+        "official_success": false,
+        "official_pass_count": "0/7",
+        "txnmem_oracle_match": "1/1",
+        "schema_scope": "venmo-only"
+      },
+      "locomo": {
+        "conversation_count": 1,
+        "completed_conversation_count": 1,
+        "native_event_count": 2,
+        "evaluation_error_count": 0,
+        "official_qa_evaluator": "not_available_in_current_runtime_boundary",
+        "txnmem_oracle_match": "1/1"
+      }
+    }
+  },
+  "distributed_protocol_smoke": {
+    "schedule_count": 4,
+    "invariant_coverage": 1.0,
+    "minimal_counterexamples": 0,
+    "production_claim": false
+  },
+  "qwen2_5_7b_repetitions": {
+    "repetitions": 5,
+    "total_tasks": 50,
+    "native_event_count": 110,
+    "evaluation_error_count": 0,
+    "contract_success_count": 50,
+    "txnmem_oracle_match_count": 50,
+    "wilson_95_lower_bound": 0.9286524008666414
+  },
+  "docx_visual_qa": {
+    "structural_audit": "passed",
+    "accessibility_audit": "passed",
+    "visual_render": "passed_with_bundled_lcms_wrapper",
+    "rendered_pages": 18,
+    "wrapper": "scripts/render_docx_with_bundled_libs.sh",
+    "page_review": "completed"
+  },
+  "production_evidence_extension": {
+    "implementation": "completed_and_locally_tested",
+    "native_scale_runner": "implemented",
+    "native_scale_execution": "blocked",
+    "native_scale_block_reason": "remote_ssh_connection_closed_and_local_official_runtimes_unavailable",
+    "required_primary_task_counts": {
+      "tau-bench": 50,
+      "appworld": 20,
+      "locomo": 10
+    },
+    "real_vector_graph_backend": "implemented_and_fake_client_tested",
+    "real_service_execution": "completed_single_host_aggregate_not_production_deployment",
+    "real_service_performance_30_repetitions": {
+      "status": "completed",
+      "aggregate_report": "results/real_backend_performance_reps30_v2/results/backend_performance.json",
+      "workload_events": [50, 200, 1000],
+      "repetitions_per_condition": 30,
+      "error_count": 0,
+      "partial_commit_count": 0
+    },
+    "fault_performance_runner": "implemented_and_fake_backend_tested",
+    "production_latency_claim": false,
+    "raw_reports_committed": false
+  },
+  "git_remote": {
+    "status": "blocked",
+    "reason": "missing_git_remote",
+    "branch": "main",
+    "required_user_action": "git remote add origin <URL>"
+  },
+  "remaining_experiments_20260807": {
+    "status": "partially_blocked",
+    "aggregate_report": "results/remaining_tasks/remaining_experiments_20260807.json",
+    "locomo_paired_repetition_2": "blocked_before_verifiable_start",
+    "appworld_baseline_tuned": "not_started_remote_ssh_unstable",
+    "model_token_cost": "blocked_missing_instrumentation",
+    "cross_host_multi_agent": "blocked_missing_second_host"
+  }
+}

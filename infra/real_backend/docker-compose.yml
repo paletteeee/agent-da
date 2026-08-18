@@ -1,0 +1,54 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.11.5
+    container_name: txnmem-qdrant
+    expose:
+      - "6333"
+      - "6334"
+    volumes:
+      - txnmem_qdrant:/qdrant/storage
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333;
+          printf "GET /readyz HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3;
+          grep -q "200 OK" <&3'
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  neo4j:
+    image: neo4j:5.22-community
+    container_name: txnmem-neo4j
+    environment:
+      NEO4J_AUTH: neo4j/txnmem-local-only
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 512m
+    expose:
+      - "7474"
+      - "7687"
+    volumes:
+      - txnmem_neo4j:/data
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p txnmem-local-only 'RETURN 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  toxiproxy:
+    image: shopify/toxiproxy:2.5.0
+    container_name: txnmem-toxiproxy
+    ports:
+      - "8474:8474"
+      - "19000:19000"
+      - "19001:19001"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+
+volumes:
+  txnmem_qdrant:
+  txnmem_neo4j:

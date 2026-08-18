@@ -1,0 +1,73 @@
+{
+  "backend_health": {
+    "neo4j": {
+      "available": true,
+      "version": "5.22.0"
+    },
+    "qdrant": {
+      "available": true,
+      "version": "1.11.5"
+    }
+  },
+  "benchmark": "tau-bench-airline",
+  "claim_boundary": "single-host end-to-end smoke; not production latency",
+  "completed_count": 5,
+  "evaluator_available_task_count": 5,
+  "evidence_id": "qwen_vector_graph_e2e_5",
+  "manifest_sha256": "b794d7578aeaacf5efdcd3a9ebe708fcbd52f54d3a5f64a142c13371057e012e",
+  "mean_ms": 18851.635056734085,
+  "model_id": "qwen2.5-7b-instruct",
+  "model_revision": "7b44fc9c62f21ea990dc4290f251f127c53a06eb1b9f170f75a20f1cd29f26b4",
+  "model_server_build": "vllm:0.8.5.post1",
+  "native_event_count": 30,
+  "p50_ms": 15496.98719382286,
+  "production_latency_claim": false,
+  "rows": [
+    {
+      "elapsed_ms": 11313.670709729195,
+      "native_event_count": 2,
+      "official_reward": 0.0,
+      "task_id": "tau-airline-test-0000"
+    },
+    {
+      "elapsed_ms": 19538.768604397774,
+      "native_event_count": 6,
+      "official_reward": 0.0,
+      "task_id": "tau-airline-test-0001"
+    },
+    {
+      "elapsed_ms": 36411.7973446846,
+      "native_event_count": 8,
+      "official_reward": 0.0,
+      "task_id": "tau-airline-test-0002"
+    },
+    {
+      "elapsed_ms": 11496.951431035995,
+      "native_event_count": 4,
+      "official_reward": 0.0,
+      "task_id": "tau-airline-test-0003"
+    },
+    {
+      "elapsed_ms": 15496.98719382286,
+      "native_event_count": 10,
+      "official_reward": 0.0,
+      "task_id": "tau-airline-test-0004"
+    }
+  ],
+  "run_command": "TXNMEM_RUN_ID=20260811-formal-v2 TXNMEM_E2E_LIMIT=5 TXNMEM_ENDPOINT=http://127.0.0.1:8000/v1 TXNMEM_MODEL=qwen2.5-7b-instruct TXNMEM_MODEL_REVISION=7b44fc9c62f21ea990dc4290f251f127c53a06eb1b9f170f75a20f1cd29f26b4 TXNMEM_MODEL_SERVER_BUILD=vllm:0.8.5.post1 TXNMEM_SOURCE_COMMIT=c0cae6d84d4c0766ca4ab2fbb850a8a37a5731c3 PYTHONPATH=<remote-run-dir>/src <runtime>/bin/python <remote-run-dir>/scripts/run_e2e_real_backend.py",
+  "schema_version": 1,
+  "source_artifact": {
+    "path": "results/submission_evidence/source_summaries/qwen_vector_graph_e2e5.source.json",
+    "sha256": "49ccbedee6c35211a6ad3565c0c08d9830d58d9e8b0a3099d5dd5e701263411b"
+  },
+  "source_commit": "c0cae6d84d4c0766ca4ab2fbb850a8a37a5731c3",
+  "status": "complete",
+  "task_count": 5,
+  "task_ids": [
+    "tau-airline-test-0000",
+    "tau-airline-test-0001",
+    "tau-airline-test-0002",
+    "tau-airline-test-0003",
+    "tau-airline-test-0004"
+  ]
+}

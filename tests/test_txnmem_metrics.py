@@ -26,6 +26,14 @@ class TxnMemMetricsTests(unittest.TestCase):
         self.assertEqual(row["scope_bypass_rate"], 1.0)
         self.assertEqual(row["any_violation"], 1)
 
+    def test_result_row_records_independent_oracle_comparison(self):
+        instance = generate_instance("atomic_multi_write", 41)
+        row = result_row(instance, run_instance(instance, "TxnMem"))
+
+        self.assertEqual(row["oracle_version"], "0.1")
+        self.assertEqual(row["oracle_match"], 1)
+        self.assertEqual(row["allowed_outcome_count"], 1)
+
     def test_summary_contains_mean_and_population_std(self):
         summary = summarize(
             [

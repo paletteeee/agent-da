@@ -1,0 +1,62 @@
+{
+  "benchmark": "deterministic_serial_replay",
+  "production_latency_claim": false,
+  "rows": [
+    {
+      "instance_count": 24,
+      "mean_ms": 0.291041333333332,
+      "operation_count": 102,
+      "operations_per_second": 350465.68414108583,
+      "p50_ms": 0.2842499999999998,
+      "p95_ms": 0.30791599999999836,
+      "repetitions": 3,
+      "total_seconds": 0.000873123999999996,
+      "variant": "Naive"
+    },
+    {
+      "instance_count": 24,
+      "mean_ms": 0.283763666666668,
+      "operation_count": 102,
+      "operations_per_second": 359454.0527269741,
+      "p50_ms": 0.28033300000000066,
+      "p95_ms": 0.2910830000000045,
+      "repetitions": 3,
+      "total_seconds": 0.000851291000000004,
+      "variant": "TxnMem-NoTxn"
+    },
+    {
+      "instance_count": 24,
+      "mean_ms": 0.27937499999999604,
+      "operation_count": 102,
+      "operations_per_second": 365100.67114094476,
+      "p50_ms": 0.27849999999999403,
+      "p95_ms": 0.28341699999999415,
+      "repetitions": 3,
+      "total_seconds": 0.0008381249999999882,
+      "variant": "TxnMem-NoPolicyCommit"
+    },
+    {
+      "instance_count": 24,
+      "mean_ms": 0.2679166666666663,
+      "operation_count": 102,
+      "operations_per_second": 380715.39657853864,
+      "p50_ms": 0.2670830000000013,
+      "p95_ms": 0.2701670000000017,
+      "repetitions": 3,
+      "total_seconds": 0.0008037499999999989,
+      "variant": "TxnMem-NoRepair"
+    },
+    {
+      "instance_count": 24,
+      "mean_ms": 0.27197199999999994,
+      "operation_count": 102,
+      "operations_per_second": 375038.6069154178,
+      "p50_ms": 0.2717910000000004,
+      "p95_ms": 0.27279200000000087,
+      "repetitions": 3,
+      "total_seconds": 0.0008159159999999999,
+      "variant": "TxnMem"
+    }
+  ],
+  "timing_source": "time.perf_counter"
+}

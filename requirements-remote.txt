@@ -1,0 +1,4 @@
+# Native benchmark and real-backend dependencies for the remote host.
+cryptography>=42,<47
+qdrant-client>=1.9,<2
+neo4j>=5.18,<7

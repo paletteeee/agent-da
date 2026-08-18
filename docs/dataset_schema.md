@@ -13,9 +13,10 @@ Each JSONL line is one deterministic controlled experiment instance.
 | initial_memories | array | Memory records present before replay |
 | operations | array | Ordered memory operations |
 | policies | array | Versioned read/write/search permissions |
-| failure_schedule | array | Step-indexed crash, revoke, delay, invalidate, or repair events |
-| provenance_edges | array | source_id -> derived_id relationships |
-| expected_outcome | object | Ground truth transaction state, committed IDs, repaired IDs, and target invariants |
+| failure_schedule | array | Causal trigger -> crash, revoke, delay, invalidate, or repair events |
+| provenance_edges | array | Initial/legacy graph metadata; generated W1-W8 instances leave this empty and derive edges from operations |
+| expected_outcome | object | Optional legacy compatibility field; never used as ground truth |
+| oracle | object | Reference executor output with allowed outcomes, safety invariants, and event trace |
 
 ## Memory object
 
@@ -40,6 +41,7 @@ A memory record contains:
 - get_by_id: direct ID lookup that must still enforce scope;
 - supersede: make a new memory replace an old memory;
 - propagate: record a derived/provenance update;
+- derive: read source memory and create a pending output; the reference executor creates `read_derive` edges from this operation;
 - invalidate: invalidate a source memory;
 - commit: commit buffered writes after policy revalidation.
 
@@ -90,14 +92,22 @@ Each instance/variant row contains the workload identity, transaction state, vio
 - scope_bypass_rate
 - latency
 - any_violation
+- oracle_version
+- oracle_match
+- allowed_outcome_count
+- oracle_mismatches
 
 ## Output artifacts
 
 The full experiment command writes:
 
 - data/generated_instances.jsonl
+- data/reference_oracles.jsonl
 - results/experiment_results.csv
 - results/summary.json
+- results/coverage.json
+- results/mutation_report.json
+- results/schedule_baseline.json
+- results/realism.json
 - results/figures/violation_rate.svg
 - results/figures/repair_recall.svg
-

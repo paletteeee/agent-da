@@ -16,7 +16,9 @@ KNOWN_WORKLOADS = (
     "provenance_chain_repair",
     "provenance_branch_repair",
     "mixed_stress",
+    "trace_grounded_replay",
 )
+CONFIG_WORKLOADS = KNOWN_WORKLOADS[:-1]
 
 REQUIRED_INSTANCE_KEYS = (
     "instance_id",
@@ -28,7 +30,6 @@ REQUIRED_INSTANCE_KEYS = (
     "policies",
     "failure_schedule",
     "provenance_edges",
-    "expected_outcome",
 )
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -64,7 +65,7 @@ def load_workload_config(path: Path) -> dict[str, Any]:
         loaded = _load_yaml_fallback(path)
     if not isinstance(loaded, dict) or not isinstance(loaded.get("workloads"), dict):
         raise ValueError("workload configuration must contain a workloads mapping")
-    missing = set(KNOWN_WORKLOADS) - set(loaded["workloads"])
+    missing = set(CONFIG_WORKLOADS) - set(loaded["workloads"])
     if missing:
         raise ValueError(f"workload configuration is missing: {sorted(missing)}")
     return loaded
@@ -102,7 +103,7 @@ def validate_instance(instance: dict[str, Any]) -> None:
     _require_list(instance, "policies")
     _require_list(instance, "failure_schedule")
     edges = _require_list(instance, "provenance_edges")
-    if not isinstance(instance["expected_outcome"], dict):
+    if "expected_outcome" in instance and not isinstance(instance["expected_outcome"], dict):
         raise ValueError("expected_outcome must be a mapping")
 
     memory_ids: set[str] = set()
@@ -127,8 +128,32 @@ def validate_instance(instance: dict[str, Any]) -> None:
         if not isinstance(step, int) or step < last_step:
             raise ValueError("operation steps must be non-decreasing integers")
         last_step = step
-        if operation.get("type") == "write" and operation.get("memory_id"):
-            memory_ids.add(str(operation["memory_id"]))
+        operation_type = operation.get("type")
+        output_id = operation.get("memory_id") or operation.get("output_id")
+        if operation_type in {"write", "stage_write", "derive", "propagate"} and output_id:
+            memory_ids.add(str(output_id))
+        source_ids = operation.get("source_ids", [])
+        if source_ids is not None and not isinstance(source_ids, list):
+            raise ValueError("operation source_ids must be a list")
+        for source_id in source_ids or []:
+            if source_id not in memory_ids:
+                raise ValueError(f"unknown operation source reference: {source_id}")
+        requested_id = operation.get("memory_id")
+        if operation_type in {"read", "get_by_id", "invalidate"} and requested_id and requested_id not in memory_ids:
+            raise ValueError(f"unknown operation memory reference: {requested_id}")
+
+    for event in instance["failure_schedule"]:
+        if not isinstance(event, dict):
+            raise ValueError("each failure event must be a mapping")
+        trigger = event.get("trigger")
+        if trigger is not None:
+            if not isinstance(trigger, dict) or set(trigger) - {"before_operation", "after_operation"}:
+                raise ValueError("failure trigger must use before_operation or after_operation")
+            operation_ids = set(operation_ids)
+            if not any(value in operation_ids for value in trigger.values()):
+                raise ValueError("failure trigger references an unknown operation")
+        elif "step" not in event:
+            raise ValueError("failure event requires trigger or step")
 
     for edge in edges:
         if not isinstance(edge, dict):

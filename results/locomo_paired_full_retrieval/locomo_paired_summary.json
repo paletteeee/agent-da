@@ -1,0 +1,81 @@
+{
+  "batch_size": 8,
+  "category_counts": {
+    "1": 282,
+    "2": 321,
+    "3": 96,
+    "4": 841,
+    "5": 446
+  },
+  "category_mean_f1": {
+    "1": 0.10417333738845837,
+    "2": 0.05387208031047621,
+    "3": 0.10723949019759303,
+    "4": 0.10132171006180493,
+    "5": 0.4125560538116592
+  },
+  "evaluator": "locomo.task_eval.evaluation.eval_question_answering",
+  "ingestion_completed": 10,
+  "max_context_chars": 24000,
+  "mean_f1": 0.1642378490151838,
+  "model": "qwen2.5-7b-instruct",
+  "native_event_count": 331,
+  "paired_native_memory": true,
+  "phase_rows": [
+    {
+      "ingestion_failure_code": null,
+      "ingestion_status": "completed",
+      "sample_id": "conv-26"
+    },
+    {
+      "ingestion_failure_code": null,
+      "ingestion_status": "completed",
+      "sample_id": "conv-30"
+    },
+    {
+      "ingestion_failure_code": null,
+      "ingestion_status": "completed",
+      "sample_id": "conv-41"
+    },
+    {
+      "ingestion_failure_code": null,
+      "ingestion_status": "completed",
+      "sample_id": "conv-42"
+    },
+    {
+      "ingestion_failure_code": null,
+      "ingestion_status": "completed",
+      "sample_id": "conv-43"
+    },
+    {
+      "ingestion_failure_code": null,
+      "ingestion_status": "completed",
+      "sample_id": "conv-44"
+    },
+    {
+      "ingestion_failure_code": null,
+      "ingestion_status": "completed",
+      "sample_id": "conv-47"
+    },
+    {
+      "ingestion_failure_code": null,
+      "ingestion_status": "completed",
+      "sample_id": "conv-48"
+    },
+    {
+      "ingestion_failure_code": null,
+      "ingestion_status": "completed",
+      "sample_id": "conv-49"
+    },
+    {
+      "ingestion_failure_code": null,
+      "ingestion_status": "completed",
+      "sample_id": "conv-50"
+    }
+  ],
+  "production_latency_claim": false,
+  "qa_batch_count": 253,
+  "question_count": 1986,
+  "sample_count": 10,
+  "status": "available"
+}

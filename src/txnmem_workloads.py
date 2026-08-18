@@ -89,42 +89,110 @@ def _base_instance(workload: str, seed: int, config: dict[str, Any]) -> dict[str
                 "effect": "allow",
                 "effective_step": 0,
             },
+            {
+                "policy_id": "p_derive",
+                "version": 1,
+                "agent_id": agent,
+                "action": "derive",
+                "scope": "tenant:user_001",
+                "effect": "allow",
+                "effective_step": 0,
+            },
+            {
+                "policy_id": "p_propagate",
+                "version": 1,
+                "agent_id": agent,
+                "action": "propagate",
+                "scope": "tenant:user_001",
+                "effect": "allow",
+                "effective_step": 0,
+            },
         ],
         "failure_schedule": [],
         "provenance_edges": [],
-        "expected_outcome": {},
     }
 
 
 def _generate_chain(instance: dict[str, Any], agent: str, depth: int) -> None:
     root_id = "m_root"
     instance["initial_memories"].append(_memory(root_id, agent_id=agent, value="source_v1"))
+    txn_id = "txn_derive"
+    operation_number = len(instance["operations"]) + 1
+    instance["operations"].append(_operation(operation_number, 1, agent, "begin_txn", txn_id=txn_id))
     previous = root_id
     for index in range(1, depth + 1):
         current = f"m_derived_{index}"
-        instance["initial_memories"].append(
-            _memory(current, agent_id=agent, value=f"derived_v{index}", derived_from=[previous])
+        read_number = len(instance["operations"]) + 1
+        instance["operations"].append(
+            _operation(
+                read_number,
+                len(instance["operations"]) + 1,
+                agent,
+                "read",
+                txn_id=txn_id,
+                memory_id=previous,
+                scope="tenant:user_001",
+            )
         )
-        instance["provenance_edges"].append(
-            {"source_id": previous, "derived_id": current, "relation": "derived_from"}
+        derive_number = len(instance["operations"]) + 1
+        instance["operations"].append(
+            _operation(
+                derive_number,
+                len(instance["operations"]) + 1,
+                agent,
+                "derive",
+                txn_id=txn_id,
+                memory_id=current,
+                source_ids=[previous],
+                value=f"derived_v{index}",
+                scope="tenant:user_001",
+            )
         )
         previous = current
+    instance["operations"].append(
+        _operation(len(instance["operations"]) + 1, len(instance["operations"]) + 1, agent, "commit", txn_id=txn_id)
+    )
 
 
 def _generate_branches(instance: dict[str, Any], agent: str, branch_factor: int, depth: int) -> None:
     root_id = "m_root"
     instance["initial_memories"].append(_memory(root_id, agent_id=agent, value="source_v1"))
+    txn_id = "txn_derive"
+    instance["operations"].append(_operation(1, 1, agent, "begin_txn", txn_id=txn_id))
+    operation_number = 1
     for branch in range(1, branch_factor + 1):
         previous = root_id
         for level in range(1, depth + 1):
             current = f"m_branch_{branch}_{level}"
-            instance["initial_memories"].append(
-                _memory(current, agent_id=agent, value=f"branch_{branch}_v{level}", derived_from=[previous])
+            operation_number += 1
+            instance["operations"].append(
+                _operation(
+                    operation_number,
+                    operation_number,
+                    agent,
+                    "read",
+                    txn_id=txn_id,
+                    memory_id=previous,
+                    scope="tenant:user_001",
+                )
             )
-            instance["provenance_edges"].append(
-                {"source_id": previous, "derived_id": current, "relation": "derived_from"}
+            operation_number += 1
+            instance["operations"].append(
+                _operation(
+                    operation_number,
+                    operation_number,
+                    agent,
+                    "derive",
+                    txn_id=txn_id,
+                    memory_id=current,
+                    source_ids=[previous],
+                    value=f"branch_{branch}_v{level}",
+                    scope="tenant:user_001",
+                )
             )
             previous = current
+    operation_number += 1
+    instance["operations"].append(_operation(operation_number, operation_number, agent, "commit", txn_id=txn_id))
 
 
 def generate_instance(
@@ -157,12 +225,14 @@ def generate_instance(
         instance["operations"].append(
             _operation(txn_size + 2, txn_size + 2, agent, "commit", txn_id="txn_001")
         )
-        instance["failure_schedule"] = [{"step": 2, "type": "crash", "target": "txn_001"}]
-        instance["expected_outcome"] = {
-            "transaction_state": "abort",
-            "committed_memory_ids": [],
-            "invariants": {"atomicity": True},
-        }
+        instance["failure_schedule"] = [
+            {
+                "trigger": {"after_operation": "op_002"},
+                "type": "crash",
+                "target": "txn_001",
+                "phase": "after_operation",
+            }
+        ]
 
     elif workload == "crash_during_commit":
         instance["operations"] = [
@@ -170,12 +240,9 @@ def generate_instance(
             _operation(2, 2, agent, "write", txn_id="txn_001", memory_id="m_commit", source_ids=[], policy_version=1),
             _operation(3, 3, agent, "commit", txn_id="txn_001"),
         ]
-        instance["failure_schedule"] = [{"step": 3, "type": "crash", "target": "commit"}]
-        instance["expected_outcome"] = {
-            "transaction_state": "abort",
-            "committed_memory_ids": [],
-            "invariants": {"recovery_consistency": True},
-        }
+        instance["failure_schedule"] = [
+            {"trigger": {"before_operation": "op_003"}, "type": "crash", "target": "commit"}
+        ]
 
     elif workload == "revoke_before_commit":
         instance["operations"] = [
@@ -183,12 +250,14 @@ def generate_instance(
             _operation(2, 2, agent, "write", txn_id="txn_001", memory_id="m_protected_write", source_ids=[], policy_version=1),
             _operation(3, 3, agent, "commit", txn_id="txn_001"),
         ]
-        instance["failure_schedule"] = [{"step": 3, "type": "revoke", "target": "write"}]
-        instance["expected_outcome"] = {
-            "transaction_state": "abort",
-            "committed_memory_ids": [],
-            "invariants": {"commit_authorization": True},
-        }
+        instance["failure_schedule"] = [
+            {
+                "trigger": {"before_operation": "op_003"},
+                "type": "revoke",
+                "target": "write",
+                "phase": "before_validate",
+            }
+        ]
 
     elif workload == "scope_bypass":
         private_id = "m_private"
@@ -210,11 +279,6 @@ def generate_instance(
                 "effective_step": 0,
             }
         )
-        instance["expected_outcome"] = {
-            "transaction_state": "completed",
-            "exposed_memory_ids": [],
-            "invariants": {"scope_safety": True},
-        }
 
     elif workload == "supersession_consistency":
         instance["initial_memories"] = [
@@ -227,30 +291,18 @@ def generate_instance(
             _operation(3, 3, agent, "supersede", txn_id="txn_super", old_memory_id="m_old", new_memory_id="m_new"),
             _operation(4, 4, agent, "commit", txn_id="txn_super"),
         ]
-        instance["expected_outcome"] = {
-            "transaction_state": "committed",
-            "active_memory_id": "m_new",
-            "superseded_memory_ids": ["m_old"],
-            "invariants": {"supersession_consistency": True},
-        }
 
     elif workload == "provenance_chain_repair":
         _generate_chain(instance, agent, int(merged["provenance_depth"]))
-        instance["operations"] = [_operation(1, 1, agent, "invalidate", memory_id="m_root", txn_id="txn_repair")]
-        instance["expected_outcome"] = {
-            "transaction_state": "repaired",
-            "root_memory_id": "m_root",
-            "invariants": {"provenance_closure": True},
-        }
+        instance["operations"].append(
+            _operation(len(instance["operations"]) + 1, len(instance["operations"]) + 1, agent, "invalidate", memory_id="m_root", txn_id="txn_repair")
+        )
 
     elif workload == "provenance_branch_repair":
         _generate_branches(instance, agent, int(merged["branch_factor"]), int(merged["provenance_depth"]))
-        instance["operations"] = [_operation(1, 1, agent, "invalidate", memory_id="m_root", txn_id="txn_repair")]
-        instance["expected_outcome"] = {
-            "transaction_state": "repaired",
-            "root_memory_id": "m_root",
-            "invariants": {"provenance_closure": True},
-        }
+        instance["operations"].append(
+            _operation(len(instance["operations"]) + 1, len(instance["operations"]) + 1, agent, "invalidate", memory_id="m_root", txn_id="txn_repair")
+        )
 
     elif workload == "mixed_stress":
         instance["initial_memories"].append(_memory("m_mix_root", agent_id=agent, value="mixed_root"))
@@ -261,14 +313,14 @@ def generate_instance(
             _operation(4, 4, agent, "commit", txn_id="txn_mix"),
         ]
         instance["failure_schedule"] = [
-            {"step": 3, "type": "revoke", "target": "write"},
-            {"step": 4, "type": "crash", "target": "commit"},
+            {
+                "trigger": {"before_operation": "op_003"},
+                "type": "revoke",
+                "target": "write",
+                "phase": "before_validate",
+            },
+            {"trigger": {"before_operation": "op_004"}, "type": "crash", "target": "commit"},
         ]
-        instance["expected_outcome"] = {
-            "transaction_state": "abort",
-            "committed_memory_ids": [],
-            "invariants": {"atomicity": True, "commit_authorization": True},
-        }
 
     validate_instance(instance)
     return instance

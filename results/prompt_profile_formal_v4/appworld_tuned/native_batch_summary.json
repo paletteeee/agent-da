@@ -1,0 +1,3699 @@
+{
+  "benchmark": "appworld",
+  "condition": {
+    "appworld_model_tool_strategy": "instruction_inferred",
+    "benchmark": "appworld",
+    "generation_parameters": "seed_temperature_and_max_steps_from_fixed_manifest",
+    "manifest_sha256": "df292af96d911a8264f3dc4f59ed15a4eff12632ab01b9d49ea51ecf7c3591e9",
+    "max_tokens": 1024,
+    "memory_backend": "sqlite",
+    "model_execution_mode": "remote_endpoint",
+    "model_id": "qwen2.5-7b-instruct",
+    "model_revision": "7b44fc9c62f21ea990dc4290f251f127c53a06eb1b9f170f75a20f1cd29f26b4",
+    "model_revision_status": "sha256",
+    "model_server_build": "vllm:0.8.5.post1",
+    "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+    "repetitions": 1,
+    "runner_evaluator_source_identity": {
+      "component_sha256": {
+        "appworld_common_evaluation": "6edb5d01459427bc6f7f1ab427349009ee20a6e0895e8036fdbaad394db1061a",
+        "appworld_environment": "6f01aa53fbb29c1aac751c766c55af438ce5a612048c36671dbb8e877ee955ac",
+        "appworld_evaluator": "bde9deb3b1e6ac0fa9819013729c0e817a97c90f579108fa032a90bba0ca51cb",
+        "txnmem_benchmark_bridge": "e8a94d6f1e1352f165f6fa0328c2d40277578388ab2d815e21d19ec131a68991",
+        "txnmem_experiment": "c49a03d8539adc5d1e1033e54eeee8b0bf9b77ff53cf222547d4e10ef3264859",
+        "txnmem_model_protocol": "373fe221a2b26b670418b5066585234ead25e045d854b5ce6ef5f4adbcbf4385",
+        "txnmem_real_experiment": "2f90d36926b0b85a8b30af688be6fb0093beaf4373e13ed8ca48610441ece51a"
+      },
+      "fingerprint": "4b7ab65cce46da47bdce231eeadc5f671a9e45adb7a92a187cf11679e251023d"
+    },
+    "runtime_version": "0.2.0.dev0",
+    "timeout_seconds": 300.0
+  },
+  "condition_fingerprint": "04118daf23c2e9c1db62cede3c896b89b09b240c8f639808e6bc8670f3df1950",
+  "dataset": "appworld",
+  "evaluation_error_count": 0,
+  "manifest_sha256": "df292af96d911a8264f3dc4f59ed15a4eff12632ab01b9d49ea51ecf7c3591e9",
+  "memory_backend": "sqlite",
+  "model_execution_mode": "remote_endpoint",
+  "model_id": "qwen2.5-7b-instruct",
+  "model_usage": {
+    "completion_tokens": 21520,
+    "prompt_tokens": 2150112,
+    "request_count": 116,
+    "responses_with_usage": 114,
+    "total_tokens": 2171632
+  },
+  "native_event_count": 125,
+  "official": {
+    "blocked_task_count": 0,
+    "dataset": "appworld",
+    "error_task_count": 0,
+    "evaluator_available_task_count": 20,
+    "event_count": 125,
+    "official_evaluator_status": "available",
+    "pass_count": 53,
+    "success_interval": {
+      "confidence": 0.95,
+      "estimate": 0.05,
+      "lower": 0.008881448800795402,
+      "successes": 1,
+      "trials": 20,
+      "upper": 0.23613119344674205
+    },
+    "successes": 1,
+    "task_count": 20,
+    "total_count": 112,
+    "trials": 20
+  },
+  "production_latency_claim": false,
+  "prompt_profile": "tuned",
+  "prompt_profiles": [
+    "tuned"
+  ],
+  "raw_reports_committed": false,
+  "raw_reports_location": "results/native_model_summary.json",
+  "repetitions": 1,
+  "task_count": 20,
+  "task_summaries": [
+    {
+      "authorized_benchmark_tool_count": 88,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "phone__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "venmo__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "page_index",
+            "page_limit",
+            "query",
+            "relationship"
+          ],
+          "name": "phone__search_contacts",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "amount",
+            "description",
+            "private",
+            "user_email"
+          ],
+          "name": "venmo__create_payment_request",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "answer",
+            "status"
+          ],
+          "name": "supervisor__complete_task",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 7,
+        "source_operation_count": 5,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 201,
+        "prompt_tokens": 31198,
+        "request_count": 2,
+        "responses_with_usage": 2,
+        "total_tokens": 31399
+      },
+      "model_visible_benchmark_tool_count": 88,
+      "model_visible_benchmark_tool_names_sha256": "62c59428ad64b3550f73315f30040ff55caac7e9b1da89dfe80d25c96f046a97",
+      "native_event_count": 5,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 6,
+        "status": "available",
+        "success": false,
+        "task_completed": true,
+        "total_count": 7
+      },
+      "preflight_contact_lookup_count": 1,
+      "preflight_login_count": 2,
+      "preflight_tool_count": 5,
+      "prompt_profile": "tuned",
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-024c982_1",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 88,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "phone__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "venmo__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "page_index",
+            "page_limit",
+            "query",
+            "relationship"
+          ],
+          "name": "phone__search_contacts",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "amount",
+            "description",
+            "private",
+            "receiver_email"
+          ],
+          "name": "venmo__create_transaction",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "transaction_id"
+          ],
+          "name": "venmo__show_transaction",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "answer",
+            "status"
+          ],
+          "name": "supervisor__complete_task",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 3
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 8,
+        "source_operation_count": 6,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 340,
+        "prompt_tokens": 45718,
+        "request_count": 3,
+        "responses_with_usage": 3,
+        "total_tokens": 46058
+      },
+      "model_visible_benchmark_tool_count": 88,
+      "model_visible_benchmark_tool_names_sha256": "62c59428ad64b3550f73315f30040ff55caac7e9b1da89dfe80d25c96f046a97",
+      "native_event_count": 6,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 1,
+        "status": "available",
+        "success": false,
+        "task_completed": true,
+        "total_count": 7
+      },
+      "preflight_contact_lookup_count": 1,
+      "preflight_login_count": 2,
+      "preflight_tool_count": 5,
+      "prompt_profile": "tuned",
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-024c982_2",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 88,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "phone__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "venmo__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "page_index",
+            "page_limit",
+            "query",
+            "relationship"
+          ],
+          "name": "phone__search_contacts",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "amount",
+            "description",
+            "private",
+            "user_email"
+          ],
+          "name": "venmo__create_payment_request",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "answer",
+            "status"
+          ],
+          "name": "supervisor__complete_task",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 7,
+        "source_operation_count": 5,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 189,
+        "prompt_tokens": 32186,
+        "request_count": 2,
+        "responses_with_usage": 2,
+        "total_tokens": 32375
+      },
+      "model_visible_benchmark_tool_count": 88,
+      "model_visible_benchmark_tool_names_sha256": "62c59428ad64b3550f73315f30040ff55caac7e9b1da89dfe80d25c96f046a97",
+      "native_event_count": 5,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": true,
+        "pass_count": 7,
+        "status": "available",
+        "success": true,
+        "task_completed": true,
+        "total_count": 7
+      },
+      "preflight_contact_lookup_count": 1,
+      "preflight_login_count": 2,
+      "preflight_tool_count": 5,
+      "prompt_profile": "tuned",
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-024c982_3",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 126,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "phone__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "spotify__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "page_index",
+            "page_limit",
+            "relationship"
+          ],
+          "name": "phone__search_contacts",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "is_public",
+            "page_index",
+            "page_limit",
+            "query",
+            "sort_by"
+          ],
+          "name": "spotify__show_playlist_library",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "page_index",
+            "page_limit",
+            "query",
+            "sort_by"
+          ],
+          "name": "spotify__show_playlist_library",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "playlist_id"
+          ],
+          "name": "spotify__show_playlist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 3
+        },
+        {
+          "argument_keys": [
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 5
+        },
+        {
+          "argument_keys": [
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 6
+        },
+        {
+          "argument_keys": [
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 7
+        },
+        {
+          "argument_keys": [
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 9
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "playlist_id",
+            "song_id"
+          ],
+          "name": "spotify__remove_song_from_playlist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 10
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "playlist_id",
+            "song_id"
+          ],
+          "name": "spotify__add_song_to_playlist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 11
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "playlist_id",
+            "song_id"
+          ],
+          "name": "spotify__add_song_to_playlist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 12
+        },
+        {
+          "argument_keys": [
+            "answer",
+            "status"
+          ],
+          "name": "supervisor__complete_task",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 13
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 15,
+        "source_operation_count": 13,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 3349,
+        "prompt_tokens": 341965,
+        "request_count": 13,
+        "responses_with_usage": 13,
+        "total_tokens": 345314
+      },
+      "model_visible_benchmark_tool_count": 126,
+      "model_visible_benchmark_tool_names_sha256": "277de6decec4f5c3607272252f98283abba59f58fbaaffa3edfbf101117c7c2d",
+      "native_event_count": 13,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 3,
+        "status": "available",
+        "success": false,
+        "task_completed": true,
+        "total_count": 5
+      },
+      "preflight_contact_lookup_count": 1,
+      "preflight_login_count": 2,
+      "preflight_tool_count": 5,
+      "prompt_profile": "tuned",
+      "status": "completed",
+      "steps": 13,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-042a9fc_1",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 126,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "phone__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "spotify__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "page_index",
+            "page_limit",
+            "relationship"
+          ],
+          "name": "phone__search_contacts",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "is_public",
+            "page_index",
+            "page_limit",
+            "query",
+            "sort_by"
+          ],
+          "name": "spotify__show_playlist_library",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "is_public",
+            "page_index",
+            "page_limit",
+            "query",
+            "sort_by"
+          ],
+          "name": "spotify__show_playlist_library",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "page_index",
+            "page_limit",
+            "query",
+            "sort_by"
+          ],
+          "name": "spotify__show_playlist_library",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 3
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "playlist_id"
+          ],
+          "name": "spotify__show_playlist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 4
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "playlist_id"
+          ],
+          "name": "spotify__show_playlist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 6
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "playlist_id"
+          ],
+          "name": "spotify__show_playlist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 8
+        },
+        {
+          "argument_keys": [
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 10
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "playlist_id",
+            "song_id"
+          ],
+          "name": "spotify__add_song_to_playlist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 11
+        },
+        {
+          "argument_keys": [
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 12
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "playlist_id",
+            "song_id"
+          ],
+          "name": "spotify__remove_song_from_playlist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 13
+        },
+        {
+          "argument_keys": [
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 14
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 14,
+        "source_operation_count": 12,
+        "trace_ground_truth_native": true
+      },
+      "failure_code": "model_http_error",
+      "model_usage": {
+        "completion_tokens": 3262,
+        "prompt_tokens": 371578,
+        "request_count": 15,
+        "responses_with_usage": 14,
+        "total_tokens": 374840
+      },
+      "model_visible_benchmark_tool_count": 126,
+      "model_visible_benchmark_tool_names_sha256": "277de6decec4f5c3607272252f98283abba59f58fbaaffa3edfbf101117c7c2d",
+      "native_event_count": 12,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 2,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 5
+      },
+      "preflight_contact_lookup_count": 1,
+      "preflight_login_count": 2,
+      "preflight_tool_count": 5,
+      "prompt_profile": "tuned",
+      "status": "failed",
+      "steps": 15,
+      "task_evaluator": {
+        "reasons": [
+          "run_not_completed"
+        ],
+        "success": false
+      },
+      "task_id": "appworld-042a9fc_2",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 126,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "phone__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "spotify__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "page_index",
+            "page_limit",
+            "relationship"
+          ],
+          "name": "phone__search_contacts",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "is_public",
+            "page_index",
+            "page_limit",
+            "query",
+            "sort_by"
+          ],
+          "name": "spotify__show_playlist_library",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "page_index",
+            "page_limit",
+            "query",
+            "sort_by"
+          ],
+          "name": "spotify__show_playlist_library",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "playlist_id"
+          ],
+          "name": "spotify__show_playlist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 3
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "message",
+            "phone_number"
+          ],
+          "name": "phone__send_text_message",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 5
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "message",
+            "phone_number"
+          ],
+          "name": "phone__send_text_message",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 6
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "message",
+            "phone_number"
+          ],
+          "name": "phone__send_text_message",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 7
+        },
+        {
+          "argument_keys": [
+            "status"
+          ],
+          "name": "supervisor__complete_task",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 9
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 11,
+        "source_operation_count": 9,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 1726,
+        "prompt_tokens": 214067,
+        "request_count": 9,
+        "responses_with_usage": 9,
+        "total_tokens": 215793
+      },
+      "model_visible_benchmark_tool_count": 126,
+      "model_visible_benchmark_tool_names_sha256": "277de6decec4f5c3607272252f98283abba59f58fbaaffa3edfbf101117c7c2d",
+      "native_event_count": 9,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 1,
+        "status": "available",
+        "success": false,
+        "task_completed": true,
+        "total_count": 5
+      },
+      "preflight_contact_lookup_count": 1,
+      "preflight_login_count": 2,
+      "preflight_tool_count": 5,
+      "prompt_profile": "tuned",
+      "status": "completed",
+      "steps": 9,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-042a9fc_3",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "spotify__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "min_follower_count",
+            "query"
+          ],
+          "name": "spotify__search_artists",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "artist_id"
+          ],
+          "name": "spotify__follow_artist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "artist_id"
+          ],
+          "name": "spotify__follow_artist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "artist_id"
+          ],
+          "name": "spotify__follow_artist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "answer",
+            "status"
+          ],
+          "name": "supervisor__complete_task",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 3
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 8,
+        "source_operation_count": 6,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 616,
+        "prompt_tokens": 48237,
+        "request_count": 3,
+        "responses_with_usage": 3,
+        "total_tokens": 48853
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "15be8d563db54a668a090fa4ae5285042775f0ffbf865264d7ad410d2e4fbecc",
+      "native_event_count": 6,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 4,
+        "status": "available",
+        "success": false,
+        "task_completed": true,
+        "total_count": 5
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 1,
+      "preflight_tool_count": 3,
+      "prompt_profile": "tuned",
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-07b42fd_1",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "spotify__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "min_follower_count",
+            "query"
+          ],
+          "name": "spotify__search_artists",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "artist_id"
+          ],
+          "name": "spotify__follow_artist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "artist_id"
+          ],
+          "name": "spotify__follow_artist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "answer",
+            "status"
+          ],
+          "name": "supervisor__complete_task",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 4
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 7,
+        "source_operation_count": 5,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 580,
+        "prompt_tokens": 64533,
+        "request_count": 4,
+        "responses_with_usage": 4,
+        "total_tokens": 65113
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "15be8d563db54a668a090fa4ae5285042775f0ffbf865264d7ad410d2e4fbecc",
+      "native_event_count": 5,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 4,
+        "status": "available",
+        "success": false,
+        "task_completed": true,
+        "total_count": 5
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 1,
+      "preflight_tool_count": 3,
+      "prompt_profile": "tuned",
+      "status": "completed",
+      "steps": 4,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-07b42fd_2",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "spotify__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "min_follower_count",
+            "query"
+          ],
+          "name": "spotify__search_artists",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "artist_id"
+          ],
+          "name": "spotify__follow_artist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "artist_id"
+          ],
+          "name": "spotify__follow_artist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "artist_id"
+          ],
+          "name": "spotify__follow_artist",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "answer",
+            "status"
+          ],
+          "name": "supervisor__complete_task",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 3
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 8,
+        "source_operation_count": 6,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 631,
+        "prompt_tokens": 48289,
+        "request_count": 3,
+        "responses_with_usage": 3,
+        "total_tokens": 48920
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "15be8d563db54a668a090fa4ae5285042775f0ffbf865264d7ad410d2e4fbecc",
+      "native_event_count": 6,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 4,
+        "status": "available",
+        "success": false,
+        "task_completed": true,
+        "total_count": 5
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 1,
+      "preflight_tool_count": 3,
+      "prompt_profile": "tuned",
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-07b42fd_3",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 7,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "access_token"
+          ],
+          "name": "amazon__show_cart",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        }
+      ],
+      "failure_code": "unauthorized_tool",
+      "model_usage": {
+        "completion_tokens": 83,
+        "prompt_tokens": 4078,
+        "request_count": 2,
+        "responses_with_usage": 2,
+        "total_tokens": 4161
+      },
+      "model_visible_benchmark_tool_count": 7,
+      "model_visible_benchmark_tool_names_sha256": "4f2707c1b0c86407bfdd8d53d8386b5fc980df174e20f485d4de2c282dab999f",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 0,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 6
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "tuned",
+      "status": "failed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [
+          "run_not_completed"
+        ],
+        "success": false
+      },
+      "task_id": "appworld-07bb666_1",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 1
+    },
+    {
+      "authorized_benchmark_tool_count": 7,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "access_token"
+          ],
+          "name": "amazon__show_wish_list",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token"
+          ],
+          "name": "amazon__show_cart",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token"
+          ],
+          "name": "amazon__show_wish_list",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 3
+        },
+        {
+          "argument_keys": [
+            "access_token"
+          ],
+          "name": "amazon__show_wish_list",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 4
+        },
+        {
+          "argument_keys": [
+            "access_token"
+          ],
+          "name": "amazon__show_wish_list",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 5
+        }
+      ],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 329,
+        "prompt_tokens": 13545,
+        "request_count": 6,
+        "responses_with_usage": 6,
+        "total_tokens": 13874
+      },
+      "model_visible_benchmark_tool_count": 7,
+      "model_visible_benchmark_tool_names_sha256": "4f2707c1b0c86407bfdd8d53d8386b5fc980df174e20f485d4de2c282dab999f",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 0,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 6
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "tuned",
+      "status": "completed",
+      "steps": 6,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-07bb666_2",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 7,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "access_token"
+          ],
+          "name": "amazon__show_cart",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        }
+      ],
+      "failure_code": "unauthorized_tool",
+      "model_usage": {
+        "completion_tokens": 83,
+        "prompt_tokens": 4078,
+        "request_count": 2,
+        "responses_with_usage": 2,
+        "total_tokens": 4161
+      },
+      "model_visible_benchmark_tool_count": 7,
+      "model_visible_benchmark_tool_names_sha256": "4f2707c1b0c86407bfdd8d53d8386b5fc980df174e20f485d4de2c282dab999f",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 0,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 6
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "tuned",
+      "status": "failed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [
+          "run_not_completed"
+        ],
+        "success": false
+      },
+      "task_id": "appworld-07bb666_3",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 1
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "amazon__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "simple_note__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "query"
+          ],
+          "name": "simple_note__search_notes",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "note_id"
+          ],
+          "name": "simple_note__show_note",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token"
+          ],
+          "name": "amazon__show_addresses",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 3
+        },
+        {
+          "argument_keys": [
+            "access_token"
+          ],
+          "name": "amazon__show_payment_cards",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 4
+        },
+        {
+          "argument_keys": [
+            "product_id"
+          ],
+          "name": "amazon__show_product",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 5
+        },
+        {
+          "argument_keys": [
+            "query"
+          ],
+          "name": "amazon__search_products",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 6
+        },
+        {
+          "argument_keys": [
+            "query"
+          ],
+          "name": "amazon__search_products",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 7
+        },
+        {
+          "argument_keys": [
+            "query"
+          ],
+          "name": "amazon__search_products",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 8
+        },
+        {
+          "argument_keys": [
+            "query"
+          ],
+          "name": "amazon__search_products",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 9
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "address_id",
+            "payment_card_id"
+          ],
+          "name": "amazon__place_order",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 10
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "card_name",
+            "payment_card_id"
+          ],
+          "name": "amazon__update_payment_card",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 11
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "address_id",
+            "payment_card_id"
+          ],
+          "name": "amazon__place_order",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 12
+        },
+        {
+          "argument_keys": [
+            "answer",
+            "status"
+          ],
+          "name": "supervisor__complete_task",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 13
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 15,
+        "source_operation_count": 13,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 2724,
+        "prompt_tokens": 238752,
+        "request_count": 13,
+        "responses_with_usage": 13,
+        "total_tokens": 241476
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "e917e43d5e554e31280e01804859bbb0a249e8d7790b8c7f4c6e29e8893aaf4b",
+      "native_event_count": 13,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 5,
+        "status": "available",
+        "success": false,
+        "task_completed": true,
+        "total_count": 7
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 2,
+      "preflight_tool_count": 4,
+      "prompt_profile": "tuned",
+      "status": "completed",
+      "steps": 13,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-099174d_1",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "amazon__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "simple_note__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "query"
+          ],
+          "name": "simple_note__search_notes",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "note_id"
+          ],
+          "name": "simple_note__show_note",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 6,
+        "source_operation_count": 4,
+        "trace_ground_truth_native": true
+      },
+      "failure_code": "unauthorized_tool",
+      "model_usage": {
+        "completion_tokens": 448,
+        "prompt_tokens": 45817,
+        "request_count": 3,
+        "responses_with_usage": 3,
+        "total_tokens": 46265
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "e917e43d5e554e31280e01804859bbb0a249e8d7790b8c7f4c6e29e8893aaf4b",
+      "native_event_count": 4,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 1,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 7
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 2,
+      "preflight_tool_count": 4,
+      "prompt_profile": "tuned",
+      "status": "failed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [
+          "run_not_completed"
+        ],
+        "success": false
+      },
+      "task_id": "appworld-099174d_2",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 1,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "amazon__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "simple_note__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "query"
+          ],
+          "name": "simple_note__search_notes",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "note_id"
+          ],
+          "name": "simple_note__show_note",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 6,
+        "source_operation_count": 4,
+        "trace_ground_truth_native": true
+      },
+      "failure_code": "unauthorized_tool",
+      "model_usage": {
+        "completion_tokens": 445,
+        "prompt_tokens": 45823,
+        "request_count": 3,
+        "responses_with_usage": 3,
+        "total_tokens": 46268
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "e917e43d5e554e31280e01804859bbb0a249e8d7790b8c7f4c6e29e8893aaf4b",
+      "native_event_count": 4,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 1,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 7
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 2,
+      "preflight_tool_count": 4,
+      "prompt_profile": "tuned",
+      "status": "failed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [
+          "run_not_completed"
+        ],
+        "success": false
+      },
+      "task_id": "appworld-099174d_3",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 1,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 52,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "gmail__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "label",
+            "read",
+            "starred"
+          ],
+          "name": "gmail__show_inbox_threads",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "label",
+            "read",
+            "starred"
+          ],
+          "name": "gmail__show_outbox_threads",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "answer",
+            "status"
+          ],
+          "name": "supervisor__complete_task",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 3
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 6,
+        "source_operation_count": 4,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 423,
+        "prompt_tokens": 34896,
+        "request_count": 3,
+        "responses_with_usage": 3,
+        "total_tokens": 35319
+      },
+      "model_visible_benchmark_tool_count": 52,
+      "model_visible_benchmark_tool_names_sha256": "b1ea40db4a9901541952ac96fa31a085025a99fb24bbada66daae8d370064d8d",
+      "native_event_count": 4,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 4,
+        "status": "available",
+        "success": false,
+        "task_completed": true,
+        "total_count": 6
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 1,
+      "preflight_tool_count": 3,
+      "prompt_profile": "tuned",
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-09ac073_1",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 52,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "gmail__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "read"
+          ],
+          "name": "gmail__show_inbox_threads",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "read"
+          ],
+          "name": "gmail__show_outbox_threads",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "email_thread_id"
+          ],
+          "name": "gmail__delete_thread",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "email_thread_id"
+          ],
+          "name": "gmail__delete_thread",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "email_thread_id"
+          ],
+          "name": "gmail__delete_thread",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "email_thread_id"
+          ],
+          "name": "gmail__delete_thread",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "email_thread_id"
+          ],
+          "name": "gmail__delete_thread",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "read"
+          ],
+          "name": "gmail__show_inbox_threads",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 3
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "read"
+          ],
+          "name": "gmail__show_outbox_threads",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 3
+        },
+        {
+          "argument_keys": [
+            "answer",
+            "status"
+          ],
+          "name": "supervisor__complete_task",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 4
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 13,
+        "source_operation_count": 11,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 1882,
+        "prompt_tokens": 59630,
+        "request_count": 4,
+        "responses_with_usage": 4,
+        "total_tokens": 61512
+      },
+      "model_visible_benchmark_tool_count": 52,
+      "model_visible_benchmark_tool_names_sha256": "b1ea40db4a9901541952ac96fa31a085025a99fb24bbada66daae8d370064d8d",
+      "native_event_count": 11,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 4,
+        "status": "available",
+        "success": false,
+        "task_completed": true,
+        "total_count": 6
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 1,
+      "preflight_tool_count": 3,
+      "prompt_profile": "tuned",
+      "status": "completed",
+      "steps": 4,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-09ac073_2",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 52,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "gmail__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "read"
+          ],
+          "name": "gmail__show_inbox_threads",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "read"
+          ],
+          "name": "gmail__show_outbox_threads",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "answer",
+            "status"
+          ],
+          "name": "supervisor__complete_task",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 3
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 6,
+        "source_operation_count": 4,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 1324,
+        "prompt_tokens": 41687,
+        "request_count": 3,
+        "responses_with_usage": 3,
+        "total_tokens": 43011
+      },
+      "model_visible_benchmark_tool_count": 52,
+      "model_visible_benchmark_tool_names_sha256": "b1ea40db4a9901541952ac96fa31a085025a99fb24bbada66daae8d370064d8d",
+      "native_event_count": 4,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 4,
+        "status": "available",
+        "success": false,
+        "task_completed": true,
+        "total_count": 6
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 1,
+      "preflight_tool_count": 3,
+      "prompt_profile": "tuned",
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-09ac073_3",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "spotify__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "page_index",
+            "page_limit",
+            "query",
+            "sort_by"
+          ],
+          "name": "spotify__search_artists",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_artists",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "artist_id",
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 3
+        },
+        {
+          "argument_keys": [
+            "artist_id",
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 4
+        },
+        {
+          "argument_keys": [
+            "artist_id",
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 5
+        },
+        {
+          "argument_keys": [
+            "artist_id",
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 6
+        },
+        {
+          "argument_keys": [
+            "artist_id",
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 7
+        },
+        {
+          "argument_keys": [
+            "artist_id",
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 8
+        },
+        {
+          "argument_keys": [
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_artists",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 10
+        },
+        {
+          "argument_keys": [
+            "artist_id",
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 11
+        },
+        {
+          "argument_keys": [
+            "artist_id",
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 12
+        },
+        {
+          "argument_keys": [
+            "artist_id",
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 13
+        },
+        {
+          "argument_keys": [
+            "artist_id",
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 14
+        },
+        {
+          "argument_keys": [
+            "artist_id",
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 15
+        },
+        {
+          "argument_keys": [
+            "artist_id",
+            "page_index",
+            "page_limit",
+            "query"
+          ],
+          "name": "spotify__search_songs",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 16
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 17,
+        "source_operation_count": 15,
+        "trace_ground_truth_native": true
+      },
+      "failure_code": "model_http_error",
+      "model_usage": {
+        "completion_tokens": 1626,
+        "prompt_tokens": 365813,
+        "request_count": 17,
+        "responses_with_usage": 16,
+        "total_tokens": 367439
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "15be8d563db54a668a090fa4ae5285042775f0ffbf865264d7ad410d2e4fbecc",
+      "native_event_count": 15,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 1,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 2
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 1,
+      "preflight_tool_count": 3,
+      "prompt_profile": "tuned",
+      "status": "failed",
+      "steps": 17,
+      "task_evaluator": {
+        "reasons": [
+          "run_not_completed"
+        ],
+        "success": false
+      },
+      "task_id": "appworld-09b0ee6_1",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_profile",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [],
+          "name": "supervisor__show_account_passwords",
+          "observation_status": "ok",
+          "origin": "trusted_preflight",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "spotify__login",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 0
+        },
+        {
+          "argument_keys": [
+            "page_index",
+            "page_limit",
+            "query",
+            "sort_by"
+          ],
+          "name": "spotify__search_artists",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "page_index",
+            "page_limit",
+            "query",
+            "sort_by"
+          ],
+          "name": "spotify__search_artists",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        },
+        {
+          "argument_keys": [
+            "page_index",
+            "page_limit",
+            "query",
+            "sort_by"
+          ],
+          "name": "spotify__search_artists",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 3
+        },
+        {
+          "argument_keys": [
+            "page_index",
+            "page_limit",
+            "query",
+            "sort_by"
+          ],
+          "name": "spotify__search_artists",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 4
+        },
+        {
+          "argument_keys": [
+            "answer",
+            "status"
+          ],
+          "name": "supervisor__complete_task",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 6
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 5,
+        "source_operation_count": 3,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 1259,
+        "prompt_tokens": 98222,
+        "request_count": 6,
+        "responses_with_usage": 6,
+        "total_tokens": 99481
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "15be8d563db54a668a090fa4ae5285042775f0ffbf865264d7ad410d2e4fbecc",
+      "native_event_count": 3,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 1,
+        "status": "available",
+        "success": false,
+        "task_completed": true,
+        "total_count": 2
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 1,
+      "preflight_tool_count": 3,
+      "prompt_profile": "tuned",
+      "status": "completed",
+      "steps": 6,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-09b0ee6_2",
+      "trusted_preflight_enabled": true,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    }
+  ],
+  "token_usage_complete": false,
+  "trace_ground_truth_native": true,
+  "treatment": {
+    "app_tool_strategy": "instruction_inferred",
+    "prompt_profile": "tuned",
+    "trusted_preflight_enabled": true
+  },
+  "unique_task_count": 20,
+  "variants": {
+    "Naive": {
+      "count": 17,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 17,
+      "violating": 0
+    },
+    "TxnMem": {
+      "count": 17,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 17,
+      "violating": 0
+    },
+    "TxnMem-NoPolicyCommit": {
+      "count": 17,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 17,
+      "violating": 0
+    },
+    "TxnMem-NoRepair": {
+      "count": 17,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 17,
+      "violating": 0
+    },
+    "TxnMem-NoTxn": {
+      "count": 17,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 17,
+      "violating": 0
+    }
+  }
+}

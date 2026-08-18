@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from typing import Any
 
+from txnmem_differential import compare_result_to_oracle
+
 
 VIOLATION_ORDER = (
     "atomicity_violation",
@@ -18,9 +20,12 @@ VIOLATION_ORDER = (
 )
 
 
-def _descendants(instance: dict[str, Any], source_id: str) -> set[str]:
+def _descendants(
+    instance: dict[str, Any], source_id: str, result: dict[str, Any] | None = None
+) -> set[str]:
     children: dict[str, list[str]] = defaultdict(list)
-    for edge in instance.get("provenance_edges", []):
+    edges = (result or {}).get("provenance_edges") or instance.get("provenance_edges", [])
+    for edge in edges:
         children[edge["source_id"]].append(edge["derived_id"])
     found: set[str] = set()
     queue = deque(children.get(source_id, []))
@@ -38,7 +43,6 @@ def check_invariants(instance: dict[str, Any], result: dict[str, Any]) -> list[s
 
     violations: list[str] = []
     workload = instance["workload"]
-    expected = instance.get("expected_outcome", {})
     committed = result.get("committed_memory_ids", [])
     final_memories = result.get("final_memories", {})
 
@@ -52,8 +56,6 @@ def check_invariants(instance: dict[str, Any], result: dict[str, Any]) -> list[s
             add("atomicity_violation")
         elif result.get("transaction_state") == "committed" and len(committed) not in (0, expected_size):
             add("atomicity_violation")
-        if expected.get("transaction_state") == "abort" and result.get("transaction_state") == "committed":
-            add("unexpected_commit")
 
     if workload == "crash_during_commit":
         if result.get("transaction_state") == "partial_commit":
@@ -89,12 +91,39 @@ def check_invariants(instance: dict[str, Any], result: dict[str, Any]) -> list[s
             add("supersession_consistency_violation")
 
     if workload in {"provenance_chain_repair", "provenance_branch_repair"}:
-        root_id = expected.get("root_memory_id", "m_root")
-        for memory_id in _descendants(instance, root_id):
+        root_id = next(
+            (
+                operation.get("memory_id")
+                for operation in instance.get("operations", [])
+                if operation.get("type") == "invalidate"
+            ),
+            "m_root",
+        )
+        for memory_id in _descendants(instance, root_id, result):
             memory = final_memories.get(memory_id)
             if memory is not None and memory.get("status") == "active":
                 add("provenance_closure_violation")
                 break
+
+    comparison = compare_result_to_oracle(instance, result)
+    if not comparison["matches"]:
+        mismatches = set(comparison["mismatches"])
+        if "visible_memory_ids" in mismatches:
+            if workload == "scope_bypass":
+                add("scope_leak_violation")
+        if "invalid_memory_ids" in mismatches:
+            if workload in {"provenance_chain_repair", "provenance_branch_repair"}:
+                add("provenance_closure_violation")
+        if "superseded_memory_ids" in mismatches:
+            if workload == "supersession_consistency":
+                add("supersession_consistency_violation")
+        if "committed_memory_ids" in mismatches or "transaction_state" in mismatches:
+            if workload in {"atomic_multi_write", "mixed_stress"}:
+                add("atomicity_violation")
+            elif workload == "revoke_before_commit":
+                add("invalid_commit_violation")
+            elif workload == "crash_during_commit":
+                add("recovery_consistency_violation")
 
     rank = {name: index for index, name in enumerate(VIOLATION_ORDER)}
     return sorted(violations, key=lambda name: rank.get(name, len(rank)))

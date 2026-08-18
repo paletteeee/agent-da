@@ -1,0 +1,123 @@
+{
+  "benchmark": "locomo",
+  "completed_task_count": 1,
+  "evaluation_error_count": 0,
+  "manifest_sha256": "8706d53e2f76fd567d2e7c32c25ae65fa447599ccfc5f81cfd945a730b500508",
+  "memory_backend": "sqlite",
+  "model_execution_mode": "remote_endpoint",
+  "model_id": "qwen2.5-7b-instruct",
+  "native_event_count": 2,
+  "production_latency_claim": false,
+  "raw_trace_path": "results/native_memory_replay/locomo_ordered/data/native_model_traces.jsonl",
+  "task_count": 1,
+  "task_summaries": [
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 4,
+        "source_operation_count": 2,
+        "trace_ground_truth_native": true
+      },
+      "official": {
+        "official_evaluator": "locomo_qa_not_available_offline"
+      },
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "locomo-memory-conv-26",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    }
+  ],
+  "trace_ground_truth_native": true,
+  "variants": {
+    "Naive": {
+      "count": 1,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 1,
+      "violating": 0
+    },
+    "TxnMem": {
+      "count": 1,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 1,
+      "violating": 0
+    },
+    "TxnMem-NoPolicyCommit": {
+      "count": 1,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 1,
+      "violating": 0
+    },
+    "TxnMem-NoRepair": {
+      "count": 1,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 1,
+      "violating": 0
+    },
+    "TxnMem-NoTxn": {
+      "count": 1,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 1,
+      "violating": 0
+    }
+  }
+}

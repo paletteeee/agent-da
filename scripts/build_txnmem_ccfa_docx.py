@@ -1,0 +1,901 @@
+#!/usr/bin/env python3
+"""Deterministically build the anonymous TxnMem CCF-A manuscript DOCX.
+
+Design preset: narrative_proposal_academic (named override of ``narrative_proposal``).
+The constants below are intentionally data-like so Task 7 can audit the approved
+page geometry, font fallbacks, academic header, table and accessibility decisions.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import zipfile
+from pathlib import Path
+from typing import Callable, Iterable
+from xml.etree import ElementTree as ET
+
+from docx import Document
+from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Inches, Pt, RGBColor
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from txnmem_paper_projection import controlled_result_rows
+
+
+# Task-6-auditable approved design data: narrative_proposal_academic.
+DESIGN = {
+    "preset": "narrative_proposal_academic",
+    "page": {"size": "Letter", "margins_in": 1.0, "content_width_dxa": 9360,
+             "header_footer_distance_in": 0.492},
+    "fonts": {"body": "Calibri", "fallbacks": ["Arial Unicode MS", "Hiragino Sans GB"]},
+    "body": {"size_pt": 11, "alignment": "justified", "after_pt": 8, "line_dxa": 320},
+    "headings": {"h1": [16, "2E74B5", 18, 10], "h2": [13, "2E74B5", 12, 6],
+                 "h3": [12, "1F4D78", 8, 4]},
+    "lists": {"left_dxa": 540, "hanging_dxa": 280, "after_pt": 4, "line_dxa": 290},
+    "tables": {"width_dxa": 9360, "indent_dxa": 120,
+               "cell_margins_dxa": {"top": 80, "bottom": 80, "start": 120, "end": 120},
+               "header_fill": "F4F6F9"},
+    "captions": {"after_pt": 6, "size_pt": 10},
+    "furniture": {"header": "TxnMem", "footer": "PAGE", "first_page_cover": False},
+    "overrides": {
+        "academic_title": "Chinese title + recommended English title + anonymous marker; no cover or border",
+        "academic_header": "short title only; page-number footer; no commercial report chrome",
+        "table_geometry": "all configured tables use fixed DXA widths, header repeat and padding",
+    },
+}
+
+TITLE = "TxnMem：面向多 Agent 共享记忆的策略感知事务运行时"
+ENGLISH_TITLE = "TxnMem: A Policy-Aware Transactional Runtime for Shared Memory in Multi-Agent Systems"
+SHORT_TITLE = "TxnMem"
+W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+NS = {"w": W_NS}
+MARKER = re.compile(r"^`?\[\[(FIG|TABLE):([a-z_]+)\]\]`?$")
+HEADING = re.compile(r"^(#{1,3})\s+(.+?)\s*$")
+SVG_RASTER_SCALE = 2
+
+
+def _load(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _set_run_font(run, *, name: str = "Calibri", size: float | None = None,
+                  color: str | None = None, bold: bool | None = None) -> None:
+    run.font.name = name
+    rfonts = run._element.get_or_add_rPr().get_or_add_rFonts()
+    rfonts.set(qn("w:ascii"), name)
+    rfonts.set(qn("w:hAnsi"), name)
+    # Arial Unicode MS is retained as the approved fallback in DESIGN; Hiragino
+    # is the available macOS CJK face and must be explicit for LibreOffice.
+    rfonts.set(qn("w:eastAsia"), "Hiragino Sans GB")
+    rfonts.set(qn("w:cs"), name)
+    if size is not None:
+        run.font.size = Pt(size)
+    if color:
+        run.font.color.rgb = RGBColor.from_string(color)
+    if bold is not None:
+        run.bold = bold
+
+
+def _set_style_font(style, *, size: float, color: str = "000000", bold: bool = False) -> None:
+    style.font.name = "Calibri"
+    style._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "Hiragino Sans GB")
+    style.font.size = Pt(size)
+    style.font.color.rgb = RGBColor.from_string(color)
+    style.font.bold = bold
+
+
+def _spacing(paragraph_format, before: float, after: float, line_dxa: int) -> None:
+    paragraph_format.space_before = Pt(before)
+    paragraph_format.space_after = Pt(after)
+    paragraph_format.line_spacing = line_dxa / 240
+
+
+def _configure_styles(doc: Document) -> None:
+    normal = doc.styles["Normal"]
+    _set_style_font(normal, size=11)
+    normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    _spacing(normal.paragraph_format, 0, 8, 320)
+
+    for name, values in (("Heading 1", DESIGN["headings"]["h1"]),
+                         ("Heading 2", DESIGN["headings"]["h2"]),
+                         ("Heading 3", DESIGN["headings"]["h3"])):
+        size, color, before, after = values
+        style = doc.styles[name]
+        _set_style_font(style, size=size, color=color, bold=True)
+        _spacing(style.paragraph_format, before, after, 240)
+        style.paragraph_format.keep_with_next = True
+
+    caption = doc.styles["Caption"]
+    _set_style_font(caption, size=10, color="404040")
+    caption.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _spacing(caption.paragraph_format, 4, 6, 240)
+    caption.paragraph_format.keep_with_next = True
+
+    code = doc.styles.add_style("TxnMem Code", WD_STYLE_TYPE.PARAGRAPH)
+    _set_style_font(code, size=9.5, color="1F2937")
+    code.paragraph_format.left_indent = Inches(0.25)
+    code.paragraph_format.right_indent = Inches(0.25)
+    _spacing(code.paragraph_format, 3, 6, 220)
+
+    references = doc.styles.add_style("TxnMem Reference", WD_STYLE_TYPE.PARAGRAPH)
+    _set_style_font(references, size=10.5)
+    references.paragraph_format.left_indent = Inches(0.32)
+    references.paragraph_format.first_line_indent = Inches(-0.32)
+    _spacing(references.paragraph_format, 0, 4, 260)
+
+    appendix_note = doc.styles.add_style("TxnMem Appendix Note", WD_STYLE_TYPE.PARAGRAPH)
+    _set_style_font(appendix_note, size=9.5)
+    _spacing(appendix_note.paragraph_format, 0, 0, 240)
+
+
+def _set_cell_shading(cell, fill: str) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+    shd = tc_pr.find(qn("w:shd"))
+    if shd is None:
+        shd = OxmlElement("w:shd")
+        tc_pr.append(shd)
+    shd.set(qn("w:fill"), fill)
+
+
+def _set_cell_margins(cell, *, compact: bool = False) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+    tc_mar = tc_pr.first_child_found_in("w:tcMar")
+    if tc_mar is None:
+        tc_mar = OxmlElement("w:tcMar")
+        tc_pr.append(tc_mar)
+    margins = DESIGN["tables"]["cell_margins_dxa"].copy()
+    if compact:
+        margins.update({"top": 0, "bottom": 0})
+    for side, value in margins.items():
+        node = tc_mar.find(qn(f"w:{side}"))
+        if node is None:
+            node = OxmlElement(f"w:{side}")
+            tc_mar.append(node)
+        node.set(qn("w:w"), str(value))
+        node.set(qn("w:type"), "dxa")
+
+
+def _set_repeat_header(row) -> None:
+    tr_pr = row._tr.get_or_add_trPr()
+    header = OxmlElement("w:tblHeader")
+    header.set(qn("w:val"), "true")
+    tr_pr.append(header)
+
+
+def _prevent_row_split(row) -> None:
+    """Keep each table row intact when a multi-page table is laid out."""
+    tr_pr = row._tr.get_or_add_trPr()
+    cant_split = OxmlElement("w:cantSplit")
+    cant_split.set(qn("w:val"), "true")
+    tr_pr.append(cant_split)
+
+
+def _set_table_geometry(table, widths: list[int], *, compact: bool = False) -> None:
+    table.autofit = False
+    tbl_pr = table._tbl.tblPr
+    tbl_w = tbl_pr.first_child_found_in("w:tblW")
+    tbl_w.set(qn("w:w"), str(sum(widths)))
+    tbl_w.set(qn("w:type"), "dxa")
+    layout = tbl_pr.first_child_found_in("w:tblLayout")
+    if layout is None:
+        layout = OxmlElement("w:tblLayout")
+        tbl_pr.append(layout)
+    layout.set(qn("w:type"), "fixed")
+    indent = tbl_pr.first_child_found_in("w:tblInd")
+    if indent is None:
+        indent = OxmlElement("w:tblInd")
+        tbl_pr.append(indent)
+    indent.set(qn("w:w"), str(DESIGN["tables"]["indent_dxa"]))
+    indent.set(qn("w:type"), "dxa")
+    grid = table._tbl.tblGrid
+    for col, width in zip(grid.gridCol_lst, widths):
+        col.set(qn("w:w"), str(width))
+    for row in table.rows:
+        _prevent_row_split(row)
+        for cell, width in zip(row.cells, widths):
+            cell.width = width
+            tc_w = cell._tc.get_or_add_tcPr().first_child_found_in("w:tcW")
+            tc_w.set(qn("w:w"), str(width))
+            tc_w.set(qn("w:type"), "dxa")
+            _set_cell_margins(cell, compact=compact)
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+
+
+def _column_widths(headers: list[str], rows: list[list[str]]) -> list[int]:
+    weights = [max(3, len(header), *(len(row[index]) for row in rows if index < len(row)))
+               for index, header in enumerate(headers)]
+    total = sum(weights)
+    widths = [max(900, int(9360 * weight / total)) for weight in weights]
+    widths[-1] += 9360 - sum(widths)
+    return widths
+
+
+def _add_table(doc: Document, title: str, headers: list[str], rows: list[list[str]], *,
+               compact: bool = False, widths: list[int] | None = None) -> None:
+    caption = doc.add_paragraph(style="Caption")
+    caption_run = caption.add_run(
+        f"表 {len([p for p in doc.paragraphs if p.style.name == 'Caption' and p.text.startswith('表')]) + 1}  {title}"
+    )
+    if compact:
+        _set_run_font(caption_run, size=9.0, color="404040")
+        _spacing(caption.paragraph_format, 0, 0, 220)
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.style = "Table Grid"
+    for cell, value in zip(table.rows[0].cells, headers):
+        cell.text = value
+        _set_cell_shading(cell, DESIGN["tables"]["header_fill"])
+        for run in cell.paragraphs[0].runs:
+            _set_run_font(run, size=9.0 if compact else 9.5, bold=True)
+            cell.paragraphs[0].paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            if compact:
+                cell.paragraphs[0].paragraph_format.line_spacing = 1.0
+    _set_repeat_header(table.rows[0])
+    for values in rows:
+        cells = table.add_row().cells
+        for cell, value in zip(cells, values):
+            paragraph = cell.paragraphs[0]
+            paragraph.add_run(value)
+            paragraph.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            paragraph.paragraph_format.space_after = Pt(0)
+            if compact:
+                paragraph.paragraph_format.line_spacing = 1.0
+            for run in paragraph.runs:
+                _set_run_font(run, size=9.0 if compact else 9.25)
+    _set_table_geometry(table, widths or _column_widths(headers, rows), compact=compact)
+
+
+def _add_page_field(paragraph) -> None:
+    run = paragraph.add_run()
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    instruction = OxmlElement("w:instrText")
+    instruction.set(qn("xml:space"), "preserve")
+    instruction.text = " PAGE "
+    separate = OxmlElement("w:fldChar")
+    separate.set(qn("w:fldCharType"), "separate")
+    text = OxmlElement("w:t")
+    text.text = "1"
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    run._r.extend((begin, instruction, separate, text, end))
+
+
+def _configure_page(doc: Document) -> None:
+    section = doc.sections[0]
+    section.page_width = Inches(8.5)
+    section.page_height = Inches(11)
+    section.top_margin = section.bottom_margin = Inches(1)
+    section.left_margin = section.right_margin = Inches(1)
+    section.header_distance = section.footer_distance = Inches(0.492)
+    header = section.header.paragraphs[0]
+    header.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_run_font(header.add_run(SHORT_TITLE), size=9, color="666666")
+    footer = section.footer.paragraphs[0]
+    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_run_font(footer.add_run("第 "), size=9, color="666666")
+    _add_page_field(footer)
+    _set_run_font(footer.add_run(" 页"), size=9, color="666666")
+
+
+def _plain(text: str) -> str:
+    text = text.strip()
+    text = text.replace("`", "")
+    text = text.replace("\\(", "").replace("\\)", "")
+    text = text.replace("\\{", "{").replace("\\}", "}")
+    text = text.replace("\\in", "∈")
+    text = re.sub(r"\\[A-Za-z]+\{([^{}]+)\}", r"\1", text)
+    text = text.replace("\\", "")
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"\*(.+?)\*", r"\1", text)
+    return text
+
+
+def _parse_table(lines: list[str], start: int) -> tuple[list[str], list[list[str]], int]:
+    rows: list[list[str]] = []
+    index = start
+    while index < len(lines) and lines[index].lstrip().startswith("|"):
+        values = [_plain(value.strip()) for value in lines[index].strip().strip("|").split("|")]
+        if not all(re.fullmatch(r":?-{3,}:?", value) for value in values):
+            rows.append(values)
+        index += 1
+    return rows[0], rows[1:], index
+
+
+def _add_list_item(doc: Document, text: str) -> None:
+    paragraph = doc.add_paragraph(style="List Bullet")
+    paragraph.paragraph_format.left_indent = Inches(0.375)
+    paragraph.paragraph_format.first_line_indent = Inches(-0.194)
+    _spacing(paragraph.paragraph_format, 0, 4, 290)
+    paragraph.add_run(_plain(text))
+
+
+def _svg_viewbox_dimensions(svg: Path) -> tuple[float, float]:
+    """Return the intrinsic SVG canvas dimensions required for raster output."""
+    root = ET.parse(svg).getroot()
+    viewbox = root.attrib.get("viewBox", "").replace(",", " ").split()
+    if len(viewbox) != 4:
+        raise ValueError(f"{svg.name} must define a four-value viewBox")
+    width, height = float(viewbox[2]), float(viewbox[3])
+    if width <= 0 or height <= 0:
+        raise ValueError(f"{svg.name} has an invalid viewBox: {root.attrib['viewBox']!r}")
+    return width, height
+
+
+def _is_expected_raster(path: Path, pixel_width: int, pixel_height: int) -> bool:
+    """Accept only a complete exact-size PNG for cache reuse or browser termination."""
+    try:
+        from PIL import Image
+
+        with Image.open(path) as image:
+            if image.format != "PNG" or image.size != (pixel_width, pixel_height):
+                return False
+            image.verify()
+        # ``verify`` checks chunk integrity but intentionally does not decode pixels.
+        # Reopen and load fully so an incomplete screenshot can never satisfy the
+        # cache gate merely by exposing a plausible IHDR.
+        with Image.open(path) as image:
+            if image.format != "PNG" or image.size != (pixel_width, pixel_height):
+                return False
+            image.load()
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _find_browser_executable(configured: Path | None = None) -> Path:
+    candidates: list[Path] = []
+    if configured is not None:
+        candidates.append(Path(configured))
+    env_value = os.environ.get("TXNMEM_BROWSER_EXECUTABLE")
+    if env_value:
+        candidates.append(Path(env_value))
+    for name in ("google-chrome", "chromium", "chromium-browser", "chrome"):
+        resolved = shutil.which(name)
+        if resolved:
+            candidates.append(Path(resolved))
+    candidates.append(
+        Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise RuntimeError(
+        "Exact-aspect SVG rasterization requires a browser executable; set "
+        "TXNMEM_BROWSER_EXECUTABLE or pass browser_executable."
+    )
+
+
+def _rasterize_svg(
+    svg: Path,
+    destination: Path,
+    *,
+    browser_executable: Path | None = None,
+) -> tuple[Path, float]:
+    """Render SVG into an exact-aspect 2× PNG canvas for python-docx embedding."""
+    destination.mkdir(parents=True, exist_ok=True)
+    svg_width, svg_height = _svg_viewbox_dimensions(svg)
+    pixel_width = round(svg_width * SVG_RASTER_SCALE)
+    pixel_height = round(svg_height * SVG_RASTER_SCALE)
+    ratio = svg_height / svg_width
+    # Cache keys include geometry/version, preventing reuse of the legacy square
+    # Quick Look thumbnail canvas that clipped wide diagrams.
+    digest = hashlib.sha256(svg.read_bytes()).hexdigest()[:16]
+    target = destination / (
+        f"{svg.stem}-{digest}-{pixel_width}x{pixel_height}-v4.png"
+    )
+    if target.is_file() and _is_expected_raster(target, pixel_width, pixel_height):
+        return target, ratio
+    if target.exists():
+        target.unlink()
+    browser = _find_browser_executable(browser_executable)
+    profile = destination / "browser-profile"
+    profile.mkdir(parents=True, exist_ok=True)
+    completed = None
+    process = None
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as error_log:
+        command = [
+            str(browser), "--headless=new", "--disable-gpu", "--hide-scrollbars",
+            "--no-first-run", "--disable-background-networking",
+            f"--user-data-dir={profile}",
+            f"--force-device-scale-factor={SVG_RASTER_SCALE}",
+            f"--window-size={round(svg_width)},{round(svg_height)}",
+            f"--screenshot={target}", svg.resolve().as_uri(),
+        ]
+        process = subprocess.Popen(
+            command,
+            text=True, stdout=subprocess.DEVNULL, stderr=error_log,
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if _is_expected_raster(target, pixel_width, pixel_height):
+                # Some macOS Chrome builds keep the headless parent and its
+                # helpers alive after the screenshot has been written. End
+                # our isolated process group promptly rather than waiting
+                # for the full timeout once the exact output is available.
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.wait(timeout=2)
+                return target, ratio
+            completed = process.poll()
+            if completed is not None:
+                break
+            time.sleep(0.05)
+        if completed is None:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                completed = process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                completed = process.wait(timeout=2)
+        error_log.seek(0)
+        stderr = error_log.read().strip()
+    if (
+        (completed is not None and completed != 0)
+        or not _is_expected_raster(target, pixel_width, pixel_height)
+    ):
+        raise RuntimeError(
+            f"Exact-aspect SVG rasterization failed for {svg.name}: {stderr}"
+        )
+    return target, ratio
+
+
+def _add_figure(
+    doc: Document,
+    figure_id: str,
+    manifest: dict,
+    root: Path,
+    cache: Path,
+    browser_executable: Path | None,
+    rasterizer: Callable[[Path, Path], tuple[Path, float]] | None,
+) -> None:
+    item = manifest["figures"][figure_id]
+    svg = root / "paper_assets/figures" / item["file"]
+    if rasterizer is None:
+        png, ratio = _rasterize_svg(
+            svg,
+            cache,
+            browser_executable=browser_executable,
+        )
+    else:
+        png, ratio = rasterizer(svg, cache)
+    manifest_ratio = item["dimensions"]["height"] / item["dimensions"]["width"]
+    if abs(ratio - manifest_ratio) > 0.002:
+        raise ValueError(f"{figure_id} SVG viewBox does not match manifest dimensions")
+    # Leave room for the caption on dense manuscript pages while retaining
+    # readable type from the now full-canvas SVG raster.
+    width = min(5.5, 6.0 / max(ratio, 0.5))
+    paragraph = doc.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.paragraph_format.keep_with_next = True
+    shape = paragraph.add_run().add_picture(
+        str(png), width=Inches(width), height=Inches(width * ratio)
+    )
+    if abs(shape.height / shape.width - ratio) > 0.002:
+        raise RuntimeError(f"{figure_id} Word drawing extent does not preserve the SVG ratio")
+    shape._inline.docPr.set("descr", item["alt_text"])
+    shape._inline.docPr.set("title", f"图：{figure_id}")
+    caption = doc.add_paragraph(style="Caption")
+    # The figure paragraph already keeps this caption with the artwork.  Break
+    # the Caption style's generic keep-next chain so the following heading does
+    # not force an otherwise fitting figure/caption pair onto the next page.
+    caption.paragraph_format.keep_with_next = False
+    number = len([p for p in doc.paragraphs if p.style.name == "Caption" and p.text.startswith("图")]) + 1
+    caption.add_run(f"图 {number}  {item['caption']}")
+
+
+def _controlled_rows(root: Path) -> tuple[list[str], list[list[str]]]:
+    rows = []
+    for item in controlled_result_rows(root):
+        name = item["variant"]
+        denominator = item["instance_count"]
+        rows.append([name, f"{item['violation_count']}/{denominator}",
+                     f"{item['oracle_match_count']}/{denominator}",
+                     "受控套件的机制对照（详见正文）"])
+    return ["变体", "违规 instance", "oracle 一致 instance", "机制解释"], rows
+
+
+def _publication_evidence_id(claim: dict, root: Path) -> str:
+    """Return a reader-safe, stable label without exposing repository paths."""
+    artifact_path = root / claim["artifact_path"]
+    if artifact_path.is_file():
+        payload = _load(artifact_path)
+        evidence_id = payload.get("evidence_id") if isinstance(payload, dict) else None
+        if isinstance(evidence_id, str) and evidence_id.strip() and "/" not in evidence_id:
+            return evidence_id.strip()
+    return f"E-{claim['claim_id']}"
+
+
+def _claim_ledger_rows(root: Path) -> tuple[list[str], list[list[str]]]:
+    claims = _load(root / "configs/paper_claims.json")["claims"]
+    active = [claim for claim in claims if claim.get("status") == "active"]
+    return ["active claim", "public evidence ID", "claim boundary"], [
+        [claim["claim_id"], _publication_evidence_id(claim, root), claim["claim_boundary"]]
+        for claim in active
+    ]
+
+
+def _reader_identifier(value: str, *, maximum_line_length: int = 18) -> str:
+    """Insert visual-only breaks between identifier components, never inside one."""
+    parts = value.split("_")
+    if len(parts) == 1:
+        return value
+    lines = [parts[0]]
+    for part in parts[1:]:
+        candidate = f"{lines[-1]}_{part}"
+        if len(candidate) > maximum_line_length:
+            lines[-1] += "_"
+            lines.append(part)
+        else:
+            lines[-1] = candidate
+    return "\n".join(lines)
+
+
+def _reader_facing_rows(table_id: str, rows: list[list[str]]) -> list[list[str]]:
+    """Apply only the local presentation adjustments needed for narrow tables."""
+    rendered = [list(row) for row in rows]
+    if table_id == "runtime_results":
+        labels = {
+            "Qwen 原生工具循环": "Qwen 原生\n工具循环",
+            "Qwen+Qdrant+Neo4j": "Qwen +\nQdrant +\nNeo4j",
+        }
+        for row in rendered:
+            row[0] = labels.get(row[0], row[0])
+    elif table_id == "claim_ledger":
+        for row in rendered:
+            row[0] = _reader_identifier(row[0])
+            row[1] = _reader_identifier(row[1])
+    return rendered
+
+
+TABLE_TITLES = {
+    "requirements_gap": "设计需求与现有能力的缺口",
+    "system_invariants": "TxnMem 的可检查不变量与主要机制",
+    "workload_family": "受控 workload family 与历史转折",
+    "experimental_setup": "评估层次、对象和判定器",
+    "controlled_results": "受控套件中各实现变体的结果",
+    "runtime_results": "模型、公开 runtime 与服务路径证据",
+    "claim_ledger": "活跃 claim 与审计边界",
+    "workload_schema": "评估记录的 schema 字段",
+}
+
+
+def _add_configured_table(doc: Document, table_id: str, markdown: dict[str, tuple[list[str], list[list[str]]]], root: Path) -> None:
+    if table_id == "controlled_results":
+        headers, rows = _controlled_rows(root)
+    elif table_id == "claim_ledger":
+        headers, rows = _claim_ledger_rows(root)
+    else:
+        headers, rows = markdown[table_id]
+    rows = _reader_facing_rows(table_id, rows)
+    _add_table(
+        doc,
+        TABLE_TITLES[table_id],
+        headers,
+        rows,
+        compact=table_id in {"claim_ledger", "workload_schema"},
+        # These only correct reader-facing wrapping faults in Tables 4, 6, and 7.
+        # Each retains the required fixed 9360-DXA table geometry.
+        widths={
+            "experimental_setup": [1600, 2700, 3150, 1910],
+            "runtime_results": [1800, 2800, 3000, 1760],
+            "claim_ledger": [2300, 2300, 4760],
+        }.get(table_id),
+    )
+
+
+def _collect_markdown_tables(lines: list[str]) -> dict[str, tuple[list[str], list[list[str]]]]:
+    found: dict[str, tuple[list[str], list[list[str]]]] = {}
+    current: str | None = None
+    index = 0
+    while index < len(lines):
+        marker = MARKER.match(lines[index].strip())
+        if marker and marker.group(1) == "TABLE":
+            current = marker.group(2)
+        elif current and lines[index].lstrip().startswith("|"):
+            headers, rows, index = _parse_table(lines, index)
+            found[current] = (headers, rows)
+            current = None
+            continue
+        index += 1
+    return found
+
+
+def _reader_safe_url_chunks(url: str) -> list[str]:
+    """Keep scheme+host visible and expose meaningful path wrap boundaries."""
+    scheme, separator, remainder = url.partition("://")
+    host, path_separator, path = remainder.partition("/")
+    if not separator or not host or not path_separator:
+        return [url]
+    chunks = [f"{scheme}://{host}/"]
+    path_parts = path.split("/")
+    chunks.extend(
+        f"{part}/" if index < len(path_parts) - 1 else part
+        for index, part in enumerate(path_parts)
+    )
+    return chunks
+
+
+def _add_references(doc: Document, catalog: dict) -> None:
+    for item in sorted(catalog["references"], key=lambda entry: entry["id"]):
+        p = doc.add_paragraph(style="TxnMem Reference")
+        p.add_run(
+            f"[{item['id']}] " + "; ".join(item["authors"]) + ". "
+            f"{item['title']}. {item['venue']}, {item['year']}. "
+        )
+        for chunk in _reader_safe_url_chunks(item["url"]):
+            p.add_run(chunk)
+
+
+def _append_title_block(doc: Document) -> None:
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _spacing(title.paragraph_format, 0, 5, 240)
+    _set_run_font(title.add_run(TITLE), size=17, color="0B2545", bold=True)
+    english = doc.add_paragraph()
+    english.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _spacing(english.paragraph_format, 0, 5, 240)
+    _set_run_font(english.add_run(ENGLISH_TITLE), size=10.5, color="4B5563")
+    anonymous = doc.add_paragraph()
+    anonymous.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _spacing(anonymous.paragraph_format, 0, 14, 240)
+    _set_run_font(anonymous.add_run("匿名稿"), size=10.5, color="4B5563")
+
+
+def _add_markdown(
+    doc: Document,
+    text: str,
+    root: Path,
+    manifest: dict,
+    config: dict,
+    raster_cache: Path,
+    browser_executable: Path | None,
+    rasterizer: Callable[[Path, Path], tuple[Path, float]] | None,
+) -> None:
+    lines = text.splitlines()
+    markdown_tables = _collect_markdown_tables(lines)
+    configured_tables = set(config["body_table_ids"] + config["appendix_table_ids"])
+    index = 0
+    in_references = False
+    appendix_note_next = False
+    last_heading_level = 0
+    while index < len(lines):
+        raw = lines[index]
+        stripped = raw.strip()
+        heading = HEADING.match(stripped)
+        if heading:
+            title = heading.group(2)
+            if title == TITLE:
+                index += 1
+                continue
+            if title == "参考文献":
+                doc.add_paragraph(title, style="Heading 1")
+                last_heading_level = 1
+                _add_references(doc, _load(root / "configs/txnmem_paper_references.json"))
+                in_references = True
+                index += 1
+                continue
+            if in_references and title != "附录":
+                index += 1
+                continue
+            if title == "附录":
+                in_references = False
+            level = len(heading.group(1))
+            # Markdown has a few related-work groups written directly as H3;
+            # make the reader-facing Word outline accessible without changing prose.
+            if level > last_heading_level + 1:
+                level = last_heading_level + 1
+            doc.add_paragraph(title, style=f"Heading {level}")
+            last_heading_level = level
+            index += 1
+            continue
+        if in_references or stripped == "匿名稿":
+            index += 1
+            continue
+        if stripped == r"\[":
+            formula_lines: list[str] = []
+            index += 1
+            while index < len(lines) and lines[index].strip() != r"\]":
+                if lines[index].strip():
+                    formula_lines.append(lines[index].strip())
+                index += 1
+            if index == len(lines):
+                raise ValueError("Display-math block is missing its closing delimiter")
+            formula = doc.add_paragraph()
+            formula.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            _spacing(formula.paragraph_format, 2, 6, 240)
+            _set_run_font(formula.add_run(_plain(" ".join(formula_lines))), size=10.5)
+            index += 1
+            continue
+        marker = MARKER.match(stripped)
+        if marker:
+            kind, marker_id = marker.groups()
+            if kind == "FIG":
+                _add_figure(
+                    doc,
+                    marker_id,
+                    manifest,
+                    root,
+                    raster_cache,
+                    browser_executable,
+                    rasterizer,
+                )
+            elif marker_id in configured_tables:
+                _add_configured_table(doc, marker_id, markdown_tables, root)
+            index += 1
+            while index < len(lines) and not lines[index].strip():
+                index += 1
+            if kind == "TABLE" and index < len(lines) and lines[index].lstrip().startswith("|"):
+                _, _, index = _parse_table(lines, index)
+            if kind == "TABLE" and marker_id == "workload_schema":
+                appendix_note_next = True
+            continue
+        if stripped.startswith("图："):
+            index += 1
+            continue
+        if stripped.startswith("```"):
+            index += 1
+            while index < len(lines) and not lines[index].strip().startswith("```"):
+                doc.add_paragraph(_plain(lines[index]), style="TxnMem Code")
+                index += 1
+            index += 1
+            continue
+        if stripped.startswith("- "):
+            _add_list_item(doc, stripped[2:])
+            index += 1
+            continue
+        if stripped:
+            doc.add_paragraph(
+                _plain(stripped),
+                style="TxnMem Appendix Note" if appendix_note_next else None,
+            )
+            appendix_note_next = False
+        index += 1
+
+
+def _local_name(name: str) -> str:
+    return name.rsplit("}", 1)[-1]
+
+
+def _scrub_metadata(path: Path) -> None:
+    """Strip creator/custom/revision identifiers while preserving generated OOXML."""
+    with zipfile.ZipFile(path) as source:
+        members = {name: source.read(name) for name in source.namelist() if name != "docProps/custom.xml"}
+    core = ET.fromstring(members["docProps/core.xml"])
+    for element in list(core):
+        if element.tag.endswith("creator") or element.tag.endswith("lastModifiedBy"):
+            core.remove(element)
+    members["docProps/core.xml"] = ET.tostring(core, encoding="utf-8", xml_declaration=True)
+    app = ET.fromstring(members["docProps/app.xml"])
+    for element in list(app):
+        if not list(element) and not (element.text or "").strip():
+            app.remove(element)
+    members["docProps/app.xml"] = ET.tostring(app, encoding="utf-8", xml_declaration=True)
+    for name, content in list(members.items()):
+        if name.endswith(".xml"):
+            root = ET.fromstring(content)
+            changed = False
+            for parent in root.iter():
+                for child in list(parent):
+                    if _local_name(child.tag).casefold() in {"rsids", "rsidroot", "rsid"}:
+                        parent.remove(child)
+                        changed = True
+            for element in root.iter():
+                for attribute in list(element.attrib):
+                    if _local_name(attribute).casefold().startswith("rsid"):
+                        del element.attrib[attribute]
+                        changed = True
+            if changed:
+                members[name] = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as target:
+        for name in sorted(members):
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            target.writestr(info, members[name])
+
+
+def build_document(
+    root: Path,
+    output: Path,
+    *,
+    raster_cache: Path | None = None,
+    browser_executable: Path | None = None,
+    rasterizer: Callable[[Path, Path], tuple[Path, float]] | None = None,
+) -> Path:
+    """Build the final reader projection; author annotations are stripped first."""
+    # This must remain the first operation on manuscript text: author claims never enter DOCX.
+    from txnmem_manuscript_audit import strip_author_annotations
+
+    root = root.resolve()
+    config = _load(root / "configs/txnmem_ccfa_paper.json")
+    raw_source = (root / config["paper_source_path"]).read_text(encoding="utf-8")
+    reader_text = strip_author_annotations(raw_source)
+    manifest = _load(root / "paper_assets/figures/manifest.json")
+
+    temporary_cache = None
+    if raster_cache is None:
+        temporary_cache = tempfile.TemporaryDirectory(prefix="txnmem-docx-raster-")
+        raster_cache = Path(temporary_cache.name)
+    else:
+        raster_cache = Path(raster_cache)
+    try:
+        doc = Document()
+        _configure_page(doc)
+        _configure_styles(doc)
+        _append_title_block(doc)
+        _add_markdown(
+            doc,
+            reader_text,
+            root,
+            manifest,
+            config,
+            raster_cache,
+            browser_executable,
+            rasterizer,
+        )
+        properties = doc.core_properties
+        properties.title = TITLE
+        properties.subject = "Anonymous manuscript"
+        properties.author = ""
+        properties.last_modified_by = ""
+        properties.company = ""
+        properties.comments = ""
+        properties.keywords = "TxnMem; multi-agent systems; shared memory; transactions"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        doc.save(output)
+        _scrub_metadata(output)
+        return output
+    finally:
+        if temporary_cache is not None:
+            temporary_cache.cleanup()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--raster-cache", type=Path)
+    parser.add_argument("--browser-executable", type=Path)
+    args = parser.parse_args()
+    print(
+        build_document(
+            args.root,
+            args.output,
+            raster_cache=args.raster_cache,
+            browser_executable=args.browser_executable,
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()
