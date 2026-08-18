@@ -42,6 +42,11 @@ _CONTROLLED_PUBLIC_ALLOWLIST = {
     ("final_controlled_200", "data", "generated_instances.jsonl"),
     ("final_controlled_200", "data", "reference_oracles.jsonl"),
 }
+_CONTROLLED_STRICT_JSON_MEMBERS = _CONTROLLED_PUBLIC_ALLOWLIST | {
+    ("final_controlled_200", "run_manifest.json"),
+    ("final_controlled_200", "results", "saturation.json"),
+    ("final_controlled_200", "results", "diversity.json"),
+}
 _LEGACY_CONTROLLED_400_SHA256 = {
     "generated_instances.jsonl": "d2fb1041989f4d42de6527c67c49e38c23af965bf21dc0a3d3064514f73a12ee",
     "reference_oracles.jsonl": "f8a936049cbc263a50b8e6149ca1156c53380fe5770391bcfac9f37bde47fbab",
@@ -161,6 +166,21 @@ _TOKEN_VALUE = re.compile(
 _IPV4_VALUE = re.compile(r"(?<![0-9.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9.])")
 
 
+def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    document: dict[str, object] = {}
+    for key, value in pairs:
+        if key in document:
+            raise ValueError(f"duplicate JSON key: {key}")
+        document[key] = value
+    return document
+
+
+def strict_json_loads(payload: str | bytes) -> object:
+    """Parse JSON while rejecting duplicate keys in every nested object."""
+
+    return json.loads(payload, object_pairs_hook=_strict_json_object)
+
+
 def _contains_sensitive_value(text: str) -> bool:
     if _TOKEN_VALUE.search(text):
         return True
@@ -204,8 +224,8 @@ def _safe_aggregate(
             return False
         return set(header) == _TRACE_REPLAY_COLUMNS and len(header) == len(_TRACE_REPLAY_COLUMNS)
     try:
-        document = json.loads(payload)
-    except (UnicodeDecodeError, json.JSONDecodeError):
+        document = strict_json_loads(payload)
+    except (UnicodeDecodeError, ValueError):
         return False
     return isinstance(document, dict) and not _contains_raw_payload(document)
 
@@ -222,7 +242,9 @@ def _component_has_raw_capability(component: str) -> bool:
         re.sub(r"[^a-z0-9]+", "", marker)
         for marker in _RAW_CAPABLE_COMPONENTS
     }
-    return bool(tokens & _RAW_CAPABLE_COMPONENTS) or compound in normalized_raw
+    return bool(tokens & _RAW_CAPABLE_COMPONENTS) or any(
+        marker in compound for marker in normalized_raw
+    )
 
 
 def _plain_int(value: object) -> bool:
@@ -562,8 +584,8 @@ def _controlled_artifact_valid(path: Path, relative_result_path: tuple[str, ...]
         lines = payload.decode("utf-8").splitlines()
         if len(lines) != expected_count or any(not line.strip() for line in lines):
             return False
-        rows = [json.loads(line) for line in lines]
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        rows = [strict_json_loads(line) for line in lines]
+    except (OSError, UnicodeDecodeError, ValueError):
         return False
     if not all(isinstance(row, dict) for row in rows):
         return False
@@ -652,7 +674,27 @@ def audit_result_paths(paths: Iterable[str | Path]) -> list[dict[str, str]]:
             or ((raw_ancestor or raw_filename) and not registered_safe_aggregate)
         ):
             findings.append({"code": "raw_result_path", "path": str(path)})
-        if relative_result_path in _CONTROLLED_PUBLIC_ALLOWLIST and not _controlled_artifact_valid(path, relative_result_path):
+        controlled_schema_invalid = False
+        if relative_result_path in _CONTROLLED_STRICT_JSON_MEMBERS:
+            try:
+                payload = path.read_bytes()
+                if path.suffix.lower() == ".jsonl":
+                    lines = payload.decode("utf-8").splitlines()
+                    if any(not line.strip() for line in lines):
+                        controlled_schema_invalid = True
+                    else:
+                        for line in lines:
+                            strict_json_loads(line)
+                else:
+                    strict_json_loads(payload)
+            except (OSError, UnicodeDecodeError, ValueError):
+                controlled_schema_invalid = True
+        if (
+            relative_result_path in _CONTROLLED_PUBLIC_ALLOWLIST
+            and not _controlled_artifact_valid(path, relative_result_path)
+        ):
+            controlled_schema_invalid = True
+        if controlled_schema_invalid:
             findings.append({"code": "controlled_artifact_schema", "path": str(path)})
         if not path.is_file() or path.suffix.lower() not in {".json", ".jsonl", ".csv"}:
             continue

@@ -164,6 +164,31 @@ class TxnMemArtifactAuditTests(unittest.TestCase):
             {str(path) for path in paths},
         )
 
+    def test_raw_path_denied_stems_match_camel_case_and_concatenated_components(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = tuple(
+                root / "results/public" / component / "summary.json"
+                for component in (
+                    "promptMessages",
+                    "payloadStore",
+                    "conversationArchive",
+                    "transcriptBundle",
+                    "dialogueExport",
+                    "chatHistory",
+                )
+            )
+            for path in paths:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('{"status":"sanitized"}', encoding="utf-8")
+
+            findings = audit_result_paths(paths)
+
+        self.assertEqual(
+            {item["path"] for item in findings if item["code"] == "raw_result_path"},
+            {str(path) for path in paths},
+        )
+
     def test_allowlisted_controlled_filename_rejects_public_payload_and_wrong_count(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

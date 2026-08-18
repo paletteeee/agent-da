@@ -95,3 +95,17 @@ keys/IDs and exported states to the regenerated instance/reference result.
 Legacy 400-instance evidence remains accepted only through its explicit
 versioned compatibility contract, never through arbitrary nested values or
 directory ancestry.
+
+#### Review fix round 5 — full variant replay, strict JSON, and semantic normalization
+
+Re-execute every registered variant for all regenerated formal instances and
+canonical-compare every CSV output field, not only oracle columns; verified
+rows are the sole input to saturation. Use one strict recursive JSON loader for
+all six controlled artifacts and reject duplicate keys at any depth in JSON or
+JSONL. Detect the formal numeric signature only when 1,600/8,000 appear under
+approved normalized count roles, avoiding unrelated numeric fields. Detect
+controlled-scale identity as a case/punctuation-insensitive token inside paths,
+commands, mapping keys, and values. Raw path classification must also recognize
+denied semantic stems inside camelCase/concatenated components such as
+`promptMessages`, `payloadStore`, `conversationArchive`, `transcriptBundle`,
+`dialogueExport`, and `chatHistory`.

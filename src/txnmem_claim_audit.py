@@ -16,9 +16,10 @@ import xml.etree.ElementTree as ET
 from txnmem_artifact_audit import (
     controlled_generated_record_valid,
     controlled_oracle_record_valid,
+    strict_json_loads,
 )
 from txnmem_conditions import canonical_fingerprint, file_sha256, verify_git_source_containment
-from txnmem_differential import compare_result_to_oracle
+from txnmem_metrics import result_row
 from txnmem_reference import ORACLE_VERSION, reference_outcome
 from txnmem_simulator import VARIANTS, run_instance
 from txnmem_statistics import (
@@ -101,8 +102,8 @@ def build_controlled_suite_evidence(
         if not line.strip():
             continue
         try:
-            row = json.loads(line)
-        except json.JSONDecodeError as exc:
+            row = strict_json_loads(line)
+        except ValueError as exc:
             raise ValueError(f"invalid instance JSON on line {line_number}") from exc
         if not isinstance(row, dict):
             raise ValueError(f"instance line {line_number} is not an object")
@@ -631,6 +632,22 @@ def _document_declares_scaled_controlled(document: Any) -> bool:
             return None
         return re.sub(r"[^a-z0-9]+", "", value.lower())
 
+    def contains_scaled_identity(value: Any) -> bool:
+        normalized = normalized_identity(value)
+        return normalized is not None and any(
+            marker in normalized
+            for marker in ("controlledscale200", "finalcontrolled200")
+        )
+
+    def normalized_tokens(value: Any) -> set[str]:
+        if not isinstance(value, str):
+            return set()
+        separated = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", value)
+        return {
+            token.lower()
+            for token in re.findall(r"[A-Za-z]+|[0-9]+", separated)
+        }
+
     def exact_integral(value: Any) -> int | None:
         if isinstance(value, bool):
             return None
@@ -645,10 +662,7 @@ def _document_declares_scaled_controlled(document: Any) -> bool:
         return None
 
     def declares(value: Any) -> bool:
-        if normalized_identity(value) in {
-            "controlledscale200",
-            "finalcontrolled200",
-        }:
+        if contains_scaled_identity(value):
             return True
         if isinstance(value, list):
             return any(declares(item) for item in value)
@@ -660,16 +674,17 @@ def _document_declares_scaled_controlled(document: Any) -> bool:
             if not isinstance(item, (dict, list))
         ]
         if any(
-            normalized_identity(item)
-            in {"controlledscale200", "finalcontrolled200"}
+            contains_scaled_identity(item)
             for item in immediate_scalars
         ):
             return True
-        count_key_markers = {"count", "instance", "row", "result", "record"}
+        count_key_roles = {
+            "count", "counts", "instance", "instances", "row", "rows",
+            "result", "results", "record", "records",
+        }
         local_integers = set()
         for key, item in value.items():
-            normalized_key = normalized_identity(key) or ""
-            if not any(marker in normalized_key for marker in count_key_markers):
+            if not (normalized_tokens(key) & count_key_roles):
                 continue
             integral = exact_integral(item)
             if integral is not None:
@@ -892,7 +907,7 @@ def _scaled_raw_artifacts_valid(
         if len(generated_lines) != 1600 or len(oracle_lines) != 1600:
             return False
         for line in generated_lines:
-            row = json.loads(line)
+            row = strict_json_loads(line)
             if not controlled_generated_record_valid(row, scaled=True):
                 return False
             coordinate = (row.get("workload"), row.get("seed"))
@@ -915,10 +930,9 @@ def _scaled_raw_artifacts_valid(
         if set(instance_ids) != expected:
             return False
         oracle_coordinates: set[tuple[str, int]] = set()
-        regenerated_oracles: dict[tuple[str, int], dict[str, Any]] = {}
         ids_to_coordinates = {value: key for key, value in instance_ids.items()}
         for line in oracle_lines:
-            row = json.loads(line)
+            row = strict_json_loads(line)
             if not controlled_oracle_record_valid(
                 row, expected_oracle_version=ORACLE_VERSION
             ):
@@ -930,28 +944,18 @@ def _scaled_raw_artifacts_valid(
             if not regenerated.get("allowed_outcomes") or row != regenerated:
                 return False
             oracle_coordinates.add(coordinate)
-            regenerated_oracles[coordinate] = regenerated
         if oracle_coordinates != expected:
             return False
         with paths["experiment_results.csv"].open(encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle)
-            allowed_columns = {
-                "instance_id", "workload", "seed", "variant", "transaction_state",
-                "transaction_states", "partial_update_rate", "invalid_commit_rate",
-                "stale_write_rate", "repair_recall", "leak_rate",
-                "supersession_consistency", "scope_bypass_rate", "latency",
-                "any_violation", "violations", "committed_count", "operation_count",
-                "repair_count", "oracle_version", "oracle_match",
-                "allowed_outcome_count", "oracle_mismatches",
-            }
-            required_columns = {
-                "instance_id", "workload", "seed", "variant", "any_violation",
-                "oracle_version", "oracle_match", "allowed_outcome_count",
-                "oracle_mismatches",
-            }
+            sample_coordinate = sorted(expected)[0]
+            sample_result = result_row(
+                instances[sample_coordinate],
+                run_instance(instances[sample_coordinate], VARIANTS[0]),
+            )
             if (
                 reader.fieldnames is None
-                or not required_columns <= set(reader.fieldnames) <= allowed_columns
+                or set(reader.fieldnames) != set(sample_result)
                 or len(reader.fieldnames) != len(set(reader.fieldnames))
             ):
                 return False
@@ -963,31 +967,27 @@ def _scaled_raw_artifacts_valid(
         for row in rows:
             try:
                 seed = int(row.get("seed", ""))
-                violation = _binary_integer(row.get("any_violation"), "any_violation")
-                match = _binary_integer(row.get("oracle_match"), "oracle_match")
             except ValueError:
                 return False
             coordinate = (row.get("workload"), seed)
             cell = (*coordinate, row.get("variant"))
             if coordinate not in expected or row.get("instance_id") != instance_ids[coordinate] or row.get("variant") not in VARIANTS or row.get("oracle_version") != ORACLE_VERSION or cell in cells:
                 return False
-            if violation not in {0, 1} or match not in {0, 1}:
-                return False
-            comparison = compare_result_to_oracle(
+            replayed = result_row(
                 instances[coordinate],
                 run_instance(instances[coordinate], row["variant"]),
-                regenerated_oracles[coordinate],
             )
-            expected_oracle_fields = {
-                "oracle_version": str(comparison["oracle_version"]),
-                "oracle_match": str(int(comparison["matches"])),
-                "allowed_outcome_count": str(comparison["allowed_outcome_count"]),
-                "oracle_mismatches": ";".join(comparison["mismatches"]),
+            expected_row = {
+                name: "" if value is None else str(value)
+                for name, value in replayed.items()
             }
-            if any(row.get(name) != value for name, value in expected_oracle_fields.items()):
+            if row != expected_row:
                 return False
             cells.add(cell)
-            metrics[cell] = (violation, match)
+            metrics[cell] = (
+                int(replayed["any_violation"]),
+                int(replayed["oracle_match"]),
+            )
         if cells != {(family, seed, variant) for family, seed in expected for variant in VARIANTS}:
             return False
         if not isinstance(saturation_document, dict):
@@ -1032,11 +1032,11 @@ def _scaled_diversity_matches_generated(path: Path, document: Any) -> bool:
         return False
     try:
         instances = [
-            json.loads(line)
+            strict_json_loads(line)
             for line in path.read_text(encoding="utf-8").splitlines()
         ]
         return controlled_diversity(instances) == document
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+    except (OSError, TypeError, ValueError):
         return False
 
 
@@ -1143,6 +1143,23 @@ def _controlled_evidence_findings(
                 )
             )
             continue
+        parsed_document: Any = None
+        if name.endswith(".json") or name.endswith(".jsonl"):
+            try:
+                if name.endswith(".json"):
+                    parsed_document = strict_json_loads(
+                        evidence_path.read_text(encoding="utf-8")
+                    )
+                else:
+                    for line in evidence_path.read_text(
+                        encoding="utf-8"
+                    ).splitlines():
+                        if line.strip():
+                            strict_json_loads(line)
+            except (OSError, ValueError) as exc:
+                findings.append(_finding("controlled_evidence_parse_error", f"cannot parse controlled {name}: {exc}", claim_id=claim_id))
+                findings.append(_finding("controlled_manifest_invalid", f"controlled closure contains invalid JSON in {name}", claim_id=claim_id))
+                continue
         actual_hash = _sha256(evidence_path)
         paths[name] = evidence_path
         checked.append({"path": value, "sha256": actual_hash})
@@ -1155,10 +1172,7 @@ def _controlled_evidence_findings(
                 )
             )
         if name.endswith(".json"):
-            try:
-                parsed_documents[name] = json.loads(evidence_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                findings.append(_finding("controlled_evidence_parse_error", f"cannot parse controlled {name}: {exc}", claim_id=claim_id))
+            parsed_documents[name] = parsed_document
         manifest_entry = manifest_artifacts.get(name) if isinstance(manifest_artifacts, dict) else None
         expected_counts = {"line_count": 1600} if name in {"generated_instances.jsonl", "reference_oracles.jsonl"} else ({"row_count": 8000} if name == "experiment_results.csv" else {})
         if (
@@ -1199,11 +1213,11 @@ def _controlled_evidence_findings(
     )
     if manifest_valid:
         try:
-            approved_config = json.loads(approved_config_path.read_text(encoding="utf-8"))
+            approved_config = strict_json_loads(approved_config_path.read_text(encoding="utf-8"))
             manifest_valid = config.get("canonical_fingerprint") == canonical_fingerprint(approved_config)
             containment = verify_git_source_containment(root, source["commit"], source["components"])
             manifest_valid = manifest_valid and containment["contained_in_commit"]
-        except (OSError, json.JSONDecodeError, ValueError):
+        except (OSError, ValueError):
             manifest_valid = False
     if not manifest_valid:
         findings.append(_finding("controlled_manifest_invalid", "scaled controlled manifest failed strict domain, config, source, or closure validation", claim_id=claim_id))
@@ -1245,7 +1259,7 @@ def audit_claim_ledger(
         ledger_path = _rooted_path(root, str(ledger_path))
     else:
         ledger_path = ledger_path.resolve()
-    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    ledger = strict_json_loads(ledger_path.read_text(encoding="utf-8"))
     if not isinstance(ledger, dict) or not isinstance(ledger.get("claims"), list):
         raise ValueError("claim ledger must be an object with a claims array")
 
@@ -1275,7 +1289,7 @@ def audit_claim_ledger(
                     )
                 )
             else:
-                supersession_payload = json.loads(
+                supersession_payload = strict_json_loads(
                     supersession_path.read_text(encoding="utf-8")
                 )
                 entries = supersession_payload.get("superseded_artifacts", [])
@@ -1423,8 +1437,8 @@ def audit_claim_ledger(
             )
         else:
             try:
-                document = json.loads(artifact_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
+                document = strict_json_loads(artifact_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
                 findings.append(
                     _finding(
                         "artifact_parse_error",
@@ -1528,10 +1542,10 @@ def audit_claim_ledger(
                         )
                     else:
                         try:
-                            manifest_document = json.loads(
+                            manifest_document = strict_json_loads(
                                 manifest_path.read_text(encoding="utf-8")
                             )
-                        except (OSError, json.JSONDecodeError):
+                        except (OSError, ValueError):
                             manifest_document = None
         controlled_findings, controlled_checked = _controlled_evidence_findings(
             root,

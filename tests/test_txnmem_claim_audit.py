@@ -17,6 +17,7 @@ from txnmem_claim_audit import (  # noqa: E402
     audit_claim_ledger,
     build_controlled_suite_evidence,
 )
+from txnmem_artifact_audit import audit_result_paths  # noqa: E402
 from txnmem_conditions import canonical_fingerprint  # noqa: E402
 from txnmem_metrics import result_row  # noqa: E402
 from txnmem_reference import reference_outcome  # noqa: E402
@@ -741,6 +742,81 @@ class PaperClaimLedgerTests(unittest.TestCase):
         self.assertNotIn("controlled_profile_required", codes)
         self.assertNotIn("controlled_evidence_missing", codes)
 
+    def test_scaled_controlled_claim_signal_normalizes_embedded_identity_and_count_roles(self):
+        observed = {}
+        for location in ("path", "run_command", "mapping_key", "mapping_value"):
+            with TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger, _ = self._fixture(root)
+                payload = json.loads(ledger.read_text())
+                claim = payload["claims"][0]
+                artifact = root / "results/evidence.json"
+                if location == "path":
+                    artifact = root / "results/CONTROLLED-SCALE.200/evidence.json"
+                    artifact.parent.mkdir(parents=True)
+                    artifact.write_text(
+                        json.dumps({"status": "complete", "task_count": 5}),
+                        encoding="utf-8",
+                    )
+                    claim["artifact_path"] = str(artifact.relative_to(root))
+                elif location == "run_command":
+                    claim["run_command"] = (
+                        "python run.py --config configs/CONTROLLED-SCALE.200.json"
+                    )
+                else:
+                    document = json.loads(artifact.read_text())
+                    if location == "mapping_key":
+                        document["prefix.CONTROLLED-SCALE.200.suffix"] = False
+                    else:
+                        document["location"] = "configs/CONTROLLED-SCALE.200.json"
+                    artifact.write_text(json.dumps(document), encoding="utf-8")
+                claim["artifact_sha256"] = self._sha256(artifact)
+                ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+                codes = {
+                    item["code"] for item in audit_claim_ledger(root, ledger)["findings"]
+                }
+                observed[location] = {
+                    "controlled_profile_required",
+                    "controlled_evidence_missing",
+                } <= codes
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger, _ = self._fixture(root)
+            artifact = root / "results/evidence.json"
+            artifact.write_text(
+                json.dumps(
+                    {
+                        "status": "complete",
+                        "task_count": 5,
+                        "account": 1600,
+                        "discount": 8000,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            payload = json.loads(ledger.read_text())
+            payload["claims"][0]["artifact_sha256"] = self._sha256(artifact)
+            ledger.write_text(json.dumps(payload), encoding="utf-8")
+            codes = {
+                item["code"] for item in audit_claim_ledger(root, ledger)["findings"]
+            }
+            observed["incidental_count_substrings_ignored"] = not (
+                {"controlled_profile_required", "controlled_evidence_missing"} & codes
+            )
+
+        self.assertEqual(
+            observed,
+            {
+                "path": True,
+                "run_command": True,
+                "mapping_key": True,
+                "mapping_value": True,
+                "incidental_count_substrings_ignored": True,
+            },
+        )
+
     def test_scaled_controlled_claim_rejects_primary_seventh_artifact(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -899,6 +975,104 @@ class PaperClaimLedgerTests(unittest.TestCase):
         self.assertIn(
             "controlled_manifest_invalid",
             {item["code"] for item in report["findings"]},
+        )
+
+    def test_scaled_controlled_claim_replays_full_result_truth_before_saturation(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger, _ = self._fixture(root)
+            payload = self._make_scaled_controlled_claim(root, ledger)
+            csv_reference = payload["claims"][0]["controlled_evidence"][
+                "experiment_results.csv"
+            ]
+            csv_path = root / csv_reference["path"]
+            with csv_path.open(encoding="utf-8", newline="") as handle:
+                reader = csv.DictReader(handle)
+                rows = list(reader)
+                fieldnames = list(reader.fieldnames or [])
+            attacked = next(
+                row
+                for row in rows
+                if row["variant"] == "TxnMem"
+                and row["seed"] == "0"
+                and row["any_violation"] == "0"
+            )
+            attacked["any_violation"] = "1"
+            with csv_path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+
+            saturation_reference = payload["claims"][0]["controlled_evidence"][
+                "saturation.json"
+            ]
+            saturation_path = root / saturation_reference["path"]
+            saturation = json.loads(saturation_path.read_text())
+            for checkpoint in saturation["checkpoints"]:
+                variant = next(
+                    item
+                    for item in checkpoint["variants"]
+                    if item["variant"] == "TxnMem"
+                )
+                variant["violations"] += 1
+                trials = variant["variant_result_count"]
+                variant["violation_rate"] = variant["violations"] / trials
+                variant["violation_interval"] = binomial_interval(
+                    variant["violations"], trials
+                )
+            saturation_path.write_text(
+                json.dumps(saturation, sort_keys=True), encoding="utf-8"
+            )
+            self._rehash_scaled_bundle(root, ledger)
+
+            report = audit_claim_ledger(root, ledger)
+
+        self.assertIn(
+            "controlled_manifest_invalid",
+            {item["code"] for item in report["findings"]},
+        )
+
+    def test_controlled_claim_and_artifact_audits_reject_recursive_duplicate_keys(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger, _ = self._fixture(root)
+            payload = self._make_scaled_controlled_claim(root, ledger)
+            generated = root / payload["claims"][0]["controlled_evidence"][
+                "generated_instances.jsonl"
+            ]["path"]
+            oracles = root / payload["claims"][0]["controlled_evidence"][
+                "reference_oracles.jsonl"
+            ]["path"]
+            probes = (
+                (generated, '"operations": [{', '"operations": [{"type": "shadow", '),
+                (oracles, '"event_trace": [{', '"event_trace": [{"event_type": "shadow", '),
+            )
+            for path, needle, replacement in probes:
+                lines = path.read_text(encoding="utf-8").splitlines()
+                self.assertIn(needle, lines[0])
+                lines[0] = lines[0].replace(needle, replacement, 1)
+                path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            self._rehash_scaled_bundle(root, ledger)
+
+            claim_codes = {
+                item["code"]
+                for item in audit_claim_ledger(root, ledger)["findings"]
+            }
+            artifact_rejections = {
+                item["path"]
+                for item in audit_result_paths([generated, oracles])
+                if item["code"] == "controlled_artifact_schema"
+            }
+
+        self.assertEqual(
+            {
+                "claim_rejected": "controlled_manifest_invalid" in claim_codes,
+                "artifact_rejections": artifact_rejections,
+            },
+            {
+                "claim_rejected": True,
+                "artifact_rejections": {str(generated), str(oracles)},
+            },
         )
 
     def test_scaled_controlled_claim_cross_checks_diversity_against_generated_instances(self):
