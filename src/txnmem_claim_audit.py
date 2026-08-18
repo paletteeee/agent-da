@@ -12,9 +12,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 import xml.etree.ElementTree as ET
 
+from txnmem_artifact_audit import (
+    controlled_generated_record_valid,
+    controlled_oracle_record_valid,
+)
 from txnmem_conditions import canonical_fingerprint, file_sha256, verify_git_source_containment
-from txnmem_reference import ORACLE_VERSION
-from txnmem_simulator import VARIANTS
+from txnmem_differential import compare_result_to_oracle
+from txnmem_reference import ORACLE_VERSION, reference_outcome
+from txnmem_simulator import VARIANTS, run_instance
 from txnmem_statistics import (
     APPROVED_CONTROLLED_PARAMETER_INTERVALS,
     binomial_interval,
@@ -609,8 +614,6 @@ _SCALED_CHECKPOINTS = [10, 25, 50, 100, 150, 200]
 
 
 def _document_declares_scaled_controlled(document: Any) -> bool:
-    if not isinstance(document, dict):
-        return False
     exact_domains = {
         "families": sorted(WORKLOADS),
         "seeds": list(range(200)),
@@ -622,14 +625,34 @@ def _document_declares_scaled_controlled(document: Any) -> bool:
         "instances": 1600,
         "variant_results": 8000,
     }
-    if document.get("domains") == exact_domains or document.get("counts") == exact_counts:
-        return True
-    evidence_id = document.get("evidence_id")
-    if evidence_id == "controlled_scale_200":
-        return True
-    if evidence_id == "controlled_suite":
-        return all(
-            document.get(field) == expected
+    stack = [document]
+    scalar_integers: set[int] = set()
+    domain_markers = {"families": False, "seeds": False, "variants": False}
+    while stack:
+        value = stack.pop()
+        if isinstance(value, str):
+            identity = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+            if identity in {"controlled_scale_200", "final_controlled_200"}:
+                return True
+            continue
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            scalar_integers.add(value)
+            continue
+        if isinstance(value, list):
+            domain_markers["families"] |= value == sorted(WORKLOADS)
+            domain_markers["seeds"] |= value == list(range(200))
+            domain_markers["variants"] |= value in (list(VARIANTS), sorted(VARIANTS))
+            stack.extend(value)
+            continue
+        if not isinstance(value, dict):
+            continue
+        if value.get("domains") == exact_domains or value.get("counts") == exact_counts:
+            return True
+        evidence_id = value.get("evidence_id")
+        if evidence_id == "controlled_suite" and all(
+            value.get(field) == expected
             for field, expected in {
                 "instance_count": 1600,
                 "workload_family_count": 8,
@@ -637,23 +660,28 @@ def _document_declares_scaled_controlled(document: Any) -> bool:
                 "variant_count": 5,
                 "variant_row_count": 8000,
             }.items()
-        )
-    if evidence_id == "controlled_violation_saturation":
-        return (
-            document.get("families") == sorted(WORKLOADS)
-            and document.get("seed_domain") == list(range(200))
-            and document.get("variant_domain") == sorted(VARIANTS)
-            and document.get("checkpoint_seed_counts") == _SCALED_CHECKPOINTS
-        )
-    if evidence_id == "controlled_diversity":
-        return (
-            document.get("family_count") == 8
-            and document.get("seed_count_per_family") == 200
-            and document.get("instance_count") == 1600
-            and isinstance(document.get("families"), dict)
-            and set(document["families"]) == set(WORKLOADS)
-        )
-    return False
+        ):
+            return True
+        if evidence_id == "controlled_violation_saturation" and (
+            value.get("families") == sorted(WORKLOADS)
+            and value.get("seed_domain") == list(range(200))
+            and value.get("variant_domain") == sorted(VARIANTS)
+            and value.get("checkpoint_seed_counts") == _SCALED_CHECKPOINTS
+        ):
+            return True
+        if evidence_id == "controlled_diversity" and (
+            value.get("family_count") == 8
+            and value.get("seed_count_per_family") == 200
+            and value.get("instance_count") == 1600
+            and isinstance(value.get("families"), dict)
+            and set(value["families"]) == set(WORKLOADS)
+        ):
+            return True
+        stack.extend(value.values())
+    return (
+        {1600, 8000} <= scalar_integers
+        or all(domain_markers.values())
+    )
 
 
 def _scaled_claim_signal(
@@ -670,7 +698,10 @@ def _scaled_claim_signal(
         for field in ("claim_id", "run_command")
     ):
         return True
-    return _document_declares_scaled_controlled(manifest_document) or _document_declares_scaled_controlled(artifact_document)
+    return any(
+        _document_declares_scaled_controlled(document)
+        for document in (claim, manifest_document, artifact_document)
+    )
 
 
 def _scaled_saturation_valid(document: Any) -> bool:
@@ -821,6 +852,7 @@ def _scaled_raw_artifacts_valid(
 ) -> bool:
     expected = {(family, seed) for family in WORKLOADS for seed in range(200)}
     instance_ids: dict[tuple[str, int], str] = {}
+    instances: dict[tuple[str, int], dict[str, Any]] = {}
     try:
         generated_lines = paths["generated_instances.jsonl"].read_text(encoding="utf-8").splitlines()
         oracle_lines = paths["reference_oracles.jsonl"].read_text(encoding="utf-8").splitlines()
@@ -828,11 +860,7 @@ def _scaled_raw_artifacts_valid(
             return False
         for line in generated_lines:
             row = json.loads(line)
-            if not isinstance(row, dict) or set(row) != {
-                "instance_id", "workload", "seed", "config", "initial_memories",
-                "operations", "policies", "failure_schedule", "provenance_edges",
-                "semantic_parameters", "semantic_fingerprint",
-            }:
+            if not controlled_generated_record_valid(row, scaled=True):
                 return False
             coordinate = (row.get("workload"), row.get("seed"))
             if coordinate not in expected or row.get("instance_id") != f"{coordinate[0]}_seed_{coordinate[1]}" or coordinate in instance_ids:
@@ -850,21 +878,26 @@ def _scaled_raw_artifacts_valid(
                 if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high or config.get(name) != value:
                     return False
             instance_ids[coordinate] = row["instance_id"]
+            instances[coordinate] = row
         if set(instance_ids) != expected:
             return False
         oracle_coordinates: set[tuple[str, int]] = set()
+        regenerated_oracles: dict[tuple[str, int], dict[str, Any]] = {}
         ids_to_coordinates = {value: key for key, value in instance_ids.items()}
         for line in oracle_lines:
             row = json.loads(line)
-            if not isinstance(row, dict) or set(row) != {
-                "instance_id", "oracle_version", "allowed_outcomes", "event_trace",
-                "minimal_counterexample", "safety_invariants",
-            } or row.get("oracle_version") != ORACLE_VERSION:
+            if not controlled_oracle_record_valid(
+                row, expected_oracle_version=ORACLE_VERSION
+            ):
                 return False
             coordinate = ids_to_coordinates.get(row.get("instance_id"))
             if coordinate is None or coordinate in oracle_coordinates:
                 return False
+            regenerated = reference_outcome(instances[coordinate])
+            if not regenerated.get("allowed_outcomes") or row != regenerated:
+                return False
             oracle_coordinates.add(coordinate)
+            regenerated_oracles[coordinate] = regenerated
         if oracle_coordinates != expected:
             return False
         with paths["experiment_results.csv"].open(encoding="utf-8", newline="") as handle:
@@ -880,7 +913,8 @@ def _scaled_raw_artifacts_valid(
             }
             required_columns = {
                 "instance_id", "workload", "seed", "variant", "any_violation",
-                "oracle_version", "oracle_match",
+                "oracle_version", "oracle_match", "allowed_outcome_count",
+                "oracle_mismatches",
             }
             if (
                 reader.fieldnames is None
@@ -905,6 +939,19 @@ def _scaled_raw_artifacts_valid(
             if coordinate not in expected or row.get("instance_id") != instance_ids[coordinate] or row.get("variant") not in VARIANTS or row.get("oracle_version") != ORACLE_VERSION or cell in cells:
                 return False
             if violation not in {0, 1} or match not in {0, 1}:
+                return False
+            comparison = compare_result_to_oracle(
+                instances[coordinate],
+                run_instance(instances[coordinate], row["variant"]),
+                regenerated_oracles[coordinate],
+            )
+            expected_oracle_fields = {
+                "oracle_version": str(comparison["oracle_version"]),
+                "oracle_match": str(int(comparison["matches"])),
+                "allowed_outcome_count": str(comparison["allowed_outcome_count"]),
+                "oracle_mismatches": ";".join(comparison["mismatches"]),
+            }
+            if any(row.get(name) != value for name, value in expected_oracle_fields.items()):
                 return False
             cells.add(cell)
             metrics[cell] = (violation, match)
@@ -943,7 +990,7 @@ def _scaled_raw_artifacts_valid(
                 ):
                     return False
         return True
-    except (OSError, json.JSONDecodeError, TypeError):
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return False
 
 
@@ -993,6 +1040,27 @@ def _controlled_evidence_findings(
             )
         )
         return findings, checked
+    primary_path = claim.get("artifact_path")
+    primary_reference = next(
+        (
+            reference
+            for reference in bundle.values()
+            if isinstance(reference, dict) and reference.get("path") == primary_path
+        ),
+        None,
+    )
+    if (
+        not isinstance(primary_reference, dict)
+        or primary_reference.get("sha256") != claim.get("artifact_sha256")
+    ):
+        findings.append(
+            _finding(
+                "controlled_primary_artifact_invalid",
+                "scaled claim assertions must target one of the exact six controlled artifacts",
+                claim_id=claim_id,
+                field="artifact_path",
+            )
+        )
     if manifest_path is None or not isinstance(manifest_document, dict):
         findings.append(_finding("controlled_manifest_invalid", "scaled controlled manifest is missing or malformed", claim_id=claim_id))
         return findings, checked

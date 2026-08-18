@@ -88,3 +88,11 @@ Ruling: Detect a scaled controlled claim from its declared evidence identity, re
 Ruling: Validate the six controlled artifacts as one closed evidence object: recompute diversity and saturation facts from the raw generated instances/results/oracles, require cross-document equality, and parse `saturation.svg` as a real SVG rooted document — cost if wrong: malformed or internally plausible summaries that are not supported by raw controlled rows become hard failures.
 
 Ruling: Treat raw-capable public path vocabulary as semantic path components (including payloads, conversations, transcripts, prompts, messages, and equivalents), and recursively reject unapproved keys/content inside controlled synthetic exceptions — cost if wrong: future aggregate schemas need explicit narrow additions rather than inheriting a permissive nested object.
+
+Ruling: Recursively detect formal controlled-scale markers in every active claim artifact regardless of key name or nesting, including exact registered domains and 1,600/8,000 counts; an attached six-artifact bundle does not authorize assertions from an unrelated seventh artifact — cost if wrong: generic diagnostic JSON that coincidentally contains the full formal signature must be explicitly classified or kept inactive.
+
+Ruling: Treat stored reference oracles and CSV `oracle_match` flags as untrusted evidence: regenerate the oracle record from each generated instance with the independent reference semantics, require exact canonical equality and at least one allowed outcome, then reconcile every result row's oracle fields — cost if wrong: claim audit becomes more computationally expensive but cannot certify a mutually tampered instance/oracle/result bundle.
+
+Ruling: A raw-capable ancestor path always dominates a schema-safe aggregate filename; safe basenames never sanitize `payloads`, `conversations`, `transcripts`, prompts/messages, or equivalent parent directories — cost if wrong: sanitized aggregates must live only in approved aggregate directories.
+
+Ruling: Controlled JSONL exceptions use record-type-specific closed recursive schemas derived from executable workload and reference-oracle exports; generic scalar/list acceptance and blacklist-only nested checks are insufficient — cost if wrong: adding a new legitimate executable field requires an intentional schema and regression update.

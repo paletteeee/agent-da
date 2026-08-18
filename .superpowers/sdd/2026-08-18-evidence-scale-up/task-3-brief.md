@@ -64,3 +64,18 @@ path components such as `payloads`, `conversations`, and `transcripts` anywhere
 in the repository. Controlled raw exceptions must recursively enforce their
 closed synthetic schema, including nested `config` objects, so a benchmark
 customer/conversation payload cannot be hidden below an allowed top-level key.
+
+#### Review fix round 3 — recursive scale identity, regenerated oracle truth, and closed records
+
+Recognize formal scale signatures recursively in the active artifact, independent
+of field names and nesting. The claim's primary `artifact_path` and assertions
+must be bound to the declared six-artifact closure; an unrelated seventh
+artifact cannot carry a scaled assertion. Regenerate each reference oracle from
+its generated instance with the independent reference semantics, require exact
+canonical equality and a non-empty allowed-outcome set, and reconcile result
+oracle fields instead of trusting CSV flags. Raw-capable ancestor directories
+always fail even when the basename is a nominally safe aggregate. Replace
+generic nested scalar/list acceptance for controlled instance and oracle JSONL
+with explicit recursive schemas for operations, policies, schedules,
+provenance, allowed outcomes, and event traces; reject dialogue/payload fields
+hidden in any executable or trace container.

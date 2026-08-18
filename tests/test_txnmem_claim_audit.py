@@ -18,8 +18,14 @@ from txnmem_claim_audit import (  # noqa: E402
     build_controlled_suite_evidence,
 )
 from txnmem_conditions import canonical_fingerprint  # noqa: E402
-from txnmem_simulator import VARIANTS  # noqa: E402
-from txnmem_statistics import binomial_interval, controlled_diversity  # noqa: E402
+from txnmem_metrics import result_row  # noqa: E402
+from txnmem_reference import reference_outcome  # noqa: E402
+from txnmem_simulator import VARIANTS, run_instance  # noqa: E402
+from txnmem_statistics import (  # noqa: E402
+    binomial_interval,
+    controlled_diversity,
+    controlled_violation_saturation,
+)
 from txnmem_workloads import WORKLOADS, generate_suite  # noqa: E402
 
 
@@ -381,6 +387,33 @@ class PaperClaimLedgerTests(unittest.TestCase):
         "policy_churn": [0, 2],
         "concurrency": [1, 3],
     }
+    _SCALED_ROWS_CACHE = None
+
+    @classmethod
+    def _scaled_rows(cls):
+        if cls._SCALED_ROWS_CACHE is None:
+            generated_rows = generate_suite(
+                WORKLOADS,
+                range(200),
+                parameter_ranges=cls.PARAMETER_INTERVALS,
+            )
+            oracle_rows = [reference_outcome(row) for row in generated_rows]
+            result_rows = [
+                result_row(row, run_instance(row, variant))
+                for row in generated_rows
+                for variant in VARIANTS
+            ]
+            cls._SCALED_ROWS_CACHE = (
+                generated_rows,
+                oracle_rows,
+                result_rows,
+                controlled_violation_saturation(
+                    result_rows,
+                    [10, 25, 50, 100, 150, 200],
+                ),
+                controlled_diversity(generated_rows),
+            )
+        return cls._SCALED_ROWS_CACHE
 
     def _make_scaled_controlled_claim(self, root: Path, ledger: Path) -> dict:
         for relative in self.SCALED_SOURCE_PATHS:
@@ -417,29 +450,13 @@ class PaperClaimLedgerTests(unittest.TestCase):
         diversity = results / "diversity.json"
         svg = figures / "saturation.svg"
 
-        generated_rows = generate_suite(
-            WORKLOADS,
-            range(200),
-            parameter_ranges=self.PARAMETER_INTERVALS,
-        )
-        oracle_rows = [
-            {
-                "instance_id": row["instance_id"],
-                "oracle_version": "0.4",
-                "allowed_outcomes": [],
-                "event_trace": [],
-                "minimal_counterexample": None,
-                "safety_invariants": {
-                    "atomicity": True,
-                    "commit_authorization": True,
-                    "no_invalid_visibility": True,
-                    "supersession_consistency": True,
-                    "provenance_closure": True,
-                    "graph_validity": True,
-                },
-            }
-            for row in generated_rows
-        ]
+        (
+            generated_rows,
+            oracle_rows,
+            result_rows,
+            saturation_document,
+            diversity_document,
+        ) = self._scaled_rows()
         generated.write_text(
             "".join(json.dumps(row, sort_keys=True) + "\n" for row in generated_rows),
             encoding="utf-8",
@@ -448,69 +465,17 @@ class PaperClaimLedgerTests(unittest.TestCase):
             "".join(json.dumps(row, sort_keys=True) + "\n" for row in oracle_rows),
             encoding="utf-8",
         )
-        csv_fields = [
-            "instance_id", "workload", "seed", "variant", "any_violation",
-            "oracle_version", "oracle_match",
-        ]
+        csv_fields = list(result_rows[0])
         with csv_path.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=csv_fields)
             writer.writeheader()
-            for row in generated_rows:
-                for variant in VARIANTS:
-                    writer.writerow(
-                        {
-                            "instance_id": row["instance_id"],
-                            "workload": row["workload"],
-                            "seed": row["seed"],
-                            "variant": variant,
-                            "any_violation": 0,
-                            "oracle_version": "0.4",
-                            "oracle_match": 1,
-                        }
-                    )
+            writer.writerows(result_rows)
 
         checkpoints = [10, 25, 50, 100, 150, 200]
-        saturation_document = {
-            "schema_version": 1,
-            "evidence_id": "controlled_violation_saturation",
-            "confidence": 0.95,
-            "interval_method": "wilson_score",
-            "interpretation_boundary": "intervals describe only the tested controlled parameter space",
-            "families": sorted(WORKLOADS),
-            "seed_domain": list(range(200)),
-            "variant_domain": sorted(VARIANTS),
-            "checkpoint_seed_counts": checkpoints,
-            "checkpoints": [],
-        }
-        for checkpoint in checkpoints:
-            trials = len(WORKLOADS) * checkpoint
-            saturation_document["checkpoints"].append(
-                {
-                    "checkpoint_seed_count": checkpoint,
-                    "checkpoint_seed_unit": "seeds_per_family",
-                    "family_count": 8,
-                    "instance_count": trials,
-                    "instance_unit": "family_seed",
-                    "variants": [
-                        {
-                            "variant": variant,
-                            "variant_result_count": trials,
-                            "variant_result_unit": "family_seed_variant",
-                            "violations": 0,
-                            "violation_rate": 0.0,
-                            "violation_interval": binomial_interval(0, trials),
-                            "oracle_matches": trials,
-                            "oracle_match_rate": 1.0,
-                            "oracle_match_interval": binomial_interval(trials, trials),
-                        }
-                        for variant in sorted(VARIANTS)
-                    ],
-                }
-            )
         saturation.write_text(json.dumps(saturation_document, sort_keys=True), encoding="utf-8")
 
         diversity.write_text(
-            json.dumps(controlled_diversity(generated_rows), sort_keys=True),
+            json.dumps(diversity_document, sort_keys=True),
             encoding="utf-8",
         )
         svg.write_text('<svg xmlns="http://www.w3.org/2000/svg"></svg>\n', encoding="utf-8")
@@ -682,6 +647,113 @@ class PaperClaimLedgerTests(unittest.TestCase):
             codes = {item["code"] for item in report["findings"]}
             self.assertIn("controlled_profile_required", codes)
             self.assertIn("controlled_evidence_missing", codes)
+
+    def test_scaled_controlled_claim_signal_recurses_through_renamed_nested_fields(self):
+        documents = (
+            {
+                "task_count": 5,
+                "renamed": {"identity": {"label": "controlled_scale_200"}},
+            },
+            {
+                "task_count": 5,
+                "renamed": {
+                    "domain_a": sorted(WORKLOADS),
+                    "domain_b": list(range(200)),
+                    "domain_c": list(VARIANTS),
+                },
+            },
+            {
+                "task_count": 5,
+                "renamed": {"count_a": 1600, "count_b": 8000},
+            },
+        )
+        for document in documents:
+            with self.subTest(document=document), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger, _ = self._fixture(root)
+                artifact = root / "results/evidence.json"
+                artifact.write_text(json.dumps(document), encoding="utf-8")
+                payload = json.loads(ledger.read_text())
+                payload["claims"][0]["artifact_sha256"] = self._sha256(artifact)
+                ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+                report = audit_claim_ledger(root, ledger)
+
+            codes = {item["code"] for item in report["findings"]}
+            self.assertIn("controlled_profile_required", codes)
+            self.assertIn("controlled_evidence_missing", codes)
+
+    def test_scaled_controlled_claim_rejects_primary_seventh_artifact(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger, _ = self._fixture(root)
+            payload = self._make_scaled_controlled_claim(root, ledger)
+            seventh = root / "results/renamed_scaled_assertions.json"
+            seventh.write_text(
+                json.dumps(
+                    {
+                        "asserted_rate": 1.0,
+                        "renamed": {"instances": 1600, "rows": 8000},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            claim = payload["claims"][0]
+            claim["artifact_path"] = "results/renamed_scaled_assertions.json"
+            claim["artifact_sha256"] = self._sha256(seventh)
+            claim["assertions"] = [
+                {"pointer": "/asserted_rate", "operator": "equals", "expected": 1.0}
+            ]
+            ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+            report = audit_claim_ledger(root, ledger)
+
+        self.assertIn(
+            "controlled_primary_artifact_invalid",
+            {item["code"] for item in report["findings"]},
+        )
+
+    def test_scaled_controlled_claim_regenerates_oracles_and_csv_oracle_fields(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger, _ = self._fixture(root)
+            payload = self._make_scaled_controlled_claim(root, ledger)
+            csv_reference = payload["claims"][0]["controlled_evidence"][
+                "experiment_results.csv"
+            ]
+            oracle_reference = payload["claims"][0]["controlled_evidence"][
+                "reference_oracles.jsonl"
+            ]
+            oracle_path = root / oracle_reference["path"]
+            oracle_rows = [json.loads(line) for line in oracle_path.read_text().splitlines()]
+            attacked_instance_id = oracle_rows[0]["instance_id"]
+            oracle_rows[0]["allowed_outcomes"] = []
+            oracle_path.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n" for row in oracle_rows),
+                encoding="utf-8",
+            )
+            csv_path = root / csv_reference["path"]
+            with csv_path.open(encoding="utf-8", newline="") as handle:
+                reader = csv.DictReader(handle)
+                rows = list(reader)
+                fieldnames = list(reader.fieldnames or [])
+            with csv_path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fieldnames)
+                writer.writeheader()
+                for row in rows:
+                    if row["instance_id"] == attacked_instance_id and row["variant"] == "TxnMem":
+                        row["oracle_match"] = "1"
+                        row["allowed_outcome_count"] = "0"
+                        row["oracle_mismatches"] = ""
+                    writer.writerow(row)
+            self._rehash_scaled_bundle(root, ledger)
+
+            report = audit_claim_ledger(root, ledger)
+
+        self.assertIn(
+            "controlled_manifest_invalid",
+            {item["code"] for item in report["findings"]},
+        )
 
     def test_scaled_controlled_claim_cross_checks_bundle_hashes_against_manifest(self):
         with TemporaryDirectory() as tmp:

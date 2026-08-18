@@ -58,7 +58,25 @@ class TxnMemArtifactAuditTests(unittest.TestCase):
                     {
                         "instance_id": instance_id,
                         "oracle_version": "0.4" if scaled else "0.1",
-                        "allowed_outcomes": [],
+                        "allowed_outcomes": [
+                            {
+                                "txn_states": {},
+                                "committed_memory_ids": [],
+                                "visible_memory_ids": [],
+                                "invalid_memory_ids": [],
+                                "superseded_memory_ids": [],
+                                "provenance_edges": [],
+                                "policy_version": 1,
+                                "invariants": {
+                                    "atomicity": True,
+                                    "commit_authorization": True,
+                                    "no_invalid_visibility": True,
+                                    "supersession_consistency": True,
+                                    "provenance_closure": True,
+                                    "graph_validity": True,
+                                },
+                            }
+                        ],
                         "event_trace": [],
                         "minimal_counterexample": None,
                         "safety_invariants": {
@@ -262,6 +280,159 @@ class TxnMemArtifactAuditTests(unittest.TestCase):
 
         self.assertEqual(safe_findings, [])
         self.assertIn("raw_result_path", {item["code"] for item in unsafe_findings})
+
+    def test_safe_aggregate_never_overrides_a_raw_capable_ancestor(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = (
+                root / "results/public/payloads/trace_realism.json",
+                root / "results/public/conversations/native_model_summary.json",
+                root / "results/public/transcripts/blocked_report.json",
+            )
+            for path in paths:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('{"status":"sanitized"}', encoding="utf-8")
+
+            findings = audit_result_paths(paths)
+
+        self.assertEqual(
+            {item["path"] for item in findings if item["code"] == "raw_result_path"},
+            {str(path) for path in paths},
+        )
+
+    def test_exact_schema_safe_aggregate_roots_remain_compatible(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = (
+                root / "results/prompt_profile_formal_v4/appworld_baseline/native_batch_summary.json",
+                root / "results/remaining_tasks/native_memory_replay/appworld/results/native_model_summary.json",
+                root / "results/remaining_tasks/native_repetitions5/repetition_report.json",
+                root / "results/remaining_tasks/public_native/appworld/results/blocked_report.json",
+            )
+            for path in paths:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('{"status":"sanitized"}', encoding="utf-8")
+
+            findings = audit_result_paths(paths)
+
+        self.assertEqual(findings, [])
+
+    def test_controlled_instances_reject_list_payloads_in_typed_fields(self):
+        mutations = (
+            lambda row: row.__setitem__(
+                "operations",
+                [{"op_id": "op_hidden", "step": 0, "type": "write", "value": ["customer", "dialogue"]}],
+            ),
+            lambda row: row.__setitem__(
+                "policies",
+                [{
+                    "policy_id": "p_hidden", "version": 1, "agent_id": "agent_1",
+                    "action": "read", "scope": ["customer", "dialogue"],
+                    "effect": "allow", "effective_step": 0,
+                }],
+            ),
+            lambda row: row.__setitem__(
+                "failure_schedule",
+                [{"type": "crash", "target": ["customer", "dialogue"], "step": 1}],
+            ),
+            lambda row: row.__setitem__(
+                "provenance_edges",
+                [{"source_id": "m_1", "derived_id": "m_2", "relation": ["customer", "dialogue"]}],
+            ),
+        )
+        for mutate in mutations:
+            with self.subTest(mutation=mutate.__code__.co_firstlineno), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                generated, _ = self._write_controlled_pair(root, "final_controlled_200", 200)
+                rows = [json.loads(line) for line in generated.read_text().splitlines()]
+                mutate(rows[0])
+                rows[0]["semantic_fingerprint"] = semantic_fingerprint(rows[0])
+                generated.write_text(
+                    "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+                    encoding="utf-8",
+                )
+
+                findings = audit_result_paths([generated])
+
+            self.assertIn(
+                "controlled_artifact_schema",
+                {item["code"] for item in findings},
+            )
+
+    def test_controlled_oracles_reject_unapproved_nested_trace_and_outcome_shapes(self):
+        mutations = (
+            lambda row: row.__setitem__(
+                "allowed_outcomes", [{"turns": ["customer", "dialogue"]}]
+            ),
+            lambda row: row.__setitem__(
+                "event_trace", [{"turns": ["customer", "dialogue"]}]
+            ),
+            lambda row: row.__setitem__(
+                "minimal_counterexample", {"turns": ["customer", "dialogue"]}
+            ),
+        )
+        for mutate in mutations:
+            with self.subTest(mutation=mutate.__code__.co_firstlineno), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                _, oracles = self._write_controlled_pair(root, "final_controlled_200", 200)
+                rows = [json.loads(line) for line in oracles.read_text().splitlines()]
+                mutate(rows[0])
+                oracles.write_text(
+                    "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
+                    encoding="utf-8",
+                )
+
+                findings = audit_result_paths([oracles])
+
+            self.assertIn(
+                "controlled_artifact_schema",
+                {item["code"] for item in findings},
+            )
+
+    def test_controlled_records_reject_raw_dialogue_in_approved_scalar_fields(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            generated, oracles = self._write_controlled_pair(
+                root, "final_controlled_200", 200
+            )
+            generated_rows = [json.loads(line) for line in generated.read_text().splitlines()]
+            generated_rows[0]["policies"] = [
+                {
+                    "policy_id": "p_hidden",
+                    "version": 1,
+                    "agent_id": "agent_1",
+                    "action": "read",
+                    "scope": "customer dialogue",
+                    "effect": "allow",
+                    "effective_step": 0,
+                }
+            ]
+            generated_rows[0]["semantic_fingerprint"] = semantic_fingerprint(
+                generated_rows[0]
+            )
+            generated.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n" for row in generated_rows),
+                encoding="utf-8",
+            )
+            oracle_rows = [json.loads(line) for line in oracles.read_text().splitlines()]
+            oracle_rows[0]["allowed_outcomes"][0]["txn_states"] = {
+                "txn_001": "customer dialogue"
+            }
+            oracles.write_text(
+                "".join(json.dumps(row, sort_keys=True) + "\n" for row in oracle_rows),
+                encoding="utf-8",
+            )
+
+            findings = audit_result_paths([generated, oracles])
+
+        self.assertEqual(
+            {
+                item["path"]
+                for item in findings
+                if item["code"] == "controlled_artifact_schema"
+            },
+            {str(generated), str(oracles)},
+        )
 
 
 if __name__ == "__main__":
