@@ -13,7 +13,7 @@ from collections import defaultdict, deque
 from typing import Any, Iterable
 
 
-ORACLE_VERSION = "0.2"
+ORACLE_VERSION = "0.3"
 _MUTATING_OPERATIONS = {"write", "stage_write", "derive", "propagate", "supersede"}
 _READ_OPERATIONS = {"read", "search", "get_by_id"}
 
@@ -231,6 +231,10 @@ def _crash_applies(event: dict[str, Any], operation: dict[str, Any]) -> bool:
 def _abort_transaction(state: dict[str, Any], txn_id: str, reason: str) -> None:
     txn = _txn(state, txn_id)
     txn["status"] = "aborted"
+    _clear_staged_mutations(txn)
+
+
+def _clear_staged_mutations(txn: dict[str, Any]) -> None:
     txn["write_set"].clear()
     txn["pending_edges"].clear()
     txn["supersessions"].clear()
@@ -238,6 +242,15 @@ def _abort_transaction(state: dict[str, Any], txn_id: str, reason: str) -> None:
     # An authorized abort after revalidation is a correct outcome, not an
     # authorization violation.  The flag is reserved for an actually
     # committed write that bypassed the current policy.
+
+
+def _has_pending_mutations(txn: dict[str, Any]) -> bool:
+    return bool(
+        txn["write_set"]
+        or txn["pending_edges"]
+        or txn["supersessions"]
+        or txn["invalidations"]
+    )
 
 
 def _record_read_version(txn: dict[str, Any], memory: dict[str, Any]) -> None:
@@ -595,12 +608,10 @@ def _run(instance: dict[str, Any], crash_resolution: str | None) -> dict[str, An
                     _abort_transaction(state, txn_id, "CRASH_BEFORE_LINEARIZE")
             stopped = True
 
-    for txn in state["transactions"].values():
+    for txn_id, txn in state["transactions"].items():
         if txn["status"] == "active":
-            if txn["write_set"] or txn["pending_edges"]:
-                txn["status"] = "aborted"
-                txn["write_set"].clear()
-                txn["pending_edges"].clear()
+            if _has_pending_mutations(txn):
+                _abort_transaction(state, txn_id, "UNFINISHED_MUTATION")
             else:
                 txn["status"] = "completed"
     return state

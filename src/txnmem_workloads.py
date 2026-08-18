@@ -32,6 +32,13 @@ WORKLOAD_SEMANTIC_PARAMETERS = {
     "provenance_branch_repair": ("provenance_depth", "branch_factor", "concurrency"),
     "mixed_stress": ("txn_size",),
 }
+EXECUTABLE_SHAPE_FIELDS = (
+    "initial_memories",
+    "operations",
+    "policies",
+    "failure_schedule",
+    "provenance_edges",
+)
 
 
 def _merged_config(config: dict[str, Any] | None) -> dict[str, Any]:
@@ -127,11 +134,13 @@ def _target_reference_category(event: Mapping[str, Any], known: Mapping[str, set
 
 def _normalized_semantic_shape(instance: Mapping[str, Any]) -> dict[str, Any]:
     labels: dict[str, dict[str, str]] = {}
-    known = _known_semantic_labels(instance)
+    executable_shape = {
+        field: instance.get(field, [])
+        for field in EXECUTABLE_SHAPE_FIELDS
+    }
+    known = _known_semantic_labels(executable_shape)
 
     def normalize(value: Any, name: str | None = None, category: str | None = None) -> Any:
-        if name in {"config", "instance_id", "seed", "semantic_fingerprint", "semantic_parameters"}:
-            return None
         if isinstance(value, Mapping):
             target_category = _target_reference_category(value, known)
             return {
@@ -141,7 +150,6 @@ def _normalized_semantic_shape(instance: Mapping[str, Any]) -> dict[str, Any]:
                     target_category if key == "target" else None,
                 )
                 for key, item in sorted(value.items(), key=lambda item: str(item[0]))
-                if key not in {"config", "instance_id", "seed", "semantic_fingerprint", "semantic_parameters"}
             }
         if isinstance(value, list):
             return [normalize(item, name, category) for item in value]
@@ -153,7 +161,7 @@ def _normalized_semantic_shape(instance: Mapping[str, Any]) -> dict[str, Any]:
             return category_labels[value]
         return value
 
-    return normalize(instance)
+    return normalize(executable_shape)
 
 
 def semantic_fingerprint(instance: Mapping[str, Any]) -> str:

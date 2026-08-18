@@ -127,13 +127,16 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
         raise ValueError(f"unsupported variant: {variant}")
 
     uses_transaction = variant not in NO_TRANSACTION_VARIANTS
-    memories = {
-        memory["memory_id"]: copy.deepcopy(memory)
-        for memory in instance["initial_memories"]
-    }
+    memories: dict[str, dict[str, Any]] = {}
+    for memory in instance["initial_memories"]:
+        item = copy.deepcopy(memory)
+        item.setdefault("status", "active")
+        item.setdefault("version", 1)
+        memories[item["memory_id"]] = item
     buffered_writes: dict[str, list[dict[str, Any]]] = {}
     buffered_edges: dict[str, list[dict[str, Any]]] = {}
     buffered_supersessions: dict[str, list[tuple[str, str]]] = {}
+    buffered_invalidations: dict[str, set[str]] = {}
     provenance_edges = copy.deepcopy(instance.get("provenance_edges", []))
     committed_memory_ids: list[str] = []
     trace: list[dict[str, Any]] = []
@@ -155,16 +158,38 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
         buffered_writes.setdefault(txn_id, [])
         buffered_edges.setdefault(txn_id, [])
         buffered_supersessions.setdefault(txn_id, [])
+        buffered_invalidations.setdefault(txn_id, set())
         transaction_authorized_actions.setdefault(txn_id, set())
         transaction_read_versions.setdefault(txn_id, {})
         transaction_states.setdefault(txn_id, "active")
 
-    def abort_transaction(txn_id: str) -> None:
-        nonlocal transaction_state
+    def has_pending_mutations(txn_id: str) -> bool:
+        return bool(
+            buffered_writes.get(txn_id)
+            or buffered_edges.get(txn_id)
+            or buffered_supersessions.get(txn_id)
+            or buffered_invalidations.get(txn_id)
+        )
+
+    def clear_staged_mutations(txn_id: str) -> None:
         ensure_transaction(txn_id)
         buffered_writes[txn_id].clear()
         buffered_edges[txn_id].clear()
         buffered_supersessions[txn_id].clear()
+        buffered_invalidations[txn_id].clear()
+
+    def stage_write(txn_id: str, memory: dict[str, Any]) -> None:
+        ensure_transaction(txn_id)
+        buffered_writes[txn_id] = [
+            pending
+            for pending in buffered_writes[txn_id]
+            if pending["memory_id"] != memory["memory_id"]
+        ]
+        buffered_writes[txn_id].append(memory)
+
+    def abort_transaction(txn_id: str) -> None:
+        nonlocal transaction_state
+        clear_staged_mutations(txn_id)
         transaction_states[txn_id] = "aborted"
         transaction_state = "aborted"
 
@@ -231,12 +256,7 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
             trace.append({"step": step, "event": "terminal_transaction", "txn_id": txn_id})
 
         elif op_type == "begin_txn":
-            buffered_writes[txn_id] = []
-            buffered_edges[txn_id] = []
-            buffered_supersessions[txn_id] = []
-            transaction_authorized_actions[txn_id] = set()
-            transaction_read_versions[txn_id] = {}
-            transaction_states[txn_id] = "active"
+            ensure_transaction(txn_id)
 
         elif op_type == "write":
             memory = _memory_from_operation(operation)
@@ -248,7 +268,7 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                 if "write" in revoked_actions:
                     trace.append({"step": step, "event": "denied_write"})
                 else:
-                    buffered_writes[txn_id].append(memory)
+                    stage_write(txn_id, memory)
                     transaction_authorized_actions[txn_id].add("write")
 
         elif op_type in {"search", "read", "get_by_id"}:
@@ -319,11 +339,13 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                 transaction_states[txn_id] = "committed"
             else:
                 for memory in buffered_writes[txn_id]:
+                    previous = memories.get(memory["memory_id"])
+                    memory["version"] = (
+                        int(previous.get("version", 1)) + 1 if previous is not None else 1
+                    )
                     memories[memory["memory_id"]] = memory
                     _record_committed(committed_memory_ids, memory["memory_id"])
-                buffered_writes[txn_id].clear()
                 provenance_edges.extend(buffered_edges[txn_id])
-                buffered_edges[txn_id].clear()
                 for old_id, new_id in buffered_supersessions[txn_id]:
                     old_memory = memories.get(old_id)
                     new_memory = memories.get(new_id)
@@ -333,7 +355,14 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                     old_memory["version"] = int(old_memory.get("version", 1)) + 1
                     new_memory["status"] = "active"
                     new_memory["supersedes_id"] = old_id
-                buffered_supersessions[txn_id].clear()
+                for memory_id in buffered_invalidations[txn_id]:
+                    memory = memories.get(memory_id)
+                    if memory is not None and memory.get("status") != "invalid":
+                        memory["status"] = "invalid"
+                        memory["version"] = int(memory.get("version", 1)) + 1
+                if buffered_invalidations[txn_id]:
+                    repair_count += _apply_repair(instance, memories, provenance_edges)
+                clear_staged_mutations(txn_id)
                 transaction_state = "committed"
                 transaction_states[txn_id] = "committed"
 
@@ -360,7 +389,7 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                 if op_type in revoked_actions:
                     trace.append({"step": step, "event": f"denied_{op_type}"})
                 else:
-                    buffered_writes[txn_id].append(memory)
+                    stage_write(txn_id, memory)
                     buffered_edges[txn_id].extend(operation_edges)
                     transaction_authorized_actions[txn_id].add(op_type)
                     for source_id in source_ids:
@@ -378,18 +407,29 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
 
         elif op_type == "invalidate":
             memory_id = operation["memory_id"]
-            if memory_id not in memories:
-                raise KeyError(f"unknown memory_id: {memory_id}")
-            memories[memory_id]["status"] = "invalid"
-            if variant in REPAIR_VARIANTS:
-                repair_count += _apply_repair(instance, memories, provenance_edges)
-                transaction_state = "repaired"
-                if operation.get("txn_id"):
-                    transaction_states[operation["txn_id"]] = "repaired"
+            if uses_transaction and transaction_states.get(txn_id) == "active":
+                known_memory_ids = set(memories) | {
+                    memory["memory_id"] for memory in buffered_writes[txn_id]
+                }
+                if memory_id not in known_memory_ids:
+                    trace.append({"step": step, "event": "denied_invalidate", "memory_id": memory_id})
+                else:
+                    invalidated = {memory_id}
+                    invalidated.update(
+                        _descendants(instance, memory_id, provenance_edges + buffered_edges[txn_id])
+                    )
+                    buffered_invalidations[txn_id].update(invalidated)
+                    trace.append({"step": step, "event": "staged_invalidate", "memory_id": memory_id})
             else:
-                transaction_state = "invalidated"
-                if operation.get("txn_id"):
-                    transaction_states[operation["txn_id"]] = "invalidated"
+                if memory_id not in memories:
+                    raise KeyError(f"unknown memory_id: {memory_id}")
+                memories[memory_id]["status"] = "invalid"
+                memories[memory_id]["version"] = int(memories[memory_id].get("version", 1)) + 1
+                if variant in REPAIR_VARIANTS:
+                    repair_count += _apply_repair(instance, memories, provenance_edges)
+                    transaction_state = "repaired"
+                else:
+                    transaction_state = "invalidated"
 
         post_events = events_for_operation(instance, operation, "after")
         if any(crash_applies(event, operation) for event in post_events):
@@ -407,7 +447,7 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
     for txn_id in sorted(transaction_states):
         if transaction_states[txn_id] != "active":
             continue
-        if buffered_writes.get(txn_id) or buffered_edges.get(txn_id):
+        if has_pending_mutations(txn_id):
             abort_transaction(txn_id)
         else:
             transaction_states[txn_id] = "completed"

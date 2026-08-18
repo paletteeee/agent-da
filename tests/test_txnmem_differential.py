@@ -25,7 +25,7 @@ class TxnMemDifferentialTests(unittest.TestCase):
         comparison = compare_result_to_oracle(instance, run_instance(instance, "TxnMem"))
 
         self.assertTrue(comparison["matches"])
-        self.assertEqual(comparison["oracle_version"], "0.2")
+        self.assertEqual(comparison["oracle_version"], "0.3")
 
     def test_naive_partial_write_is_rejected_by_w1_oracle(self):
         instance = generate_instance("atomic_multi_write", seed=1, config={"txn_size": 2})
@@ -239,6 +239,91 @@ class TxnMemDifferentialTests(unittest.TestCase):
 
         self.assertEqual(result["transaction_states"], {"txn_a": "aborted", "txn_b": "committed"})
         self.assertEqual(result["committed_memory_ids"], ["m_b"])
+        self.assertTrue(compare_result_to_oracle(instance, result)["matches"])
+
+    def test_transactional_invalidation_is_discarded_by_explicit_abort(self):
+        """An active transaction stages invalidation instead of mutating committed memory."""
+
+        instance = generate_instance("atomic_multi_write", seed=16, config={"txn_size": 1})
+        agent = instance["policies"][0]["agent_id"]
+        instance["initial_memories"] = [
+            {"memory_id": "m_root", "agent_id": agent, "scope": "tenant:user_001", "status": "active"}
+        ]
+        instance["operations"] = [
+            {"op_id": "op_001", "step": 1, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_a"},
+            {"op_id": "op_002", "step": 2, "agent_id": agent, "type": "invalidate", "txn_id": "txn_a", "memory_id": "m_root"},
+            {"op_id": "op_003", "step": 3, "agent_id": agent, "type": "abort", "txn_id": "txn_a"},
+        ]
+        instance["failure_schedule"] = []
+
+        result = run_instance(instance, "TxnMem")
+
+        self.assertEqual(result["transaction_states"], {"txn_a": "aborted"})
+        self.assertEqual(result["final_memories"]["m_root"]["status"], "active")
+        self.assertTrue(compare_result_to_oracle(instance, result)["matches"])
+
+    def test_staged_supersession_and_invalidation_are_discarded_by_crash(self):
+        """Crash clears all staged mutation categories without changing committed records."""
+
+        instance = generate_instance("supersession_consistency", seed=17)
+        instance["operations"] = instance["operations"][:-1] + [
+            {"op_id": "op_004", "step": 4, "agent_id": instance["policies"][0]["agent_id"], "type": "invalidate", "txn_id": "txn_super", "memory_id": "m_old"}
+        ]
+        instance["failure_schedule"] = [
+            {"trigger": {"after_operation": "op_004"}, "type": "crash", "target": "txn_super", "phase": "after_operation"}
+        ]
+
+        result = run_instance(instance, "TxnMem")
+
+        self.assertEqual(result["transaction_states"], {"txn_super": "aborted"})
+        self.assertEqual(result["final_memories"]["m_old"]["status"], "active")
+        self.assertEqual(result["final_memories"]["m_new"]["status"], "pending")
+        self.assertTrue(compare_result_to_oracle(instance, result)["matches"])
+
+    def test_sibling_overwrite_invalidates_reader_by_committed_version(self):
+        """Reader commit aborts after a sibling overwrites its recorded committed version."""
+
+        instance = generate_instance("atomic_multi_write", seed=18, config={"txn_size": 1})
+        agent = instance["policies"][0]["agent_id"]
+        instance["initial_memories"] = [
+            {"memory_id": "m_shared", "agent_id": agent, "scope": "tenant:user_001", "status": "active", "version": 1}
+        ]
+        instance["operations"] = [
+            {"op_id": "op_001", "step": 1, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_reader"},
+            {"op_id": "op_002", "step": 2, "agent_id": agent, "type": "read", "txn_id": "txn_reader", "memory_id": "m_shared", "scope": "tenant:user_001"},
+            {"op_id": "op_003", "step": 3, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_writer"},
+            {"op_id": "op_004", "step": 4, "agent_id": agent, "type": "write", "txn_id": "txn_writer", "memory_id": "m_shared", "source_ids": [], "policy_version": 1},
+            {"op_id": "op_005", "step": 5, "agent_id": agent, "type": "commit", "txn_id": "txn_writer"},
+            {"op_id": "op_006", "step": 6, "agent_id": agent, "type": "commit", "txn_id": "txn_reader"},
+        ]
+        instance["failure_schedule"] = []
+
+        result = run_instance(instance, "TxnMem")
+
+        self.assertEqual(result["transaction_states"], {"txn_reader": "aborted", "txn_writer": "committed"})
+        self.assertEqual(result["final_memories"]["m_shared"]["version"], 2)
+        self.assertTrue(compare_result_to_oracle(instance, result)["matches"])
+
+    def test_duplicate_begin_preserves_active_transaction_staged_state(self):
+        """A duplicate active begin cannot reset staged write/supersession/invalidation work."""
+
+        instance = generate_instance("supersession_consistency", seed=19)
+        agent = instance["policies"][0]["agent_id"]
+        instance["operations"] = [
+            {"op_id": "op_001", "step": 1, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_super"},
+            {"op_id": "op_002", "step": 2, "agent_id": agent, "type": "write", "txn_id": "txn_super", "memory_id": "m_new", "source_ids": [], "policy_version": 1, "supersedes_id": "m_old"},
+            {"op_id": "op_003", "step": 3, "agent_id": agent, "type": "supersede", "txn_id": "txn_super", "old_memory_id": "m_old", "new_memory_id": "m_new"},
+            {"op_id": "op_004", "step": 4, "agent_id": agent, "type": "invalidate", "txn_id": "txn_super", "memory_id": "m_old"},
+            {"op_id": "op_005", "step": 5, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_super"},
+            {"op_id": "op_006", "step": 6, "agent_id": agent, "type": "commit", "txn_id": "txn_super"},
+        ]
+        instance["failure_schedule"] = []
+
+        result = run_instance(instance, "TxnMem")
+
+        self.assertEqual(result["transaction_states"], {"txn_super": "committed"})
+        self.assertEqual(result["final_memories"]["m_old"]["status"], "invalid")
+        self.assertEqual(result["final_memories"]["m_new"]["status"], "active")
         self.assertTrue(compare_result_to_oracle(instance, result)["matches"])
 
 

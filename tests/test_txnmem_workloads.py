@@ -166,6 +166,8 @@ class TxnMemWorkloadTests(unittest.TestCase):
         changed_metadata["semantic_parameters"] = {"txn_size": 99}
         changed_metadata["seed"] = 999
         changed_metadata["instance_id"] = "metadata_only_change"
+        changed_metadata["expected_outcome"] = {"arbitrary": "metadata"}
+        changed_metadata["future_metadata"] = {"opaque": ["not", "executable"]}
         low = generate_suite(
             ["crash_during_commit"], [12], parameter_ranges={"txn_size": [1, 1]}
         )[0]
@@ -176,6 +178,18 @@ class TxnMemWorkloadTests(unittest.TestCase):
         self.assertEqual(semantic_fingerprint(metadata_only), semantic_fingerprint(changed_metadata))
         self.assertNotEqual(semantic_fingerprint(low), semantic_fingerprint(high))
         self.assertNotEqual(len(low["operations"]), len(high["operations"]))
+
+    def test_semantic_fingerprint_changes_for_executable_operation_and_schedule_inputs(self):
+        """The executable-input allowlist remains sensitive to replay semantics."""
+
+        instance = generate_instance("atomic_multi_write", seed=20, config={"txn_size": 1})
+        changed_operation = json.loads(json.dumps(instance))
+        changed_operation["operations"][1]["value"] = "changed_value"
+        changed_schedule = json.loads(json.dumps(instance))
+        changed_schedule["failure_schedule"][0]["phase"] = "before_validate"
+
+        self.assertNotEqual(semantic_fingerprint(instance), semantic_fingerprint(changed_operation))
+        self.assertNotEqual(semantic_fingerprint(instance), semantic_fingerprint(changed_schedule))
 
     def test_semantic_fingerprint_preserves_reserved_crash_literals_before_transaction_collisions(self):
         """Operation-type selectors remain literal even when a transaction has that identifier."""

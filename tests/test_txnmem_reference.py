@@ -137,7 +137,38 @@ class TxnMemReferenceTests(unittest.TestCase):
                 "graph_validity": True,
             },
         }])
-        self.assertEqual(oracle["oracle_version"], "0.2")
+        self.assertEqual(oracle["oracle_version"], "0.3")
+
+    def test_unfinished_supersession_and_invalidation_transactions_abort_at_end_of_run(self):
+        """Every staged mutation category is terminally aborted without a commit."""
+
+        supersession = reference_outcome(
+            self._instance(
+                [
+                    {"op_id": "begin", "step": 1, "type": "begin_txn", "txn_id": "txn_super", "agent_id": "agent_1"},
+                    {"op_id": "supersede", "step": 2, "type": "supersede", "txn_id": "txn_super", "old_memory_id": "m_old", "new_memory_id": "m_new", "agent_id": "agent_1"},
+                ],
+                initial_memories=[
+                    {"memory_id": "m_old", "agent_id": "agent_1", "scope": "tenant:user_001", "status": "active"},
+                    {"memory_id": "m_new", "agent_id": "agent_1", "scope": "tenant:user_001", "status": "active"},
+                ],
+            )
+        )["allowed_outcomes"][0]
+        invalidation = reference_outcome(
+            self._instance(
+                [
+                    {"op_id": "begin", "step": 1, "type": "begin_txn", "txn_id": "txn_invalidate", "agent_id": "agent_1"},
+                    {"op_id": "invalidate", "step": 2, "type": "invalidate", "txn_id": "txn_invalidate", "memory_id": "m_root", "agent_id": "agent_1"},
+                ],
+                initial_memories=[{"memory_id": "m_root", "agent_id": "agent_1", "scope": "tenant:user_001", "status": "active"}],
+            )
+        )["allowed_outcomes"][0]
+
+        self.assertEqual(supersession["txn_states"], {"txn_super": "aborted"})
+        self.assertEqual(supersession["superseded_memory_ids"], [])
+        self.assertEqual(invalidation["txn_states"], {"txn_invalidate": "aborted"})
+        self.assertEqual(invalidation["invalid_memory_ids"], [])
+        self.assertEqual(reference_outcome(self._instance([]))["oracle_version"], "0.3")
 
     def test_transactional_invalidation_applies_only_when_transaction_commits(self):
         initial_memories = [

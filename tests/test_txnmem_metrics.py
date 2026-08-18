@@ -32,7 +32,7 @@ class TxnMemMetricsTests(unittest.TestCase):
         instance = generate_instance("atomic_multi_write", 41)
         row = result_row(instance, run_instance(instance, "TxnMem"))
 
-        self.assertEqual(row["oracle_version"], "0.2")
+        self.assertEqual(row["oracle_version"], "0.3")
         self.assertEqual(row["oracle_match"], 1)
         self.assertEqual(row["allowed_outcome_count"], 1)
 
