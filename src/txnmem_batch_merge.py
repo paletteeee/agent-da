@@ -218,7 +218,8 @@ def merge_native_shards(
         else:
             per_task_evaluator_status.append("available")
         if all(
-            isinstance(row.get("official"), Mapping)
+            row["status"] == "completed"
+            and isinstance(row.get("official"), Mapping)
             and _official_status(row["official"]) == "available"
             and row["official"].get("success") is True
             for row in task_rows

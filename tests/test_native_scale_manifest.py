@@ -86,6 +86,111 @@ class NativeScaleManifestTests(unittest.TestCase):
         )
         return path
 
+    def _run_scale_script(
+        self, arguments: list[str], *, environment: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        script_environment = dict(os.environ)
+        script_environment["TXNMEM_PYTHON"] = sys.executable
+        if environment is not None:
+            script_environment.update(environment)
+        return subprocess.run(
+            [str(ROOT / "scripts" / "run_native_scale.sh"), *arguments],
+            cwd=ROOT,
+            env=script_environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def _write_merge_fixture(
+        self, out_dir: Path, *, parent: dict | None = None, shard_count: int = 2
+    ) -> dict:
+        parent = self._parent_manifest(task_count=4) if parent is None else parent
+        manifest_dir = out_dir / "manifests" / "tau_bench"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        (manifest_dir / "parent.json").write_text(
+            json.dumps(parent, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        shards = benchmark_manifests.shard_manifest(parent, shard_count)
+        for shard in shards:
+            shard_name = f"shard_{shard['shard_index']:03d}"
+            (manifest_dir / f"{shard_name}.json").write_text(
+                json.dumps(shard, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            rows = [
+                {
+                    "task_id": task["task_id"],
+                    "source_position": task["source_position"],
+                    "status": "completed",
+                    "official": {"status": "available", "success": True},
+                }
+                for task in shard["tasks"]
+            ]
+            report = {
+                "parent_manifest_hash": parent["manifest_hash"],
+                "execution_manifest_hash": shard["manifest_hash"],
+                "shard_index": shard["shard_index"],
+                "shard_count": shard["shard_count"],
+                "benchmark": parent["benchmark"],
+                "domain": parent["domain"],
+                "split": parent["split"],
+                "source_identity": parent["source_identity"],
+                "condition_fingerprint": parent["condition_fingerprint"],
+                "execution_condition_fingerprint": "e" * 64,
+                "repetitions": 1,
+                "task_summaries": rows,
+            }
+            report_dir = out_dir / "runs" / "tau_bench" / shard_name
+            report_dir.mkdir(parents=True)
+            (report_dir / "shard_report.json").write_text(
+                json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        return parent
+
+    def _formal_tau_source(self, root: Path) -> Path:
+        task_source = root / "tau_bench" / "envs" / "retail" / "tasks_test.py"
+        task_source.parent.mkdir(parents=True)
+        for package in (
+            root / "tau_bench",
+            root / "tau_bench" / "envs",
+            root / "tau_bench" / "envs" / "retail",
+        ):
+            (package / "__init__.py").write_text("", encoding="utf-8")
+        task_source.write_text(
+            "TASKS_TEST = ["
+            + ",".join(
+                repr({"instruction": f"retail task {index}"}) for index in range(115)
+            )
+            + "]\n",
+            encoding="utf-8",
+        )
+        dist_info = root / "tau_bench-0.1.0.dist-info"
+        dist_info.mkdir()
+        (dist_info / "METADATA").write_text(
+            "Metadata-Version: 2.1\nName: tau-bench\nVersion: 0.1.0\n",
+            encoding="utf-8",
+        )
+        return root
+
+    def _no_model_python_shim(self, path: Path) -> Path:
+        path.write_text(
+            f"""#!{sys.executable}
+import os
+from pathlib import Path
+import sys
+
+if len(sys.argv) > 1 and Path(sys.argv[1]).name == "txnmem_experiment.py":
+    raise SystemExit("model execution forbidden by native-scale script test")
+os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
+""",
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+        return path
+
     def test_manifest_is_deterministic_and_contains_hash_and_task_split(self):
         with TemporaryDirectory() as tmp:
             source = self._locomo_source(Path(tmp))
@@ -265,6 +370,131 @@ class NativeScaleManifestTests(unittest.TestCase):
             written = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(digest, manifest["manifest_hash"])
         self.assertEqual(written, manifest)
+
+    def test_scale_script_merge_only_refuses_existing_merge_without_resume(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            self._write_merge_fixture(out_dir)
+            arguments = [
+                "--merge-only",
+                "--benchmarks",
+                "tau-bench",
+                "--out-dir",
+                str(out_dir),
+                "--shard-count",
+                "2",
+            ]
+            first = self._run_scale_script(arguments)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            merge_path = out_dir / "merged" / "tau_bench.json"
+            existing = merge_path.read_bytes()
+
+            repeated = self._run_scale_script(arguments)
+
+            self.assertNotEqual(repeated.returncode, 0)
+            self.assertEqual(merge_path.read_bytes(), existing)
+
+    def test_scale_script_merge_only_resume_accepts_only_canonical_recomputation(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            self._write_merge_fixture(out_dir)
+            arguments = [
+                "--merge-only",
+                "--benchmarks",
+                "tau-bench",
+                "--out-dir",
+                str(out_dir),
+                "--shard-count",
+                "2",
+            ]
+            first = self._run_scale_script(arguments)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            merge_path = out_dir / "merged" / "tau_bench.json"
+            payload = json.loads(merge_path.read_text(encoding="utf-8"))
+
+            canonical_equal = (
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+            ).encode("utf-8")
+            with self.subTest(case="canonically equal"):
+                merge_path.write_bytes(canonical_equal)
+                equal_resume = self._run_scale_script([*arguments, "--resume"])
+                self.assertEqual(equal_resume.returncode, 0, equal_resume.stderr)
+                self.assertEqual(merge_path.read_bytes(), canonical_equal)
+
+            invalid_existing = {
+                "malformed sentinel": b"sentinel: do not overwrite\n",
+                "different JSON": b'{"sentinel":true}\n',
+            }
+            for case, existing in invalid_existing.items():
+                with self.subTest(case=case):
+                    merge_path.write_bytes(existing)
+                    rejected = self._run_scale_script([*arguments, "--resume"])
+                    self.assertNotEqual(rejected.returncode, 0)
+                    self.assertEqual(merge_path.read_bytes(), existing)
+
+    def test_scale_script_normal_resume_verifies_merge_without_model_calls(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tau_root = self._formal_tau_source(root / "tau-source")
+            out_dir = root / "out"
+            python_shim = self._no_model_python_shim(root / "no-model-python")
+            environment = {
+                "TXNMEM_PYTHON": str(python_shim),
+                "TXNMEM_TAU_ROOT": str(tau_root),
+            }
+            base_arguments = [
+                "--benchmarks",
+                "tau-bench",
+                "--out-dir",
+                str(out_dir),
+                "--shard-count",
+                "2",
+            ]
+            generated = self._run_scale_script(
+                ["--generate-only", *base_arguments], environment=environment
+            )
+            self.assertEqual(generated.returncode, 0, generated.stderr)
+            parent = json.loads(
+                (out_dir / "manifests" / "tau_bench" / "parent.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self._write_merge_fixture(out_dir, parent=parent)
+            merged = self._run_scale_script(
+                ["--merge-only", *base_arguments], environment=environment
+            )
+            self.assertEqual(merged.returncode, 0, merged.stderr)
+            merge_path = out_dir / "merged" / "tau_bench.json"
+            payload = json.loads(merge_path.read_text(encoding="utf-8"))
+            normal_arguments = [
+                "--resume",
+                "--endpoint",
+                "no-model-call://invalid",
+                "--model",
+                "must-not-run",
+                *base_arguments,
+            ]
+
+            canonical_equal = (
+                json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+            ).encode("utf-8")
+            with self.subTest(case="canonically equal"):
+                merge_path.write_bytes(canonical_equal)
+                equal_resume = self._run_scale_script(
+                    normal_arguments, environment=environment
+                )
+                self.assertEqual(equal_resume.returncode, 0, equal_resume.stderr)
+                self.assertEqual(merge_path.read_bytes(), canonical_equal)
+
+            with self.subTest(case="different sentinel"):
+                sentinel = b'{"sentinel":"normal path must not overwrite"}\n'
+                merge_path.write_bytes(sentinel)
+                rejected = self._run_scale_script(
+                    normal_arguments, environment=environment
+                )
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertEqual(merge_path.read_bytes(), sentinel)
+                self.assertNotIn("model execution forbidden", rejected.stderr)
 
     def test_scale_script_generate_and_merge_only_are_no_model_exact_count_paths(self):
         with TemporaryDirectory() as tmp:

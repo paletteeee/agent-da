@@ -158,6 +158,30 @@ class NativeShardMergeTests(unittest.TestCase):
         self.assertEqual(merged["official"]["successes"], 0)
         self.assertEqual(merged["official"]["failures"], 4)
 
+    def test_merge_requires_every_repetition_execution_to_complete_for_success(self):
+        merge_native_shards = self._merge_function()
+        parent = self._parent_manifest()
+
+        for execution_status in ("failed", "error", "blocked", "evaluator_error"):
+            with self.subTest(execution_status=execution_status):
+                reports = self._reports(parent, repetitions=2)
+                successful_task_rows = [
+                    row
+                    for report in reports
+                    for row in report["task_summaries"]
+                    if row["task_id"] == "appworld-task-0"
+                ]
+                successful_task_rows[1]["status"] = execution_status
+
+                merged = merge_native_shards(parent, reports)
+
+                self.assertEqual(merged["task_aggregate"]["denominator"], 4)
+                self.assertEqual(merged["task_aggregate"]["successes"], 0)
+                self.assertEqual(merged["task_aggregate"]["failures"], 4)
+                self.assertEqual(merged["official"]["trials"], 4)
+                self.assertEqual(merged["official"]["successes"], 0)
+                self.assertEqual(merged["official"]["failures"], 4)
+
     def test_merge_rejects_duplicate_missing_extra_and_condition_mismatch(self):
         merge_native_shards = self._merge_function()
         parent = self._parent_manifest()

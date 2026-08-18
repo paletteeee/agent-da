@@ -264,7 +264,7 @@ mkdir -p "$TXNMEM_OUT_DIR/merged"
 for TXNMEM_BENCHMARK_ITEM in "${TXNMEM_SELECTED_BENCHMARKS[@]}"; do
   TXNMEM_BENCHMARK="${TXNMEM_BENCHMARK_ITEM//[[:space:]]/}"
   TXNMEM_JOB="${TXNMEM_BENCHMARK//-/_}"
-  "$TXNMEM_PYTHON" - "$TXNMEM_OUT_DIR" "$TXNMEM_JOB" "$TXNMEM_SHARD_COUNT" <<'PY'
+  "$TXNMEM_PYTHON" - "$TXNMEM_OUT_DIR" "$TXNMEM_JOB" "$TXNMEM_SHARD_COUNT" "$TXNMEM_RESUME" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -274,6 +274,7 @@ from txnmem_batch_merge import merge_native_shards
 out_dir = Path(sys.argv[1])
 job = sys.argv[2]
 shard_count = int(sys.argv[3])
+resume = bool(int(sys.argv[4]))
 try:
     parent = json.loads((out_dir / "manifests" / job / "parent.json").read_text(encoding="utf-8"))
     reports = [
@@ -288,7 +289,20 @@ except (OSError, json.JSONDecodeError) as exc:
     raise SystemExit(f"cannot merge incomplete or malformed shard outputs for {job}: {exc}") from exc
 merged = merge_native_shards(parent, reports)
 path = out_dir / "merged" / f"{job}.json"
-path.write_text(json.dumps(merged, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+if path.exists():
+    if not resume:
+        raise SystemExit(f"refusing to overwrite existing merge without --resume: {path}")
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"existing resume merge is malformed: {path}") from exc
+    if existing != merged:
+        raise SystemExit(f"existing resume merge does not match recomputation: {path}")
+else:
+    path.write_text(
+        json.dumps(merged, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 PY
 done
 fi

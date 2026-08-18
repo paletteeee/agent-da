@@ -122,3 +122,7 @@ Ruling: Freeze the public formal domains as τ-bench `retail/test` with exactly 
 Ruling: Deterministic sharding partitions the frozen ordered manifest by stable task position while preserving raw official task ID, parent manifest hash, benchmark/domain/split, code/data identity and shared condition fingerprint; merging rejects empty coverage, duplicates, omissions, extras, mismatches or conflicting repetitions — cost if wrong: partial reruns must be repaired rather than silently changing the denominator.
 
 Ruling: Failed, evaluator-error and blocked task rows remain one task each in the merged official denominator; shard success is an execution status and never filters statistical units — cost if wrong: formal aggregate rates may be lower than success-only diagnostics but are unbiased by execution failures.
+
+Ruling: A merged task counts as official success only when every repetition has execution `status=completed`, official evaluator `status=available`, and `success=true`; evaluator output can never override a failed/error/blocked execution — cost if wrong: inconsistent task/evaluator records lower success rather than being optimistically resolved.
+
+Ruling: The merged aggregate is a protected formal artifact: without `--resume` an existing merge path is never overwritten; with `--resume` an existing byte-equivalent/canonically equal merge is accepted, while any mismatch fails closed — cost if wrong: intentional replacement requires a fresh output directory or explicit cleanup outside the formal workflow.
