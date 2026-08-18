@@ -97,6 +97,88 @@ Per-family executable fingerprint counts are: atomic multi-write 4, crash during
 
 Concerns: none.
 
+## Review fix round 3
+
+Status: DONE
+
+Implementation commit: `00b4c71bc2ccf2789084df171b3e607bc6cb9543`
+
+### Findings closed
+
+- Scaled-controlled signatures are discovered recursively across claim metadata, active artifact objects and nested arrays/objects, independent of wrapper/field names. Exact registered domains, the 1,600/8,000 formal count pair and controlled-scale identities all force the strict profile and bundle gate.
+- A scaled claim's primary `artifact_path`, hash and assertions must now be bound to one of the exact six controlled artifacts. A renamed seventh artifact cannot borrow a valid bundle.
+- Every stored oracle is schema-validated, required to contain an outcome, regenerated with `reference_outcome` from its generated instance and compared structurally with the regenerated record. Every CSV oracle field (`oracle_version`, `oracle_match`, `allowed_outcome_count`, `oracle_mismatches`) is recomputed from a fresh variant execution against that regenerated oracle.
+- Raw-capable ancestors such as `payloads`, `conversations` and `transcripts` dominate safe aggregate basenames. Exact historical aggregate roots remain compatible only with an explicitly schema-safe aggregate filename/document.
+- Controlled generated instances and reference-oracle records use positive recursive schemas for config, memories, operations/new-memory, policies, schedules/triggers, provenance, allowed outcomes, invariants and event traces. Unknown nested shapes, type-confused lists and raw customer/dialogue marker values fail closed.
+
+### TDD evidence
+
+Primary adversarial RED command:
+
+`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -B -m unittest -v tests.test_txnmem_claim_audit.PaperClaimLedgerTests.test_scaled_controlled_claim_signal_recurses_through_renamed_nested_fields tests.test_txnmem_claim_audit.PaperClaimLedgerTests.test_scaled_controlled_claim_rejects_primary_seventh_artifact tests.test_txnmem_claim_audit.PaperClaimLedgerTests.test_scaled_controlled_claim_regenerates_oracles_and_csv_oracle_fields tests.test_txnmem_artifact_audit.TxnMemArtifactAuditTests.test_safe_aggregate_never_overrides_a_raw_capable_ancestor tests.test_txnmem_artifact_audit.TxnMemArtifactAuditTests.test_controlled_instances_reject_list_payloads_in_typed_fields tests.test_txnmem_artifact_audit.TxnMemArtifactAuditTests.test_controlled_oracles_reject_unapproved_nested_trace_and_outcome_shapes`
+
+Primary RED result: exit 1; 6 tests ran and exactly 6 failed. Each failure observed an empty finding set for its intended bypass.
+
+Scalar-content RED command:
+
+`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -B -m unittest -v tests.test_txnmem_artifact_audit.TxnMemArtifactAuditTests.test_controlled_records_reject_raw_dialogue_in_approved_scalar_fields`
+
+Scalar-content RED result: exit 1; 1 test ran and failed because both mutated controlled records were accepted.
+
+Aggregate-compatibility RED command:
+
+`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -B -m unittest -v tests.test_txnmem_artifact_audit.TxnMemArtifactAuditTests.test_exact_schema_safe_aggregate_roots_remain_compatible`
+
+Compatibility RED result: exit 1; 1 test ran and failed because all four established schema-safe aggregate paths were over-classified as raw.
+
+Adversarial GREEN result: exit 0; all 7 bypass tests passed together. Aggregate attack/compatibility GREEN result: exit 0; 2 tests passed.
+
+### Final verification
+
+Focused command:
+
+`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -B -m unittest -q tests.test_txnmem_statistics tests.test_txnmem_conditions tests.test_txnmem_claim_audit tests.test_txnmem_artifact_audit tests.test_cli_outputs`
+
+Focused result: exit 0; 80 tests passed in 36.285 seconds.
+
+Full command:
+
+`PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -B -m unittest discover -s tests -q`
+
+Full result: exit 0; 606 tests passed, 4 optional dependency/data tests skipped, in 42.028 seconds.
+
+- Claim audit: exit 0; 15 active claims, 0 findings; output only at `/tmp/txnmem-scale-claim-audit-fix3-final-precommit.json`.
+- Artifact audit: exit 0; 0 findings.
+- `git diff --check`: exit 0 with no output.
+- No formal result artifact was added to Git.
+
+### Deterministic committed-HEAD verification
+
+- Run A: `/tmp/txnmem-fix3-formal-a.3AtLEO/results/final_controlled_200`
+- Run B: `/tmp/txnmem-fix3-formal-b.UYlSZZ/results/final_controlled_200`
+- Both used `experiment --config configs/controlled_scale_200.json --seeds 200 --require-clean-source` and exited 0 with 1,600 instances and 8,000 result rows.
+- `diff -rq` over the complete 14-file trees exited 0 with no output.
+- Both manifests declare commit `00b4c71bc2ccf2789084df171b3e607bc6cb9543`, `contained_in_commit=true`, oracle `0.4`, 1,600 instances and 8,000 variant rows.
+- The generated-instance and reference-oracle JSONL files from both trees passed the controlled artifact audit with 0 findings.
+
+### Files changed
+
+- `src/txnmem_claim_audit.py`
+- `src/txnmem_artifact_audit.py`
+- `tests/test_txnmem_claim_audit.py`
+- `tests/test_txnmem_artifact_audit.py`
+- `.superpowers/sdd/2026-08-18-evidence-scale-up/task-3-brief.md`
+- `.superpowers/sdd/2026-08-18-evidence-scale-up/progress.md`
+- `.superpowers/sdd/2026-08-18-evidence-scale-up/task-3-report.md`
+
+### Self-review
+
+- Confirmed each realistic mutation—non-recursive signal, unbound primary artifact, trusted empty oracle, trusted CSV flag, safe-basename ancestor override, open list shape and hidden raw scalar—causes a targeted regression failure.
+- Confirmed actual 200-seed generated/oracle shapes and the historical 50/200 controlled fixtures satisfy the positive schemas.
+- Confirmed historical non-scaled claims, Task 1/2 behavior and oracle version 0.4 remain unchanged.
+
+Concerns: none.
+
 ## Review fix round 2
 
 Status: DONE
