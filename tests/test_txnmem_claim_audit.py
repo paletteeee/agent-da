@@ -665,7 +665,7 @@ class PaperClaimLedgerTests(unittest.TestCase):
             },
             {
                 "task_count": 5,
-                "renamed": {"count_a": 1600, "count_b": 8000},
+                "renamed": {"instances": 1600, "variant_results": 8000},
             },
         )
         for document in documents:
@@ -692,11 +692,14 @@ class PaperClaimLedgerTests(unittest.TestCase):
             },
             {
                 "task_count": 5,
-                "renamed": {"count_a": "1600", "count_b": "8000"},
+                "renamed": {
+                    "Instance.Count": "1600",
+                    "Variant-Row.Count": "8000",
+                },
             },
             {
                 "task_count": 5,
-                "renamed": {"count_a": 1600.0, "count_b": 8000.0},
+                "renamed": {"INSTANCES": 1600.0, "Variant.Results": 8000.0},
             },
         )
         for document in documents:
@@ -714,6 +717,56 @@ class PaperClaimLedgerTests(unittest.TestCase):
             codes = {item["code"] for item in report["findings"]}
             self.assertIn("controlled_profile_required", codes)
             self.assertIn("controlled_evidence_missing", codes)
+
+    def test_scaled_controlled_claim_numeric_signal_requires_emitted_role_pair(self):
+        documents = {
+            "operational_counts": {
+                "task_count": 5,
+                "renamed": {"request_count": 1600, "token_count": 8000},
+            },
+            "formal_manifest_counts": {
+                "task_count": 5,
+                "renamed": {"instances": 1600, "variant_results": 8000},
+            },
+            "controlled_suite_counts": {
+                "task_count": 5,
+                "renamed": {"instance_count": 1600, "variant_row_count": 8000},
+            },
+            "roles_in_different_objects": {
+                "task_count": 5,
+                "first": {"instances": 1600},
+                "second": {"variant_results": 8000},
+            },
+        }
+        observed = {}
+        for label, document in documents.items():
+            with self.subTest(label=label), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                ledger, _ = self._fixture(root)
+                artifact = root / "results/evidence.json"
+                artifact.write_text(json.dumps(document), encoding="utf-8")
+                payload = json.loads(ledger.read_text())
+                payload["claims"][0]["artifact_sha256"] = self._sha256(artifact)
+                ledger.write_text(json.dumps(payload), encoding="utf-8")
+
+                codes = {
+                    item["code"]
+                    for item in audit_claim_ledger(root, ledger)["findings"]
+                }
+                observed[label] = {
+                    "controlled_profile_required",
+                    "controlled_evidence_missing",
+                } <= codes
+
+        self.assertEqual(
+            observed,
+            {
+                "operational_counts": False,
+                "formal_manifest_counts": True,
+                "controlled_suite_counts": True,
+                "roles_in_different_objects": False,
+            },
+        )
 
     def test_scaled_controlled_claim_signal_does_not_combine_unrelated_counts(self):
         with TemporaryDirectory() as tmp:

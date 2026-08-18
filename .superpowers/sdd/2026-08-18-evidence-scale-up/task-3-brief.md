@@ -109,3 +109,13 @@ commands, mapping keys, and values. Raw path classification must also recognize
 denied semantic stems inside camelCase/concatenated components such as
 `promptMessages`, `payloadStore`, `conversationArchive`, `transcriptBundle`,
 `dialogueExport`, and `chatHistory`.
+
+#### Review fix round 6 — exact semantic count roles
+
+Replace generic token-intersection count detection with explicit normalized
+instance-count and variant-result-count key registries derived from the formal
+manifest/evidence schemas. The 1,600 and 8,000 values trigger only when paired
+under those approved roles in one evidence object. Operational pairs such as
+`request_count=1600` and `token_count=8000`, or account/discount counts, remain
+non-scaled. Preserve every identity/path/domain trigger and all round-5 replay
+and strict-JSON behavior.

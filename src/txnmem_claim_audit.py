@@ -613,6 +613,8 @@ _SCALED_SOURCE_PATHS = {
     "src/txnmem_workloads.py",
 }
 _SCALED_CHECKPOINTS = [10, 25, 50, 100, 150, 200]
+_SCALED_INSTANCE_COUNT_ROLES = {"instances", "instancecount"}
+_SCALED_VARIANT_RESULT_COUNT_ROLES = {"variantresults", "variantrowcount"}
 
 
 def _document_declares_scaled_controlled(document: Any) -> bool:
@@ -638,15 +640,6 @@ def _document_declares_scaled_controlled(document: Any) -> bool:
             marker in normalized
             for marker in ("controlledscale200", "finalcontrolled200")
         )
-
-    def normalized_tokens(value: Any) -> set[str]:
-        if not isinstance(value, str):
-            return set()
-        separated = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", value)
-        return {
-            token.lower()
-            for token in re.findall(r"[A-Za-z]+|[0-9]+", separated)
-        }
 
     def exact_integral(value: Any) -> int | None:
         if isinstance(value, bool):
@@ -678,18 +671,22 @@ def _document_declares_scaled_controlled(document: Any) -> bool:
             for item in immediate_scalars
         ):
             return True
-        count_key_roles = {
-            "count", "counts", "instance", "instances", "row", "rows",
-            "result", "results", "record", "records",
-        }
-        local_integers = set()
+        has_instance_count = False
+        has_variant_result_count = False
         for key, item in value.items():
-            if not (normalized_tokens(key) & count_key_roles):
-                continue
+            normalized_key = normalized_identity(key)
             integral = exact_integral(item)
-            if integral is not None:
-                local_integers.add(integral)
-        if {1600, 8000} <= local_integers:
+            if (
+                normalized_key in _SCALED_INSTANCE_COUNT_ROLES
+                and integral == 1600
+            ):
+                has_instance_count = True
+            if (
+                normalized_key in _SCALED_VARIANT_RESULT_COUNT_ROLES
+                and integral == 8000
+            ):
+                has_variant_result_count = True
+        if has_instance_count and has_variant_result_count:
             return True
         local_lists = [item for item in value.values() if isinstance(item, list)]
         if (
