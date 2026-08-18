@@ -84,8 +84,8 @@ class TxnMemWorkloadTests(unittest.TestCase):
         for workload in WORKLOADS:
             rows = [row for row in first if row["workload"] == workload]
             self.assertEqual({row["seed"] for row in rows}, set(range(200)))
-            if rows[0]["semantic_parameters"]:
-                self.assertGreater(len({row["semantic_fingerprint"] for row in rows}), 1)
+            self.assertTrue(rows[0]["semantic_parameters"])
+            self.assertGreater(len({row["semantic_fingerprint"] for row in rows}), 1)
 
     def test_semantic_sampling_uses_inclusive_ranges(self):
         """Sampling must include both endpoints rather than treating high as exclusive."""
@@ -141,6 +141,20 @@ class TxnMemWorkloadTests(unittest.TestCase):
         changed_action["failure_schedule"][-1]["target"] = "derive"
         self.assertNotEqual(semantic_fingerprint(relabeled), semantic_fingerprint(changed_action))
 
+    def test_semantic_fingerprint_preserves_literal_crash_targets_despite_operation_id_collision(self):
+        """The literal crash target ``commit`` is not an operation-id reference."""
+
+        colliding = generate_instance("crash_during_commit", seed=8)
+        colliding["operations"][-1]["op_id"] = "commit"
+        colliding["failure_schedule"][0]["trigger"] = {"before_operation": "commit"}
+        relabeled_operation = json.loads(json.dumps(colliding))
+        relabeled_operation["operations"][-1]["op_id"] = "renamed_commit_operation"
+        relabeled_operation["failure_schedule"][0]["trigger"] = {
+            "before_operation": "renamed_commit_operation"
+        }
+
+        self.assertEqual(semantic_fingerprint(colliding), semantic_fingerprint(relabeled_operation))
+
     def test_parameter_ranges_drive_consumed_schedule_and_policy_inputs(self):
         """Replacing consumed policy schedules with ignored annotations must change replay."""
 
@@ -180,8 +194,24 @@ class TxnMemWorkloadTests(unittest.TestCase):
             operation["txn_id"] for operation in concurrent["operations"] if operation.get("txn_id")
         }
         result = run_instance(concurrent, "TxnMem")
+        begin_positions = [
+            index for index, operation in enumerate(concurrent["operations"])
+            if operation["type"] == "begin_txn"
+        ]
+        concurrent_work_positions = [
+            index for index, operation in enumerate(concurrent["operations"])
+            if operation.get("txn_id", "").startswith("txn_001_concurrent_")
+            and operation["type"] not in {"begin_txn", "commit"}
+        ]
+        concurrent_commit_positions = [
+            index for index, operation in enumerate(concurrent["operations"])
+            if operation.get("txn_id", "").startswith("txn_001_concurrent_")
+            and operation["type"] == "commit"
+        ]
 
         self.assertEqual(len(transaction_ids), 3)
+        self.assertLess(max(begin_positions), min(concurrent_work_positions))
+        self.assertLess(max(concurrent_work_positions), min(concurrent_commit_positions))
         for transaction_id in transaction_ids:
             sequence = [
                 operation["type"]
@@ -192,6 +222,38 @@ class TxnMemWorkloadTests(unittest.TestCase):
             self.assertEqual(sequence[-1], "commit")
             self.assertGreaterEqual(len(sequence), 3)
         self.assertTrue(compare_result_to_oracle(concurrent, result)["matches"])
+
+    def test_concurrency_interleaves_real_provenance_writes(self):
+        """Concurrent lanes overlap begin/derive/commit work that both executors consume."""
+
+        concurrent = generate_suite(
+            ["provenance_chain_repair"],
+            [9],
+            parameter_ranges={"concurrency": [3, 3], "provenance_depth": [1, 1]},
+        )[0]
+        concurrent_derives = [
+            operation
+            for operation in concurrent["operations"]
+            if operation["type"] == "derive" and "concurrent" in operation.get("txn_id", "")
+        ]
+        transaction_ids = [operation["txn_id"] for operation in concurrent_derives]
+
+        self.assertEqual(len(concurrent_derives), 2)
+        self.assertEqual({operation["source_ids"][0] for operation in concurrent_derives}, {"m_root"})
+        self.assertEqual(len(set(transaction_ids)), 2)
+        primary_read_position = next(
+            index
+            for index, operation in enumerate(concurrent["operations"])
+            if operation.get("txn_id") == "txn_derive" and operation["type"] == "read"
+        )
+        first_concurrent_commit = next(
+            index
+            for index, operation in enumerate(concurrent["operations"])
+            if operation.get("txn_id", "").startswith("txn_derive_concurrent_")
+            and operation["type"] == "commit"
+        )
+        self.assertLess(primary_read_position, first_concurrent_commit)
+        self.assertTrue(compare_result_to_oracle(concurrent, run_instance(concurrent, "TxnMem"))["matches"])
 
     def test_provenance_chain_records_real_derive_operations(self):
         instance = generate_instance("provenance_chain_repair", seed=14, config={"provenance_depth": 2})

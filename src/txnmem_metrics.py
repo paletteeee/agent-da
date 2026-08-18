@@ -82,6 +82,12 @@ def result_row(instance: dict[str, Any], result: dict[str, Any]) -> dict[str, An
         "seed": instance["seed"],
         "variant": result["variant"],
         "transaction_state": result["transaction_state"],
+        "transaction_states": json.dumps(
+            dict(sorted(result.get("transaction_states", {}).items())),
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
         "partial_update_rate": float("atomicity_violation" in violations),
         "invalid_commit_rate": float("invalid_commit_violation" in violations),
         "stale_write_rate": float("stale_write_violation" in violations),

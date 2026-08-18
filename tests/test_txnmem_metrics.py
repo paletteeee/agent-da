@@ -1,3 +1,4 @@
+import csv
 import json
 import sys
 import unittest
@@ -14,6 +15,7 @@ from txnmem_metrics import (  # noqa: E402
     write_summary,
     write_violation_figure,
 )
+from txnmem_experiment import write_csv  # noqa: E402
 from txnmem_simulator import run_instance  # noqa: E402
 from txnmem_workloads import generate_instance  # noqa: E402
 
@@ -33,6 +35,29 @@ class TxnMemMetricsTests(unittest.TestCase):
         self.assertEqual(row["oracle_version"], "0.1")
         self.assertEqual(row["oracle_match"], 1)
         self.assertEqual(row["allowed_outcome_count"], 1)
+
+    def test_result_row_exports_sorted_per_transaction_states_to_csv(self):
+        """Concurrent terminal states remain audit-visible in row and CSV artifacts."""
+
+        instance = generate_instance("atomic_multi_write", 42, config={"txn_size": 1})
+        agent = instance["policies"][0]["agent_id"]
+        instance["operations"] = [
+            {"op_id": "op_001", "step": 1, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_b"},
+            {"op_id": "op_002", "step": 2, "agent_id": agent, "type": "begin_txn", "txn_id": "txn_a"},
+            {"op_id": "op_003", "step": 3, "agent_id": agent, "type": "write", "txn_id": "txn_b", "memory_id": "m_b", "source_ids": [], "policy_version": 1},
+            {"op_id": "op_004", "step": 4, "agent_id": agent, "type": "abort", "txn_id": "txn_a"},
+            {"op_id": "op_005", "step": 5, "agent_id": agent, "type": "commit", "txn_id": "txn_b"},
+        ]
+        instance["failure_schedule"] = []
+        row = result_row(instance, run_instance(instance, "TxnMem"))
+
+        self.assertEqual(row["transaction_states"], '{"txn_a":"aborted","txn_b":"committed"}')
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "results.csv"
+            write_csv([row], path)
+            with path.open(newline="", encoding="utf-8") as handle:
+                exported = next(csv.DictReader(handle))
+        self.assertEqual(exported["transaction_states"], row["transaction_states"])
 
     def test_summary_contains_mean_and_population_std(self):
         summary = summarize(

@@ -137,9 +137,9 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
     committed_memory_ids: list[str] = []
     trace: list[dict[str, Any]] = []
     current_policy_version = 1
-    begin_policy_versions: dict[str, int] = {}
-    transaction_write_allowed: dict[str, bool] = {}
-    write_allowed = True
+    transaction_authorized_actions: dict[str, set[str]] = {}
+    transaction_read_versions: dict[str, dict[str, tuple[int, Any, Any]]] = {}
+    revoked_actions: set[str] = set()
     transaction_state = "active"
     transaction_states: dict[str, str] = {}
     repair_count = 0
@@ -153,9 +153,42 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
     def ensure_transaction(txn_id: str) -> None:
         buffered_writes.setdefault(txn_id, [])
         buffered_edges.setdefault(txn_id, [])
-        begin_policy_versions.setdefault(txn_id, current_policy_version)
-        transaction_write_allowed.setdefault(txn_id, write_allowed)
+        transaction_authorized_actions.setdefault(txn_id, set())
+        transaction_read_versions.setdefault(txn_id, {})
         transaction_states.setdefault(txn_id, "active")
+
+    def abort_transaction(txn_id: str) -> None:
+        nonlocal transaction_state
+        ensure_transaction(txn_id)
+        buffered_writes[txn_id].clear()
+        buffered_edges[txn_id].clear()
+        transaction_states[txn_id] = "aborted"
+        transaction_state = "aborted"
+
+    def abort_active_transactions() -> None:
+        for txn_id in sorted(transaction_states):
+            if transaction_states[txn_id] == "active":
+                abort_transaction(txn_id)
+
+    def crash_applies(event: dict[str, Any], operation: dict[str, Any]) -> bool:
+        if event["type"] not in {"crash", "crash_during_commit"}:
+            return False
+        target = event.get("target")
+        return target in {None, operation.get("txn_id"), operation.get("type"), "commit"}
+
+    def read_dependency_changed(txn_id: str) -> bool:
+        for memory_id, (version, scope, status) in transaction_read_versions[txn_id].items():
+            memory = memories.get(memory_id)
+            if memory is None:
+                return True
+            if (
+                int(memory.get("version", 1)) != version
+                or memory.get("scope") != scope
+                or memory.get("status") != status
+                or memory.get("status") != "active"
+            ):
+                return True
+        return False
 
     for operation in instance["operations"]:
         step = int(operation["step"])
@@ -163,20 +196,42 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
         for event in pre_events:
             if event["type"] == "revoke":
                 current_policy_version += 1
-                write_allowed = False
+                target = event.get("target")
+                if target in {"read", "search", "write", "derive", "propagate", "supersede"}:
+                    revoked_actions.add(target)
                 trace.append({"step": step, "event": "revoke", "policy_version": current_policy_version})
             elif event["type"] == "delay":
                 trace.append({"step": step, "event": "delay"})
 
         op_type = operation["type"]
         trace.append({"step": step, "operation": op_type})
+        txn_id = transaction_id(operation)
+        pre_crashes = [event for event in pre_events if crash_applies(event, operation)]
+        ambiguous_commit_crash = bool(
+            pre_crashes
+            and op_type == "commit"
+            and all(event.get("phase") is None for event in pre_crashes)
+        )
+        if pre_crashes and not ambiguous_commit_crash:
+            if uses_transaction:
+                abort_active_transactions()
+                transaction_state = "aborted"
+            elif committed_memory_ids:
+                transaction_state = "partial_commit"
+            else:
+                transaction_state = "crashed"
+            trace.append({"step": step, "event": "crash"})
+            break
 
-        if op_type == "begin_txn":
-            txn_id = transaction_id(operation)
+        terminal = uses_transaction and transaction_states.get(txn_id) in {"committed", "aborted"}
+        if terminal:
+            trace.append({"step": step, "event": "terminal_transaction", "txn_id": txn_id})
+
+        elif op_type == "begin_txn":
             buffered_writes[txn_id] = []
             buffered_edges[txn_id] = []
-            begin_policy_versions[txn_id] = current_policy_version
-            transaction_write_allowed[txn_id] = write_allowed
+            transaction_authorized_actions[txn_id] = set()
+            transaction_read_versions[txn_id] = {}
             transaction_states[txn_id] = "active"
 
         elif op_type == "write":
@@ -185,16 +240,24 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                 memories[memory["memory_id"]] = memory
                 _record_committed(committed_memory_ids, memory["memory_id"])
             else:
-                txn_id = transaction_id(operation)
                 ensure_transaction(txn_id)
-                buffered_writes[txn_id].append(memory)
+                if "write" in revoked_actions:
+                    trace.append({"step": step, "event": "denied_write"})
+                else:
+                    buffered_writes[txn_id].append(memory)
+                    transaction_authorized_actions[txn_id].add("write")
 
         elif op_type in {"search", "read", "get_by_id"}:
+            if uses_transaction:
+                ensure_transaction(txn_id)
             requested_id = operation.get("memory_id")
             candidates = [memories.get(requested_id)] if requested_id else list(memories.values())
             found = None
+            action = "search" if op_type == "search" else "read"
             for memory in candidates:
                 if memory is None or memory.get("status") not in {"active", "pending"}:
+                    continue
+                if action in revoked_actions:
                     continue
                 if not _matches(memory, operation):
                     continue
@@ -207,11 +270,19 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
             if found is not None:
                 if found["memory_id"] not in exposed_memory_ids:
                     exposed_memory_ids.append(found["memory_id"])
+                if uses_transaction and found["memory_id"] in memories:
+                    transaction_read_versions[txn_id][found["memory_id"]] = (
+                        int(found.get("version", 1)),
+                        found.get("scope"),
+                        found.get("status"),
+                    )
                 trace.append({"step": step, "event": "exposed_read", "memory_id": found["memory_id"]})
 
         elif op_type == "supersede":
-            txn_id = transaction_id(operation)
             ensure_transaction(txn_id)
+            if "supersede" in revoked_actions:
+                trace.append({"step": step, "event": "denied_supersede"})
+                continue
             old_id = operation["old_memory_id"]
             new_id = operation["new_memory_id"]
             def visible_memory(memory_id: str) -> dict[str, Any] | None:
@@ -240,25 +311,17 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                         pending["status"] = "active"
                         pending["supersedes_id"] = old_id
                 supersession_updates += 1
+                transaction_authorized_actions[txn_id].add("supersede")
 
         elif op_type == "commit":
-            txn_id = transaction_id(operation)
             ensure_transaction(txn_id)
-            policy_changed = (
-                current_policy_version != begin_policy_versions[txn_id]
-                or not transaction_write_allowed[txn_id]
-            )
-            crash_on_commit = any(event["type"] in {"crash", "crash_during_commit"} for event in pre_events)
-            if variant in POLICY_REVALIDATION_VARIANTS and policy_changed:
-                buffered_writes[txn_id].clear()
-                buffered_edges[txn_id].clear()
-                transaction_state = "aborted"
-                transaction_states[txn_id] = "aborted"
-            elif crash_on_commit and uses_transaction:
-                buffered_writes[txn_id].clear()
-                buffered_edges[txn_id].clear()
-                transaction_state = "aborted"
-                transaction_states[txn_id] = "aborted"
+            policy_revoked = bool(transaction_authorized_actions[txn_id] & revoked_actions)
+            if variant in POLICY_REVALIDATION_VARIANTS and (
+                policy_revoked or read_dependency_changed(txn_id)
+            ):
+                abort_transaction(txn_id)
+            elif ambiguous_commit_crash and uses_transaction:
+                abort_transaction(txn_id)
             elif not uses_transaction:
                 transaction_state = "committed"
                 transaction_states[txn_id] = "committed"
@@ -273,12 +336,7 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                 transaction_states[txn_id] = "committed"
 
         elif op_type == "abort":
-            txn_id = transaction_id(operation)
-            ensure_transaction(txn_id)
-            buffered_writes[txn_id].clear()
-            buffered_edges[txn_id].clear()
-            transaction_state = "aborted"
-            transaction_states[txn_id] = "aborted"
+            abort_transaction(txn_id)
 
         elif op_type in {"derive", "propagate"}:
             memory = _memory_from_operation(operation)
@@ -296,10 +354,21 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                 for source_id in source_ids
             ]
             if uses_transaction:
-                txn_id = transaction_id(operation)
                 ensure_transaction(txn_id)
-                buffered_writes[txn_id].append(memory)
-                buffered_edges[txn_id].extend(operation_edges)
+                if op_type in revoked_actions:
+                    trace.append({"step": step, "event": f"denied_{op_type}"})
+                else:
+                    buffered_writes[txn_id].append(memory)
+                    buffered_edges[txn_id].extend(operation_edges)
+                    transaction_authorized_actions[txn_id].add(op_type)
+                    for source_id in source_ids:
+                        source = memories.get(source_id)
+                        if source is not None:
+                            transaction_read_versions[txn_id][source_id] = (
+                                int(source.get("version", 1)),
+                                source.get("scope"),
+                                source.get("status"),
+                            )
             else:
                 memories[memory["memory_id"]] = memory
                 _record_committed(committed_memory_ids, memory["memory_id"])
@@ -321,15 +390,11 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
                     transaction_states[operation["txn_id"]] = "invalidated"
 
         post_events = events_for_operation(instance, operation, "after")
-        if any(event["type"] in {"crash", "crash_during_commit"} for event in pre_events + post_events):
+        if any(crash_applies(event, operation) for event in post_events):
             if op_type != "commit":
                 if uses_transaction:
-                    txn_id = transaction_id(operation)
-                    ensure_transaction(txn_id)
-                    buffered_writes[txn_id].clear()
-                    buffered_edges[txn_id].clear()
+                    abort_active_transactions()
                     transaction_state = "aborted"
-                    transaction_states[txn_id] = "aborted"
                 elif committed_memory_ids:
                     transaction_state = "partial_commit"
                 else:
@@ -337,8 +402,15 @@ def run_instance(instance: dict[str, Any], variant: str) -> dict[str, Any]:
             trace.append({"step": step, "event": "crash"})
             break
 
+    for txn_id in sorted(transaction_states):
+        if transaction_states[txn_id] != "active":
+            continue
+        if buffered_writes.get(txn_id) or buffered_edges.get(txn_id):
+            abort_transaction(txn_id)
+        else:
+            transaction_states[txn_id] = "completed"
     if transaction_state == "active":
-        transaction_state = "completed"
+        transaction_state = transaction_states.get("implicit", "completed")
 
     return {
         "variant": variant,

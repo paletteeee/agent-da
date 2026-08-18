@@ -24,13 +24,13 @@ WORKLOADS = (
 
 WORKLOAD_SEMANTIC_PARAMETERS = {
     "atomic_multi_write": ("txn_size",),
-    "crash_during_commit": (),
+    "crash_during_commit": ("txn_size",),
     "revoke_before_commit": ("policy_churn", "concurrency"),
-    "scope_bypass": (),
+    "scope_bypass": ("concurrency",),
     "supersession_consistency": ("concurrency",),
     "provenance_chain_repair": ("provenance_depth", "concurrency"),
     "provenance_branch_repair": ("provenance_depth", "branch_factor", "concurrency"),
-    "mixed_stress": (),
+    "mixed_stress": ("txn_size",),
 }
 
 
@@ -106,9 +106,12 @@ def _target_reference_category(event: Mapping[str, Any], known: Mapping[str, set
         return None
     event_type = event.get("type") or event.get("action")
     if event_type in {"crash", "crash_during_commit"}:
-        for category in ("transaction", "operation"):
-            if target in known.get(category, set()):
-                return category
+        # Crash targets accept a transaction identifier, but values such as
+        # ``commit`` and operation names are literal crash selectors.  In
+        # particular, an incidental op_id named ``commit`` must not turn that
+        # literal selector into an identifier reference.
+        if target in known.get("transaction", set()):
+            return "transaction"
     if event_type == "invalidate" and target in known.get("memory", set()):
         return "memory"
     return None
@@ -246,34 +249,139 @@ def _interleave_concurrent_transactions(instance: dict[str, Any], concurrency: i
     primary_txn_id = str(primary_begin["txn_id"])
     agent = primary_begin["agent_id"]
     probes: list[dict[str, Any]] = []
+    provenance_workload = instance["workload"] in {
+        "provenance_chain_repair",
+        "provenance_branch_repair",
+    }
     for lane in range(2, concurrency + 1):
         txn_id = f"{primary_txn_id}_concurrent_{lane}"
+        work = (
+            {
+                "op_id": f"concurrent_{lane}_derive",
+                "agent_id": agent,
+                "type": "derive",
+                "txn_id": txn_id,
+                "memory_id": f"m_concurrent_derived_{lane}",
+                "source_ids": ["m_root"],
+                "value": f"concurrent_derived_{lane}",
+                "scope": "tenant:user_001",
+            }
+            if provenance_workload
+            else {
+                "op_id": f"concurrent_{lane}_read",
+                "agent_id": agent,
+                "type": "read",
+                "txn_id": txn_id,
+                "query": "__concurrent_probe__",
+                "scope": "tenant:user_001",
+            }
+        )
         probes.extend(
             [
                 {"op_id": f"concurrent_{lane}_begin", "agent_id": agent, "type": "begin_txn", "txn_id": txn_id},
-                {
-                    "op_id": f"concurrent_{lane}_read",
-                    "agent_id": agent,
-                    "type": "read",
-                    "txn_id": txn_id,
-                    "query": "__concurrent_probe__",
-                    "scope": "tenant:user_001",
-                },
+                work,
                 {"op_id": f"concurrent_{lane}_commit", "agent_id": agent, "type": "commit", "txn_id": txn_id},
             ]
         )
     starts = [operation for operation in probes if operation["type"] == "begin_txn"]
-    reads = [operation for operation in probes if operation["type"] == "read"]
+    work = [operation for operation in probes if operation["type"] not in {"begin_txn", "commit"}]
     commits = [operation for operation in probes if operation["type"] == "commit"]
+    tail = operations[primary_begin_index + 1 :]
     instance["operations"] = [
         *operations[: primary_begin_index + 1],
         *starts,
-        *reads,
+        *work,
+        *tail[:1],
         *commits,
-        *operations[primary_begin_index + 1 :],
+        *tail[1:],
     ]
     for step, operation in enumerate(instance["operations"], start=1):
         operation["step"] = step
+
+
+def _parameterize_crash_during_commit(instance: dict[str, Any], txn_size: int) -> None:
+    """Scale real buffered writes while retaining the literal commit crash target."""
+
+    if txn_size <= 1:
+        return
+    begin, write, commit = instance["operations"]
+    writes = []
+    for index in range(txn_size):
+        item = dict(write)
+        item["memory_id"] = "m_commit" if index == 0 else f"m_commit_{index + 1}"
+        writes.append(item)
+    instance["operations"] = [dict(begin), *writes, dict(commit)]
+    for number, operation in enumerate(instance["operations"], start=1):
+        operation["op_id"] = f"op_{number:03d}"
+        operation["step"] = number
+    instance["failure_schedule"][0]["trigger"] = {
+        "before_operation": instance["operations"][-1]["op_id"]
+    }
+
+
+def _parameterize_scope_bypass(instance: dict[str, Any], concurrency: int) -> None:
+    """Make each sampled lane a real, interleaved cross-scope transaction."""
+
+    if concurrency <= 1:
+        return
+    agent = instance["operations"][0]["agent_id"]
+    lanes = [f"txn_scope_{index}" for index in range(1, concurrency + 1)]
+    operations: list[dict[str, Any]] = []
+    for txn_id in lanes:
+        operations.append({"agent_id": agent, "type": "begin_txn", "txn_id": txn_id})
+    for txn_id in lanes:
+        operations.append(
+            {
+                "agent_id": agent,
+                "type": "search",
+                "txn_id": txn_id,
+                "query": "private_fact",
+                "scope": "tenant:user_002",
+            }
+        )
+    for txn_id in lanes:
+        operations.append(
+            {
+                "agent_id": agent,
+                "type": "get_by_id",
+                "txn_id": txn_id,
+                "memory_id": "m_private",
+                "scope": "tenant:user_002",
+            }
+        )
+    for txn_id in lanes:
+        operations.append({"agent_id": agent, "type": "commit", "txn_id": txn_id})
+    for number, operation in enumerate(operations, start=1):
+        operation["op_id"] = f"op_{number:03d}"
+        operation["step"] = number
+    instance["operations"] = operations
+
+
+def _parameterize_mixed_stress(instance: dict[str, Any], txn_size: int) -> None:
+    """Scale the actual staged-write set, not an ignored workload annotation."""
+
+    begin = instance["operations"][0]
+    write = instance["operations"][1]
+    commit = instance["operations"][-1]
+    writes = []
+    for index in range(txn_size):
+        item = dict(write)
+        item["memory_id"] = f"m_mix_{index + 1}"
+        writes.append(item)
+    instance["operations"] = [dict(begin), *writes, dict(commit)]
+    for number, operation in enumerate(instance["operations"], start=1):
+        operation["op_id"] = f"op_{number:03d}"
+        operation["step"] = number
+    commit_id = instance["operations"][-1]["op_id"]
+    instance["failure_schedule"] = [
+        {
+            "trigger": {"before_operation": commit_id},
+            "type": "revoke",
+            "target": "write",
+            "phase": "before_validate",
+        },
+        {"trigger": {"before_operation": commit_id}, "type": "crash", "target": "commit"},
+    ]
 
 
 def _apply_parameterized_schedules(
@@ -281,9 +389,18 @@ def _apply_parameterized_schedules(
 ) -> None:
     """Add replay-consumed interleavings and policy schedules for sampled semantics."""
 
+    txn_size = semantic_parameters.get("txn_size")
+    if txn_size is not None and instance["workload"] == "crash_during_commit":
+        _parameterize_crash_during_commit(instance, txn_size)
+    if txn_size is not None and instance["workload"] == "mixed_stress":
+        _parameterize_mixed_stress(instance, txn_size)
+
     concurrency = semantic_parameters.get("concurrency")
     if concurrency is not None:
-        _interleave_concurrent_transactions(instance, concurrency)
+        if instance["workload"] == "scope_bypass":
+            _parameterize_scope_bypass(instance, concurrency)
+        else:
+            _interleave_concurrent_transactions(instance, concurrency)
 
     policy_churn = semantic_parameters.get("policy_churn")
     if policy_churn is not None:
