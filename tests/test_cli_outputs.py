@@ -276,6 +276,103 @@ class TxnMemCliOutputTests(unittest.TestCase):
         self.assertNotEqual(canonical_fingerprint(baseline), canonical_fingerprint(all_public))
         self.assertEqual(not_applicable["appworld_model_tool_strategy"], "not_applicable")
 
+    def test_tau_batch_rejects_manifest_runtime_scope_mismatch_before_execution(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        manifest = {
+            "manifest_version": 1,
+            "dataset_name": "tau-bench-retail-test",
+            "benchmark": "tau-bench",
+            "domain": "retail",
+            "split": "test",
+            "parent_manifest_hash": "a" * 64,
+            "tasks": [{"task_id": "task-1", "prompt": "fixture"}],
+        }
+
+        def run_batch(_manifest, _model, out_dir, **_kwargs):
+            (out_dir / "results").mkdir(parents=True, exist_ok=True)
+            return {}
+
+        for option, value in (("--tau-domain", "airline"), ("--tau-split", "dev")):
+            with self.subTest(option=option), TemporaryDirectory() as tmp, patch(
+                "txnmem_experiment.load_task_manifest",
+                return_value=(manifest, "b" * 64),
+            ), patch(
+                "txnmem_experiment.run_benchmark_batch", side_effect=run_batch
+            ) as run_batch_mock:
+                arguments = [
+                    "benchmark-native-batch",
+                    "--benchmark",
+                    "tau-bench",
+                    "--manifest",
+                    "manifest.json",
+                    "--offline-fixture",
+                    "--out-dir",
+                    tmp,
+                    "--tau-domain",
+                    "retail",
+                    "--tau-split",
+                    "test",
+                    option,
+                    value,
+                ]
+
+                self.assertEqual(main(arguments), 2)
+                run_batch_mock.assert_not_called()
+
+    def test_shard_batch_condition_records_frozen_domain_and_split(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        manifest = {
+            "manifest_version": 1,
+            "dataset_name": "tau-bench-retail-test",
+            "benchmark": "tau-bench",
+            "domain": "retail",
+            "split": "test",
+            "parent_manifest_hash": "a" * 64,
+            "tasks": [{"task_id": "task-1", "prompt": "fixture"}],
+        }
+
+        def run_batch(_manifest, _model, out_dir, **_kwargs):
+            (out_dir / "results").mkdir(parents=True, exist_ok=True)
+            return {}
+
+        with TemporaryDirectory() as tmp, patch(
+            "txnmem_experiment.load_task_manifest",
+            return_value=(manifest, "b" * 64),
+        ), patch(
+            "txnmem_experiment.run_benchmark_batch", side_effect=run_batch
+        ):
+            self.assertEqual(
+                main(
+                    [
+                        "benchmark-native-batch",
+                        "--benchmark",
+                        "tau-bench",
+                        "--manifest",
+                        "manifest.json",
+                        "--offline-fixture",
+                        "--out-dir",
+                        tmp,
+                        "--tau-domain",
+                        "retail",
+                        "--tau-split",
+                        "test",
+                    ]
+                ),
+                0,
+            )
+            report = json.loads(
+                (Path(tmp) / "results" / "native_batch_summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+        self.assertEqual(report["condition"]["domain"], "retail")
+        self.assertEqual(report["condition"]["split"], "test")
+
     def test_experiment_command_writes_all_artifacts(self):
         with TemporaryDirectory() as tmp:
             completed = subprocess.run(

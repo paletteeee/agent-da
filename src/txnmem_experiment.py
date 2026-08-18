@@ -103,6 +103,54 @@ def _benchmark_condition_manifest_hash(
     return manifest_sha256
 
 
+def _validate_benchmark_manifest_scope(
+    manifest: Mapping[str, Any],
+    *,
+    benchmark: str,
+    tau_domain: str,
+    tau_split: str,
+) -> None:
+    """Bind new public manifests to the runtime selected by the CLI.
+
+    Legacy manifests have no explicit benchmark marker and retain their
+    historical argument-driven behavior.
+    """
+
+    declared_benchmark = manifest.get("benchmark")
+    if declared_benchmark is None:
+        return
+    if not isinstance(declared_benchmark, str) or not declared_benchmark:
+        raise RealExperimentError(
+            "invalid_manifest_scope", "manifest benchmark metadata is malformed"
+        )
+    if declared_benchmark != benchmark:
+        raise RealExperimentError(
+            "manifest_benchmark_mismatch",
+            f"manifest benchmark {declared_benchmark!r} does not match --benchmark {benchmark!r}",
+        )
+    declared_split = manifest.get("split")
+    if not isinstance(declared_split, str) or not declared_split:
+        raise RealExperimentError(
+            "invalid_manifest_scope", "manifest split metadata is malformed"
+        )
+    if benchmark == "tau-bench":
+        declared_domain = manifest.get("domain")
+        if not isinstance(declared_domain, str) or not declared_domain:
+            raise RealExperimentError(
+                "invalid_manifest_scope", "tau-bench manifest domain metadata is malformed"
+            )
+        if declared_domain != tau_domain:
+            raise RealExperimentError(
+                "manifest_domain_mismatch",
+                f"manifest domain {declared_domain!r} does not match --tau-domain {tau_domain!r}",
+            )
+        if declared_split != tau_split:
+            raise RealExperimentError(
+                "manifest_split_mismatch",
+                f"manifest split {declared_split!r} does not match --tau-split {tau_split!r}",
+            )
+
+
 def _paired_benchmark_condition(
     *,
     benchmark: str,
@@ -116,6 +164,8 @@ def _paired_benchmark_condition(
     model_revision: str,
     model_server_build: str,
     appworld_tool_strategy: str,
+    domain: str | None = None,
+    split: str | None = None,
 ) -> dict[str, object]:
     import txnmem_benchmark_bridge as benchmark_bridge_module
     import txnmem_model_protocol as model_protocol_module
@@ -144,7 +194,7 @@ def _paired_benchmark_condition(
             source_paths["appworld_common_evaluation"] = Path(
                 appworld_common_evaluation_module.__file__
             )
-    return {
+    condition: dict[str, object] = {
         "benchmark": benchmark,
         "manifest_sha256": manifest_sha256,
         "model_id": model_id,
@@ -173,6 +223,11 @@ def _paired_benchmark_condition(
             appworld_tool_strategy if benchmark == "appworld" else "not_applicable"
         ),
     }
+    if domain is not None:
+        condition["domain"] = domain
+    if split is not None:
+        condition["split"] = split
+    return condition
 
 
 def write_jsonl(instances: Iterable[dict[str, Any]], path: Path) -> None:
@@ -1192,6 +1247,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "benchmark-native-batch":
         try:
             manifest, manifest_sha256 = load_task_manifest(args.manifest)
+            _validate_benchmark_manifest_scope(
+                manifest,
+                benchmark=args.benchmark,
+                tau_domain=args.tau_domain,
+                tau_split=args.tau_split,
+            )
             if args.offline_fixture:
                 model = _OfflineFixtureModel()
                 execution_mode = "offline_fixture"
@@ -1289,6 +1350,17 @@ def main(argv: list[str] | None = None) -> int:
             report["model_id"] = model_id
             report["manifest_sha256"] = manifest_sha256
             report["benchmark"] = args.benchmark
+            if manifest.get("benchmark") is not None:
+                for field in (
+                    "domain",
+                    "split",
+                    "source_identity",
+                    "parent_manifest_hash",
+                    "shard_index",
+                    "shard_count",
+                ):
+                    if field in manifest:
+                        report[field] = manifest[field]
             report["memory_backend"] = args.memory_backend
             report["prompt_profile"] = args.prompt_profile
             condition = _paired_benchmark_condition(
@@ -1305,6 +1377,16 @@ def main(argv: list[str] | None = None) -> int:
                 model_revision=args.model_revision,
                 model_server_build=args.model_server_build,
                 appworld_tool_strategy=args.appworld_tool_strategy,
+                domain=(
+                    str(manifest["domain"])
+                    if manifest.get("benchmark") is not None and "domain" in manifest
+                    else None
+                ),
+                split=(
+                    str(manifest["split"])
+                    if manifest.get("benchmark") is not None and "split" in manifest
+                    else None
+                ),
             )
             report["condition"] = condition
             report["condition_fingerprint"] = canonical_fingerprint(condition)

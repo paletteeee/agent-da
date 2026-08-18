@@ -83,6 +83,7 @@ class NativeShardMergeTests(unittest.TestCase):
             reports.append(
                 {
                     "parent_manifest_hash": parent["manifest_hash"],
+                    "execution_manifest_hash": shard["manifest_hash"],
                     "shard_index": shard["shard_index"],
                     "shard_count": shard["shard_count"],
                     "benchmark": parent["benchmark"],
@@ -121,6 +122,41 @@ class NativeShardMergeTests(unittest.TestCase):
             merged["task_aggregate"]["status_counts"],
             {"blocked": 1, "completed": 1, "evaluator_error": 1, "failed": 1},
         )
+
+    def test_merge_preserves_frozen_raw_official_task_ids(self):
+        merge_native_shards = self._merge_function()
+        parent = self._parent_manifest()
+
+        merged = merge_native_shards(parent, self._reports(parent))
+
+        self.assertEqual(
+            [row["raw_task_id"] for row in merged["task_summaries"]],
+            [task["raw_task_id"] for task in parent["tasks"]],
+        )
+
+    def test_merge_rejects_executed_shard_manifest_hash_mismatch(self):
+        merge_native_shards = self._merge_function()
+        parent = self._parent_manifest()
+        reports = self._reports(parent)
+        reports[0]["execution_manifest_hash"] = "0" * 64
+
+        with self.assertRaisesRegex(ValueError, "execution manifest"):
+            merge_native_shards(parent, reports)
+
+    def test_merge_does_not_count_evaluator_error_as_success(self):
+        merge_native_shards = self._merge_function()
+        parent = self._parent_manifest()
+        reports = self._reports(parent)
+        reports[0]["task_summaries"][0]["official"] = {
+            "status": "error",
+            "success": True,
+            "error": "contradictory evaluator output",
+        }
+
+        merged = merge_native_shards(parent, reports)
+
+        self.assertEqual(merged["official"]["successes"], 0)
+        self.assertEqual(merged["official"]["failures"], 4)
 
     def test_merge_rejects_duplicate_missing_extra_and_condition_mismatch(self):
         merge_native_shards = self._merge_function()

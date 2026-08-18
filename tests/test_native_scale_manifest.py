@@ -392,6 +392,7 @@ class NativeScaleManifestTests(unittest.TestCase):
                         json.dumps(
                             {
                                 "parent_manifest_hash": parent["manifest_hash"],
+                                "execution_manifest_hash": shard["manifest_hash"],
                                 "shard_index": shard["shard_index"],
                                 "shard_count": shard["shard_count"],
                                 "benchmark": parent["benchmark"],

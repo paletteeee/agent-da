@@ -6,7 +6,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from txnmem_benchmark_manifests import _canonical_hash
+from txnmem_benchmark_manifests import _canonical_hash, shard_manifest
 
 
 def _require_equal(report: Mapping[str, Any], field: str, expected: Any) -> None:
@@ -75,6 +75,13 @@ def merge_native_shards(
             raise ValueError(f"duplicate manifest task ID: {task_id}")
         if position != index:
             raise ValueError(f"source position mismatch for task {task_id}")
+        raw_task_id = task.get("raw_task_id")
+        if (
+            isinstance(raw_task_id, bool)
+            or not isinstance(raw_task_id, (str, int))
+            or (isinstance(raw_task_id, str) and not raw_task_id)
+        ):
+            raise ValueError(f"malformed raw task ID for task {task_id}")
         expected[task_id] = (index, task)
 
     reports = list(shard_reports)
@@ -124,6 +131,11 @@ def merge_native_shards(
         if shard_index in shard_indexes:
             raise ValueError(f"duplicate shard index: {shard_index}")
         shard_indexes.add(shard_index)
+        expected_shard_hash = shard_manifest(manifest, shard_count)[shard_index][
+            "manifest_hash"
+        ]
+        if report.get("execution_manifest_hash") != expected_shard_hash:
+            raise ValueError(f"execution manifest mismatch for shard {shard_index}")
         repetitions = report.get("repetitions")
         if isinstance(repetitions, bool) or not isinstance(repetitions, int) or repetitions < 1:
             raise ValueError("malformed repetitions")
@@ -165,6 +177,10 @@ def merge_native_shards(
             if position % shard_count != shard_index:
                 raise ValueError(f"shard assignment mismatch for task {task_id}")
             item = dict(row)
+            raw_task_id = expected[task_id][1]["raw_task_id"]
+            if "raw_task_id" in item and item["raw_task_id"] != raw_task_id:
+                raise ValueError(f"raw task ID mismatch for task {task_id}")
+            item["raw_task_id"] = raw_task_id
             item["repetition"] = repetition
             rows_by_key[key] = item
     if declared_shard_count is None or shard_indexes != set(range(declared_shard_count)):
@@ -203,6 +219,7 @@ def merge_native_shards(
             per_task_evaluator_status.append("available")
         if all(
             isinstance(row.get("official"), Mapping)
+            and _official_status(row["official"]) == "available"
             and row["official"].get("success") is True
             for row in task_rows
         ):
