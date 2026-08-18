@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import inspect
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -612,6 +615,111 @@ class AppWorldAdapterTest(unittest.TestCase):
 
 
 class ManifestGeneratorTest(unittest.TestCase):
+    def _appworld_data_fixture(self, root: Path) -> tuple[Path, bytes, bytes]:
+        data_root = root / "data"
+        (data_root / "datasets").mkdir(parents=True)
+        (data_root / "tasks").mkdir()
+        split_bytes = b"task-b\ntask-a\n"
+        version_bytes = b"0.2.0\n"
+        (data_root / "datasets" / "test_normal.txt").write_bytes(split_bytes)
+        (data_root / "version.txt").write_bytes(version_bytes)
+        (data_root / "base_dbs").mkdir()
+        (data_root / "base_dbs" / "version.txt").write_bytes(b"db-version\n")
+        for task_id in ("task-a", "task-b", "out-of-split"):
+            task_dir = data_root / "tasks" / task_id
+            task_dir.mkdir()
+            (task_dir / "specs.json").write_text(
+                json.dumps({"instruction": f"instruction {task_id}"}),
+                encoding="utf-8",
+            )
+        return data_root, split_bytes, version_bytes
+
+    def test_appworld_manifest_uses_test_normal_source_order_and_official_identities(self):
+        self.assertIn("task_split", inspect.signature(generate_appworld_manifest).parameters)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_root, split_bytes, version_bytes = self._appworld_data_fixture(root)
+
+            from_root = generate_appworld_manifest(root, task_split="test_normal")
+            from_data_root = generate_appworld_manifest(
+                data_root=data_root, task_split="test_normal"
+            )
+
+        self.assertEqual(from_root, from_data_root)
+        self.assertEqual(from_root["benchmark"], "appworld")
+        self.assertEqual(from_root["split"], "test_normal")
+        self.assertEqual(
+            [task["task_id"] for task in from_root["tasks"]],
+            ["appworld-task-b", "appworld-task-a"],
+        )
+        self.assertEqual(
+            [task["raw_task_id"] for task in from_root["tasks"]],
+            ["task-b", "task-a"],
+        )
+        self.assertEqual(
+            [task["source_position"] for task in from_root["tasks"]], [0, 1]
+        )
+        self.assertEqual(
+            from_root["source_identity"]["split_file"],
+            {
+                "path": "datasets/test_normal.txt",
+                "sha256": hashlib.sha256(split_bytes).hexdigest(),
+            },
+        )
+        self.assertEqual(
+            from_root["source_identity"]["version_file"],
+            {
+                "path": "version.txt",
+                "sha256": hashlib.sha256(version_bytes).hexdigest(),
+            },
+        )
+
+    def test_appworld_manifest_rejects_missing_or_duplicate_split_ids(self):
+        self.assertIn("task_split", inspect.signature(generate_appworld_manifest).parameters)
+        with tempfile.TemporaryDirectory() as directory:
+            data_root, _, _ = self._appworld_data_fixture(Path(directory))
+            split_path = data_root / "datasets" / "test_normal.txt"
+            split_path.write_text("task-a\nmissing-task\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "missing.*missing-task"):
+                generate_appworld_manifest(data_root=data_root, task_split="test_normal")
+
+            split_path.write_text("task-a\ntask-a\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "duplicate.*task-a"):
+                generate_appworld_manifest(data_root=data_root, task_split="test_normal")
+
+    def test_appworld_manifest_rejects_noncanonical_or_escaping_split_ids(self):
+        self.assertIn("task_split", inspect.signature(generate_appworld_manifest).parameters)
+        with tempfile.TemporaryDirectory() as directory:
+            data_root, _, _ = self._appworld_data_fixture(Path(directory))
+            escaping_dir = data_root / "outside"
+            escaping_dir.mkdir()
+            (escaping_dir / "specs.json").write_text(
+                json.dumps({"instruction": "outside"}), encoding="utf-8"
+            )
+            split_path = data_root / "datasets" / "test_normal.txt"
+            for malformed_id in ("../outside", "task-a "):
+                with self.subTest(malformed_id=malformed_id):
+                    split_path.write_text(malformed_id + "\n", encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "malformed.*task ID"):
+                        generate_appworld_manifest(
+                            data_root=data_root, task_split="test_normal"
+                        )
+
+    def test_appworld_manifest_rejects_missing_version_and_malformed_specs(self):
+        self.assertIn("task_split", inspect.signature(generate_appworld_manifest).parameters)
+        with tempfile.TemporaryDirectory() as directory:
+            data_root, _, version_bytes = self._appworld_data_fixture(Path(directory))
+            (data_root / "version.txt").unlink()
+            with self.assertRaisesRegex(ValueError, "version"):
+                generate_appworld_manifest(data_root=data_root, task_split="test_normal")
+
+            (data_root / "version.txt").write_bytes(version_bytes)
+            (data_root / "tasks" / "task-b" / "specs.json").write_text(
+                "{not-json", encoding="utf-8"
+            )
+            with self.assertRaisesRegex(ValueError, "malformed.*task-b"):
+                generate_appworld_manifest(data_root=data_root, task_split="test_normal")
+
     def test_locomo_manifest_from_sample(self):
         manifest = generate_locomo_manifest(
             source=Path("tests/fixtures/locomo_redacted_minimal.json"), max_tasks=2
@@ -621,6 +729,60 @@ class ManifestGeneratorTest(unittest.TestCase):
         task = manifest["tasks"][0]
         self.assertIn("instruction", task)
         self.assertIn("sample_id", task)
+
+    def test_tau_retail_test_manifest_preserves_source_order_and_package_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source_path = Path(directory) / "tau_bench" / "envs" / "retail" / "tasks_test.py"
+            source_path.parent.mkdir(parents=True)
+            source_bytes = b"# frozen retail/test task source\n"
+            source_path.write_bytes(source_bytes)
+            task_module = types.ModuleType("tau_bench.envs.retail.tasks_test")
+            task_module.__file__ = str(source_path)
+            task_module.TASKS_TEST = [
+                types.SimpleNamespace(instruction=f"retail task {index}")
+                for index in range(115)
+            ]
+            modules = {
+                "tau_bench": types.ModuleType("tau_bench"),
+                "tau_bench.envs": types.ModuleType("tau_bench.envs"),
+                "tau_bench.envs.retail": types.ModuleType("tau_bench.envs.retail"),
+                "tau_bench.envs.retail.tasks_test": task_module,
+            }
+            with mock.patch.dict(sys.modules, modules), mock.patch(
+                "importlib.metadata.version", return_value="0.1.0"
+            ):
+                manifest = generate_tau_bench_manifest(
+                    domain="retail", task_split="test"
+                )
+
+        self.assertEqual(manifest["benchmark"], "tau-bench")
+        self.assertEqual(manifest["domain"], "retail")
+        self.assertEqual(manifest["split"], "test")
+        self.assertEqual(len(manifest["tasks"]), 115)
+        self.assertEqual(
+            [task["raw_task_id"] for task in manifest["tasks"]], list(range(115))
+        )
+        self.assertEqual(
+            [task["source_position"] for task in manifest["tasks"]], list(range(115))
+        )
+        self.assertEqual(manifest["tasks"][114]["task_index"], 114)
+        self.assertEqual(
+            manifest["source_identity"]["task_source"],
+            {
+                "module": "tau_bench.envs.retail.tasks_test",
+                "path": "tau_bench/envs/retail/tasks_test.py",
+                "sha256": hashlib.sha256(source_bytes).hexdigest(),
+            },
+        )
+        self.assertEqual(
+            manifest["source_identity"]["package"],
+            {"distribution": "tau-bench", "version": "0.1.0"},
+        )
+        self.assertEqual(len(manifest["source_identity"]["fingerprint"]), 64)
+
+    def test_tau_manifest_rejects_unsupported_domain_split_pair(self):
+        with self.assertRaisesRegex(ValueError, "unsupported.*split"):
+            generate_tau_bench_manifest(domain="retail", task_split="validation")
 
     def test_tau_manifest_requires_installed_package(self):
         try:

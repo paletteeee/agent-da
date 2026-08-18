@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import json
 import hashlib
-import os
+import importlib
+import importlib.metadata
 import random
+import re
+import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +26,44 @@ def _canonical_manifest(dataset_name: str, tasks: list[dict[str, Any]]) -> dict[
         "tasks": tasks,
     }
     return normalized
+
+
+def _canonical_hash(value: Mapping[str, Any]) -> str:
+    normalized = {key: item for key, item in value.items() if key != "manifest_hash"}
+    encoded = json.dumps(
+        normalized,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _file_identity(path: Path, relative_path: str) -> dict[str, str]:
+    try:
+        content = path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"required AppWorld identity file is missing: {relative_path}") from exc
+    return {
+        "path": relative_path,
+        "sha256": hashlib.sha256(content).hexdigest(),
+    }
+
+
+def _resolve_appworld_data_root(root: str | Path) -> Path:
+    supplied = Path(root)
+    candidates = []
+    if (supplied / "tasks").is_dir() and (supplied / "datasets").is_dir():
+        candidates.append(supplied)
+    nested = supplied / "data"
+    if (nested / "tasks").is_dir() and (nested / "datasets").is_dir():
+        candidates.append(nested)
+    unique = list(dict.fromkeys(path.resolve() for path in candidates))
+    if not unique:
+        raise ValueError(f"AppWorld root does not contain an official data tree: {supplied}")
+    if len(unique) != 1:
+        raise ValueError(f"ambiguous AppWorld data root: {supplied}")
+    return unique[0]
 
 
 def _task(
@@ -61,27 +103,64 @@ def generate_tau_bench_manifest(
     max_steps: int = 30,
 ) -> dict[str, Any]:
     """Generate a manifest from the official tau-bench task lists."""
-    import sys
-
-    if domain == "airline":
-        sys.path.insert(0, "external_data/deps/tau-bench")
-        from tau_bench.envs.airline.tasks_test import TASKS  # type: ignore
-    elif domain == "retail":
-        sys.path.insert(0, "external_data/deps/tau-bench")
-        if task_split == "train":
-            from tau_bench.envs.retail.tasks_train import TASKS_TRAIN as TASKS  # type: ignore
-        elif task_split == "dev":
-            from tau_bench.envs.retail.tasks_dev import TASKS_DEV as TASKS  # type: ignore
-        else:
-            from tau_bench.envs.retail.tasks_test import TASKS_TEST as TASKS  # type: ignore
-    else:
-        raise ValueError(f"unsupported tau-bench domain: {domain}")
+    sources = {
+        ("airline", "test"): ("tau_bench.envs.airline.tasks_test", "TASKS"),
+        ("retail", "train"): ("tau_bench.envs.retail.tasks_train", "TASKS_TRAIN"),
+        ("retail", "dev"): ("tau_bench.envs.retail.tasks_dev", "TASKS_DEV"),
+        ("retail", "test"): ("tau_bench.envs.retail.tasks_test", "TASKS_TEST"),
+    }
+    try:
+        module_name, task_symbol = sources[(domain, task_split)]
+    except KeyError as exc:
+        if domain not in {item[0] for item in sources}:
+            raise ValueError(f"unsupported tau-bench domain: {domain}") from exc
+        raise ValueError(
+            f"unsupported tau-bench split {task_split!r} for domain {domain!r}"
+        ) from exc
+    dependency_root = "external_data/deps/tau-bench"
+    if dependency_root not in sys.path:
+        sys.path.insert(0, dependency_root)
+    module = importlib.import_module(module_name)
+    TASKS = getattr(module, task_symbol, None)
+    if not isinstance(TASKS, (list, tuple)):
+        raise ValueError(f"malformed tau-bench task source: {module_name}.{task_symbol}")
+    source_path_value = getattr(module, "__file__", None)
+    if not isinstance(source_path_value, str):
+        raise ValueError(f"tau-bench task source has no file identity: {module_name}")
+    source_path = Path(source_path_value)
+    try:
+        source_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise ValueError(f"tau-bench task source is unreadable: {module_name}") from exc
+    try:
+        package_version = importlib.metadata.version("tau-bench")
+    except importlib.metadata.PackageNotFoundError as exc:
+        raise ValueError("tau-bench package identity is unavailable") from exc
+    task_source = {
+        "module": module_name,
+        "path": module_name.replace(".", "/") + ".py",
+        "sha256": source_hash,
+    }
+    identity_material = {
+        "task_source": task_source,
+        "package": {"distribution": "tau-bench", "version": package_version},
+    }
+    source_identity = {
+        **identity_material,
+        "fingerprint": _canonical_hash(identity_material),
+    }
 
     tasks = []
     for index, task in enumerate(TASKS):
         if max_tasks is not None and index >= max_tasks:
             break
         instruction = getattr(task, "instruction", "") or (task.get("instruction", "") if isinstance(task, dict) else "")
+        if isinstance(task, Mapping) and "task_id" in task:
+            raw_task_id = task["task_id"]
+        elif hasattr(task, "task_id"):
+            raw_task_id = getattr(task, "task_id")
+        else:
+            raw_task_id = index
         task_id = f"tau-{domain}-{task_split}-{index:04d}"
         tasks.append(
             _task(
@@ -89,37 +168,85 @@ def generate_tau_bench_manifest(
                 str(instruction),
                 seed=seed,
                 max_steps=max_steps,
-                extra={"domain": domain, "task_split": task_split, "task_index": index},
+                extra={
+                    "domain": domain,
+                    "task_split": task_split,
+                    "task_index": index,
+                    "raw_task_id": raw_task_id,
+                    "source_index": index,
+                    "source_position": index,
+                },
             )
         )
-    return _canonical_manifest(f"tau-bench-{domain}-{task_split}", tasks)
+    manifest = _canonical_manifest(f"tau-bench-{domain}-{task_split}", tasks)
+    manifest.update(
+        {
+            "benchmark": "tau-bench",
+            "domain": domain,
+            "split": task_split,
+            "source_task_count": len(TASKS),
+            "source_identity": source_identity,
+        }
+    )
+    return manifest
 
 
 def generate_appworld_manifest(
-    *,
     data_root: str | Path = "external_data/deps/appworld-data/data",
+    *,
+    task_split: str = "test_normal",
     max_tasks: int | None = None,
     seed: int = 0,
     max_steps: int = 30,
 ) -> dict[str, Any]:
     """Generate a manifest from the official AppWorld task specs."""
-    data_root = Path(data_root)
-    task_dirs = sorted(
-        [path for path in (data_root / "tasks").iterdir() if path.is_dir()]
-    )
+    if not isinstance(task_split, str) or not task_split or Path(task_split).name != task_split:
+        raise ValueError("task_split must be a non-empty split name")
+    data_root = _resolve_appworld_data_root(data_root)
+    split_relative = f"datasets/{task_split}.txt"
+    split_path = data_root / split_relative
+    split_identity = _file_identity(split_path, split_relative)
+    version_identity = _file_identity(data_root / "version.txt", "version.txt")
+    try:
+        raw_ids = split_path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ValueError(f"AppWorld split file is not valid UTF-8: {split_relative}") from exc
+    task_ids = []
+    for raw_task_id in raw_ids:
+        if (
+            raw_task_id != raw_task_id.strip()
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", raw_task_id) is None
+        ):
+            raise ValueError(f"malformed AppWorld split task ID: {raw_task_id!r}")
+        task_ids.append(raw_task_id)
+    seen_ids: set[str] = set()
+    for task_id in task_ids:
+        if task_id in seen_ids:
+            raise ValueError(f"duplicate AppWorld split task ID: {task_id}")
+        seen_ids.add(task_id)
+    missing_ids = [
+        task_id for task_id in task_ids if not (data_root / "tasks" / task_id).is_dir()
+    ]
+    if missing_ids:
+        raise ValueError(f"missing AppWorld task directory: {missing_ids[0]}")
+
     tasks = []
-    for index, task_dir in enumerate(task_dirs):
+    selected_ids = task_ids if max_tasks is None else task_ids[:max_tasks]
+    for index, raw_task_id in enumerate(selected_ids):
+        task_dir = data_root / "tasks" / raw_task_id
         if max_tasks is not None and index >= max_tasks:
             break
         specs_path = task_dir / "specs.json"
         if not specs_path.exists():
-            continue
+            raise ValueError(f"malformed AppWorld specs for {raw_task_id}: missing specs.json")
         try:
             specs = json.loads(specs_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"malformed AppWorld specs for {raw_task_id}") from exc
+        if not isinstance(specs, Mapping) or not isinstance(specs.get("instruction"), str):
+            raise ValueError(f"malformed AppWorld specs for {raw_task_id}")
         instruction = specs.get("instruction", "")
-        task_id = f"appworld-{task_dir.name}"
+        task_id = f"appworld-{raw_task_id}"
         app_names = []
         dbs_dir = task_dir / "dbs"
         if dbs_dir.is_dir():
@@ -148,7 +275,11 @@ def generate_appworld_manifest(
                 seed=seed,
                 max_steps=max_steps,
                 extra={
-                    "task_dir": task_dir.name,
+                    "task_dir": raw_task_id,
+                    "raw_task_id": raw_task_id,
+                    "source_index": index,
+                    "source_position": index,
+                    "task_split": task_split,
                     "app_names": app_names,
                     "api_name_allowlist": api_name_allowlist,
                     "supervisor": specs.get("supervisor"),
@@ -156,7 +287,97 @@ def generate_appworld_manifest(
                 },
             )
         )
-    return _canonical_manifest("appworld", tasks)
+    identity_material = {
+        "split_file": split_identity,
+        "version_file": version_identity,
+    }
+    source_identity = {
+        **identity_material,
+        "fingerprint": _canonical_hash(identity_material),
+    }
+    manifest = _canonical_manifest(f"appworld-{task_split}", tasks)
+    manifest.update(
+        {
+            "benchmark": "appworld",
+            "split": task_split,
+            "source_task_count": len(task_ids),
+            "source_identity": source_identity,
+        }
+    )
+    return manifest
+
+
+def shard_manifest(
+    manifest: Mapping[str, Any], shard_count: int
+) -> list[dict[str, Any]]:
+    """Partition an ordered parent manifest exactly once by source position."""
+
+    if not isinstance(manifest, Mapping):
+        raise ValueError("manifest must be a mapping")
+    tasks = manifest.get("tasks")
+    if not isinstance(tasks, list) or not tasks:
+        raise ValueError("manifest.tasks must be a non-empty list")
+    if (
+        isinstance(shard_count, bool)
+        or not isinstance(shard_count, int)
+        or shard_count < 1
+        or shard_count > len(tasks)
+    ):
+        raise ValueError("shard_count must be between 1 and the task count")
+    parent_hash = manifest.get("manifest_hash")
+    if not isinstance(parent_hash, str) or parent_hash != _canonical_hash(manifest):
+        raise ValueError("parent manifest_hash does not match the canonical manifest")
+    task_ids: list[str] = []
+    positions: list[int] = []
+    normalized_tasks: list[dict[str, Any]] = []
+    for index, task in enumerate(tasks):
+        if not isinstance(task, Mapping):
+            raise ValueError(f"manifest task {index} must be a mapping")
+        task_id = task.get("task_id")
+        if not isinstance(task_id, str) or not task_id:
+            raise ValueError(f"manifest task {index} has an invalid task_id")
+        if task_id in task_ids:
+            raise ValueError(f"duplicate task ID: {task_id}")
+        position = task.get("source_position", index)
+        if isinstance(position, bool) or not isinstance(position, int):
+            raise ValueError(f"task {task_id} has an invalid source_position")
+        task_ids.append(task_id)
+        positions.append(position)
+        item = dict(task)
+        item["source_position"] = position
+        normalized_tasks.append(item)
+    if positions != list(range(len(tasks))):
+        raise ValueError("source positions must be unique, contiguous, and ordered")
+
+    required = ("benchmark", "split", "source_identity", "condition_fingerprint")
+    for field in required:
+        if field not in manifest:
+            raise ValueError(f"parent manifest is missing {field}")
+    shards: list[dict[str, Any]] = []
+    for shard_index in range(shard_count):
+        shard_tasks = [
+            dict(task)
+            for task in normalized_tasks
+            if task["source_position"] % shard_count == shard_index
+        ]
+        shard: dict[str, Any] = {
+            "manifest_version": int(manifest.get("manifest_version", 1)),
+            "dataset_name": str(manifest.get("dataset_name", "benchmark")),
+            "benchmark": manifest["benchmark"],
+            "split": manifest["split"],
+            "source_identity": manifest["source_identity"],
+            "condition_fingerprint": manifest["condition_fingerprint"],
+            "parent_manifest_hash": parent_hash,
+            "shard_index": shard_index,
+            "shard_count": shard_count,
+            "task_count": len(shard_tasks),
+            "tasks": shard_tasks,
+        }
+        if "domain" in manifest:
+            shard["domain"] = manifest["domain"]
+        shard["manifest_hash"] = _canonical_hash(shard)
+        shards.append(shard)
+    return shards
 
 
 def generate_locomo_manifest(
@@ -233,16 +454,23 @@ def build_native_scale_manifest(
         )
     elif benchmark == "appworld":
         data_root = Path(source or "external_data/deps/appworld-data/data")
-        if data_root.name != "data" and (data_root / "data" / "tasks").is_dir():
-            data_root = data_root / "data"
-        manifest = generate_appworld_manifest(data_root=data_root, max_tasks=limit, seed=seed)
+        manifest = generate_appworld_manifest(
+            data_root=data_root,
+            task_split=split,
+            max_tasks=limit,
+            seed=seed,
+        )
     else:
         locomo_source = Path(source or "external_data/raw/locomo10.json")
         manifest = generate_locomo_manifest(source=locomo_source, max_tasks=limit, seed=seed)
 
-    tasks = list(manifest.get("tasks", []))
+    tasks = [dict(task) for task in manifest.get("tasks", [])]
     if len(tasks) != limit:
         raise ValueError(f"{benchmark} source provided {len(tasks)} tasks, expected {limit}")
+    for position, task in enumerate(tasks):
+        task.setdefault("source_position", position)
+        task.setdefault("source_index", position)
+        task.setdefault("raw_task_id", task.get("task_id"))
     task_ids = [str(task.get("task_id")) for task in tasks]
     if any(not task_id or task_id == "None" for task_id in task_ids):
         raise ValueError("every task must have a non-empty task_id")
@@ -252,10 +480,14 @@ def build_native_scale_manifest(
     shuffled = list(task_ids)
     random.Random(seed).shuffle(shuffled)
     holdout_count = max(1, round(len(shuffled) * 0.2))
-    holdout_ids = sorted(shuffled[:holdout_count])
-    holdout_set = set(holdout_ids)
-    train_ids = sorted(task_id for task_id in task_ids if task_id not in holdout_set)
+    holdout_set = set(shuffled[:holdout_count])
+    holdout_ids = [task_id for task_id in task_ids if task_id in holdout_set]
+    train_ids = [task_id for task_id in task_ids if task_id not in holdout_set]
     normalized = dict(manifest)
+    normalized["tasks"] = tasks
+    normalized["benchmark"] = benchmark
+    if benchmark == "tau-bench":
+        normalized["domain"] = str(source or "airline")
     normalized["seed"] = int(seed)
     normalized["split"] = split
     normalized["task_count"] = len(tasks)
@@ -265,20 +497,59 @@ def build_native_scale_manifest(
         "train_task_ids": train_ids,
         "holdout_task_ids": holdout_ids,
     }
-    if isinstance(source, (str, Path)) and Path(str(source)).is_file():
+    raw_task_ids = [task["raw_task_id"] for task in tasks]
+    ordered_raw_ids = json.dumps(
+        raw_task_ids,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    normalized["public_split_identity"] = {
+        "benchmark": benchmark,
+        "split": split,
+        "source_task_count": int(manifest.get("source_task_count", len(tasks))),
+        "selected_task_count": len(tasks),
+        "ordered_raw_task_ids_sha256": hashlib.sha256(ordered_raw_ids).hexdigest(),
+    }
+    if "domain" in normalized:
+        normalized["public_split_identity"]["domain"] = normalized["domain"]
+    if isinstance(manifest.get("source_identity"), Mapping):
+        normalized["source_identity"] = dict(manifest["source_identity"])
+        normalized["source_sha256"] = str(manifest["source_identity"]["fingerprint"])
+    elif isinstance(source, (str, Path)) and Path(str(source)).is_file():
         source_bytes = Path(str(source)).read_bytes()
         normalized["source_sha256"] = hashlib.sha256(source_bytes).hexdigest()
+        normalized["source_identity"] = {
+            "source_file": {
+                "path": Path(str(source)).name,
+                "sha256": normalized["source_sha256"],
+            },
+            "fingerprint": normalized["source_sha256"],
+        }
     else:
         normalized["source_sha256"] = hashlib.sha256(str(source or benchmark).encode("utf-8")).hexdigest()
-    encoded = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    normalized["manifest_hash"] = hashlib.sha256(encoded).hexdigest()
+        normalized["source_identity"] = {
+            "source_label_sha256": normalized["source_sha256"],
+            "fingerprint": normalized["source_sha256"],
+        }
+    condition = {
+        "benchmark": benchmark,
+        "domain": normalized.get("domain"),
+        "split": split,
+        "seed": int(seed),
+        "source_identity": normalized["source_identity"],
+        "public_split_identity": normalized["public_split_identity"],
+    }
+    normalized["condition_fingerprint"] = _canonical_hash(condition)
+    normalized["manifest_hash"] = _canonical_hash(normalized)
     return normalized
 
 
 def write_manifest(manifest: dict[str, Any], out_path: str | Path) -> str:
     """Write a manifest and return its canonical SHA-256 digest."""
-    encoded = json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    digest = hashlib.sha256(encoded).hexdigest()
+    digest = _canonical_hash(manifest)
+    provided_digest = manifest.get("manifest_hash")
+    if provided_digest is not None and provided_digest != digest:
+        raise ValueError("manifest_hash does not match the canonical manifest")
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

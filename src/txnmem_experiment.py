@@ -92,6 +92,17 @@ def _benchmark_runtime_version(benchmark: str) -> str:
         return "unknown"
 
 
+def _benchmark_condition_manifest_hash(
+    manifest: Mapping[str, Any], manifest_sha256: str
+) -> str:
+    """Use a shard's frozen parent identity for cross-shard conditions."""
+
+    parent_hash = manifest.get("parent_manifest_hash")
+    if isinstance(parent_hash, str) and parent_hash:
+        return parent_hash
+    return manifest_sha256
+
+
 def _paired_benchmark_condition(
     *,
     benchmark: str,
@@ -1282,7 +1293,9 @@ def main(argv: list[str] | None = None) -> int:
             report["prompt_profile"] = args.prompt_profile
             condition = _paired_benchmark_condition(
                 benchmark=args.benchmark,
-                manifest_sha256=manifest_sha256,
+                manifest_sha256=_benchmark_condition_manifest_hash(
+                    manifest, manifest_sha256
+                ),
                 model_id=model_id,
                 model_execution_mode=execution_mode,
                 memory_backend=args.memory_backend,

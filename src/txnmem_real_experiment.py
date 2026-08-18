@@ -68,7 +68,22 @@ def load_task_manifest(source: Mapping[str, Any] | Path) -> tuple[dict[str, Any]
         "dataset_name": str(source.get("dataset_name", "txnmem-real-model")),
         "tasks": normalized_tasks,
     }
-    for field in ("seed", "split", "task_count", "task_level_split", "source_sha256"):
+    for field in (
+        "benchmark",
+        "domain",
+        "seed",
+        "split",
+        "task_count",
+        "source_task_count",
+        "task_level_split",
+        "public_split_identity",
+        "source_sha256",
+        "source_identity",
+        "condition_fingerprint",
+        "parent_manifest_hash",
+        "shard_index",
+        "shard_count",
+    ):
         if field in source:
             normalized[field] = source[field]
     if "transaction_mode" in source:
