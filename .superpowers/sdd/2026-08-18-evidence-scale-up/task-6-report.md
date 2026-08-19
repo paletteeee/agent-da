@@ -4,7 +4,7 @@
 
 The official cleaned LongMemEval-S source, its separate official-QA oracle reference, and the official evaluator source are now immutable and preflighted. The runner stores every released session under one question-specific opaque namespace, reads model context back through the memory backend, applies deterministic session-level BM25-style ranking, excludes the 30 abstention questions from retrieval denominators, and writes only the two fields accepted by the official evaluator. Official QA remains fail-closed until the pinned supported judge actually succeeds.
 
-Task 6 implementation and source preflight are complete. The full 500-question Qwen generation batch belongs to the subsequent formal-run task; no result in this task is presented as a full-model benchmark score.
+Task 6 implementation, source preflight, and independent review are complete. The first review found two fail-closed gaps in the official-QA handoff; commit `a9ad933` closes both and the same reviewer returned PASS after running focused and adversarial checks. The full 500-question Qwen generation batch belongs to the subsequent formal-run task; no result in this task is presented as a full-model benchmark score.
 
 ## Immutable source identities
 
@@ -34,9 +34,9 @@ The strict preflight also records three anomalies in the released cleaned file r
 - `preflight_longmemeval_oracle(...)` independently verifies the official-QA reference hash, size, schema, 500 unique IDs, and exact S/oracle ID-set equality.
 - `run_longmemeval_item(...)` writes all sessions, searches the backend, explicitly filters returned records by the question namespace because backend filters are not trusted, ranks only the backend-returned values, and calls the model once.
 - The public answer and `answer_session_ids` are used only after retrieval to compute evidence recall; neither enters ranking or the model prompt.
-- `write_official_hypotheses(...)` creates an immutable JSONL file containing exactly `question_id` and `hypothesis`.
-- `aggregate_longmemeval(...)` reports retrieval micro/macro recall over non-abstentions and endpoint-returned token counters. A local score cannot activate the official field.
-- Official QA becomes available only for a successful zero-return-code report bound to the exact official evaluator commit/hash, exact oracle hash, exact hypothesis/log hashes, all 500 questions, the supported `gpt-4o-2024-08-06` judge identity, and three finite accuracy metrics. Otherwise it remains `blocked`.
+- `write_official_hypotheses(...)` creates an immutable JSONL file containing exactly `question_id` and `hypothesis`, but only after its IDs exactly match all 500 formal questions, including the 30 abstentions. A partial or substituted set is rejected before file creation.
+- `aggregate_longmemeval(...)` reports retrieval micro/macro recall over non-abstentions and endpoint-returned token counters. It does not trust caller-supplied hashes or metrics: it opens and hashes the hypotheses, evaluator log, oracle, `evaluate_qa.py`, and `print_qa_metrics.py`; validates 500 ordered unique results, the fixed GPT-4o judge label, exact ID/hypothesis equality, and the 30 abstentions; then recomputes overall, task-averaged, and abstention accuracy from the per-question Boolean labels.
+- Official QA becomes available only after that artifact-backed validation succeeds under the pinned commit and hashes. A partial log, wrong judge, altered script, mismatched hypothesis, fabricated summary, or unavailable artifact leaves it `blocked`.
 
 The released official script supports GPT-4o and a local Llama-3.1-70B judge; it does not support Qwen2.5-7B as an official judge. Qwen2.5-7B remains the evaluated Agent/reader model, while the official QA field will not be populated without a successful supported judge.
 
@@ -46,10 +46,11 @@ The released official script supports GPT-4o and a local Llama-3.1-70B judge; it
 - Source-conformance REDs exposed official duplicate session IDs, 32 numeric answers, 12 empty turns, and day-stable but minute-unstable ordering; each case received a regression test before the minimal semantics-preserving adjustment.
 - Backend-boundary RED: a deliberately changed backend round-trip value showed that source-side context could bypass returned memory; the runner now ranks and prompts only backend-returned values.
 - Oracle/evaluator RED: no pinned oracle/evaluator identities or strict official-score activation contract existed.
-- Local Task-6 suite: 18 tests passed.
-- Combined server focused suite: 54 tests passed under the server model Python.
+- Initial local Task-6 suite: 18 tests passed; post-review suite: 20/20 passed.
+- The post-review combined LongMemEval/LoCoMo/resampling suite passed 42/42 locally and 42/42 under the server model Python. The earlier broader Task-5/6 server suite passed 54/54 before the two additional regressions were added.
 - Local and server S/oracle preflights both passed with byte-identical counts and hashes.
 - Bash syntax, Python compilation with an isolated bytecode cache, and `git diff --check` passed.
+- Independent review initially rejected caller-trusted summaries and partial official inputs. After `a9ad933`, the reviewer returned PASS: 20 focused tests plus 10 extra adversarial assertions rejected forged summaries, 499-row logs, wrong judges, altered evaluator/metrics scripts, and partial results.
 
 ## Real-source offline smoke
 

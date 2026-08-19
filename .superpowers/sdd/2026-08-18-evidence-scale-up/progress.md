@@ -189,6 +189,8 @@ Ruling: Exclude exactly the 30 `_abs` questions from LongMemEval session-retriev
 
 Ruling: LongMemEval official QA is fail-closed and can activate only after the exact pinned official GPT-4o evaluator, oracle, hypotheses and log evidence all succeed; Qwen2.5-7B generation or a local heuristic cannot populate that field — cost if wrong: official QA remains blocked until a supported judge is authorized and available.
 
-Task 6: complete (18 local tests, 54 combined server focused tests, exact 500-question S/oracle preflight, 23,867 sessions, 246,750 turns, 890 retrieval evidence sessions, and a two-real-question/98-session offline wiring smoke; full 500-question Qwen run deferred to the formal-run task).
+Ruling: A LongMemEval official score is derived only from immutable artifacts read by the aggregator: exact 500-question hypotheses/log ID equality, 30 abstentions, pinned oracle and both official script hashes, fixed GPT-4o judge labels, and recomputed per-label metrics; caller-supplied hashes, counts, or summary metrics are never evidence — cost if wrong: the official field remains blocked until the complete log bundle is present.
+
+Task 6: complete (implementation `768a760`, review correction `a9ad933`, final independent review PASS; 20/20 post-review local tests, 42/42 post-review combined server tests, 10 additional reviewer adversarial assertions, exact 500-question S/oracle preflight, 23,867 sessions, 246,750 turns, 890 retrieval evidence sessions, and a two-real-question/98-session offline wiring smoke; full 500-question Qwen run deferred to the formal-run task).
 
 Task 5: complete (implementation commit `962ba6f`, corrective commits `1d247ac`, `97c6375`, and `7327f58`; fourth fresh independent review PASS; 39 local focused tests, 36 latest Task-5 server tests, 11 exact isolated package pins, official F1 smoke, shell/privacy checks all passed).
