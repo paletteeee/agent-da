@@ -178,3 +178,15 @@ Task 5: second independent review passed the original four corrections and found
 Ruling: Formal model identity strings are canonical only when they are already stripped and remain nonempty; whitespace-only or leading/trailing-whitespace model IDs, revisions, and server builds are invalid even when both profiles match — cost if wrong: loosely serialized historical summaries must be canonicalized and regenerated.
 
 Task 5: third independent review passed every earlier correction and found the whitespace-only identity variant; it is fixed in aggregation and comparison with RED/GREEN adversarial tests; fourth fresh review pending.
+
+Ruling: Freeze LongMemEval to the cleaned S and oracle files at dataset revision `98d7416c…`, and bind official QA to the official evaluator repository commit `9e0b455f…`; URL labels or a moving branch are not source identity — cost if wrong: existing unpinned downloads must be reverified or replaced.
+
+Ruling: Preserve released LongMemEval anomalies as positional semantics: repeated session IDs remain distinct source positions, empty turns remain present, and ordering is required only across calendar days because 211 released questions invert times within one day — cost if wrong: sorting by minute or deduplicating IDs silently changes 13–211 question histories.
+
+Ruling: Isolate memory by question and construct prompts only from backend-returned active values after explicit namespace filtering; the source-side session map supplies identity/position only — cost if wrong: backend corruption or cross-question leakage could be hidden by a local source side channel.
+
+Ruling: Exclude exactly the 30 `_abs` questions from LongMemEval session-retrieval denominators, while retaining them in the 500-question QA denominator — cost if wrong: retrieval recall is not comparable to the official protocol.
+
+Ruling: LongMemEval official QA is fail-closed and can activate only after the exact pinned official GPT-4o evaluator, oracle, hypotheses and log evidence all succeed; Qwen2.5-7B generation or a local heuristic cannot populate that field — cost if wrong: official QA remains blocked until a supported judge is authorized and available.
+
+Task 6: complete (18 local tests, 54 combined server focused tests, exact 500-question S/oracle preflight, 23,867 sessions, 246,750 turns, 890 retrieval evidence sessions, and a two-real-question/98-session offline wiring smoke; full 500-question Qwen run deferred to the formal-run task).

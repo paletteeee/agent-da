@@ -32,6 +32,8 @@ results/cross_host_model_load_*/data/
 # All experiment-local data directories and raw prediction/trace files are non-committable.
 results/**/data/
 results/**/locomo_paired_predictions.json
+results/**/longmemeval_hypotheses.jsonl
+results/**/longmemeval_item_results.jsonl
 results/**/native_model_traces.jsonl
 results/**/model_load_traces.jsonl
 results/remote_experiment_inputs/
