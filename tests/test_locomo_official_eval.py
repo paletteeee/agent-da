@@ -465,6 +465,16 @@ class LoCoMoOfficialEvalTests(unittest.TestCase):
                 "model_revision": "",
                 "model_server_build": "vllm:test-build",
             },
+            {
+                "model": "qwen",
+                "model_revision": "   ",
+                "model_server_build": "vllm:test-build",
+            },
+            {
+                "model": "qwen",
+                "model_revision": "a" * 64,
+                "model_server_build": "\t",
+            },
             _model_identity("different-model"),
         ):
             with self.subTest(invalid_identity=invalid_identity):
@@ -474,6 +484,21 @@ class LoCoMoOfficialEvalTests(unittest.TestCase):
                         prompt_profile="baseline",
                         model="qwen",
                     )
+        whitespace_model = {
+            **base,
+            "model": "   ",
+            "model_identity": {
+                "model": "   ",
+                "model_revision": "a" * 64,
+                "model_server_build": "vllm:test-build",
+            },
+        }
+        with self.assertRaisesRegex(ValueError, "model identit|model ID"):
+            aggregate_repetition_summaries(
+                [whitespace_model],
+                prompt_profile="baseline",
+                model="   ",
+            )
 
     def test_partial_repetition_is_not_counted_as_successful_score(self):
         aggregate = aggregate_repetition_summaries(

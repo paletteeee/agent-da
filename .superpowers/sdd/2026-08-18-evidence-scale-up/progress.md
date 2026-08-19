@@ -174,3 +174,7 @@ Task 5: corrective implementation complete; fresh independent re-review pending 
 Ruling: A LoCoMo model identity is valid only when `model`, `model_revision`, and `model_server_build` are all nonempty strings and the identity model equals the top-level model; two equally malformed identities do not form a valid pair — cost if wrong: legacy summaries using `revision` or arbitrary identity maps must be regenerated.
 
 Task 5: second independent review passed the original four corrections and found one strict-identity gap; that gap is fixed with adversarial tests (39 local focused tests, 36 Task-5 server tests); third fresh review pending.
+
+Ruling: Formal model identity strings are canonical only when they are already stripped and remain nonempty; whitespace-only or leading/trailing-whitespace model IDs, revisions, and server builds are invalid even when both profiles match — cost if wrong: loosely serialized historical summaries must be canonicalized and regenerated.
+
+Task 5: third independent review passed every earlier correction and found the whitespace-only identity variant; it is fixed in aggregation and comparison with RED/GREEN adversarial tests; fourth fresh review pending.

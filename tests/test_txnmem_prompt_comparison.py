@@ -244,6 +244,16 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
                 "model_revision": "",
                 "model_server_build": "vllm:test-build",
             },
+            {
+                "model": "qwen",
+                "model_revision": "   ",
+                "model_server_build": "vllm:test-build",
+            },
+            {
+                "model": "qwen",
+                "model_revision": "a" * 64,
+                "model_server_build": "\t",
+            },
             _model_identity("different-model"),
         ]
         for identity in invalid_identities:
@@ -254,6 +264,18 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
                 tuned["model_identity"] = copy.deepcopy(identity)
                 with self.assertRaisesRegex(ValueError, "model identit"):
                     compare_locomo_prompt_profiles(baseline, tuned)
+        baseline = self._formal_locomo_summary("baseline")
+        tuned = self._formal_locomo_summary("tuned")
+        whitespace_identity = {
+            "model": "   ",
+            "model_revision": "a" * 64,
+            "model_server_build": "vllm:test-build",
+        }
+        for row in (baseline, tuned):
+            row["model"] = "   "
+            row["model_identity"] = copy.deepcopy(whitespace_identity)
+        with self.assertRaisesRegex(ValueError, "model ID|model identit"):
+            compare_locomo_prompt_profiles(baseline, tuned)
 
     def test_appworld_comparison_pairs_task_ids_and_official_assertions(self):
         def summary(profile, successes, passes, tokens):

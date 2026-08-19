@@ -255,7 +255,9 @@ def _validated_model_identity(value: Any, expected_model: str) -> dict[str, Any]
         raise ValueError("repetition model identities differ or are missing")
     required = ("model", "model_revision", "model_server_build")
     if any(
-        not isinstance(value.get(field), str) or not value.get(field)
+        not isinstance(value.get(field), str)
+        or not value.get(field).strip()
+        or value.get(field) != value.get(field).strip()
         for field in required
     ):
         raise ValueError(
@@ -278,6 +280,12 @@ def aggregate_repetition_summaries(
 
     if not summaries:
         raise ValueError("at least one repetition summary is required")
+    if (
+        not isinstance(model, str)
+        or not model.strip()
+        or model != model.strip()
+    ):
+        raise ValueError("repetition model ID is missing or noncanonical")
     task_manifest_values = [summary.get("task_manifest_sha256") for summary in summaries]
     if not all(isinstance(value, str) and value for value in task_manifest_values):
         raise ValueError("repetition task manifests differ or are missing")

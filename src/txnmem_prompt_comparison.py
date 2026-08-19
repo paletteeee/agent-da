@@ -74,7 +74,9 @@ def _validated_model_identity(value: Any, expected_model: str) -> dict[str, Any]
         raise ValueError("LoCoMo model identities differ or are missing")
     required = ("model", "model_revision", "model_server_build")
     if any(
-        not isinstance(value.get(field), str) or not value.get(field)
+        not isinstance(value.get(field), str)
+        or not value.get(field).strip()
+        or value.get(field) != value.get(field).strip()
         for field in required
     ):
         raise ValueError("LoCoMo model identity fields are missing or empty")
@@ -121,7 +123,8 @@ def compare_locomo_prompt_profiles(
     tuned_model = tuned.get("model")
     if (
         not isinstance(baseline_model, str)
-        or not baseline_model
+        or not baseline_model.strip()
+        or baseline_model != baseline_model.strip()
         or baseline_model != tuned_model
     ):
         raise ValueError("LoCoMo model IDs differ or are missing")
