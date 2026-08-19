@@ -103,6 +103,22 @@ Review fix round 3 fresh GREEN evidence:
 - Host Bash remains GNU Bash `3.2.57(1)-release`. Fresh `bash -n scripts/run_native_scale.sh` and `git diff --check`: exit 0 with no output.
 - Fresh local read-only source verification again found τ-bench `retail/test` count 115 and source SHA-256 `6f09468923c6cfb6162e94fe659264d6aee70816c18d51278fb4a581db7765a4`; AppWorld `test_normal` count/unique count 168/168, zero missing task directories, split SHA-256 `c3af41497b6f2f0860a2ff8c09b335dca527e2cf48e59b4aabdb301b6b68db8f`, version `0.2.0`, and version-file SHA-256 `911fc0c48cb0c70601db5775a9bef1b740dc4cc9f9b46389b9f0563fe7eb94d7`.
 
+Review fix round 4 used four end-to-end RED regressions before production changes. The combined command ran 4 test methods in 5.7 seconds and produced 9 intended failures:
+
+- Complete-launch preflight: 2 failures showed a valid first shard invoking the model before a later partial or stale shard was rejected.
+- Fresh merge-only rebinding: 2 failures showed duplicate or inconsistent raw summaries being ignored when a pre-bound report was merged without `--resume`.
+- Finite-number parsing: 1 failure showed exponent overflow (`1e999`) being parsed as positive infinity despite named NaN/Infinity rejection.
+- Runner output confinement: 4 failures showed the actual benchmark runner following planted symlinks for the raw trace, repetition summary, final batch summary, and SQLite backend reservation.
+
+Review fix round 4 fresh GREEN evidence:
+
+- The four new adversarial regressions passed in 5.380 seconds with all 9 subcases protected.
+- The complete affected set (`tests.test_native_scale_manifest`, `tests.test_txnmem_batch_merge`, `tests.test_benchmark_bridge`, `tests.test_cli_outputs`, `tests.test_txnmem_real_model`, `tests.test_public_batch_reporting`) passed 155 tests in 29.043 seconds; 4 optional dependency/data tests skipped; 0 failures/errors.
+- Full suite: exit 0; 661 tests ran in 100.649 seconds; 4 optional dependency/data tests skipped; 0 failures/errors.
+- Claim audit: exit 0; 15 active claims, 0 findings; diagnostic output only at `/tmp/txnmem-task4-round4-controller-claim-audit.json`.
+- Artifact audit: exit 0; 0 findings.
+- Fresh `bash -n scripts/run_native_scale.sh` and `git diff --check`: exit 0 with no output.
+
 ## Local no-model formal preflight
 
 Source checks against the local authorized dataset copies:

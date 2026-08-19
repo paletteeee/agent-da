@@ -213,6 +213,34 @@ if [ "$TXNMEM_GENERATE_ONLY" -eq 0 ] && [ "$TXNMEM_MERGE_ONLY" -eq 0 ]; then
     echo "error: --endpoint and --model are required for shard execution" >&2
     exit 2
   fi
+  TXNMEM_RUN_PLAN_OUTPUT="$("$TXNMEM_PYTHON" - "$TXNMEM_OUT_DIR" "$TXNMEM_BENCHMARKS" "$TXNMEM_SHARD_COUNT" "$TXNMEM_RESUME" <<'PY'
+import sys
+
+from txnmem_formal_io import FormalStore, prepare_shard_runs
+
+store = FormalStore(sys.argv[1])
+selected = [item.strip() for item in sys.argv[2].split(",") if item.strip()]
+job_names = {"tau-bench": "tau_bench", "appworld": "appworld", "locomo": "locomo"}
+try:
+    jobs = [job_names[item] for item in selected]
+except KeyError as exc:
+    raise SystemExit(f"unsupported benchmark: {exc.args[0]}") from exc
+for job, shard_index, action in prepare_shard_runs(
+    store,
+    jobs,
+    int(sys.argv[3]),
+    resume=bool(int(sys.argv[4])),
+):
+    print(f"{job}\t{shard_index}\t{action}")
+PY
+)"
+  TXNMEM_RUN_PLAN_LINES=()
+  while IFS= read -r TXNMEM_PLAN_LINE; do
+    if [ -n "$TXNMEM_PLAN_LINE" ]; then
+      TXNMEM_RUN_PLAN_LINES[${#TXNMEM_RUN_PLAN_LINES[@]}]="$TXNMEM_PLAN_LINE"
+    fi
+  done <<< "$TXNMEM_RUN_PLAN_OUTPUT"
+  TXNMEM_RUN_PLAN_CURSOR=0
 for TXNMEM_BENCHMARK_ITEM in "${TXNMEM_SELECTED_BENCHMARKS[@]}"; do
   TXNMEM_BENCHMARK="${TXNMEM_BENCHMARK_ITEM//[[:space:]]/}"
   TXNMEM_JOB="${TXNMEM_BENCHMARK//-/_}"
@@ -226,23 +254,13 @@ for TXNMEM_BENCHMARK_ITEM in "${TXNMEM_SELECTED_BENCHMARKS[@]}"; do
     TXNMEM_RUN_DIR="$TXNMEM_OUT_DIR/runs/$TXNMEM_JOB/$TXNMEM_SHARD_NAME"
     TXNMEM_RAW_REPORT="$TXNMEM_RUN_DIR/results/native_batch_summary.json"
     TXNMEM_BOUND_REPORT="$TXNMEM_RUN_DIR/shard_report.json"
-    TXNMEM_RUN_ACTION="$("$TXNMEM_PYTHON" - "$TXNMEM_OUT_DIR" "$TXNMEM_JOB" "$TXNMEM_SHARD_INDEX" "$TXNMEM_SHARD_COUNT" "$TXNMEM_RESUME" <<'PY'
-import sys
-
-from txnmem_formal_io import FormalStore, prepare_shard_run
-
-store = FormalStore(sys.argv[1])
-print(
-    prepare_shard_run(
-        store,
-        sys.argv[2],
-        int(sys.argv[3]),
-        int(sys.argv[4]),
-        resume=bool(int(sys.argv[5])),
-    )
-)
-PY
-)"
+    TXNMEM_RUN_PLAN_LINE="${TXNMEM_RUN_PLAN_LINES[$TXNMEM_RUN_PLAN_CURSOR]}"
+    TXNMEM_RUN_PLAN_CURSOR=$((TXNMEM_RUN_PLAN_CURSOR + 1))
+    IFS=$'\t' read -r TXNMEM_PLAN_JOB TXNMEM_PLAN_INDEX TXNMEM_RUN_ACTION <<< "$TXNMEM_RUN_PLAN_LINE"
+    if [ "$TXNMEM_PLAN_JOB" != "$TXNMEM_JOB" ] || [ "$TXNMEM_PLAN_INDEX" -ne "$TXNMEM_SHARD_INDEX" ]; then
+      echo "error: shard run plan order mismatch" >&2
+      exit 2
+    fi
     if [ "$TXNMEM_RUN_ACTION" = "reuse" ]; then
       continue
     fi
@@ -271,20 +289,18 @@ if [ "$TXNMEM_GENERATE_ONLY" -eq 0 ]; then
 for TXNMEM_BENCHMARK_ITEM in "${TXNMEM_SELECTED_BENCHMARKS[@]}"; do
   TXNMEM_BENCHMARK="${TXNMEM_BENCHMARK_ITEM//[[:space:]]/}"
   TXNMEM_JOB="${TXNMEM_BENCHMARK//-/_}"
-  "$TXNMEM_PYTHON" - "$TXNMEM_OUT_DIR" "$TXNMEM_JOB" "$TXNMEM_SHARD_COUNT" "$TXNMEM_RESUME" "$TXNMEM_MERGE_ONLY" <<'PY'
+  "$TXNMEM_PYTHON" - "$TXNMEM_OUT_DIR" "$TXNMEM_JOB" "$TXNMEM_SHARD_COUNT" "$TXNMEM_RESUME" <<'PY'
 import sys
 
 from txnmem_formal_io import FormalStore, finalize_native_merge
 
 store = FormalStore(sys.argv[1])
 resume = bool(int(sys.argv[4]))
-merge_only = bool(int(sys.argv[5]))
 finalize_native_merge(
     store,
     sys.argv[2],
     int(sys.argv[3]),
     resume=resume,
-    require_raw=resume or not merge_only,
 )
 PY
 done

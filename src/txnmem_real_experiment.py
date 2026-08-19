@@ -15,6 +15,7 @@ from typing import Any
 from txnmem_backend import InstrumentedMemoryBackend
 from txnmem_event_contract import validate_events
 from txnmem_failure_controller import FailureController, validate_failure_schedule
+from txnmem_formal_io import FormalStore
 from txnmem_model_protocol import merge_usage_summaries
 from txnmem_real_agent import run_real_agent
 from txnmem_realism import trace_evidence_summary
@@ -338,15 +339,15 @@ def run_benchmark_experiment_manifest(
 
     from txnmem_benchmark_bridge import run_benchmark_agent
 
-    raw_path = out_dir / "data" / "native_model_traces.jsonl"
-    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    store = FormalStore(out_dir)
+    raw_path = store.path("data", "native_model_traces.jsonl")
     aggregate_tasks: list[dict[str, Any]] = []
     variant_totals: Counter[str] = Counter()
     variant_matches: Counter[str] = Counter()
     variant_violations: Counter[str] = Counter()
     native_event_count = 0
     evaluation_error_count = 0
-    with raw_path.open("w", encoding="utf-8") as raw_handle:
+    with store.open_text_exclusive("data", "native_model_traces.jsonl") as raw_handle:
         for index, task in enumerate(tasks, start=1):
             if not isinstance(task, Mapping):
                 raise RealExperimentError("invalid_task", f"manifest task {index} must be a mapping")
@@ -468,7 +469,9 @@ def run_benchmark_experiment_manifest(
         "raw_trace_path": str(raw_path),
     }
     sanitized = sanitize_run_report(report)
-    _write_json(out_dir / "results" / "native_model_summary.json", sanitized)
+    store.write_json_exclusive(
+        "results", "native_model_summary.json", payload=sanitized
+    )
     return sanitized
 
 
@@ -479,6 +482,7 @@ def run_benchmark_batch(
     backend_factory: Any | None = None,
     adapter_factory: Any | None = None,
     repetitions: int = 1,
+    write_summary: bool = True,
 ) -> dict[str, Any]:
     """Run fixed benchmark tasks and aggregate official results by task.
 
@@ -500,10 +504,16 @@ def run_benchmark_batch(
     if model is None or not callable(getattr(model, "complete", None)):
         raise RealExperimentError("missing_model", "a configured model client is required")
 
+    store = FormalStore(out_dir)
     all_task_summaries: list[dict[str, Any]] = []
     reports: list[dict[str, Any]] = []
     for repetition in range(repetitions):
-        repetition_dir = out_dir if repetitions == 1 else out_dir / f"rep_{repetition + 1:02d}"
+        if repetitions == 1:
+            repetition_dir = store.root
+        else:
+            repetition_name = f"rep_{repetition + 1:02d}"
+            store.create_directory_exclusive(repetition_name)
+            repetition_dir = store.path(repetition_name)
         repetition_tasks: list[dict[str, Any]] = []
         for task_index, task in enumerate(tasks, start=1):
             item = dict(task)
@@ -644,7 +654,10 @@ def run_benchmark_batch(
         "production_latency_claim": False,
     }
     sanitized = sanitize_run_report(result)
-    _write_json(out_dir / "results" / "native_batch_summary.json", sanitized)
+    if write_summary:
+        store.write_json_exclusive(
+            "results", "native_batch_summary.json", payload=sanitized
+        )
     return sanitized
 
 

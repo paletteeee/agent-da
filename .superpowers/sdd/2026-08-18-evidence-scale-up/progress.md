@@ -140,3 +140,11 @@ Ruling: Treat symlinks or resolved path escape anywhere below the formal output 
 Ruling: Under `--resume`, an existing merge is reusable only after strict pre-model recomputation from a complete frozen shard set; an incomplete, malformed, ambiguous, or unequal merge aborts before any model/shard side effect — cost if wrong: GPU work and new shard evidence can be produced for a destination already known to be unreusable.
 
 Ruling: Resume reuses a shard run only when strict raw and bound summaries both exist and a fresh binding is type-strict canonically identical; every other pre-existing run directory is partial/stale and rejected, while new execution starts in an exclusively created directory — cost if wrong: partial traces can be truncated, mixed, or silently promoted to completed formal evidence.
+
+Ruling: Preflight the complete selected benchmark×shard launch set before creating or executing any missing shard; one later stale shard aborts before the first model side effect — cost if wrong: valid earlier shards may wait for global validation, but GPU work cannot begin under a launch set already known to be inconsistent.
+
+Ruling: Every formal merge path, including fresh non-resume merge-only execution, must strictly load raw and bound reports and require a fresh canonical rebinding match — cost if wrong: distributed workers must retain or transfer the sanitized raw summary alongside the bound report rather than merging a bound-only package.
+
+Ruling: Strict JSON rejects all non-finite values including exponent overflow such as `1e999`, not only named NaN/Infinity tokens — cost if wrong: unusual oversized numeric diagnostics are rejected instead of silently becoming infinity.
+
+Ruling: Descriptor-relative no-follow exclusive creation applies through the invoked benchmark runner's raw trace, repetition summary, final batch summary, and formal backend file reservation—not only launcher manifests and merge files — cost if wrong: legacy direct reruns into occupied output directories now fail closed and must use a fresh directory.

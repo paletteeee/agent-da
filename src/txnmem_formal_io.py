@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import stat
+from contextlib import contextmanager
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,13 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _reject_nonfinite(value: str) -> Any:
     raise FormalIOError(f"non-finite JSON number: {value}")
+
+
+def _parse_finite_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise FormalIOError(f"non-finite JSON number: {value}")
+    return parsed
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -214,6 +223,7 @@ class FormalStore:
                     stream,
                     object_pairs_hook=_reject_duplicate_keys,
                     parse_constant=_reject_nonfinite,
+                    parse_float=_parse_finite_float,
                 )
         except FormalIOError:
             raise
@@ -268,6 +278,66 @@ class FormalStore:
             if descriptor is not None:
                 os.close(descriptor)
             os.close(parent)
+
+    @contextmanager
+    def open_text_exclusive(self, *parts: str):
+        """Open a new UTF-8 text artifact without following symlinks."""
+
+        parent, name = self._open_parent(parts, create=True)
+        descriptor: int | None = None
+        try:
+            flags = (
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+            )
+            descriptor = os.open(name, flags, 0o600, dir_fd=parent)
+        except FileExistsError as exc:
+            raise FormalIOError(
+                f"refusing to overwrite existing formal file: {self.path(*parts)}"
+            ) from exc
+        except OSError as exc:
+            raise FormalIOError(f"cannot create formal file: {self.path(*parts)}") from exc
+        finally:
+            os.close(parent)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                descriptor = None
+                yield stream
+                stream.flush()
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
+    def reserve_file_exclusive(self, *parts: str, mode: int = 0o600) -> Path:
+        """Reserve one empty regular file for a backend that opens it later."""
+
+        parent, name = self._open_parent(parts, create=True)
+        descriptor: int | None = None
+        try:
+            flags = (
+                os.O_RDWR
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+            )
+            descriptor = os.open(name, flags, mode, dir_fd=parent)
+        except FileExistsError as exc:
+            raise FormalIOError(
+                f"refusing to reuse existing formal backend file: {self.path(*parts)}"
+            ) from exc
+        except OSError as exc:
+            raise FormalIOError(
+                f"cannot reserve formal backend file: {self.path(*parts)}"
+            ) from exc
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            os.close(parent)
+        return self.path(*parts)
 
     def write_or_verify_json(
         self,
@@ -445,8 +515,6 @@ def recompute_native_merge(
     store: FormalStore,
     job: str,
     shard_count: int,
-    *,
-    require_raw: bool,
 ) -> dict[str, Any]:
     """Strictly reload and recompute one merged native-scale report."""
 
@@ -457,17 +525,16 @@ def recompute_native_merge(
     for index, shard in enumerate(shards):
         shard_name = f"shard_{index:03d}"
         bound = store.load_json("runs", job, shard_name, "shard_report.json")
-        if require_raw:
-            raw = store.load_json(
-                "runs",
-                job,
-                shard_name,
-                "results",
-                "native_batch_summary.json",
-            )
-            rebound = bind_native_shard_report(shard, raw)
-            if not canonical_json_equal(bound, rebound):
-                raise FormalIOError(f"bound report does not match raw shard {index}")
+        raw = store.load_json(
+            "runs",
+            job,
+            shard_name,
+            "results",
+            "native_batch_summary.json",
+        )
+        rebound = bind_native_shard_report(shard, raw)
+        if not canonical_json_equal(bound, rebound):
+            raise FormalIOError(f"bound report does not match raw shard {index}")
         reports.append(bound)
     merged = merge_native_shards(parent, reports)
     validate_merged_report(merged)
@@ -525,7 +592,6 @@ def preflight_existing_merge(
         store,
         job,
         shard_count,
-        require_raw=True,
     )
     if not canonical_json_equal(existing, recomputed):
         raise FormalIOError(
@@ -534,23 +600,20 @@ def preflight_existing_merge(
     return True
 
 
-def prepare_shard_run(
+def _inspect_shard_run(
     store: FormalStore,
     job: str,
     shard_index: int,
-    shard_count: int,
+    shard: Mapping[str, Any],
     *,
     resume: bool,
 ) -> str:
-    """Exclusively create a new run or strictly verify a completed run."""
+    """Inspect one run without creating anything or invoking a model."""
 
-    _, shards = _load_frozen_job(store, job, shard_count)
-    shard = shards[shard_index]
     shard_name = f"shard_{shard_index:03d}"
     run_parts = ("runs", job, shard_name)
     kind = store.entry_kind(*run_parts)
     if kind == "missing":
-        store.create_directory_exclusive(*run_parts)
         return "execute"
     if kind != "directory":
         raise FormalIOError(f"shard run is not a directory: {store.path(*run_parts)}")
@@ -568,6 +631,37 @@ def prepare_shard_run(
     if not canonical_json_equal(bound, rebound):
         raise FormalIOError(f"bound report does not match raw shard {shard_index}")
     return "reuse"
+
+
+def prepare_shard_runs(
+    store: FormalStore,
+    jobs: Sequence[str],
+    shard_count: int,
+    *,
+    resume: bool,
+) -> list[tuple[str, int, str]]:
+    """Validate the complete launch set, then reserve every missing run."""
+
+    planned: list[tuple[str, int, str]] = []
+    for job in jobs:
+        _, shards = _load_frozen_job(store, job, shard_count)
+        for shard_index, shard in enumerate(shards):
+            action = _inspect_shard_run(
+                store,
+                job,
+                shard_index,
+                shard,
+                resume=resume,
+            )
+            planned.append((job, shard_index, action))
+
+    # Creation happens only after every existing run in every job has passed.
+    for job, shard_index, action in planned:
+        if action == "execute":
+            store.create_directory_exclusive(
+                "runs", job, f"shard_{shard_index:03d}"
+            )
+    return planned
 
 
 def bind_shard_files(
@@ -602,13 +696,11 @@ def finalize_native_merge(
     shard_count: int,
     *,
     resume: bool,
-    require_raw: bool,
 ) -> None:
     merged = recompute_native_merge(
         store,
         job,
         shard_count,
-        require_raw=require_raw,
     )
     parts = ("merged", f"{job}.json")
     kind = store.entry_kind(*parts)

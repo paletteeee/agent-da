@@ -35,6 +35,7 @@ from txnmem_conditions import (
     source_identity,
     verify_git_source_containment,
 )
+from txnmem_formal_io import FormalIOError, FormalStore
 from txnmem_service_faults import ToxiproxyFaultController, deterministic_fault_matrix
 from txnmem_mutation import (
     build_minimal_mutant_witnesses,
@@ -1216,7 +1217,11 @@ def main(argv: list[str] | None = None) -> int:
                 from txnmem_backend import SQLiteInstrumentedMemoryBackend
 
                 def backend_factory(index: int, root: Path) -> SQLiteInstrumentedMemoryBackend:
-                    return SQLiteInstrumentedMemoryBackend(root / "data" / f"memory_{index:04d}.sqlite")
+                    store = FormalStore(root)
+                    database = store.reserve_file_exclusive(
+                        "data", f"memory_{index:04d}.sqlite"
+                    )
+                    return SQLiteInstrumentedMemoryBackend(database)
 
             report = run_benchmark_experiment_manifest(
                 {
@@ -1330,7 +1335,11 @@ def main(argv: list[str] | None = None) -> int:
                 from txnmem_backend import SQLiteInstrumentedMemoryBackend
 
                 def backend_factory(index: int, root: Path) -> SQLiteInstrumentedMemoryBackend:
-                    return SQLiteInstrumentedMemoryBackend(root / "data" / f"memory_{index:04d}.sqlite")
+                    store = FormalStore(root)
+                    database = store.reserve_file_exclusive(
+                        "data", f"memory_{index:04d}.sqlite"
+                    )
+                    return SQLiteInstrumentedMemoryBackend(database)
 
             report = run_benchmark_batch(
                 {
@@ -1345,6 +1354,7 @@ def main(argv: list[str] | None = None) -> int:
                 backend_factory=backend_factory,
                 adapter_factory=adapter_factory,
                 repetitions=args.repetitions,
+                write_summary=False,
             )
             report["model_execution_mode"] = execution_mode
             report["model_id"] = model_id
@@ -1401,12 +1411,18 @@ def main(argv: list[str] | None = None) -> int:
                     else "benchmark_default_tools"
                 ),
             }
-            summary_path = args.out_dir / "results" / "native_batch_summary.json"
-            summary_path.write_text(
-                json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
+            FormalStore(args.out_dir).write_json_exclusive(
+                "results",
+                "native_batch_summary.json",
+                payload=report,
             )
-        except (OSError, json.JSONDecodeError, RealExperimentError, ImportError) as exc:
+        except (
+            OSError,
+            json.JSONDecodeError,
+            RealExperimentError,
+            FormalIOError,
+            ImportError,
+        ) as exc:
             print(f"benchmark native batch configuration error: {exc}")
             return 2
         print(f"wrote benchmark native batch summary -> {args.out_dir / 'results' / 'native_batch_summary.json'}")

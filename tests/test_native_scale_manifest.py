@@ -18,6 +18,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import txnmem_benchmark_manifests as benchmark_manifests
 import txnmem_experiment as experiment_cli
 from txnmem_benchmark_manifests import build_native_scale_manifest, write_manifest
+from txnmem_formal_io import FormalIOError, FormalStore
 from txnmem_real_experiment import load_task_manifest
 
 
@@ -308,6 +309,36 @@ if len(sys.argv) > 1 and Path(sys.argv[1]).name == "txnmem_experiment.py":
         json.dumps(arguments), encoding="utf-8"
     )
     raise SystemExit(0)
+os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
+""",
+            encoding="utf-8",
+        )
+        path.chmod(0o755)
+        return path
+
+    def _actual_offline_batch_python_shim(self, path: Path) -> Path:
+        path.write_text(
+            f"""#!{sys.executable}
+import os
+from pathlib import Path
+import sys
+
+if len(sys.argv) > 1 and Path(sys.argv[1]).name == "txnmem_experiment.py":
+    arguments = list(sys.argv[2:])
+
+    def option(name):
+        return arguments[arguments.index(name) + 1]
+
+    planted = os.environ.get("TXNMEM_TEST_PLANTED_OUTPUT")
+    if planted:
+        victim = Path(option("--out-dir")).joinpath(*planted.split("/"))
+        victim.parent.mkdir(parents=True, exist_ok=True)
+        victim.symlink_to(Path(os.environ["TXNMEM_TEST_ESCAPED_TARGET"]))
+    arguments.append("--offline-fixture")
+    os.execv(
+        {sys.executable!r},
+        [{sys.executable!r}, sys.argv[1], *arguments],
+    )
 os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
 """,
             encoding="utf-8",
@@ -932,6 +963,274 @@ os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
                     self.assertFalse(model_marker.exists(), rejected.stderr)
                     self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
 
+    def test_scale_script_preflights_all_shards_before_any_run_or_model_side_effect(self):
+        for later_run_state in ("partial", "stale"):
+            with self.subTest(later_run_state=later_run_state), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source = self._locomo_source(root)
+                out_dir = root / "out"
+                base_arguments = [
+                    "--benchmarks",
+                    "locomo",
+                    "--locomo-tasks",
+                    "5",
+                    "--out-dir",
+                    str(out_dir),
+                    "--shard-count",
+                    "2",
+                ]
+                source_environment = {"TXNMEM_LOCOMO_SOURCE": str(source)}
+                generated = self._run_scale_script(
+                    ["--generate-only", *base_arguments],
+                    environment=source_environment,
+                )
+                self.assertEqual(generated.returncode, 0, generated.stderr)
+
+                shard = json.loads(
+                    (
+                        out_dir
+                        / "manifests"
+                        / "locomo"
+                        / "shard_001.json"
+                    ).read_text(encoding="utf-8")
+                )
+                later_run = out_dir / "runs" / "locomo" / "shard_001"
+                later_run.mkdir(parents=True)
+                if later_run_state == "stale":
+                    raw_rows = [
+                        {
+                            "task_id": task["task_id"],
+                            "status": "completed",
+                            "official": {"status": "available", "success": True},
+                        }
+                        for task in shard["tasks"]
+                    ]
+                    raw_path = later_run / "results" / "native_batch_summary.json"
+                    raw_path.parent.mkdir()
+                    raw_path.write_text(
+                        json.dumps(
+                            {
+                                "manifest_sha256": shard["manifest_hash"],
+                                "condition_fingerprint": "e" * 64,
+                                "repetitions": 1,
+                                "task_summaries": raw_rows,
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        encoding="utf-8",
+                    )
+                    bound_rows = [
+                        {
+                            **row,
+                            "source_position": task["source_position"],
+                            "repetition": 1,
+                        }
+                        for row, task in zip(raw_rows, shard["tasks"])
+                    ]
+                    bound_rows[0]["status"] = "failed"
+                    (later_run / "shard_report.json").write_text(
+                        json.dumps(
+                            {
+                                "parent_manifest_hash": shard["parent_manifest_hash"],
+                                "shard_index": shard["shard_index"],
+                                "shard_count": shard["shard_count"],
+                                "benchmark": shard["benchmark"],
+                                "split": shard["split"],
+                                "source_identity": shard["source_identity"],
+                                "condition_fingerprint": shard["condition_fingerprint"],
+                                "execution_condition_fingerprint": "e" * 64,
+                                "execution_manifest_hash": shard["manifest_hash"],
+                                "repetitions": 1,
+                                "task_summaries": bound_rows,
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                        encoding="utf-8",
+                    )
+                later_snapshot = {
+                    str(path.relative_to(later_run)): path.read_bytes()
+                    for path in later_run.rglob("*")
+                    if path.is_file()
+                }
+                model_marker = root / "model-invoked-before-global-preflight"
+                python_shim = self._model_side_effect_python_shim(
+                    root / "model-side-effect-python"
+                )
+                environment = {
+                    **source_environment,
+                    "TXNMEM_PYTHON": str(python_shim),
+                    "TXNMEM_TEST_MODEL_MARKER": str(model_marker),
+                }
+
+                rejected = self._run_scale_script(
+                    [
+                        "--resume",
+                        "--endpoint",
+                        "no-model-call://global-preflight",
+                        "--model",
+                        "must-not-run",
+                        *base_arguments,
+                    ],
+                    environment=environment,
+                )
+
+                self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                self.assertFalse(model_marker.exists(), rejected.stderr)
+                self.assertFalse(
+                    (out_dir / "runs" / "locomo" / "shard_000").exists(),
+                    "global preflight must not create an earlier missing run",
+                )
+                self.assertEqual(
+                    {
+                        str(path.relative_to(later_run)): path.read_bytes()
+                        for path in later_run.rglob("*")
+                        if path.is_file()
+                    },
+                    later_snapshot,
+                )
+
+    def test_scale_script_fresh_merge_only_strictly_rebinds_every_raw_report(self):
+        for raw_case in ("duplicate", "inconsistent"):
+            with self.subTest(raw_case=raw_case), TemporaryDirectory() as tmp:
+                out_dir = Path(tmp) / "out"
+                self._write_merge_fixture(out_dir)
+                raw_path = (
+                    out_dir
+                    / "runs"
+                    / "tau_bench"
+                    / "shard_001"
+                    / "results"
+                    / "native_batch_summary.json"
+                )
+                if raw_case == "duplicate":
+                    self._insert_duplicate_scalar(
+                        raw_path,
+                        key="status",
+                        duplicate_value="completed",
+                    )
+                else:
+                    raw = json.loads(raw_path.read_text(encoding="utf-8"))
+                    raw["task_summaries"][0]["status"] = "failed"
+                    raw_path.write_text(
+                        json.dumps(raw, ensure_ascii=False, indent=2, sort_keys=True)
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                original_raw = raw_path.read_bytes()
+
+                rejected = self._run_scale_script(
+                    [
+                        "--merge-only",
+                        "--benchmarks",
+                        "tau-bench",
+                        "--out-dir",
+                        str(out_dir),
+                        "--shard-count",
+                        "2",
+                    ]
+                )
+
+                self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                self.assertEqual(raw_path.read_bytes(), original_raw)
+                self.assertFalse((out_dir / "merged" / "tau_bench.json").exists())
+
+    def test_scale_script_rejects_nested_exponent_overflow_in_strict_json(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "out"
+            self._write_merge_fixture(out_dir)
+            direct_path = out_dir / "nested_overflow.json"
+            direct_path.write_text(
+                '{"outer":{"inner":[{"value":1e999}]}}\n',
+                encoding="utf-8",
+            )
+            with self.subTest(boundary="FormalStore.load_json"):
+                with self.assertRaises(FormalIOError):
+                    FormalStore(out_dir).load_json("nested_overflow.json")
+            bound_path = (
+                out_dir
+                / "runs"
+                / "tau_bench"
+                / "shard_001"
+                / "shard_report.json"
+            )
+            bound = json.loads(bound_path.read_text(encoding="utf-8"))
+            bound["task_summaries"][0]["diagnostics"] = {
+                "nested": {"overflow": "__EXPONENT_OVERFLOW__"}
+            }
+            overflow_text = (
+                json.dumps(bound, ensure_ascii=False, indent=2, sort_keys=True)
+                .replace('"__EXPONENT_OVERFLOW__"', "1e999")
+                + "\n"
+            )
+            self.assertIn("1e999", overflow_text)
+            bound_path.write_text(overflow_text, encoding="utf-8")
+            original_bound = bound_path.read_bytes()
+
+            rejected = self._run_scale_script(
+                [
+                    "--merge-only",
+                    "--benchmarks",
+                    "tau-bench",
+                    "--out-dir",
+                    str(out_dir),
+                    "--shard-count",
+                    "2",
+                ]
+            )
+
+            self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+            self.assertEqual(bound_path.read_bytes(), original_bound)
+            self.assertFalse((out_dir / "merged" / "tau_bench.json").exists())
+
+    def test_scale_script_actual_runner_outputs_are_no_follow_exclusive(self):
+        protected_outputs = (
+            "data/native_model_traces.jsonl",
+            "results/native_model_summary.json",
+            "results/native_batch_summary.json",
+            "data/memory_0001.sqlite",
+        )
+        for relative_output in protected_outputs:
+            with self.subTest(relative_output=relative_output), TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source = self._locomo_source(root)
+                out_dir = root / "out"
+                escaped_target = root / "escaped-output"
+                python_shim = self._actual_offline_batch_python_shim(
+                    root / "actual-offline-python"
+                )
+                environment = {
+                    "TXNMEM_PYTHON": str(python_shim),
+                    "TXNMEM_LOCOMO_SOURCE": str(source),
+                    "TXNMEM_TEST_PLANTED_OUTPUT": relative_output,
+                    "TXNMEM_TEST_ESCAPED_TARGET": str(escaped_target),
+                }
+
+                rejected = self._run_scale_script(
+                    [
+                        "--endpoint",
+                        "offline-fixture://no-network",
+                        "--model",
+                        "offline-fixture",
+                        "--benchmarks",
+                        "locomo",
+                        "--locomo-tasks",
+                        "1",
+                        "--out-dir",
+                        str(out_dir),
+                        "--shard-count",
+                        "1",
+                    ],
+                    environment=environment,
+                )
+
+                planted = out_dir / "runs" / "locomo" / "shard_000" / relative_output
+                self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                self.assertTrue(planted.is_symlink())
+                self.assertFalse(escaped_target.exists())
+                self.assertFalse((out_dir / "merged" / "locomo.json").exists())
+
     def test_scale_script_normal_resume_verifies_merge_without_model_calls(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1226,29 +1525,51 @@ os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
                         {
                             "task_id": task["task_id"],
                             "source_position": task["source_position"],
+                            "repetition": 1,
                             "status": "failed",
                             "official": {"status": "blocked"},
                         }
                         for task in shard["tasks"]
                     ]
-                    (report_dir / "shard_report.json").write_text(
+                    raw_path = report_dir / "results" / "native_batch_summary.json"
+                    raw_path.parent.mkdir()
+                    raw_path.write_text(
                         json.dumps(
                             {
-                                "parent_manifest_hash": parent["manifest_hash"],
-                                "execution_manifest_hash": shard["manifest_hash"],
-                                "shard_index": shard["shard_index"],
-                                "shard_count": shard["shard_count"],
-                                "benchmark": parent["benchmark"],
-                                "domain": parent.get("domain"),
-                                "split": parent["split"],
-                                "source_identity": parent["source_identity"],
-                                "condition_fingerprint": parent["condition_fingerprint"],
-                                "execution_condition_fingerprint": "e" * 64,
+                                "manifest_sha256": shard["manifest_hash"],
+                                "condition_fingerprint": "e" * 64,
                                 "repetitions": 1,
-                                "task_summaries": rows,
-                            }
+                                "task_summaries": [
+                                    {
+                                        "task_id": row["task_id"],
+                                        "status": row["status"],
+                                        "official": row["official"],
+                                    }
+                                    for row in rows
+                                ],
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
                         ),
                         encoding="utf-8",
+                    )
+                    bound_report = {
+                        "parent_manifest_hash": parent["manifest_hash"],
+                        "execution_manifest_hash": shard["manifest_hash"],
+                        "shard_index": shard["shard_index"],
+                        "shard_count": shard["shard_count"],
+                        "benchmark": parent["benchmark"],
+                        "split": parent["split"],
+                        "source_identity": parent["source_identity"],
+                        "condition_fingerprint": parent["condition_fingerprint"],
+                        "execution_condition_fingerprint": "e" * 64,
+                        "repetitions": 1,
+                        "task_summaries": rows,
+                    }
+                    if "domain" in parent:
+                        bound_report["domain"] = parent["domain"]
+                    (report_dir / "shard_report.json").write_text(
+                        json.dumps(bound_report), encoding="utf-8"
                     )
 
             merged = subprocess.run(
