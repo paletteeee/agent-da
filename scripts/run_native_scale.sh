@@ -71,14 +71,21 @@ if [ ! -x "$TXNMEM_PYTHON" ]; then
   exit 2
 fi
 
-mkdir -p "$TXNMEM_OUT_DIR/manifests" "$TXNMEM_OUT_DIR/runs"
 export PYTHONPATH="$TXNMEM_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+
+"$TXNMEM_PYTHON" - "$TXNMEM_OUT_DIR" <<'PY'
+import sys
+
+from txnmem_formal_io import FormalStore
+
+store = FormalStore(sys.argv[1])
+store.ensure_directory("manifests")
+store.ensure_directory("runs")
+PY
 
 if [ "$TXNMEM_MERGE_ONLY" -eq 0 ]; then
 "$TXNMEM_PYTHON" - "$TXNMEM_OUT_DIR" "$TXNMEM_BENCHMARKS" "$TXNMEM_TAU_ROOT" "$TXNMEM_TAU_DOMAIN" "$TXNMEM_TAU_SPLIT" "$TXNMEM_TAU_TASKS" "$TXNMEM_APPWORLD_ROOT" "$TXNMEM_APPWORLD_SPLIT" "$TXNMEM_APPWORLD_TASKS" "$TXNMEM_LOCOMO_SOURCE" "$TXNMEM_LOCOMO_TASKS" "$TXNMEM_SHARD_COUNT" "$TXNMEM_RESUME" <<'PY'
-import json
 import sys
-from pathlib import Path
 
 (
     out_dir,
@@ -98,8 +105,9 @@ from pathlib import Path
 sys.path.insert(0, tau_root)
 
 from txnmem_benchmark_manifests import build_native_scale_manifest, shard_manifest
+from txnmem_formal_io import FormalStore, validate_parent_manifest
 
-out_dir = Path(out_dir)
+store = FormalStore(out_dir)
 allowed = {
     "tau-bench": (tau_domain, int(tau_limit), tau_split),
     "appworld": (appworld_root, int(appworld_limit), appworld_split),
@@ -109,20 +117,6 @@ selected = [item.strip() for item in requested_benchmarks.split(",") if item.str
 if not selected or len(selected) != len(set(selected)) or any(item not in allowed for item in selected):
     raise SystemExit("--benchmarks must be a unique comma-separated subset of tau-bench,appworld,locomo")
 resume = bool(int(resume))
-
-def write_or_verify(path: Path, payload: dict) -> None:
-    if path.exists():
-        if not resume:
-            raise SystemExit(f"refusing to overwrite existing manifest without --resume: {path}")
-        try:
-            existing = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise SystemExit(f"existing resume manifest is malformed: {path}") from exc
-        if existing != payload:
-            raise SystemExit(f"existing resume manifest does not match frozen source: {path}")
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 summary = {"seed": 17, "shard_count": int(shard_count), "manifests": {}}
 for benchmark in selected:
@@ -142,90 +136,75 @@ for benchmark in selected:
             f"source={manifest.get('source_task_count')} selected={manifest.get('task_count')} "
             f"expected={formal_expected}"
         )
+    validate_parent_manifest(manifest)
     job = benchmark.replace("-", "_")
-    manifest_dir = out_dir / "manifests" / job
-    path = manifest_dir / "parent.json"
-    write_or_verify(path, manifest)
+    store.write_or_verify_json(
+        "manifests",
+        job,
+        "parent.json",
+        payload=manifest,
+        resume=resume,
+        artifact_name="manifest",
+        sort_keys=False,
+    )
     for shard in shard_manifest(manifest, int(shard_count)):
-        write_or_verify(manifest_dir / f"shard_{shard['shard_index']:03d}.json", shard)
+        store.write_or_verify_json(
+            "manifests",
+            job,
+            f"shard_{shard['shard_index']:03d}.json",
+            payload=shard,
+            resume=resume,
+            artifact_name="manifest",
+            sort_keys=False,
+        )
     summary["manifests"][benchmark] = {
         "path": f"manifests/{job}/parent.json",
         "task_count": manifest["task_count"],
         "manifest_hash": manifest["manifest_hash"],
     }
-write_or_verify(out_dir / "scale_manifest_summary.json", summary)
+store.write_or_verify_json(
+    "scale_manifest_summary.json",
+    payload=summary,
+    resume=resume,
+    artifact_name="manifest summary",
+    sort_keys=False,
+)
 PY
 fi
 
 IFS=',' read -r -a TXNMEM_SELECTED_BENCHMARKS <<< "$TXNMEM_BENCHMARKS"
 
-if [ "$TXNMEM_GENERATE_ONLY" -eq 0 ] && [ "$TXNMEM_RESUME" -eq 0 ]; then
-  for TXNMEM_BENCHMARK_ITEM in "${TXNMEM_SELECTED_BENCHMARKS[@]}"; do
-    TXNMEM_BENCHMARK="${TXNMEM_BENCHMARK_ITEM//[[:space:]]/}"
-    TXNMEM_JOB="${TXNMEM_BENCHMARK//-/_}"
-    case "$TXNMEM_JOB" in
-      tau_bench|appworld|locomo) ;;
-      *) echo "error: unsupported benchmark: $TXNMEM_BENCHMARK" >&2; exit 2 ;;
-    esac
-    TXNMEM_MERGED_PATH="$TXNMEM_OUT_DIR/merged/$TXNMEM_JOB.json"
-    if [ -e "$TXNMEM_MERGED_PATH" ] || [ -L "$TXNMEM_MERGED_PATH" ]; then
-      echo "error: refusing to overwrite existing merge without --resume: $TXNMEM_MERGED_PATH" >&2
-      exit 2
-    fi
-  done
+if [ "$TXNMEM_GENERATE_ONLY" -eq 0 ]; then
+  "$TXNMEM_PYTHON" - "$TXNMEM_OUT_DIR" "$TXNMEM_BENCHMARKS" "$TXNMEM_SHARD_COUNT" "$TXNMEM_RESUME" <<'PY'
+import sys
+
+from txnmem_formal_io import FormalStore, preflight_existing_merge
+
+store = FormalStore(sys.argv[1])
+selected = [item.strip() for item in sys.argv[2].split(",") if item.strip()]
+shard_count = int(sys.argv[3])
+resume = bool(int(sys.argv[4]))
+jobs = {"tau-bench": "tau_bench", "appworld": "appworld", "locomo": "locomo"}
+for benchmark in selected:
+    if benchmark not in jobs:
+        raise SystemExit(f"unsupported benchmark: {benchmark}")
+    preflight_existing_merge(
+        store,
+        jobs[benchmark],
+        shard_count,
+        resume=resume,
+    )
+PY
 fi
 
 bind_shard_report() {
-  "$TXNMEM_PYTHON" - "$1" "$2" "$3" <<'PY'
-import json
+  "$TXNMEM_PYTHON" - "$1" "$2" "$3" "$4" <<'PY'
 import sys
-from pathlib import Path
 
-shard_path, raw_path, output_path = map(Path, sys.argv[1:])
-try:
-    shard = json.loads(shard_path.read_text(encoding="utf-8"))
-    raw = json.loads(raw_path.read_text(encoding="utf-8"))
-except (OSError, json.JSONDecodeError) as exc:
-    raise SystemExit(f"cannot bind malformed shard output: {exc}") from exc
-if raw.get("manifest_sha256") != shard.get("manifest_hash"):
-    raise SystemExit("native report manifest hash does not match executed shard")
-execution_condition = raw.get("condition_fingerprint")
-if not isinstance(execution_condition, str) or not execution_condition:
-    raise SystemExit("native report has no execution condition fingerprint")
-repetitions = raw.get("repetitions")
-if isinstance(repetitions, bool) or not isinstance(repetitions, int) or repetitions < 1:
-    raise SystemExit("native report has malformed repetitions")
-tasks = shard.get("tasks")
-rows = raw.get("task_summaries")
-if not isinstance(tasks, list) or not isinstance(rows, list) or len(rows) != len(tasks) * repetitions:
-    raise SystemExit("native report task rows do not cover the shard repetitions")
-bound_rows = []
-for repetition in range(1, repetitions + 1):
-    for task_offset, task in enumerate(tasks):
-        row = rows[(repetition - 1) * len(tasks) + task_offset]
-        if not isinstance(row, dict) or row.get("task_id") != task.get("task_id"):
-            raise SystemExit("native report task order does not match the shard")
-        item = dict(row)
-        item["source_position"] = task["source_position"]
-        item["repetition"] = repetition
-        bound_rows.append(item)
-report = {
-    "parent_manifest_hash": shard["parent_manifest_hash"],
-    "shard_index": shard["shard_index"],
-    "shard_count": shard["shard_count"],
-    "benchmark": shard["benchmark"],
-    "split": shard["split"],
-    "source_identity": shard["source_identity"],
-    "condition_fingerprint": shard["condition_fingerprint"],
-    "execution_condition_fingerprint": execution_condition,
-    "execution_manifest_hash": raw.get("manifest_sha256"),
-    "repetitions": repetitions,
-    "task_summaries": bound_rows,
-}
-if "domain" in shard:
-    report["domain"] = shard["domain"]
-output_path.parent.mkdir(parents=True, exist_ok=True)
-output_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+from txnmem_formal_io import FormalStore, bind_shard_files
+
+store = FormalStore(sys.argv[1])
+bind_shard_files(store, sys.argv[2], int(sys.argv[3]), int(sys.argv[4]))
 PY
 }
 
@@ -247,15 +226,28 @@ for TXNMEM_BENCHMARK_ITEM in "${TXNMEM_SELECTED_BENCHMARKS[@]}"; do
     TXNMEM_RUN_DIR="$TXNMEM_OUT_DIR/runs/$TXNMEM_JOB/$TXNMEM_SHARD_NAME"
     TXNMEM_RAW_REPORT="$TXNMEM_RUN_DIR/results/native_batch_summary.json"
     TXNMEM_BOUND_REPORT="$TXNMEM_RUN_DIR/shard_report.json"
-    if [ "$TXNMEM_RESUME" -eq 1 ] && [ -f "$TXNMEM_BOUND_REPORT" ]; then
+    TXNMEM_RUN_ACTION="$("$TXNMEM_PYTHON" - "$TXNMEM_OUT_DIR" "$TXNMEM_JOB" "$TXNMEM_SHARD_INDEX" "$TXNMEM_SHARD_COUNT" "$TXNMEM_RESUME" <<'PY'
+import sys
+
+from txnmem_formal_io import FormalStore, prepare_shard_run
+
+store = FormalStore(sys.argv[1])
+print(
+    prepare_shard_run(
+        store,
+        sys.argv[2],
+        int(sys.argv[3]),
+        int(sys.argv[4]),
+        resume=bool(int(sys.argv[5])),
+    )
+)
+PY
+)"
+    if [ "$TXNMEM_RUN_ACTION" = "reuse" ]; then
       continue
     fi
-    if [ "$TXNMEM_RESUME" -eq 1 ] && [ -f "$TXNMEM_RAW_REPORT" ]; then
-      bind_shard_report "$TXNMEM_SHARD_PATH" "$TXNMEM_RAW_REPORT" "$TXNMEM_BOUND_REPORT"
-      continue
-    fi
-    if [ -e "$TXNMEM_RUN_DIR" ] && [ "$TXNMEM_RESUME" -eq 0 ]; then
-      echo "error: refusing to overwrite shard run without --resume: $TXNMEM_RUN_DIR" >&2
+    if [ "$TXNMEM_RUN_ACTION" != "execute" ]; then
+      echo "error: invalid shard run action: $TXNMEM_RUN_ACTION" >&2
       exit 2
     fi
     "$TXNMEM_PYTHON" "$TXNMEM_ROOT/src/txnmem_experiment.py" benchmark-native-batch \
@@ -270,68 +262,30 @@ for TXNMEM_BENCHMARK_ITEM in "${TXNMEM_SELECTED_BENCHMARKS[@]}"; do
       --model "$TXNMEM_MODEL" \
       --appworld-root "$TXNMEM_APPWORLD_ROOT" \
       ${TXNMEM_LOCOMO_EVALUATOR_ARGS[@]+"${TXNMEM_LOCOMO_EVALUATOR_ARGS[@]}"}
-    bind_shard_report "$TXNMEM_SHARD_PATH" "$TXNMEM_RAW_REPORT" "$TXNMEM_BOUND_REPORT"
+    bind_shard_report "$TXNMEM_OUT_DIR" "$TXNMEM_JOB" "$TXNMEM_SHARD_INDEX" "$TXNMEM_SHARD_COUNT"
   done
 done
 fi
 
 if [ "$TXNMEM_GENERATE_ONLY" -eq 0 ]; then
-mkdir -p "$TXNMEM_OUT_DIR/merged"
 for TXNMEM_BENCHMARK_ITEM in "${TXNMEM_SELECTED_BENCHMARKS[@]}"; do
   TXNMEM_BENCHMARK="${TXNMEM_BENCHMARK_ITEM//[[:space:]]/}"
   TXNMEM_JOB="${TXNMEM_BENCHMARK//-/_}"
-  "$TXNMEM_PYTHON" - "$TXNMEM_OUT_DIR" "$TXNMEM_JOB" "$TXNMEM_SHARD_COUNT" "$TXNMEM_RESUME" <<'PY'
-import json
+  "$TXNMEM_PYTHON" - "$TXNMEM_OUT_DIR" "$TXNMEM_JOB" "$TXNMEM_SHARD_COUNT" "$TXNMEM_RESUME" "$TXNMEM_MERGE_ONLY" <<'PY'
 import sys
-from pathlib import Path
 
-from txnmem_batch_merge import merge_native_shards
+from txnmem_formal_io import FormalStore, finalize_native_merge
 
-
-def reject_duplicate_keys(pairs):
-    document = {}
-    for key, value in pairs:
-        if key in document:
-            raise ValueError(f"duplicate JSON key: {key}")
-        document[key] = value
-    return document
-
-
-out_dir = Path(sys.argv[1])
-job = sys.argv[2]
-shard_count = int(sys.argv[3])
+store = FormalStore(sys.argv[1])
 resume = bool(int(sys.argv[4]))
-try:
-    parent = json.loads((out_dir / "manifests" / job / "parent.json").read_text(encoding="utf-8"))
-    reports = [
-        json.loads(
-            (out_dir / "runs" / job / f"shard_{index:03d}" / "shard_report.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        for index in range(shard_count)
-    ]
-except (OSError, json.JSONDecodeError) as exc:
-    raise SystemExit(f"cannot merge incomplete or malformed shard outputs for {job}: {exc}") from exc
-merged = merge_native_shards(parent, reports)
-path = out_dir / "merged" / f"{job}.json"
-if path.exists():
-    if not resume:
-        raise SystemExit(f"refusing to overwrite existing merge without --resume: {path}")
-    try:
-        existing = json.loads(
-            path.read_text(encoding="utf-8"),
-            object_pairs_hook=reject_duplicate_keys,
-        )
-    except (OSError, ValueError) as exc:
-        raise SystemExit(f"existing resume merge is malformed: {path}") from exc
-    if existing != merged:
-        raise SystemExit(f"existing resume merge does not match recomputation: {path}")
-else:
-    path.write_text(
-        json.dumps(merged, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+merge_only = bool(int(sys.argv[5]))
+finalize_native_merge(
+    store,
+    sys.argv[2],
+    int(sys.argv[3]),
+    resume=resume,
+    require_raw=resume or not merge_only,
+)
 PY
 done
 fi

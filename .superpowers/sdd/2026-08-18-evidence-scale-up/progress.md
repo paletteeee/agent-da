@@ -132,3 +132,11 @@ Ruling: Official evaluator evidence is fail-closed: only the explicit status `av
 Ruling: Protect an existing merged formal artifact before launching any shard or model process in both merge-only and normal execution; `--resume` is the only permitted reuse path — cost if wrong: a refused rerun could otherwise spend GPU time or create shard side effects before discovering that its final destination is immutable.
 
 Ruling: Existing merge artifacts must be parsed with recursive duplicate-key rejection before resume equality is evaluated, and the launcher must remain executable under the host Bash 3.2 with empty optional argument lists — cost if wrong: ambiguous JSON or platform-specific array behavior could bypass or abort the formal replay contract.
+
+Ruling: Apply recursive duplicate-key rejection and type-strict canonical JSON equality to every formal parent manifest, shard manifest, raw report, bound report, and merge artifact—not only the final merge — cost if wrong: Python's permissive parser and `True == 1` equality can certify rebound identities or malformed schema values.
+
+Ruling: Treat symlinks or resolved path escape anywhere below the formal output root as invalid, and create formal files with no-follow exclusive creation — cost if wrong: dangling destinations can redirect a nominally protected artifact outside its versioned output tree.
+
+Ruling: Under `--resume`, an existing merge is reusable only after strict pre-model recomputation from a complete frozen shard set; an incomplete, malformed, ambiguous, or unequal merge aborts before any model/shard side effect — cost if wrong: GPU work and new shard evidence can be produced for a destination already known to be unreusable.
+
+Ruling: Resume reuses a shard run only when strict raw and bound summaries both exist and a fresh binding is type-strict canonically identical; every other pre-existing run directory is partial/stale and rejected, while new execution starts in an exclusively created directory — cost if wrong: partial traces can be truncated, mixed, or silently promoted to completed formal evidence.

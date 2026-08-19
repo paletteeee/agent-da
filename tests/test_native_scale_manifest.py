@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -123,6 +124,7 @@ class NativeScaleManifestTests(unittest.TestCase):
                 {
                     "task_id": task["task_id"],
                     "source_position": task["source_position"],
+                    "repetition": 1,
                     "status": "completed",
                     "official": {"status": "available", "success": True},
                 }
@@ -144,11 +146,90 @@ class NativeScaleManifestTests(unittest.TestCase):
             }
             report_dir = out_dir / "runs" / "tau_bench" / shard_name
             report_dir.mkdir(parents=True)
+            raw_rows = [
+                {
+                    "task_id": row["task_id"],
+                    "status": row["status"],
+                    "official": row["official"],
+                }
+                for row in rows
+            ]
+            raw_path = report_dir / "results" / "native_batch_summary.json"
+            raw_path.parent.mkdir()
+            raw_path.write_text(
+                json.dumps(
+                    {
+                        "manifest_sha256": shard["manifest_hash"],
+                        "condition_fingerprint": "e" * 64,
+                        "repetitions": 1,
+                        "task_summaries": raw_rows,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             (report_dir / "shard_report.json").write_text(
                 json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
         return parent
+
+    def _complete_locomo_scale_run(
+        self, root: Path, *, shard_count: int = 1
+    ) -> tuple[Path, list[str], dict[str, str]]:
+        source = self._locomo_source(root)
+        out_dir = root / "out"
+        model_log = root / "model-invocation.json"
+        python_shim = self._native_batch_python_shim(root / "native-batch-python")
+        environment = {
+            "TXNMEM_PYTHON": str(python_shim),
+            "TXNMEM_LOCOMO_SOURCE": str(source),
+            "TXNMEM_LOCOMO_EVALUATOR_COMMAND": "",
+            "TXNMEM_TEST_MODEL_LOG": str(model_log),
+        }
+        arguments = [
+            "--endpoint",
+            "no-model-call://local-shim",
+            "--model",
+            "local-shim",
+            "--benchmarks",
+            "locomo",
+            "--locomo-tasks",
+            "5",
+            "--out-dir",
+            str(out_dir),
+            "--shard-count",
+            str(shard_count),
+        ]
+        completed = self._run_scale_script(arguments, environment=environment)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertTrue(model_log.is_file())
+        return out_dir, arguments, environment
+
+    def _insert_duplicate_scalar(
+        self,
+        path: Path,
+        *,
+        key: str,
+        duplicate_value: object,
+        occurrence: int = 0,
+    ) -> None:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        pattern = re.compile(
+            rf"(?m)^(?P<indent>[ \t]*){re.escape(json.dumps(key))}[ \t]*:"
+        )
+        matches = list(pattern.finditer(text))
+        self.assertGreater(len(matches), occurrence, f"missing JSON key {key} in {path}")
+        match = matches[occurrence]
+        insertion = (
+            f"{match.group('indent')}{json.dumps(key)}: "
+            f"{json.dumps(duplicate_value, ensure_ascii=False)},\n"
+        )
+        path.write_text(text[: match.start()] + insertion + text[match.start() :], encoding="utf-8")
 
     def _formal_tau_source(self, root: Path) -> Path:
         task_source = root / "tau_bench" / "envs" / "retail" / "tasks_test.py"
@@ -526,6 +607,331 @@ os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
             self.assertNotEqual(rejected.returncode, 0)
             self.assertEqual(merge_path.read_text(encoding="utf-8"), ambiguous)
 
+    def test_scale_script_rejects_duplicate_keys_in_every_formal_input(self):
+        artifacts = {
+            "parent manifest": (
+                Path("manifests/locomo/parent.json"),
+                "source_position",
+                0,
+                99,
+            ),
+            "shard manifest": (
+                Path("manifests/locomo/shard_000.json"),
+                "source_position",
+                0,
+                99,
+            ),
+            "raw report": (
+                Path("runs/locomo/shard_000/results/native_batch_summary.json"),
+                "status",
+                "available",
+                "blocked",
+            ),
+            "bound report": (
+                Path("runs/locomo/shard_000/shard_report.json"),
+                "status",
+                "available",
+                "blocked",
+            ),
+        }
+        for artifact, (relative_path, key, correct, wrong) in artifacts.items():
+            for duplicate_case, duplicate_value in (
+                ("same value", correct),
+                ("wrong then correct", wrong),
+            ):
+                with self.subTest(artifact=artifact, duplicate_case=duplicate_case):
+                    with TemporaryDirectory() as tmp:
+                        root = Path(tmp)
+                        out_dir, arguments, environment = self._complete_locomo_scale_run(root)
+                        formal_path = out_dir / relative_path
+                        self._insert_duplicate_scalar(
+                            formal_path,
+                            key=key,
+                            duplicate_value=duplicate_value,
+                        )
+                        ambiguous = formal_path.read_bytes()
+                        model_marker = root / "model-invoked-on-duplicate"
+                        python_shim = self._model_side_effect_python_shim(
+                            root / "model-side-effect-python"
+                        )
+                        resume_environment = {
+                            **environment,
+                            "TXNMEM_PYTHON": str(python_shim),
+                            "TXNMEM_TEST_MODEL_MARKER": str(model_marker),
+                        }
+
+                        rejected = self._run_scale_script(
+                            ["--resume", *arguments],
+                            environment=resume_environment,
+                        )
+
+                        self.assertFalse(model_marker.exists(), rejected.stderr)
+                        self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                        self.assertEqual(formal_path.read_bytes(), ambiguous)
+
+    def test_scale_script_resume_equality_is_type_strict_for_schema_and_counts(self):
+        manifest_cases = (
+            ("parent manifest version", Path("parent.json"), "manifest_version"),
+            ("shard count", Path("shard_000.json"), "shard_count"),
+        )
+        for case, relative_path, field in manifest_cases:
+            with self.subTest(case=case):
+                with TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    source = self._locomo_source(root)
+                    out_dir = root / "out"
+                    environment = {"TXNMEM_LOCOMO_SOURCE": str(source)}
+                    arguments = [
+                        "--generate-only",
+                        "--benchmarks",
+                        "locomo",
+                        "--locomo-tasks",
+                        "5",
+                        "--out-dir",
+                        str(out_dir),
+                        "--shard-count",
+                        "1",
+                    ]
+                    generated = self._run_scale_script(arguments, environment=environment)
+                    self.assertEqual(generated.returncode, 0, generated.stderr)
+                    path = out_dir / "manifests" / "locomo" / relative_path
+                    original = path.read_text(encoding="utf-8")
+                    changed = original.replace(f'"{field}": 1', f'"{field}": true', 1)
+                    self.assertNotEqual(changed, original)
+                    path.write_text(changed, encoding="utf-8")
+
+                    rejected = self._run_scale_script(
+                        [*arguments, "--resume"], environment=environment
+                    )
+
+                    self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                    self.assertEqual(path.read_text(encoding="utf-8"), changed)
+
+        merge_cases = ("schema_version", "shard_count", "repetitions")
+        for field in merge_cases:
+            with self.subTest(case=f"merged {field}"):
+                with TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    out_dir, arguments, environment = self._complete_locomo_scale_run(root)
+                    merge_path = out_dir / "merged" / "locomo.json"
+                    original = merge_path.read_text(encoding="utf-8")
+                    changed = original.replace(f'"{field}": 1', f'"{field}": true', 1)
+                    self.assertNotEqual(changed, original)
+                    merge_path.write_text(changed, encoding="utf-8")
+
+                    rejected = self._run_scale_script(
+                        ["--merge-only", "--resume", *arguments],
+                        environment=environment,
+                    )
+
+                    self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                    self.assertEqual(merge_path.read_text(encoding="utf-8"), changed)
+
+    def test_scale_script_rejects_dangling_parent_and_merge_symlink_escapes(self):
+        with self.subTest(artifact="parent manifest"):
+            with TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source = self._locomo_source(root)
+                out_dir = root / "out"
+                parent_path = out_dir / "manifests" / "locomo" / "parent.json"
+                parent_path.parent.mkdir(parents=True)
+                escaped = root / "escaped-parent.json"
+                parent_path.symlink_to(escaped)
+
+                rejected = self._run_scale_script(
+                    [
+                        "--generate-only",
+                        "--benchmarks",
+                        "locomo",
+                        "--locomo-tasks",
+                        "5",
+                        "--out-dir",
+                        str(out_dir),
+                    ],
+                    environment={"TXNMEM_LOCOMO_SOURCE": str(source)},
+                )
+
+                self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                self.assertFalse(escaped.exists())
+                self.assertTrue(parent_path.is_symlink())
+
+        with self.subTest(artifact="merged report"):
+            with TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                out_dir = root / "out"
+                self._write_merge_fixture(out_dir)
+                merge_path = out_dir / "merged" / "tau_bench.json"
+                merge_path.parent.mkdir(parents=True)
+                escaped = root / "escaped-merge.json"
+                merge_path.symlink_to(escaped)
+
+                rejected = self._run_scale_script(
+                    [
+                        "--merge-only",
+                        "--resume",
+                        "--benchmarks",
+                        "tau-bench",
+                        "--out-dir",
+                        str(out_dir),
+                        "--shard-count",
+                        "2",
+                    ]
+                )
+
+                self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+                self.assertFalse(escaped.exists())
+                self.assertTrue(merge_path.is_symlink())
+
+    def test_scale_script_resume_rejects_bad_merge_before_model_execution(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = self._locomo_source(root)
+            out_dir = root / "out"
+            merge_path = out_dir / "merged" / "locomo.json"
+            merge_path.parent.mkdir(parents=True)
+            malformed = b"malformed formal merge\n"
+            merge_path.write_bytes(malformed)
+            model_marker = root / "model-invoked"
+            python_shim = self._model_side_effect_python_shim(
+                root / "model-side-effect-python"
+            )
+            environment = {
+                "TXNMEM_PYTHON": str(python_shim),
+                "TXNMEM_LOCOMO_SOURCE": str(source),
+                "TXNMEM_TEST_MODEL_MARKER": str(model_marker),
+            }
+
+            rejected = self._run_scale_script(
+                [
+                    "--resume",
+                    "--endpoint",
+                    "no-model-call://must-refuse-first",
+                    "--model",
+                    "must-not-run",
+                    "--benchmarks",
+                    "locomo",
+                    "--locomo-tasks",
+                    "5",
+                    "--out-dir",
+                    str(out_dir),
+                    "--shard-count",
+                    "1",
+                ],
+                environment=environment,
+            )
+
+            self.assertFalse(model_marker.exists(), rejected.stderr)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertEqual(merge_path.read_bytes(), malformed)
+
+    def test_scale_script_resume_rejects_every_partial_run_before_model_execution(self):
+        for partial_case in ("empty", "trace only", "raw only", "bound only"):
+            with self.subTest(partial_case=partial_case):
+                with TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    source = self._locomo_source(root)
+                    out_dir = root / "out"
+                    arguments = [
+                        "--benchmarks",
+                        "locomo",
+                        "--locomo-tasks",
+                        "5",
+                        "--out-dir",
+                        str(out_dir),
+                        "--shard-count",
+                        "1",
+                    ]
+                    source_environment = {"TXNMEM_LOCOMO_SOURCE": str(source)}
+                    generated = self._run_scale_script(
+                        ["--generate-only", *arguments],
+                        environment=source_environment,
+                    )
+                    self.assertEqual(generated.returncode, 0, generated.stderr)
+                    shard = json.loads(
+                        (out_dir / "manifests" / "locomo" / "shard_000.json").read_text(
+                            encoding="utf-8"
+                        )
+                    )
+                    run_dir = out_dir / "runs" / "locomo" / "shard_000"
+                    run_dir.mkdir(parents=True)
+                    raw_rows = [
+                        {
+                            "task_id": task["task_id"],
+                            "status": "completed",
+                            "official": {"status": "available", "success": True},
+                        }
+                        for task in shard["tasks"]
+                    ]
+                    if partial_case == "trace only":
+                        trace_path = run_dir / "data" / "native_model_traces.jsonl"
+                        trace_path.parent.mkdir()
+                        trace_path.write_text('{"partial":true}\n', encoding="utf-8")
+                    elif partial_case == "raw only":
+                        raw_path = run_dir / "results" / "native_batch_summary.json"
+                        raw_path.parent.mkdir()
+                        raw_path.write_text(
+                            json.dumps(
+                                {
+                                    "manifest_sha256": shard["manifest_hash"],
+                                    "condition_fingerprint": "e" * 64,
+                                    "repetitions": 1,
+                                    "task_summaries": raw_rows,
+                                }
+                            ),
+                            encoding="utf-8",
+                        )
+                    elif partial_case == "bound only":
+                        bound_rows = [
+                            {
+                                **row,
+                                "source_position": task["source_position"],
+                                "repetition": 1,
+                            }
+                            for row, task in zip(raw_rows, shard["tasks"])
+                        ]
+                        (run_dir / "shard_report.json").write_text(
+                            json.dumps(
+                                {
+                                    "parent_manifest_hash": shard["parent_manifest_hash"],
+                                    "shard_index": shard["shard_index"],
+                                    "shard_count": shard["shard_count"],
+                                    "benchmark": shard["benchmark"],
+                                    "split": shard["split"],
+                                    "source_identity": shard["source_identity"],
+                                    "condition_fingerprint": shard["condition_fingerprint"],
+                                    "execution_condition_fingerprint": "e" * 64,
+                                    "execution_manifest_hash": shard["manifest_hash"],
+                                    "repetitions": 1,
+                                    "task_summaries": bound_rows,
+                                }
+                            ),
+                            encoding="utf-8",
+                        )
+                    model_marker = root / "model-invoked"
+                    python_shim = self._model_side_effect_python_shim(
+                        root / "model-side-effect-python"
+                    )
+                    environment = {
+                        **source_environment,
+                        "TXNMEM_PYTHON": str(python_shim),
+                        "TXNMEM_TEST_MODEL_MARKER": str(model_marker),
+                    }
+
+                    rejected = self._run_scale_script(
+                        [
+                            "--resume",
+                            "--endpoint",
+                            "no-model-call://must-refuse-partial",
+                            "--model",
+                            "must-not-run",
+                            *arguments,
+                        ],
+                        environment=environment,
+                    )
+
+                    self.assertFalse(model_marker.exists(), rejected.stderr)
+                    self.assertNotEqual(rejected.returncode, 0, rejected.stdout)
+
     def test_scale_script_normal_resume_verifies_merge_without_model_calls(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -623,6 +1029,43 @@ os.execv({sys.executable!r}, [{sys.executable!r}, *sys.argv[1:]])
             self.assertEqual(completed.returncode, 0, completed.stderr)
             invocation = json.loads(model_log.read_text(encoding="utf-8"))
             self.assertNotIn("--locomo-evaluator-command", invocation)
+            self.assertTrue((out_dir / "merged" / "tau_bench.json").is_file())
+
+    def test_scale_script_executes_with_populated_optional_evaluator_args_on_bash_3_2(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tau_root = self._formal_tau_source(root / "tau-source")
+            out_dir = root / "out"
+            model_log = root / "model-invocation.json"
+            python_shim = self._native_batch_python_shim(root / "native-batch-python")
+            evaluator_command = '["python3","evaluate.py"]'
+            environment = {
+                "TXNMEM_PYTHON": str(python_shim),
+                "TXNMEM_TAU_ROOT": str(tau_root),
+                "TXNMEM_LOCOMO_EVALUATOR_COMMAND": evaluator_command,
+                "TXNMEM_TEST_MODEL_LOG": str(model_log),
+            }
+
+            completed = self._run_scale_script(
+                [
+                    "--endpoint",
+                    "no-model-call://local-shim",
+                    "--model",
+                    "local-shim",
+                    "--benchmarks",
+                    "tau-bench",
+                    "--out-dir",
+                    str(out_dir),
+                    "--shard-count",
+                    "1",
+                ],
+                environment=environment,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            invocation = json.loads(model_log.read_text(encoding="utf-8"))
+            option_index = invocation.index("--locomo-evaluator-command")
+            self.assertEqual(invocation[option_index + 1], evaluator_command)
             self.assertTrue((out_dir / "merged" / "tau_bench.json").is_file())
 
     def test_scale_script_refuses_protected_merge_before_model_execution(self):

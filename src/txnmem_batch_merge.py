@@ -7,10 +7,11 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from txnmem_benchmark_manifests import _canonical_hash, shard_manifest
+from txnmem_formal_io import canonical_json_equal
 
 
 def _require_equal(report: Mapping[str, Any], field: str, expected: Any) -> None:
-    if report.get(field) != expected:
+    if not canonical_json_equal(report.get(field), expected):
         raise ValueError(f"{field} mismatch")
 
 
@@ -40,6 +41,8 @@ def merge_native_shards(
 
     if not isinstance(manifest, Mapping):
         raise ValueError("manifest must be a mapping")
+    if type(manifest.get("manifest_version")) is not int or manifest["manifest_version"] != 1:
+        raise ValueError("parent manifest has malformed manifest_version")
     tasks = manifest.get("tasks")
     if not isinstance(tasks, list) or not tasks:
         raise ValueError("manifest.tasks must be a non-empty list")
@@ -63,7 +66,7 @@ def merge_native_shards(
         or not manifest["condition_fingerprint"]
     ):
         raise ValueError("parent manifest has malformed condition_fingerprint")
-    if manifest.get("task_count", len(tasks)) != len(tasks):
+    if type(manifest.get("task_count")) is not int or manifest["task_count"] != len(tasks):
         raise ValueError("parent manifest task_count mismatch")
     expected: dict[str, tuple[int, Mapping[str, Any]]] = {}
     for index, task in enumerate(tasks):
@@ -75,7 +78,7 @@ def merge_native_shards(
             raise ValueError(f"malformed manifest task at position {index}")
         if task_id in expected:
             raise ValueError(f"duplicate manifest task ID: {task_id}")
-        if position != index:
+        if type(position) is not int or position != index:
             raise ValueError(f"source position mismatch for task {task_id}")
         raw_task_id = task.get("raw_task_id")
         if (
@@ -157,7 +160,7 @@ def merge_native_shards(
             if task_id not in expected:
                 raise ValueError(f"extra task: {task_id}")
             position = expected[task_id][0]
-            if row.get("source_position") != position:
+            if type(row.get("source_position")) is not int or row["source_position"] != position:
                 raise ValueError(f"source position mismatch for task {task_id}")
             status = row.get("status")
             if not isinstance(status, str) or not status:
@@ -180,7 +183,9 @@ def merge_native_shards(
                 raise ValueError(f"shard assignment mismatch for task {task_id}")
             item = dict(row)
             raw_task_id = expected[task_id][1]["raw_task_id"]
-            if "raw_task_id" in item and item["raw_task_id"] != raw_task_id:
+            if "raw_task_id" in item and not canonical_json_equal(
+                item["raw_task_id"], raw_task_id
+            ):
                 raise ValueError(f"raw task ID mismatch for task {task_id}")
             item["raw_task_id"] = raw_task_id
             item["repetition"] = repetition

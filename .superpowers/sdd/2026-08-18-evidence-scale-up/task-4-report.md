@@ -1,6 +1,6 @@
 # Task 4 implementation report
 
-Status: IMPLEMENTATION AND REVIEW FIX ROUND 2 GREEN; AUTHORIZED-SERVER PREFLIGHT COMPLETE
+Status: IMPLEMENTATION AND REVIEW FIX ROUND 3 GREEN; AUTHORIZED-SERVER PREFLIGHT COMPLETE
 
 Base HEAD: `94b42759ff9434e506f6ade992a4206140fdaa72`
 
@@ -10,6 +10,10 @@ Blocker-fix commit: `274f509773a6a01cb4e69bc3cbf6547f4676283c`
 
 Review-fix round 1 implementation commit: `504abff49ad8d9340d3d0e5d589bd5a4130fc491`
 
+Review-fix round 2 implementation commit: `ddf371dfa6d50c7305153f75b70653872f3c4a57`
+
+Review-fix round 3 implementation commit: this report's commit
+
 ## Scope implemented
 
 - Froze legacy τ-bench `retail/test` in official task-source order and AppWorld `test_normal` in official split-file order. Parent manifests retain raw official IDs, source positions, benchmark/domain/split, package or version-file identity, source hashes, ordered-ID hashes, condition fingerprints, and canonical manifest hashes.
@@ -18,6 +22,7 @@ Review-fix round 1 implementation commit: `504abff49ad8d9340d3d0e5d589bd5a4130fc
 - Added formal script defaults (`retail/test=115`, `test_normal=168`), generate-only, merge-only, deterministic shard execution, and resume verification. Existing manifests and runs are never overwritten without `--resume`.
 - Preserved new benchmark metadata through `load_task_manifest`, bound shard execution conditions to the frozen parent hash, and recorded formal domain/split in the runtime condition. New explicitly scoped τ manifests are rejected before execution if CLI domain/split disagree; legacy manifests without the new benchmark marker retain their prior argument-driven behavior.
 - Closed the controller blockers by restoring `raw_task_id` from the frozen parent, requiring each report's executed shard hash, and requiring evaluator status `available` before an official boolean success can count.
+- Added one launcher-scoped strict formal store for recursive duplicate-key rejection, type-strict canonical JSON equality, exact schema/count typing, descriptor-relative no-follow path traversal, exclusive formal-file creation, complete pre-model merge replay, strict raw-to-bound resume verification, and exclusive new run-directory creation.
 
 ## TDD RED evidence
 
@@ -49,6 +54,14 @@ Review fix round 2 used four separate RED cycles:
 - Early protected-output refusal: after correcting a fixture-only generated-shim escape, 1 test ran in 0.618 seconds and failed because the model-runner invocation marker existed before the launcher discovered the protected merge.
 - Recursive duplicate keys: 1 merge-only resume test ran in 0.085 seconds and failed because a nested duplicate `denominator` key parsed equal to the recomputation and returned 0.
 
+Review fix round 3 used five end-to-end launcher regressions before any production change. The combined RED command exited 1 after 16.092 seconds: 5 test methods produced 20 intended subtest failures.
+
+- Recursive formal JSON: 8 failures showed same-value and wrong-then-correct nested duplicate keys being accepted in parent manifests, shard manifests, raw summaries, and bound reports; every launcher returned 0.
+- Type-strict resume equality: 5 failures showed `true` accepted as integer `1` for parent `manifest_version`, shard `shard_count`, and merged `schema_version`, `shard_count`, and `repetitions`.
+- Path safety: 2 failures showed dangling parent/merge symlinks being followed to targets outside the output directory and the launcher returning 0.
+- Existing-merge preflight: 1 failure showed the model-invocation marker created before a malformed existing merge with no shard reports was rejected.
+- Completed-only run reuse: 4 failures covered empty, trace-only, raw-only, and bound-only run directories. Empty/trace-only invoked the model; raw-only was silently rebound; bound-only was silently reused.
+
 ## GREEN evidence
 
 - Immediate regression GREEN: 11 tests passed in 0.086 seconds for all merge blocker tests and both CLI scope/condition tests.
@@ -78,6 +91,17 @@ Review fix round 2 fresh GREEN evidence:
 - Claim audit: exit 0; 15 active claims, 0 findings; diagnostic output only at `/tmp/txnmem-task4-fix2-claim-audit.json`.
 - Artifact audit: exit 0; 0 findings.
 - Host Bash: GNU Bash `3.2.57(1)-release`. Fresh `bash -n scripts/run_native_scale.sh` and `git diff --check`: exit 0 with no output.
+
+Review fix round 3 fresh GREEN evidence:
+
+- The five new reviewer regressions passed in 20.645 seconds, including all 20 adversarial subcases and explicit no-model markers.
+- The complete native-scale manifest module passed 23 tests in 20.441 seconds before the populated-array preservation case was added. Empty and populated Bash 3.2 evaluator-array paths then passed 2 tests in 2.188 seconds.
+- Complete Task 4 set (`tests.test_cli_outputs`, `tests.test_benchmark_bridge`, `tests.test_native_scale_manifest`, `tests.test_txnmem_batch_merge`): exit 0; 89 tests ran in 24.634 seconds; 4 optional dependency/data tests skipped; 0 failures/errors.
+- Full suite: exit 0; 657 tests ran in 121.210 seconds; 4 optional dependency/data tests skipped; 0 failures/errors.
+- Claim audit: exit 0; 15 active claims, 0 findings; diagnostic output only at `/tmp/txnmem-task4-fix3-claim-audit.json`.
+- Artifact audit: exit 0; 0 findings.
+- Host Bash remains GNU Bash `3.2.57(1)-release`. Fresh `bash -n scripts/run_native_scale.sh` and `git diff --check`: exit 0 with no output.
+- Fresh local read-only source verification again found τ-bench `retail/test` count 115 and source SHA-256 `6f09468923c6cfb6162e94fe659264d6aee70816c18d51278fb4a581db7765a4`; AppWorld `test_normal` count/unique count 168/168, zero missing task directories, split SHA-256 `c3af41497b6f2f0860a2ff8c09b335dca527e2cf48e59b4aabdb301b6b68db8f`, version `0.2.0`, and version-file SHA-256 `911fc0c48cb0c70601db5775a9bef1b740dc4cc9f9b46389b9f0563fe7eb94d7`.
 
 ## Local no-model formal preflight
 
@@ -119,6 +143,7 @@ authorized-server source-identity gate is therefore complete.
 - `src/txnmem_batch_merge.py`
 - `src/txnmem_benchmark_manifests.py`
 - `src/txnmem_experiment.py`
+- `src/txnmem_formal_io.py`
 - `src/txnmem_real_experiment.py`
 - `tests/test_benchmark_bridge.py`
 - `tests/test_cli_outputs.py`
@@ -136,6 +161,9 @@ authorized-server source-identity gate is therefore complete.
 - Any existing merged destination is rejected before shard/model execution without resume, and the final write-time guard remains in place for overwrite safety. Dangling symlink destinations also fail the early check.
 - Optional evaluator arguments use Bash-3.2 nounset-safe array expansion while preserving populated multi-word arguments.
 - Normal-path regressions use deterministic local shims and explicitly detect or forbid model-runner invocation. No endpoint or model was called during review-fix verification.
+- Every formal launcher read now uses one recursive duplicate-key-rejecting parser. Resume comparisons use canonical JSON bytes, so booleans, integers, and floating-point values cannot compare through Python coercion.
+- Formal paths are traversed from an opened output-root directory descriptor; symlink components and final symlinks fail closed. Parent, shard, summary, bound, and merged files use no-follow exclusive creation. Each new model run starts only after exclusive creation of its shard run directory.
+- Existing merges under `--resume` are strictly loaded and recomputed from complete frozen shard manifests plus raw and rebound reports before any model/shard process. Existing runs require both strict raw and bound summaries and exact fresh rebinding; all partial shapes abort unchanged.
 - No raw public prompts, tool arguments, benchmark payloads, endpoint, credential, or formal result artifact was added to Git.
 
-Implementation concern: none. External completion gate: none for Task 4. Process note: the code-review skill's independent reviewer subagent was unavailable in this session, so the final requirement/mutation/security review was performed directly and is not represented as an independent review.
+Implementation concern: none. External completion gate: none for Task 4. Environment note: the current local checkout has the authorized source copies but lacks τ-bench's optional `litellm` import dependency, so the fresh round-3 local check used read-only AST/count/hash inspection rather than rerunning the real-package generate-only command. The earlier no-model local generator preflight and authorized-server read-only preflight remain recorded above, and no source-selection code changed in round 3. Process note: the code-review skill's independent reviewer subagent was unavailable in this session, so the final requirement/mutation/security review was performed directly and is not represented as an independent review.
