@@ -148,3 +148,5 @@ Ruling: Every formal merge path, including fresh non-resume merge-only execution
 Ruling: Strict JSON rejects all non-finite values including exponent overflow such as `1e999`, not only named NaN/Infinity tokens — cost if wrong: unusual oversized numeric diagnostics are rejected instead of silently becoming infinity.
 
 Ruling: Descriptor-relative no-follow exclusive creation applies through the invoked benchmark runner's raw trace, repetition summary, final batch summary, and formal backend file reservation—not only launcher manifests and merge files — cost if wrong: legacy direct reruns into occupied output directories now fail closed and must use a fresh directory.
+
+Task 4: complete (commits 94b4275..2c6866e plus final review record; final fresh independent review PASS; controller verification: 155/155 focused tests with 4 optional skips, 661 full tests with 4 optional skips, 15 active claims/0 findings, artifact audit 0 findings, exact τ-bench retail/test 115 and AppWorld test_normal 168 source identities, Bash 3.2 syntax and clean diff checks)
