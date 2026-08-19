@@ -4,7 +4,7 @@
 
 The LoCoMo paired evaluator now ingests every chronological session without a whole-conversation head/tail cap, bounds each individual model request, isolates memory by conversation/profile/repetition seed, enforces the formal five-seed schedule, and reports deterministic conversation-cluster bootstrap intervals. The baseline/tuned comparison rejects mismatched task manifests, model identities, condition fingerprints, seeds, per-repetition denominators, conversation IDs, or conversation denominators.
 
-Task 5 implementation and evaluator-environment preparation are complete. A first independent review found four fail-closedness/reproducibility gaps; all four have been corrected and the fresh corrective review is pending. The formal five-repetition GPU batch belongs to Task 11 and has not been started while an unrelated user-owned GPU process occupies the server.
+Task 5 implementation, evaluator-environment preparation, corrective rounds, and fresh independent review are complete. The formal five-repetition GPU batch belongs to the subsequent formal-run task and has not been started while an unrelated user-owned GPU process occupies the server.
 
 ## Interfaces implemented
 
@@ -65,7 +65,7 @@ The first fresh independent review returned `FAIL` with four actionable findings
 - Latest corrective server focused suite: 36 Task-5 tests passed under the server model Python; the earlier combined Task-5/Task-6 server suite passed 49 tests.
 - Exact server package verification: all 11 pinned lightweight distributions matched their declared versions and resolved inside the isolated target.
 - Python compilation, both setup-script syntax checks, `git diff --check`, and added-line private-material scan passed.
-- Fourth fresh independent corrective review: pending.
+- Fourth fresh independent corrective review: `PASS`; no actionable issue remained.
 
 ## Security and evidence boundaries
 
