@@ -170,3 +170,7 @@ Ruling: Profile means and conversation-cluster intervals include the same availa
 Ruling: Importability is not dependency reproducibility: every pinned lightweight LoCoMo distribution must match its exact version and resolve physically inside the isolated target before the evaluator smoke can pass — cost if wrong: an already importable global package set may trigger a one-time isolated installation.
 
 Task 5: corrective implementation complete; fresh independent re-review pending (first review found four issues; controller verification: 38 local focused tests and 49 server focused tests passed, all 11 lightweight package pins resolved inside the isolated target, private-path fix applied).
+
+Ruling: A LoCoMo model identity is valid only when `model`, `model_revision`, and `model_server_build` are all nonempty strings and the identity model equals the top-level model; two equally malformed identities do not form a valid pair — cost if wrong: legacy summaries using `revision` or arbitrary identity maps must be regenerated.
+
+Task 5: second independent review passed the original four corrections and found one strict-identity gap; that gap is fixed with adversarial tests (39 local focused tests, 36 Task-5 server tests); third fresh review pending.

@@ -30,6 +30,14 @@ from locomo_paired_eval import (  # noqa: E402
 from txnmem_model_protocol import ModelResponse, TokenUsage  # noqa: E402
 
 
+def _model_identity(model):
+    return {
+        "model": model,
+        "model_revision": "a" * 64,
+        "model_server_build": "vllm:test-build",
+    }
+
+
 class LoCoMoOfficialEvalTests(unittest.TestCase):
     @staticmethod
     def _stream_sample():
@@ -294,7 +302,7 @@ class LoCoMoOfficialEvalTests(unittest.TestCase):
                     "mean_f1": 0.2,
                     "condition_fingerprint": "same-condition",
                     "task_manifest_sha256": "same-task-manifest",
-                    "model_identity": {"model": "qwen2.5-7b-instruct", "revision": "same"},
+                    "model_identity": _model_identity("qwen2.5-7b-instruct"),
                     "conversation_score_summaries": [
                         {
                             "conversation_id_sha256": "a" * 64,
@@ -321,7 +329,7 @@ class LoCoMoOfficialEvalTests(unittest.TestCase):
                     "mean_f1": 0.4,
                     "condition_fingerprint": "same-condition",
                     "task_manifest_sha256": "same-task-manifest",
-                    "model_identity": {"model": "qwen2.5-7b-instruct", "revision": "same"},
+                    "model_identity": _model_identity("qwen2.5-7b-instruct"),
                     "conversation_score_summaries": [
                         {
                             "conversation_id_sha256": "a" * 64,
@@ -360,7 +368,7 @@ class LoCoMoOfficialEvalTests(unittest.TestCase):
             "question_count": 2,
             "mean_f1": 0.5,
             "task_manifest_sha256": "same-task-manifest",
-            "model_identity": {"model": "qwen", "revision": "revision"},
+            "model_identity": _model_identity("qwen"),
             "condition_fingerprint": "same-condition",
             "conversation_score_summaries": [
                 {
@@ -421,7 +429,7 @@ class LoCoMoOfficialEvalTests(unittest.TestCase):
             "native_event_count": 1,
             "condition_fingerprint": "same-condition",
             "task_manifest_sha256": "same-task-manifest",
-            "model_identity": {"model": "qwen", "revision": "same"},
+            "model_identity": _model_identity("qwen"),
             "conversation_score_summaries": [
                 {
                     "conversation_id_sha256": "a" * 64,
@@ -446,10 +454,26 @@ class LoCoMoOfficialEvalTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, "model identities differ"):
             aggregate_repetition_summaries(
-                [base, {**base, "model_identity": {"model": "other"}}],
+                [base, {**base, "model_identity": _model_identity("other")}],
                 prompt_profile="baseline",
                 model="qwen",
             )
+        for invalid_identity in (
+            {"x": "y"},
+            {
+                "model": "qwen",
+                "model_revision": "",
+                "model_server_build": "vllm:test-build",
+            },
+            _model_identity("different-model"),
+        ):
+            with self.subTest(invalid_identity=invalid_identity):
+                with self.assertRaisesRegex(ValueError, "model identit"):
+                    aggregate_repetition_summaries(
+                        [{**base, "model_identity": invalid_identity}],
+                        prompt_profile="baseline",
+                        model="qwen",
+                    )
 
     def test_partial_repetition_is_not_counted_as_successful_score(self):
         aggregate = aggregate_repetition_summaries(
@@ -462,7 +486,7 @@ class LoCoMoOfficialEvalTests(unittest.TestCase):
                     "mean_f1": 0.5,
                     "condition_fingerprint": "same-condition",
                     "task_manifest_sha256": "same-task-manifest",
-                    "model_identity": {"model": "qwen", "revision": "same"},
+                    "model_identity": _model_identity("qwen"),
                     "conversation_score_summaries": [
                         {
                             "conversation_id_sha256": "a" * 64,
@@ -494,7 +518,7 @@ class LoCoMoOfficialEvalTests(unittest.TestCase):
                     "mean_f1": 0.0,
                     "condition_fingerprint": "same-condition",
                     "task_manifest_sha256": "same-task-manifest",
-                    "model_identity": {"model": "qwen", "revision": "same"},
+                    "model_identity": _model_identity("qwen"),
                     "conversation_score_summaries": [
                         {
                             "conversation_id_sha256": "a" * 64,

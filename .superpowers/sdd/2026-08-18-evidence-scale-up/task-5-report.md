@@ -59,13 +59,13 @@ Fresh read-only inspection of `<remote-locomo-source>` produced:
 
 ## Independent-review correction pass
 
-The first fresh independent review returned `FAIL` with four actionable findings. The comparison now requires a nonempty identical model identity, exactly five successful repetitions, the exact formal seed schedule, five positive question/sample denominators, and consistency between those denominators and the combined per-conversation totals. Partial/error repetitions are excluded from both the profile estimate and the conversation bootstrap input, so the point estimate and interval use the same completed repetitions. The evaluator bootstrap verifies every exact lightweight dependency version and verifies that each distribution is physically loaded from the isolated target before and after installation. The environment-specific source path in this report was replaced by `<remote-locomo-source>`.
+The first fresh independent review returned `FAIL` with four actionable findings. The comparison now requires a nonempty identical model identity, exactly five successful repetitions, the exact formal seed schedule, five positive question/sample denominators, and consistency between those denominators and the combined per-conversation totals. Partial/error repetitions are excluded from both the profile estimate and the conversation bootstrap input, so the point estimate and interval use the same completed repetitions. The evaluator bootstrap verifies every exact lightweight dependency version and verifies that each distribution is physically loaded from the isolated target before and after installation. The environment-specific source path in this report was replaced by `<remote-locomo-source>`. A second independent review passed those four corrections but found that two equally malformed nonempty identity objects could still compare equal; the aggregate and comparison now both require nonempty `model`, `model_revision`, and `model_server_build`, and require the identity model to equal the top-level model.
 
-- Corrective local focused suite: 38 tests passed, including path privacy.
-- Corrective server focused suite: 49 tests passed under the server model Python.
+- Latest corrective local focused suite: 39 tests passed, including path privacy and matching-malformed-identity adversaries.
+- Latest corrective server focused suite: 36 Task-5 tests passed under the server model Python; the earlier combined Task-5/Task-6 server suite passed 49 tests.
 - Exact server package verification: all 11 pinned lightweight distributions matched their declared versions and resolved inside the isolated target.
 - Python compilation, both setup-script syntax checks, `git diff --check`, and added-line private-material scan passed.
-- Final independent corrective review: pending.
+- Third fresh independent corrective review: pending.
 
 ## Security and evidence boundaries
 

@@ -69,6 +69,20 @@ def _formal_positive_denominators(
     return list(value)
 
 
+def _validated_model_identity(value: Any, expected_model: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("LoCoMo model identities differ or are missing")
+    required = ("model", "model_revision", "model_server_build")
+    if any(
+        not isinstance(value.get(field), str) or not value.get(field)
+        for field in required
+    ):
+        raise ValueError("LoCoMo model identity fields are missing or empty")
+    if value.get("model") != expected_model:
+        raise ValueError("LoCoMo model identity disagrees with the model ID")
+    return dict(value)
+
+
 def _locomo_conversation_scores(
     summary: Mapping[str, Any],
 ) -> dict[str, tuple[int, float]]:
@@ -111,15 +125,13 @@ def compare_locomo_prompt_profiles(
         or baseline_model != tuned_model
     ):
         raise ValueError("LoCoMo model IDs differ or are missing")
-    baseline_identity = baseline.get("model_identity")
-    tuned_identity = tuned.get("model_identity")
-    if (
-        not isinstance(baseline_identity, Mapping)
-        or not isinstance(tuned_identity, Mapping)
-        or not baseline_identity
-        or not tuned_identity
-        or dict(baseline_identity) != dict(tuned_identity)
-    ):
+    baseline_identity = _validated_model_identity(
+        baseline.get("model_identity"), baseline_model
+    )
+    tuned_identity = _validated_model_identity(
+        tuned.get("model_identity"), baseline_model
+    )
+    if baseline_identity != tuned_identity:
         raise ValueError("LoCoMo model identities differ or are missing")
     baseline_manifest = baseline.get("task_manifest_sha256")
     tuned_manifest = tuned.get("task_manifest_sha256")
@@ -222,7 +234,7 @@ def compare_locomo_prompt_profiles(
         "model": baseline_model,
         "condition_fingerprint": condition_fingerprint,
         "task_manifest_sha256": baseline_manifest,
-        "model_identity": dict(baseline_identity),
+        "model_identity": baseline_identity,
         "paired_repetition_count": len(deltas),
         "repetition_seeds": baseline_seeds,
         "question_count_per_repetition": question_denominators,

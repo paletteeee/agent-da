@@ -7,12 +7,20 @@ from txnmem_prompt_comparison import (
 )
 
 
+def _model_identity(model):
+    return {
+        "model": model,
+        "model_revision": "a" * 64,
+        "model_server_build": "vllm:test-build",
+    }
+
+
 class TxnMemPromptComparisonTests(unittest.TestCase):
     @staticmethod
     def _formal_locomo_summary(profile):
         return {
             "model": "qwen",
-            "model_identity": {"model": "qwen", "revision": "same"},
+            "model_identity": _model_identity("qwen"),
             "condition_fingerprint": "same-condition",
             "task_manifest_sha256": "same-task-manifest",
             "prompt_profile": profile,
@@ -39,7 +47,7 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
             "model": "qwen2.5-7b-instruct",
             "condition_fingerprint": "same-condition",
             "task_manifest_sha256": "same-task-manifest",
-            "model_identity": {"model": "qwen2.5-7b-instruct", "revision": "same"},
+            "model_identity": _model_identity("qwen2.5-7b-instruct"),
             "repetition_count": 5,
             "successful_repetition_count": 5,
             "repetition_seeds": [17, 1017, 2017, 3017, 4017],
@@ -128,7 +136,7 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
     def test_locomo_comparison_rejects_non_formal_schedule_and_task_mismatch(self):
         common = {
             "model": "qwen",
-            "model_identity": {"model": "qwen", "revision": "same"},
+            "model_identity": _model_identity("qwen"),
             "condition_fingerprint": "same-condition",
             "task_manifest_sha256": "same-task-manifest",
             "repetition_count": 3,
@@ -193,6 +201,20 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
             "missing repetition count": lambda row: row.pop("repetition_count"),
             "wrong repetition count": lambda row: row.__setitem__("repetition_count", 4),
             "empty model identity": lambda row: row.__setitem__("model_identity", {}),
+            "irrelevant model identity": lambda row: row.__setitem__(
+                "model_identity", {"x": "y"}
+            ),
+            "empty identity field": lambda row: row.__setitem__(
+                "model_identity",
+                {
+                    "model": "qwen",
+                    "model_revision": "",
+                    "model_server_build": "vllm:test-build",
+                },
+            ),
+            "identity model mismatch": lambda row: row.__setitem__(
+                "model_identity", _model_identity("different-model")
+            ),
             "missing question denominators": lambda row: row.pop(
                 "question_count_per_repetition"
             ),
@@ -212,6 +234,25 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
                 tuned = copy.deepcopy(valid_tuned)
                 mutate(tuned)
                 with self.assertRaises(ValueError):
+                    compare_locomo_prompt_profiles(baseline, tuned)
+
+    def test_locomo_comparison_rejects_matching_but_invalid_model_identities(self):
+        invalid_identities = [
+            {"x": "y"},
+            {
+                "model": "qwen",
+                "model_revision": "",
+                "model_server_build": "vllm:test-build",
+            },
+            _model_identity("different-model"),
+        ]
+        for identity in invalid_identities:
+            with self.subTest(identity=identity):
+                baseline = self._formal_locomo_summary("baseline")
+                tuned = self._formal_locomo_summary("tuned")
+                baseline["model_identity"] = copy.deepcopy(identity)
+                tuned["model_identity"] = copy.deepcopy(identity)
+                with self.assertRaisesRegex(ValueError, "model identit"):
                     compare_locomo_prompt_profiles(baseline, tuned)
 
     def test_appworld_comparison_pairs_task_ids_and_official_assertions(self):

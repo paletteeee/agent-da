@@ -250,6 +250,24 @@ def resolve_category5_answer(answer: str, choice_map: Mapping[str, str]) -> str:
     return str(choice_map.get(match.group(1).lower(), answer))
 
 
+def _validated_model_identity(value: Any, expected_model: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("repetition model identities differ or are missing")
+    required = ("model", "model_revision", "model_server_build")
+    if any(
+        not isinstance(value.get(field), str) or not value.get(field)
+        for field in required
+    ):
+        raise ValueError(
+            "repetition model identities differ: required fields are missing or empty"
+        )
+    if value.get("model") != expected_model:
+        raise ValueError(
+            "repetition model identities differ: identity model disagrees with the model ID"
+        )
+    return dict(value)
+
+
 def aggregate_repetition_summaries(
     summaries: Sequence[Mapping[str, Any]],
     *,
@@ -268,9 +286,10 @@ def aggregate_repetition_summaries(
         raise ValueError("repetition task manifests differ")
     if any(summary.get("model") != model for summary in summaries):
         raise ValueError("repetition model IDs differ")
-    model_identity_values = [summary.get("model_identity") for summary in summaries]
-    if not all(isinstance(value, Mapping) and value for value in model_identity_values):
-        raise ValueError("repetition model identities differ or are missing")
+    model_identity_values = [
+        _validated_model_identity(summary.get("model_identity"), model)
+        for summary in summaries
+    ]
     model_identities = {
         canonical_fingerprint(value) for value in model_identity_values
     }
