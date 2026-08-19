@@ -9,6 +9,7 @@ events.  The only score in the report comes from LoCoMo's own
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 import re
@@ -16,6 +17,53 @@ import urllib.request
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+
+def _session_sort_key(key: str) -> tuple[int, str]:
+    suffix = key.removeprefix("session_")
+    return (int(suffix), key) if suffix.isdigit() else (10**9, key)
+
+
+def iter_conversation_sessions(sample: Mapping[str, Any]):
+    """Yield every LoCoMo session in source chronology without truncation."""
+
+    if not isinstance(sample, Mapping):
+        raise ValueError("LoCoMo sample must be a mapping")
+    conversation = sample.get("conversation", sample)
+    if not isinstance(conversation, Mapping):
+        raise ValueError("LoCoMo conversation must be a mapping")
+    session_keys = sorted(
+        (
+            str(key)
+            for key in conversation
+            if str(key).startswith("session_")
+            and not str(key).endswith("_date_time")
+        ),
+        key=_session_sort_key,
+    )
+    for source_position, key in enumerate(session_keys):
+        turns = conversation.get(key)
+        if not isinstance(turns, list):
+            raise ValueError(f"LoCoMo {key} must be a list of turns")
+        session_number = key.removeprefix("session_")
+        date_time = str(conversation.get(f"session_{session_number}_date_time", ""))
+        lines = [f"DATE: {date_time}", "CONVERSATION:"]
+        for turn_index, turn in enumerate(turns):
+            if not isinstance(turn, Mapping):
+                raise ValueError(f"LoCoMo {key} turn {turn_index} must be a mapping")
+            speaker = str(turn.get("speaker", "speaker"))
+            text = turn.get("text", turn.get("content", ""))
+            if text not in (None, ""):
+                lines.append(f'{speaker} said, "{text}"')
+        content = "\n".join(lines)
+        yield {
+            "session_id": key,
+            "source_position": source_position,
+            "date_time": date_time,
+            "content": content,
+            "char_count": len(content),
+            "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        }
 
 
 def parse_batch_answers(text: str, count: int) -> dict[int, str]:
@@ -86,23 +134,9 @@ def normalize_qa_for_evaluator(qa: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _conversation_context(conversation: Mapping[str, Any], max_chars: int) -> str:
-    lines: list[str] = []
-    session_keys = sorted(
-        (str(key) for key in conversation if str(key).startswith("session_") and not str(key).endswith("_date_time")),
-        key=lambda key: int(key.split("_")[-1]) if key.split("_")[-1].isdigit() else 10**9,
+    context = "\n".join(
+        session["content"] for session in iter_conversation_sessions(conversation)
     )
-    for key in session_keys:
-        session_number = key.split("_")[-1]
-        lines.append(f"DATE: {conversation.get(f'session_{session_number}_date_time', '')}")
-        lines.append("CONVERSATION:")
-        for turn in conversation.get(key, []):
-            if not isinstance(turn, Mapping):
-                continue
-            speaker = turn.get("speaker", "speaker")
-            text = turn.get("text", turn.get("content", ""))
-            if text:
-                lines.append(f'{speaker} said, "{text}"')
-    context = "\n".join(lines)
     if max_chars <= 0 or len(context) <= max_chars:
         return context
     marker = "\n[conversation middle omitted for context budget]\n"

@@ -150,3 +150,15 @@ Ruling: Strict JSON rejects all non-finite values including exponent overflow su
 Ruling: Descriptor-relative no-follow exclusive creation applies through the invoked benchmark runner's raw trace, repetition summary, final batch summary, and formal backend file reservation—not only launcher manifests and merge files — cost if wrong: legacy direct reruns into occupied output directories now fail closed and must use a fresh directory.
 
 Task 4: complete (commits 94b4275..2c6866e plus final review record; final fresh independent review PASS; controller verification: 155/155 focused tests with 4 optional skips, 661 full tests with 4 optional skips, 15 active claims/0 findings, artifact audit 0 findings, exact τ-bench retail/test 115 and AppWorld test_normal 168 source identities, Bash 3.2 syntax and clean diff checks)
+
+Ruling: Treat LoCoMo `session_<n>` numbering as the released chronological order and stream every session; cap each session request independently instead of truncating the whole conversation — cost if wrong: formal ingestion expands to 272 requests per repetition but preserves all 827,164 content characters.
+
+Ruling: Isolate LoCoMo memory by conversation, prompt profile, and repetition seed; baseline and tuned runs never share a backend namespace — cost if wrong: repeated storage increases disk/model work but prevents cross-treatment leakage.
+
+Ruling: Freeze formal LoCoMo paired evaluation to exactly five seeds `17/1017/2017/3017/4017`; three-run historical evidence remains diagnostic — cost if wrong: partial schedules cannot activate formal claims and must be rerun.
+
+Ruling: Bootstrap LoCoMo outcomes by whole conversation while preserving each conversation's complete question denominator across repetitions; QA rows are not independent sampling units — cost if wrong: intervals are wider with only ten clusters but match the benchmark's true experimental unit.
+
+Ruling: Accept a baseline/tuned LoCoMo comparison only when task-manifest hash, model identity, condition fingerprint, five-seed schedule, repetition denominators, conversation identities, and conversation denominators all match — cost if wrong: otherwise plausible historical aggregates may be rejected until regenerated with complete identity metadata.
+
+Ruling: Pin the official LoCoMo evaluator to repository commit `3eb6f2c5…` and evaluator SHA-256 `8e3be5d5…`, install lightweight dependencies in an isolated target path, and never replace official F1 with a local judge — cost if wrong: environment setup is more explicit but avoids source drift and vLLM dependency mutation.

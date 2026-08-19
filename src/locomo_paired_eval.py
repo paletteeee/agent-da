@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from importlib.metadata import PackageNotFoundError, version as package_version
+import hashlib
 import json
 import random
 import re
@@ -21,9 +22,9 @@ from statistics import mean, pstdev
 from typing import Any, Mapping, Sequence
 
 from locomo_official_eval import (
-    _conversation_context,
     _question_for_model,
     aggregate_scores,
+    iter_conversation_sessions,
     normalize_qa_for_evaluator,
     parse_batch_answers,
 )
@@ -37,6 +38,151 @@ from txnmem_model_protocol import (
     merge_usage_summaries,
 )
 from txnmem_real_agent import run_real_agent
+from txnmem_resampling import cluster_bootstrap_interval
+
+
+FORMAL_PAIRED_SEEDS = (17, 1017, 2017, 3017, 4017)
+
+
+def conversation_namespace(sample_id: str, prompt_profile: str, seed: int) -> str:
+    """Return an isolated backend namespace for one paired condition."""
+
+    if prompt_profile not in {"baseline", "tuned"}:
+        raise ValueError(f"unsupported prompt profile: {prompt_profile}")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise ValueError("seed must be an integer")
+    return "locomo:" + canonical_fingerprint(
+        {
+            "sample_id": str(sample_id),
+            "prompt_profile": prompt_profile,
+            "repetition_seed": seed,
+        }
+    )[:24]
+
+
+def _stream_sha256(chunks: Sequence[str]) -> str:
+    digest = hashlib.sha256()
+    for chunk in chunks:
+        encoded = chunk.encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    return digest.hexdigest()
+
+
+def ingest_session_stream(
+    sample: Mapping[str, Any],
+    ingest_session: Any,
+    *,
+    max_session_chars: int,
+) -> dict[str, Any]:
+    """Pass the complete ordered session stream through bounded requests."""
+
+    if isinstance(max_session_chars, bool) or not isinstance(max_session_chars, int):
+        raise ValueError("max_session_chars must be a positive integer")
+    if max_session_chars < 1:
+        raise ValueError("max_session_chars must be a positive integer")
+    if not callable(ingest_session):
+        raise ValueError("ingest_session must be callable")
+
+    sessions = list(iter_conversation_sessions(sample))
+    source_chunks: list[str] = []
+    attempted_chunks: list[str] = []
+    completed_char_count = 0
+    completed_chunk_count = 0
+    attempted_sessions: set[str] = set()
+    completed_sessions: set[str] = set()
+    session_summaries: list[dict[str, Any]] = []
+    for session in sessions:
+        content = str(session["content"])
+        chunks = [
+            content[offset : offset + max_session_chars]
+            for offset in range(0, len(content), max_session_chars)
+        ] or [""]
+        source_chunks.extend(chunks)
+        session_completed = True
+        session_completed_chars = 0
+        for chunk_index, chunk in enumerate(chunks):
+            payload = {
+                "session_id": session["session_id"],
+                "session_id_sha256": hashlib.sha256(
+                    str(session["session_id"]).encode("utf-8")
+                ).hexdigest(),
+                "session_position": session["source_position"],
+                "date_time": session["date_time"],
+                "session_sha256": session["sha256"],
+                "chunk_index": chunk_index,
+                "chunk_count": len(chunks),
+                "content": chunk,
+                "char_count": len(chunk),
+                "chunk_sha256": hashlib.sha256(chunk.encode("utf-8")).hexdigest(),
+            }
+            attempted_sessions.add(str(session["session_id"]))
+            attempted_chunks.append(chunk)
+            try:
+                outcome = ingest_session(payload)
+                completed = isinstance(outcome, Mapping) and outcome.get("status") == "completed"
+            except Exception:
+                completed = False
+            if completed:
+                completed_chunk_count += 1
+                completed_char_count += len(chunk)
+                session_completed_chars += len(chunk)
+            else:
+                session_completed = False
+        if session_completed:
+            completed_sessions.add(str(session["session_id"]))
+        session_summaries.append(
+            {
+                "session_id_sha256": hashlib.sha256(
+                    str(session["session_id"]).encode("utf-8")
+                ).hexdigest(),
+                "source_position": session["source_position"],
+                "source_char_count": len(content),
+                "attempted_char_count": len(content),
+                "completed_char_count": session_completed_chars,
+                "chunk_count": len(chunks),
+                "completed": session_completed,
+                "session_sha256": session["sha256"],
+            }
+        )
+
+    source_char_count = sum(len(chunk) for chunk in source_chunks)
+    attempted_char_count = sum(len(chunk) for chunk in attempted_chunks)
+    source_chunk_count = len(source_chunks)
+    attempted_chunk_count = len(attempted_chunks)
+    return {
+        "status": (
+            "completed"
+            if completed_chunk_count == source_chunk_count
+            else "partial"
+            if completed_chunk_count
+            else "error"
+        ),
+        "source_session_count": len(sessions),
+        "attempted_session_count": len(attempted_sessions),
+        "completed_session_count": len(completed_sessions),
+        "source_chunk_count": source_chunk_count,
+        "attempted_chunk_count": attempted_chunk_count,
+        "completed_chunk_count": completed_chunk_count,
+        "source_char_count": source_char_count,
+        "attempted_char_count": attempted_char_count,
+        "completed_char_count": completed_char_count,
+        "session_attempt_coverage": (
+            len(attempted_sessions) / len(sessions) if sessions else 1.0
+        ),
+        "session_completion_coverage": (
+            len(completed_sessions) / len(sessions) if sessions else 1.0
+        ),
+        "character_attempt_coverage": (
+            attempted_char_count / source_char_count if source_char_count else 1.0
+        ),
+        "character_completion_coverage": (
+            completed_char_count / source_char_count if source_char_count else 1.0
+        ),
+        "source_stream_sha256": _stream_sha256(source_chunks),
+        "attempted_stream_sha256": _stream_sha256(attempted_chunks),
+        "session_summaries": session_summaries,
+    }
 
 
 def build_paired_question_prompt(
@@ -114,6 +260,22 @@ def aggregate_repetition_summaries(
 
     if not summaries:
         raise ValueError("at least one repetition summary is required")
+    task_manifest_values = [summary.get("task_manifest_sha256") for summary in summaries]
+    if not all(isinstance(value, str) and value for value in task_manifest_values):
+        raise ValueError("repetition task manifests differ or are missing")
+    task_manifests = set(task_manifest_values)
+    if len(task_manifests) != 1:
+        raise ValueError("repetition task manifests differ")
+    if any(summary.get("model") != model for summary in summaries):
+        raise ValueError("repetition model IDs differ")
+    model_identity_values = [summary.get("model_identity") for summary in summaries]
+    if not all(isinstance(value, Mapping) for value in model_identity_values):
+        raise ValueError("repetition model identities differ or are missing")
+    model_identities = {
+        canonical_fingerprint(value) for value in model_identity_values
+    }
+    if len(model_identities) != 1:
+        raise ValueError("repetition model identities differ")
     available_summaries = [summary for summary in summaries if summary.get("status") == "available"]
     scores: list[float | None] = [
         float(summary.get("mean_f1", 0.0))
@@ -141,13 +303,67 @@ def aggregate_repetition_summaries(
     usage = merge_usage_summaries(
         [summary.get("model_usage", {}) for summary in summaries]
     )
+    condition_values = [summary.get("condition_fingerprint") for summary in summaries]
     condition_fingerprints = {
-        str(summary.get("condition_fingerprint"))
-        for summary in summaries
-        if summary.get("condition_fingerprint")
+        str(value) for value in condition_values if isinstance(value, str) and value
     }
-    if len(condition_fingerprints) > 1:
-        raise ValueError("repetition condition fingerprints differ")
+    if len(condition_fingerprints) != 1 or not all(condition_values):
+        raise ValueError("repetition condition fingerprints differ or are missing")
+
+    cluster_rows: list[dict[str, Any]] = []
+    combined_conversations: dict[str, dict[str, Any]] = {}
+    expected_conversation_ids: list[str] | None = None
+    conversation_summary_sets = [
+        summary.get("conversation_score_summaries") for summary in summaries
+    ]
+    if not all(isinstance(item, list) and item for item in conversation_summary_sets):
+        raise ValueError("repetition conversation score summaries are incomplete")
+    if conversation_summary_sets:
+        for repetition_index, items in enumerate(conversation_summary_sets):
+            assert isinstance(items, list)
+            conversation_ids: list[str] = []
+            for item in items:
+                if not isinstance(item, Mapping):
+                    raise ValueError("invalid conversation score summary")
+                conversation_id = item.get("conversation_id_sha256")
+                question_count = item.get("question_count")
+                score_sum = item.get("score_sum")
+                if not isinstance(conversation_id, str) or not conversation_id:
+                    raise ValueError("invalid conversation score identity")
+                if (
+                    isinstance(question_count, bool)
+                    or not isinstance(question_count, int)
+                    or question_count < 1
+                ):
+                    raise ValueError("invalid conversation question count")
+                if isinstance(score_sum, bool) or not isinstance(score_sum, (int, float)):
+                    raise ValueError("invalid conversation score sum")
+                conversation_ids.append(conversation_id)
+                conversation_mean = float(score_sum) / question_count
+                combined = combined_conversations.setdefault(
+                    conversation_id,
+                    {
+                        "conversation_id_sha256": conversation_id,
+                        "question_evaluation_count": 0,
+                        "score_sum": 0.0,
+                    },
+                )
+                combined["question_evaluation_count"] += question_count
+                combined["score_sum"] += float(score_sum)
+                cluster_rows.extend(
+                    {
+                        "conversation_id_sha256": conversation_id,
+                        "score": conversation_mean,
+                        "repetition": repetition_index + 1,
+                    }
+                    for _ in range(question_count)
+                )
+            if len(conversation_ids) != len(set(conversation_ids)):
+                raise ValueError("duplicate conversation score identity")
+            if expected_conversation_ids is None:
+                expected_conversation_ids = conversation_ids
+            elif conversation_ids != expected_conversation_ids:
+                raise ValueError("repetition conversation task IDs differ")
     result = {
         "status": (
             "available"
@@ -200,9 +416,24 @@ def aggregate_repetition_summaries(
         "raw_reports_committed": False,
         "production_latency_claim": False,
     }
-    if condition_fingerprints:
-        result["condition_fingerprint"] = next(iter(condition_fingerprints))
-        result["condition"] = summaries[0].get("condition")
+    result["task_manifest_sha256"] = next(iter(task_manifests))
+    result["model_identity"] = summaries[0]["model_identity"]
+    if cluster_rows:
+        result["conversation_count"] = len(expected_conversation_ids or [])
+        result["conversation_score_summaries"] = []
+        for conversation_id in expected_conversation_ids or []:
+            item = dict(combined_conversations[conversation_id])
+            item["mean_f1"] = item["score_sum"] / item["question_evaluation_count"]
+            result["conversation_score_summaries"].append(item)
+        result["cluster_bootstrap_interval"] = cluster_bootstrap_interval(
+            cluster_rows,
+            "conversation_id_sha256",
+            "score",
+            repetitions=10000,
+            seed=17,
+        )
+    result["condition_fingerprint"] = next(iter(condition_fingerprints))
+    result["condition"] = summaries[0].get("condition")
     result["treatment"] = {"prompt_profile": prompt_profile}
     return result
 
@@ -258,7 +489,8 @@ def run_paired_eval(
     *,
     limit: int | None = None,
     batch_size: int = 8,
-    max_context_chars: int = 24000,
+    max_session_chars: int = 12000,
+    max_context_chars: int | None = None,
     max_ingest_steps: int = 12,
     max_qa_steps: int = 6,
     max_tokens: int = 512,
@@ -268,6 +500,9 @@ def run_paired_eval(
     model_revision: str = "unspecified",
 ) -> dict[str, Any]:
     """Run conversation ingestion and QA using one backend per sample."""
+
+    if max_context_chars is not None:
+        max_session_chars = int(max_context_chars)
 
     import locomo_official_eval as official_eval_module
     import txnmem_backend as backend_module
@@ -304,6 +539,8 @@ def run_paired_eval(
     qa_parsed_answer_count = 0
     qa_failure_counts: Counter[str] = Counter()
     model_usage = empty_usage_summary()
+    conversation_score_summaries: list[dict[str, Any]] = []
+    ingestion_coverage_rows: list[dict[str, Any]] = []
     sample_manifest = [
         {
             "sample_id": str(sample.get("sample_id", index)),
@@ -344,7 +581,8 @@ def run_paired_eval(
         "memory_backend": "SQLiteInstrumentedMemoryBackend",
         "retrieval_projection": "paired_memory_retrieval",
         "batch_size": int(batch_size),
-        "max_context_chars": int(max_context_chars),
+        "ingestion_mode": "complete_ordered_session_stream_v1",
+        "max_session_chars": int(max_session_chars),
         "max_ingest_steps": int(max_ingest_steps),
         "max_qa_steps": int(max_qa_steps),
         "max_tokens": int(max_tokens),
@@ -355,35 +593,75 @@ def run_paired_eval(
 
     for sample_index, sample in enumerate(selected):
         sample_id = str(sample.get("sample_id", sample_index))
+        sample_id_sha256 = hashlib.sha256(sample_id.encode("utf-8")).hexdigest()
+        namespace = conversation_namespace(sample_id, prompt_profile, seed)
         qas = [normalize_qa_for_evaluator(qa) for qa in sample.get("qa", [])]
-        context = _conversation_context(sample.get("conversation", {}), max_context_chars)
         database_path = out_path / "data" / f"memory_{sample_index:04d}.sqlite"
         backend = SQLiteInstrumentedMemoryBackend(database_path)
         try:
-            ingest = run_real_agent(
-                {
-                    "task_id": f"{sample_id}:ingest",
-                    "agent_id": "locomo_paired_agent",
-                    "system_prompt": build_ingestion_system_prompt(prompt_profile),
-                    "prompt": f"Conversation to ingest:\n{context}",
-                    "max_steps": max_ingest_steps,
-                },
-                client,
-                backend,
-                max_steps=max_ingest_steps,
-                seed=seed + sample_index,
-                temperature=0.0,
+            def ingest_chunk(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+                chunk_seed = (
+                    seed
+                    + sample_index * 10000
+                    + int(payload["session_position"]) * 100
+                    + int(payload["chunk_index"])
+                )
+                ingest = run_real_agent(
+                    {
+                        "task_id": (
+                            f"{sample_id}:ingest:{payload['session_position']}:"
+                            f"{payload['chunk_index']}"
+                        ),
+                        "agent_id": namespace,
+                        "system_prompt": build_ingestion_system_prompt(prompt_profile),
+                        "prompt": (
+                            "Chronological LoCoMo session chunk "
+                            f"{int(payload['chunk_index']) + 1}/{payload['chunk_count']} "
+                            f"for session {int(payload['session_position']) + 1}. "
+                            "Store all supported facts from this chunk.\n\n"
+                            f"{payload['content']}"
+                        ),
+                        "max_steps": max_ingest_steps,
+                    },
+                    client,
+                    backend,
+                    max_steps=max_ingest_steps,
+                    seed=chunk_seed,
+                    temperature=0.0,
+                )
+                ingest_usage = ingest.get("model_usage", {})
+                for field in model_usage:
+                    model_usage[field] += int(ingest_usage.get(field, 0) or 0)
+                return {
+                    "status": ingest.get("status"),
+                    "failure_code": ingest.get("failure_code"),
+                }
+
+            stream_report = ingest_session_stream(
+                sample,
+                ingest_chunk,
+                max_session_chars=max_session_chars,
             )
-            ingest_ok = ingest.get("status") == "completed"
-            ingest_usage = ingest.get("model_usage", {})
-            for field in model_usage:
-                model_usage[field] += int(ingest_usage.get(field, 0) or 0)
+            ingest_ok = stream_report["status"] == "completed"
             ingestion_completed += int(ingest_ok)
+            ingestion_coverage_rows.append(
+                {
+                    "conversation_id_sha256": sample_id_sha256,
+                    "namespace_sha256": hashlib.sha256(namespace.encode("utf-8")).hexdigest(),
+                    **stream_report,
+                }
+            )
             phase_rows.append(
                 {
-                    "sample_id": sample_id,
-                    "ingestion_status": ingest.get("status"),
-                    "ingestion_failure_code": ingest.get("failure_code"),
+                    "conversation_id_sha256": sample_id_sha256,
+                    "namespace_sha256": hashlib.sha256(namespace.encode("utf-8")).hexdigest(),
+                    "ingestion_status": stream_report["status"],
+                    "source_session_count": stream_report["source_session_count"],
+                    "source_char_count": stream_report["source_char_count"],
+                    "attempted_char_count": stream_report["attempted_char_count"],
+                    "completed_char_count": stream_report["completed_char_count"],
+                    "source_stream_sha256": stream_report["source_stream_sha256"],
+                    "attempted_stream_sha256": stream_report["attempted_stream_sha256"],
                 }
             )
 
@@ -399,7 +677,7 @@ def run_paired_eval(
                 )
                 retrieved = backend.search(
                     query=None,
-                    agent_id="locomo_paired_agent",
+                    agent_id=namespace,
                     projection="paired_memory_retrieval",
                 )
                 retrieval_prompt = (
@@ -460,6 +738,15 @@ def run_paired_eval(
                 }
                 score_rows.append(row)
                 sample_rows.append(row)
+            score_sum = sum(float(row["score"]) for row in sample_rows)
+            conversation_score_summaries.append(
+                {
+                    "conversation_id_sha256": sample_id_sha256,
+                    "question_count": len(sample_rows),
+                    "score_sum": score_sum,
+                    "mean_f1": score_sum / len(sample_rows) if sample_rows else 0.0,
+                }
+            )
             raw_predictions.append({"sample_id": sample_id, "qa": qas, "scores": sample_rows})
         finally:
             native_event_count += len(backend.validated_events())
@@ -471,6 +758,24 @@ def run_paired_eval(
         sample_count=len(selected),
         ingestion_completed=ingestion_completed,
         qa_batch_count=qa_batch_count,
+    )
+    total_source_sessions = sum(
+        int(row["source_session_count"]) for row in ingestion_coverage_rows
+    )
+    total_attempted_sessions = sum(
+        int(row["attempted_session_count"]) for row in ingestion_coverage_rows
+    )
+    total_completed_sessions = sum(
+        int(row["completed_session_count"]) for row in ingestion_coverage_rows
+    )
+    total_source_chars = sum(
+        int(row["source_char_count"]) for row in ingestion_coverage_rows
+    )
+    total_attempted_chars = sum(
+        int(row["attempted_char_count"]) for row in ingestion_coverage_rows
+    )
+    total_completed_chars = sum(
+        int(row["completed_char_count"]) for row in ingestion_coverage_rows
     )
     summary.update(
         {
@@ -486,10 +791,16 @@ def run_paired_eval(
             "evaluator": "locomo.task_eval.evaluation.eval_question_answering",
             "model": model,
             "batch_size": int(batch_size),
-            "max_context_chars": int(max_context_chars),
+            "max_session_chars": int(max_session_chars),
             "prompt_profile": prompt_profile,
             "condition": condition,
             "condition_fingerprint": canonical_fingerprint(condition),
+            "task_manifest_sha256": canonical_fingerprint(sample_manifest),
+            "model_identity": {
+                "model": model,
+                "model_revision": str(model_revision),
+                "model_server_build": model_server_build,
+            },
             "treatment": {"prompt_profile": prompt_profile},
             "model_usage": model_usage,
             "token_usage_complete": bool(model_usage["request_count"])
@@ -502,6 +813,42 @@ def run_paired_eval(
             "qa_question_successful_response_count": qa_question_successful_response_count,
             "qa_parsed_answer_count": qa_parsed_answer_count,
             "qa_failure_counts": dict(sorted(qa_failure_counts.items())),
+            "conversation_score_summaries": conversation_score_summaries,
+            "ingestion_coverage": {
+                "conversation_count": len(ingestion_coverage_rows),
+                "source_session_count": total_source_sessions,
+                "attempted_session_count": total_attempted_sessions,
+                "completed_session_count": total_completed_sessions,
+                "source_char_count": total_source_chars,
+                "attempted_char_count": total_attempted_chars,
+                "completed_char_count": total_completed_chars,
+                "session_attempt_coverage": (
+                    total_attempted_sessions / total_source_sessions
+                    if total_source_sessions
+                    else 1.0
+                ),
+                "session_completion_coverage": (
+                    total_completed_sessions / total_source_sessions
+                    if total_source_sessions
+                    else 1.0
+                ),
+                "character_attempt_coverage": (
+                    total_attempted_chars / total_source_chars
+                    if total_source_chars
+                    else 1.0
+                ),
+                "character_completion_coverage": (
+                    total_completed_chars / total_source_chars
+                    if total_source_chars
+                    else 1.0
+                ),
+                "source_stream_set_sha256": canonical_fingerprint(
+                    [row["source_stream_sha256"] for row in ingestion_coverage_rows]
+                ),
+                "attempted_stream_set_sha256": canonical_fingerprint(
+                    [row["attempted_stream_sha256"] for row in ingestion_coverage_rows]
+                ),
+            },
             "phase_rows": phase_rows,
         }
     )
@@ -523,19 +870,22 @@ def run_paired_repetitions(
 ) -> dict[str, Any]:
     """Run isolated repetitions and persist one sanitized aggregate."""
 
-    if repetitions < 1:
-        raise ValueError("repetitions must be positive")
+    if repetitions != len(FORMAL_PAIRED_SEEDS) or seed != FORMAL_PAIRED_SEEDS[0]:
+        raise ValueError(
+            "formal LoCoMo paired evaluation requires exactly five repetitions "
+            "with seeds 17, 1017, 2017, 3017, and 4017"
+        )
     root = Path(out_dir)
     summaries = []
-    repetition_seeds = [seed + repetition * 1000 for repetition in range(repetitions)]
-    for repetition in range(repetitions):
+    repetition_seeds = list(FORMAL_PAIRED_SEEDS)
+    for repetition, repetition_seed in enumerate(repetition_seeds):
         summaries.append(
             run_paired_eval(
                 data_file,
                 root / f"rep_{repetition + 1:02d}",
                 endpoint,
                 model,
-                seed=seed + repetition * 1000,
+                seed=repetition_seed,
                 prompt_profile=prompt_profile,
                 **kwargs,
             )
@@ -561,7 +911,13 @@ def main() -> int:
     parser.add_argument("--model-revision", default="unspecified")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--max-context-chars", type=int, default=24000)
+    parser.add_argument(
+        "--max-session-chars",
+        "--max-context-chars",
+        dest="max_session_chars",
+        type=int,
+        default=12000,
+    )
     parser.add_argument("--max-ingest-steps", type=int, default=12)
     parser.add_argument("--max-qa-steps", type=int, default=6)
     parser.add_argument("--max-tokens", type=int, default=512)

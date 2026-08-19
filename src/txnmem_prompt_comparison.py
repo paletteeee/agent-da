@@ -9,6 +9,8 @@ from pathlib import Path
 from statistics import mean, pstdev
 from typing import Any, Mapping, Sequence
 
+from txnmem_resampling import cluster_bootstrap_interval
+
 
 def _profile(summary: Mapping[str, Any], expected: str) -> None:
     if summary.get("prompt_profile") != expected:
@@ -56,6 +58,31 @@ def _numbers(value: Any, field: str) -> list[float]:
     return numbers
 
 
+def _locomo_conversation_scores(
+    summary: Mapping[str, Any],
+) -> dict[str, tuple[int, float]]:
+    rows = summary.get("conversation_score_summaries")
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("LoCoMo conversation score summaries are missing")
+    result: dict[str, tuple[int, float]] = {}
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise ValueError("invalid LoCoMo conversation score summary")
+        conversation_id = row.get("conversation_id_sha256")
+        count = row.get("question_evaluation_count")
+        score_sum = row.get("score_sum")
+        if not isinstance(conversation_id, str) or not conversation_id:
+            raise ValueError("invalid LoCoMo conversation identity")
+        if conversation_id in result:
+            raise ValueError("duplicate LoCoMo conversation identity")
+        if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+            raise ValueError("invalid LoCoMo conversation denominator")
+        if isinstance(score_sum, bool) or not isinstance(score_sum, (int, float)):
+            raise ValueError("invalid LoCoMo conversation score")
+        result[conversation_id] = (count, float(score_sum))
+    return result
+
+
 def compare_locomo_prompt_profiles(
     baseline: Mapping[str, Any],
     tuned: Mapping[str, Any],
@@ -67,10 +94,28 @@ def compare_locomo_prompt_profiles(
     condition_fingerprint = _condition_fingerprint_pair(baseline, tuned)
     if baseline.get("model") != tuned.get("model"):
         raise ValueError("LoCoMo model IDs differ")
+    baseline_identity = baseline.get("model_identity")
+    tuned_identity = tuned.get("model_identity")
+    if (
+        not isinstance(baseline_identity, Mapping)
+        or not isinstance(tuned_identity, Mapping)
+        or dict(baseline_identity) != dict(tuned_identity)
+    ):
+        raise ValueError("LoCoMo model identities differ or are missing")
+    baseline_manifest = baseline.get("task_manifest_sha256")
+    tuned_manifest = tuned.get("task_manifest_sha256")
+    if (
+        not isinstance(baseline_manifest, str)
+        or not baseline_manifest
+        or baseline_manifest != tuned_manifest
+    ):
+        raise ValueError("LoCoMo task manifests differ or are missing")
     baseline_seeds = list(baseline.get("repetition_seeds", []))
     tuned_seeds = list(tuned.get("repetition_seeds", []))
     if not baseline_seeds or baseline_seeds != tuned_seeds:
         raise ValueError("LoCoMo repetition seed schedules differ")
+    if baseline_seeds != [17, 1017, 2017, 3017, 4017]:
+        raise ValueError("LoCoMo comparison requires the formal five-seed schedule")
     baseline_scores = _numbers(baseline.get("mean_f1_by_repetition"), "baseline scores")
     tuned_scores = _numbers(tuned.get("mean_f1_by_repetition"), "tuned scores")
     if len(baseline_scores) != len(tuned_scores) or len(baseline_scores) != len(baseline_seeds):
@@ -88,11 +133,38 @@ def compare_locomo_prompt_profiles(
         - float(baseline.get("category_f1_mean", {}).get(category, 0.0))
         for category in categories
     }
+    baseline_conversations = _locomo_conversation_scores(baseline)
+    tuned_conversations = _locomo_conversation_scores(tuned)
+    if set(baseline_conversations) != set(tuned_conversations):
+        raise ValueError("LoCoMo conversation task IDs differ")
+    paired_cluster_rows: list[dict[str, Any]] = []
+    for conversation_id in sorted(baseline_conversations):
+        left_count, left_sum = baseline_conversations[conversation_id]
+        right_count, right_sum = tuned_conversations[conversation_id]
+        if left_count != right_count:
+            raise ValueError("LoCoMo conversation denominators differ")
+        delta = right_sum / right_count - left_sum / left_count
+        paired_cluster_rows.extend(
+            {
+                "conversation_id_sha256": conversation_id,
+                "score_delta": delta,
+            }
+            for _ in range(left_count)
+        )
+    paired_cluster_interval = cluster_bootstrap_interval(
+        paired_cluster_rows,
+        "conversation_id_sha256",
+        "score_delta",
+        repetitions=10000,
+        seed=17,
+    )
     token_comparison = _token_comparison(baseline, tuned)
     return {
         "comparison": "locomo_paired_prompt_profiles",
         "model": baseline.get("model"),
         "condition_fingerprint": condition_fingerprint,
+        "task_manifest_sha256": baseline_manifest,
+        "model_identity": dict(baseline_identity),
         "paired_repetition_count": len(deltas),
         "repetition_seeds": baseline_seeds,
         "question_count_per_repetition": baseline.get("question_count_per_repetition", []),
@@ -103,6 +175,8 @@ def compare_locomo_prompt_profiles(
         "mean_f1_delta": mean(deltas),
         "mean_f1_delta_std": pstdev(deltas),
         "category_f1_delta": category_delta,
+        "paired_conversation_count": len(baseline_conversations),
+        "paired_conversation_cluster_interval": paired_cluster_interval,
         **token_comparison,
         "claim_boundary": "descriptive paired repetitions; no population-level significance claim",
         "raw_predictions_committed": False,

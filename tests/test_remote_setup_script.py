@@ -8,6 +8,11 @@ class RemoteSetupScriptTests(unittest.TestCase):
         self.script = (
             Path(__file__).resolve().parents[1] / "scripts" / "setup_remote_deps.sh"
         ).read_text(encoding="utf-8")
+        self.locomo_script = (
+            Path(__file__).resolve().parents[1]
+            / "scripts"
+            / "bootstrap_locomo_agent.sh"
+        ).read_text(encoding="utf-8")
 
     def test_bundle_paths_are_not_left_as_unexpanded_shell_variables(self):
         self.assertNotRegex(self.script, r'Path\("\$BENCH_ROOT')
@@ -24,6 +29,25 @@ class RemoteSetupScriptTests(unittest.TestCase):
         self.assertIn('DATA_BUNDLE="$BENCH_ROOT/appworld-data/data-0.2.0.bundle"', self.script)
         self.assertIn('if [ ! -s "$DATA_BUNDLE" ]; then', self.script)
         self.assertIn('--max-time', self.script)
+
+    def test_locomo_evaluator_source_is_commit_and_hash_pinned(self):
+        self.assertIn("3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376", self.locomo_script)
+        self.assertIn(
+            "8e3be5d57ff2ff9ec5cd05939592f468c5f3f1fd95d13e431932bdf6bf0fd6fd",
+            self.locomo_script,
+        )
+        self.assertIn("codeload.github.com/snap-research/locomo", self.locomo_script)
+        self.assertNotIn("git clone --depth 1", self.locomo_script)
+
+    def test_locomo_evaluator_installs_only_lightweight_target_dependencies(self):
+        self.assertIn("--target", self.locomo_script)
+        self.assertIn("--no-deps", self.locomo_script)
+        self.assertIn("bert-score==0.3.13", self.locomo_script)
+        self.assertNotRegex(self.locomo_script, r"pip install[^\n]*torch")
+
+    def test_locomo_evaluator_setup_runs_official_f1_smoke(self):
+        self.assertIn("from task_eval.evaluation import eval_question_answering", self.locomo_script)
+        self.assertIn("assert float(result[0][0]) == 1.0", self.locomo_script)
 
 
 if __name__ == "__main__":

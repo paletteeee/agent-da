@@ -11,31 +11,74 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
         common = {
             "model": "qwen2.5-7b-instruct",
             "condition_fingerprint": "same-condition",
-            "repetition_count": 3,
-            "repetition_seeds": [17, 1017, 2017],
-            "question_count_per_repetition": [100, 100, 100],
-            "sample_count_per_repetition": [10, 10, 10],
+            "task_manifest_sha256": "same-task-manifest",
+            "model_identity": {"model": "qwen2.5-7b-instruct", "revision": "same"},
+            "repetition_count": 5,
+            "repetition_seeds": [17, 1017, 2017, 3017, 4017],
+            "question_count_per_repetition": [100, 100, 100, 100, 100],
+            "sample_count_per_repetition": [10, 10, 10, 10, 10],
             "category_f1_mean": {"1": 0.1, "2": 0.2},
             "model_usage": {"total_tokens": 1000},
             "token_usage_complete": True,
         }
         report = compare_locomo_prompt_profiles(
-            {**common, "prompt_profile": "baseline", "mean_f1_by_repetition": [0.1, 0.2, 0.3]},
+            {
+                **common,
+                "prompt_profile": "baseline",
+                "mean_f1_by_repetition": [0.1, 0.2, 0.3, 0.4, 0.5],
+                "conversation_score_summaries": [
+                    {
+                        "conversation_id_sha256": "a" * 64,
+                        "question_evaluation_count": 10,
+                        "score_sum": 2.0,
+                        "mean_f1": 0.2,
+                    },
+                    {
+                        "conversation_id_sha256": "b" * 64,
+                        "question_evaluation_count": 20,
+                        "score_sum": 8.0,
+                        "mean_f1": 0.4,
+                    },
+                ],
+            },
             {
                 **common,
                 "prompt_profile": "tuned",
-                "mean_f1_by_repetition": [0.2, 0.3, 0.5],
+                "mean_f1_by_repetition": [0.2, 0.3, 0.5, 0.5, 0.7],
                 "category_f1_mean": {"1": 0.15, "2": 0.25},
                 "model_usage": {"total_tokens": 1200},
+                "conversation_score_summaries": [
+                    {
+                        "conversation_id_sha256": "a" * 64,
+                        "question_evaluation_count": 10,
+                        "score_sum": 3.0,
+                        "mean_f1": 0.3,
+                    },
+                    {
+                        "conversation_id_sha256": "b" * 64,
+                        "question_evaluation_count": 20,
+                        "score_sum": 12.0,
+                        "mean_f1": 0.6,
+                    },
+                ],
             },
         )
 
-        self.assertEqual(report["paired_repetition_count"], 3)
-        self.assertEqual(report["paired_mean_f1_deltas"], [0.1, 0.1, 0.2])
-        self.assertAlmostEqual(report["mean_f1_delta"], 0.13333333333333333)
+        self.assertEqual(report["paired_repetition_count"], 5)
+        self.assertEqual(report["paired_mean_f1_deltas"], [0.1, 0.1, 0.2, 0.1, 0.2])
+        self.assertAlmostEqual(report["mean_f1_delta"], 0.14)
         self.assertAlmostEqual(report["category_f1_delta"]["1"], 0.05)
         self.assertEqual(report["token_delta"], 200)
         self.assertEqual(report["token_delta_status"], "exact")
+        self.assertEqual(report["paired_conversation_count"], 2)
+        self.assertEqual(
+            report["paired_conversation_cluster_interval"]["sampling_unit"],
+            "whole_group",
+        )
+        self.assertAlmostEqual(
+            report["paired_conversation_cluster_interval"]["estimate"],
+            1 / 6,
+        )
 
     def test_locomo_comparison_rejects_seed_mismatch(self):
         baseline = {
@@ -52,6 +95,39 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
             compare_locomo_prompt_profiles(
                 baseline,
                 {**baseline, "prompt_profile": "tuned", "repetition_seeds": [18]},
+            )
+
+    def test_locomo_comparison_rejects_non_formal_schedule_and_task_mismatch(self):
+        common = {
+            "model": "qwen",
+            "model_identity": {"model": "qwen", "revision": "same"},
+            "condition_fingerprint": "same-condition",
+            "task_manifest_sha256": "same-task-manifest",
+            "repetition_seeds": [17, 1017, 2017],
+            "mean_f1_by_repetition": [0.1, 0.1, 0.1],
+            "question_count_per_repetition": [1, 1, 1],
+            "sample_count_per_repetition": [1, 1, 1],
+        }
+        with self.assertRaisesRegex(ValueError, "five-seed"):
+            compare_locomo_prompt_profiles(
+                {**common, "prompt_profile": "baseline"},
+                {**common, "prompt_profile": "tuned"},
+            )
+        formal = {
+            **common,
+            "repetition_seeds": [17, 1017, 2017, 3017, 4017],
+            "mean_f1_by_repetition": [0.1] * 5,
+            "question_count_per_repetition": [1] * 5,
+            "sample_count_per_repetition": [1] * 5,
+        }
+        with self.assertRaisesRegex(ValueError, "task manifests differ"):
+            compare_locomo_prompt_profiles(
+                {**formal, "prompt_profile": "baseline"},
+                {
+                    **formal,
+                    "prompt_profile": "tuned",
+                    "task_manifest_sha256": "different",
+                },
             )
 
     def test_locomo_comparison_rejects_condition_fingerprint_mismatch(self):
