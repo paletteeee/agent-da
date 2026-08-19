@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import hashlib
 import random
 import math
+from collections.abc import Callable, Mapping, Sequence
 from statistics import mean, median, pstdev
 from typing import Any, Iterable
 
 from txnmem_schema import DEFAULT_CONFIG
-from txnmem_workloads import WORKLOADS, generate_instance
+from txnmem_resampling import cluster_bootstrap_interval
+from txnmem_trace_pipeline import leave_one_group_out
+from txnmem_workloads import WORKLOADS, generate_instance, generate_suite
 
 
 FEATURES = (
@@ -512,12 +516,203 @@ def calibrated_suite(
     seeds: Iterable[int],
     workloads: Iterable[str] = WORKLOADS,
     base_config: dict[str, Any] | None = None,
+    parameter_ranges: Mapping[str, Sequence[int]] | None = None,
 ) -> list[dict[str, Any]]:
     """Generate a synthetic training suite calibrated from training traces."""
 
     config = calibrate_config(trace_features, base_config=base_config)
-    return [
-        generate_instance(workload, seed, config=config)
-        for workload in workloads
-        for seed in seeds
-    ]
+    return generate_suite(
+        workloads,
+        seeds,
+        config=config,
+        parameter_ranges=parameter_ranges,
+    )
+
+
+def _opaque_group(group_key: str, value: str) -> str:
+    return hashlib.sha256(f"{group_key}\0{value}".encode("utf-8")).hexdigest()
+
+
+def cross_fitted_realism(
+    records: Iterable[dict[str, Any]],
+    group_key: str,
+    *,
+    parameter_ranges: Mapping[str, Sequence[int]],
+    seeds: Iterable[int],
+    workloads: Iterable[str] = WORKLOADS,
+    base_config: dict[str, Any] | None = None,
+    calibrator: Callable[..., Mapping[str, Any]] = calibrate_config,
+    evaluation_groups: Sequence[str] | None = None,
+    calibration_groups: Sequence[str] | None = None,
+    bootstrap_repetitions: int = 2000,
+    joint_test_permutations: int = 999,
+    joint_test_dimensions: int = 64,
+    cluster_bootstrap_repetitions: int = 2000,
+    seed: int = 17,
+) -> dict[str, Any]:
+    """Calibrate on all-but-one group and compare only with that held-out group."""
+
+    materialized = list(records)
+    seed_values = list(seeds)
+    workload_values = list(workloads)
+    if (
+        not seed_values
+        or any(isinstance(value, bool) or not isinstance(value, int) for value in seed_values)
+        or len(set(seed_values)) != len(seed_values)
+    ):
+        raise ValueError("seeds must be a non-empty sequence of unique integers")
+    if not workload_values or len(set(workload_values)) != len(workload_values):
+        raise ValueError("workloads must be non-empty and unique")
+    if (
+        isinstance(cluster_bootstrap_repetitions, bool)
+        or not isinstance(cluster_bootstrap_repetitions, int)
+        or cluster_bootstrap_repetitions < 1
+    ):
+        raise ValueError("cluster_bootstrap_repetitions must be positive")
+
+    all_source_folds = leave_one_group_out(materialized, group_key)
+    if (evaluation_groups is None) != (calibration_groups is None):
+        raise ValueError(
+            "evaluation_groups and calibration_groups must be supplied together"
+        )
+    if evaluation_groups is None:
+        source_folds = all_source_folds
+        split_method = "leave_one_group_out"
+    else:
+        evaluation_values = list(evaluation_groups)
+        calibration_values = list(calibration_groups or ())
+        for label, values in (
+            ("evaluation_groups", evaluation_values),
+            ("calibration_groups", calibration_values),
+        ):
+            if (
+                not values
+                or any(
+                    not isinstance(value, str)
+                    or not value.strip()
+                    or value != value.strip()
+                    for value in values
+                )
+                or len(set(values)) != len(values)
+            ):
+                raise ValueError(f"{label} must contain unique canonical strings")
+        evaluation_set = set(evaluation_values)
+        calibration_set = set(calibration_values)
+        if not evaluation_set.isdisjoint(calibration_set):
+            raise ValueError("evaluation and calibration groups must be disjoint")
+        available_groups = {
+            str(source_fold["holdout_groups"][0]) for source_fold in all_source_folds
+        }
+        if evaluation_set.union(calibration_set) != available_groups:
+            raise ValueError(
+                "evaluation and calibration groups must exactly partition source groups"
+            )
+        train_records = [
+            record for record in materialized if record[group_key] in calibration_set
+        ]
+        source_folds = [
+            {
+                "fold_index": fold_index,
+                "group_key": group_key,
+                "train_groups": sorted(calibration_set),
+                "holdout_groups": [holdout_group],
+                "train_records": train_records,
+                "holdout_records": [
+                    record
+                    for record in materialized
+                    if record[group_key] == holdout_group
+                ],
+            }
+            for fold_index, holdout_group in enumerate(evaluation_values)
+        ]
+        split_method = "disjoint_calibration_and_evaluation_groups"
+    folds: list[dict[str, Any]] = []
+    cluster_rows: list[dict[str, Any]] = []
+    for source_fold in source_folds:
+        train_records = source_fold["train_records"]
+        holdout_records = source_fold["holdout_records"]
+        calibrated = calibrator(train_records, base_config=base_config)
+        if not isinstance(calibrated, Mapping):
+            raise ValueError("calibrator must return a mapping")
+        calibration = dict(calibrated)
+        synthetic_instances = generate_suite(
+            workload_values,
+            seed_values,
+            config=calibration,
+            parameter_ranges=parameter_ranges,
+        )
+        synthetic_features = [
+            extract_trace_features(
+                instance.get("operations", []), instance.get("failure_schedule", [])
+            )
+            for instance in synthetic_instances
+        ]
+        comparison = compare_distributions(
+            synthetic_features,
+            holdout_records,
+            bootstrap_repetitions=bootstrap_repetitions,
+            joint_test_permutations=joint_test_permutations,
+            joint_test_dimensions=joint_test_dimensions,
+            seed=seed + int(source_fold["fold_index"]) * 1009,
+        )
+        holdout_group = source_fold["holdout_groups"][0]
+        holdout_hash = _opaque_group(group_key, holdout_group)
+        train_hashes = sorted(
+            _opaque_group(group_key, value) for value in source_fold["train_groups"]
+        )
+        discrepancy = float(comparison["mean_feature_relative_abs_diff"])
+        folds.append(
+            {
+                "fold_index": source_fold["fold_index"],
+                "holdout_group_sha256": holdout_hash,
+                "train_group_sha256": train_hashes,
+                "train_group_count": len(train_hashes),
+                "train_record_count": len(train_records),
+                "holdout_record_count": len(holdout_records),
+                "calibration": calibration,
+                "synthetic_instance_count": len(synthetic_instances),
+                "comparison": comparison,
+                "low_sample_warning": comparison["multivariate_test"].get(
+                    "small_sample_warning"
+                ),
+            }
+        )
+        cluster_rows.append(
+            {
+                "holdout_group_sha256": holdout_hash,
+                "mean_feature_relative_abs_diff": discrepancy,
+            }
+        )
+
+    cluster_aggregate = cluster_bootstrap_interval(
+        cluster_rows,
+        "holdout_group_sha256",
+        "mean_feature_relative_abs_diff",
+        repetitions=cluster_bootstrap_repetitions,
+        seed=seed,
+    )
+    return {
+        "method": "group_aware_cross_fitted_realism",
+        "split_method": split_method,
+        "group_key": group_key,
+        "group_count": len(folds),
+        "fold_count": len(folds),
+        "calibration_invocation_count": len(folds),
+        "workloads": workload_values,
+        "seeds": seed_values,
+        "parameter_ranges": {
+            str(name): list(bounds) for name, bounds in sorted(parameter_ranges.items())
+        },
+        "folds": folds,
+        "cluster_aggregate": cluster_aggregate,
+        "low_sample_warning": (
+            "one or more held-out groups contain fewer than 20 trace instances; "
+            "fold-level joint tests are low-power and unstable"
+            if any(len(fold["holdout_records"]) < 20 for fold in source_folds)
+            else None
+        ),
+        "claim_boundary": (
+            "a non-significant fold-level joint test is not evidence of distributional equivalence"
+        ),
+        "raw_group_ids_retained": False,
+    }

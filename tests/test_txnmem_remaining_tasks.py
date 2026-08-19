@@ -1,3 +1,5 @@
+from contextlib import redirect_stdout
+import io
 import json
 import sys
 import unittest
@@ -19,10 +21,17 @@ from txnmem_distributed import run_process_action_sequences  # noqa: E402
 from txnmem_event_contract import EventContractError, validate_event, validate_events  # noqa: E402
 from examples.native_memory_agent import run_native_example  # noqa: E402
 from txnmem_interleavings import enumerate_interleavings, micro_witness_report  # noqa: E402
+from txnmem_experiment import main as experiment_main  # noqa: E402
 from txnmem_performance import benchmark_replay  # noqa: E402
 from txnmem_repair import incremental_repair, repair_failure_matrix  # noqa: E402
 from txnmem_realism import calibrate_config, split_holdout, trace_evidence_summary  # noqa: E402
-from txnmem_trace_pipeline import load_trace_records, build_trace_instances, trace_inventory  # noqa: E402
+from txnmem_trace_pipeline import (  # noqa: E402
+    build_grouped_trace_instances,
+    build_trace_instances,
+    leave_one_group_out,
+    load_trace_records,
+    trace_inventory,
+)
 from txnmem_trace import trace_to_instance  # noqa: E402
 from txnmem_simulator import run_instance  # noqa: E402
 from txnmem_workloads import generate_instance  # noqa: E402
@@ -265,6 +274,110 @@ class TxnMemRemainingTaskTests(unittest.TestCase):
         tau_train, tau_holdout = split_holdout(tau_trials, holdout_fraction=0.25, seed=2)
         self.assertEqual(len(tau_train), 3)
         self.assertEqual(len(tau_holdout), 1)
+
+    def test_leave_one_group_out_rejects_missing_or_single_group(self):
+        with self.assertRaisesRegex(ValueError, "group key"):
+            leave_one_group_out([{"value": 1}], "family_id")
+        with self.assertRaisesRegex(ValueError, "at least two"):
+            leave_one_group_out([{"family_id": "only"}], "family_id")
+
+    def test_trace_replay_emits_group_cross_fitted_realism_without_raw_group_ids(self):
+        records = [
+            {
+                "task_id": f"task-{index}",
+                "family_id": f"family-{index}",
+                "method": "get",
+                "url": f"/app/resource/{index}",
+            }
+            for index in range(3)
+        ]
+        config = {
+            "seed": 17,
+            "synthetic": {
+                "workloads": ["atomic_multi_write"],
+                "seeds": [0],
+                "parameter_ranges": {"txn_size": [1, 2]},
+            },
+            "statistics": {
+                "bootstrap_repetitions": 10,
+                "joint_test_permutations": 9,
+                "joint_test_dimensions": 8,
+                "cluster_bootstrap_repetitions": 20,
+            },
+        }
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events = root / "events.jsonl"
+            realism_config = root / "realism.json"
+            out_dir = root / "out"
+            events.write_text(
+                "".join(json.dumps(record) + "\n" for record in records),
+                encoding="utf-8",
+            )
+            realism_config.write_text(json.dumps(config), encoding="utf-8")
+
+            with redirect_stdout(io.StringIO()):
+                status = experiment_main(
+                    [
+                        "trace-replay",
+                        "--events",
+                        str(events),
+                        "--adapter",
+                        "appworld",
+                        "--source",
+                        "fixture",
+                        "--out-dir",
+                        str(out_dir),
+                        "--group-key",
+                        "family_id",
+                        "--realism-config",
+                        str(realism_config),
+                    ]
+                )
+            report_text = (out_dir / "results" / "trace_realism.json").read_text()
+            report = json.loads(report_text)
+
+        self.assertEqual(status, 0)
+        self.assertEqual(report["cross_fitted"]["group_count"], 3)
+        self.assertEqual(report["cross_fitted"]["calibration_invocation_count"], 3)
+        self.assertNotIn("family-0", report_text)
+        self.assertFalse(report["cross_fitted"]["raw_group_ids_retained"])
+        self.assertRegex(report["trace_source_sha256"], r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            set(report["cross_fitted"]["source_group_instance_counts_by_sha256"]),
+            {fold["holdout_group_sha256"] for fold in report["cross_fitted"]["folds"]},
+        )
+
+    def test_locomo_grouped_projection_uses_sessions_as_rows_and_conversation_as_group(self):
+        records = [
+            {
+                "sample_id": f"conversation-{conversation}",
+                "conversation": {
+                    "session_1_date_time": "2024-01-01",
+                    "session_2_date_time": "2024-01-02",
+                },
+                "session_summary": {
+                    "session_1_summary": f"summary {conversation} one",
+                    "session_2_summary": f"summary {conversation} two",
+                },
+            }
+            for conversation in range(2)
+        ]
+
+        grouped = build_grouped_trace_instances(
+            records,
+            "locomo",
+            group_key="conversation_id",
+            source="fixture",
+            seed=17,
+        )
+
+        self.assertEqual(len(grouped), 4)
+        self.assertEqual(
+            [group for group, _instance in grouped],
+            ["conversation-0", "conversation-0", "conversation-1", "conversation-1"],
+        )
+        self.assertEqual(len({instance["instance_id"] for _group, instance in grouped}), 4)
 
     def test_exhaustive_micro_witness_enumerates_all_linearizations(self):
         left = [{"op_id": "a1", "type": "read"}, {"op_id": "a2", "type": "write"}]

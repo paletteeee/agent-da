@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -102,6 +103,124 @@ def build_trace_instances(
     return instances
 
 
+def _group_value(record: dict[str, Any], group_key: str, adapter: str) -> str:
+    value = record.get(group_key)
+    if value is None and adapter.lower() == "locomo" and group_key == "conversation_id":
+        value = record.get("sample_id")
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"record has no valid group key {group_key!r}")
+    if value != value.strip():
+        raise ValueError(f"record has a noncanonical group key {group_key!r}")
+    return value
+
+
+def _session_order(value: str) -> tuple[int, str]:
+    match = re.fullmatch(r"session_([0-9]+)", value)
+    return (int(match.group(1)), value) if match else (10**9, value)
+
+
+def _locomo_session_projection(
+    record: dict[str, Any], group_key: str, group: str
+) -> list[dict[str, Any]]:
+    conversation = record.get("conversation")
+    if not isinstance(conversation, dict):
+        return [{**record, group_key: group}]
+    summaries = record.get("session_summary")
+    projected: list[dict[str, Any]] = []
+    if isinstance(summaries, dict):
+        summary_rows = []
+        for key, value in summaries.items():
+            if not str(key).endswith("_summary") or not value:
+                continue
+            session_id = str(key)[: -len("_summary")]
+            summary_rows.append((session_id, value))
+        for session_id, value in sorted(summary_rows, key=lambda item: _session_order(item[0])):
+            projected.append(
+                {
+                    group_key: group,
+                    "episode_id": f"{group}:{session_id}",
+                    "id": f"{group}:{session_id}:summary",
+                    "kind": "memory_write",
+                    "memory_id": f"locomo:{group}:{session_id}",
+                    "value": value,
+                    "sample_id": group,
+                    "session_id": session_id,
+                    "timestamp": conversation.get(f"{session_id}_date_time"),
+                    "agent_id": "agent_1",
+                    "projection": "locomo_session_summary",
+                }
+            )
+    if projected:
+        return projected
+
+    transcript_rows = []
+    for key, turns in conversation.items():
+        session_id = str(key)
+        if not session_id.startswith("session_") or session_id.endswith("_date_time"):
+            continue
+        if not isinstance(turns, list):
+            continue
+        value = " ".join(
+            str(turn.get("text", "")) for turn in turns if isinstance(turn, dict)
+        ).strip()
+        if value:
+            transcript_rows.append((session_id, value))
+    for session_id, value in sorted(transcript_rows, key=lambda item: _session_order(item[0])):
+        projected.append(
+            {
+                group_key: group,
+                "episode_id": f"{group}:{session_id}",
+                "id": f"{group}:{session_id}:transcript",
+                "kind": "memory_write",
+                "memory_id": f"locomo:{group}:{session_id}",
+                "value": value,
+                "sample_id": group,
+                "session_id": session_id,
+                "timestamp": conversation.get(f"{session_id}_date_time"),
+                "agent_id": "agent_1",
+                "projection": "locomo_session_transcript",
+            }
+        )
+    return projected
+
+
+def build_grouped_trace_instances(
+    records: Iterable[dict[str, Any]],
+    adapter: str,
+    *,
+    group_key: str,
+    source: str,
+    seed: int = 0,
+) -> list[tuple[str, dict[str, Any]]]:
+    """Build session/task instances while retaining an external grouping unit."""
+
+    if not isinstance(group_key, str) or not group_key.strip():
+        raise ValueError("group_key must be a non-empty string")
+    prepared: list[dict[str, Any]] = []
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            raise ValueError(f"record {index} must be a mapping")
+        group = _group_value(record, group_key, adapter)
+        if adapter.lower() == "locomo":
+            prepared.extend(_locomo_session_projection(record, group_key, group))
+        else:
+            prepared.append({**record, group_key: group})
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for record in prepared:
+        grouped.setdefault(str(record[group_key]), []).append(record)
+    result: list[tuple[str, dict[str, Any]]] = []
+    for group_index, group in enumerate(sorted(grouped)):
+        instances = build_trace_instances(
+            grouped[group],
+            adapter,
+            source=source,
+            seed=seed + group_index * 100000,
+        )
+        result.extend((group, instance) for instance in instances)
+    return result
+
+
 def _add_replay_transaction_envelope(instance: dict[str, Any]) -> None:
     """Make a transaction-free external episode executable by the replay engine.
 
@@ -162,6 +281,52 @@ def split_holdout(
     train = [record for key in sorted(groups) if key not in holdout_keys for record in groups[key]]
     holdout = [record for key in sorted(groups) if key in holdout_keys for record in groups[key]]
     return train, holdout
+
+
+def leave_one_group_out(
+    records: Iterable[dict[str, Any]], group_key: str
+) -> list[dict[str, Any]]:
+    """Return deterministic folds that keep every named group intact."""
+
+    if not isinstance(group_key, str) or not group_key.strip():
+        raise ValueError("group_key must be a non-empty string")
+    materialized = list(records)
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for index, record in enumerate(materialized):
+        if not isinstance(record, dict):
+            raise ValueError(f"record {index} must be a mapping")
+        value = record.get(group_key)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"record {index} has no valid group key {group_key!r}")
+        if value != value.strip():
+            raise ValueError(f"record {index} has a noncanonical group key value")
+        groups.setdefault(value, []).append(record)
+    if len(groups) < 2:
+        raise ValueError("leave-one-group-out requires at least two groups")
+
+    ordered_groups = sorted(groups)
+    folds: list[dict[str, Any]] = []
+    for fold_index, holdout_group in enumerate(ordered_groups):
+        train_groups = [group for group in ordered_groups if group != holdout_group]
+        folds.append(
+            {
+                "fold_index": fold_index,
+                "group_key": group_key,
+                "train_groups": train_groups,
+                "holdout_groups": [holdout_group],
+                "train_records": [
+                    record
+                    for record in materialized
+                    if record[group_key] != holdout_group
+                ],
+                "holdout_records": [
+                    record
+                    for record in materialized
+                    if record[group_key] == holdout_group
+                ],
+            }
+        )
+    return folds
 
 
 def replay_trace_instances(

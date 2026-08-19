@@ -1,0 +1,3234 @@
+{
+  "bootstrap_repetitions": 2000,
+  "bootstrap_seed": 17,
+  "calibration": {
+    "agent_count": 1,
+    "branch_factor": 1,
+    "concurrency": 1,
+    "policy_churn": 0,
+    "provenance_depth": 1,
+    "source_instance_count": 8,
+    "txn_size": 27
+  },
+  "comparison_method": "feature-wise bootstrap intervals plus a joint RBF-RFF MMD permutation test",
+  "comparison_split": "holdout_only",
+  "cross_fitted": {
+    "calibration_invocation_count": 10,
+    "claim_boundary": "a non-significant fold-level joint test is not evidence of distributional equivalence",
+    "cluster_aggregate": {
+      "bootstrap_repetitions": 10000,
+      "confidence": 0.95,
+      "estimate": 0.3947723091845608,
+      "group_count": 10,
+      "lower": 0.3947723091845608,
+      "method": "percentile_cluster_bootstrap",
+      "row_count": 10,
+      "sampling_unit": "whole_group",
+      "seed": 17,
+      "upper": 0.3947723091845608
+    },
+    "fold_count": 10,
+    "folds": [
+      {
+        "calibration": {
+          "agent_count": 1,
+          "branch_factor": 1,
+          "concurrency": 1,
+          "policy_churn": 0,
+          "provenance_depth": 1,
+          "txn_size": 1
+        },
+        "comparison": {
+          "bootstrap_repetitions": 2000,
+          "bootstrap_seed": 17,
+          "comparison_method": "feature-wise bootstrap intervals plus a joint RBF-RFF MMD permutation test",
+          "features": {
+            "agent_count": {
+              "mean_abs_diff": 0.0,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count_left": 80,
+                "sample_count_right": 19,
+                "seed": 5064,
+                "upper": 0.0
+              },
+              "relative_mean_abs_diff": 0.0,
+              "synthetic_mean": 1.0,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 80,
+                "seed": 5062,
+                "upper": 1.0
+              },
+              "synthetic_std": 0.0,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 19,
+                "seed": 5063,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            },
+            "branch_factor": {
+              "mean_abs_diff": 0.6375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.3875,
+                "sample_count_left": 80,
+                "sample_count_right": 19,
+                "seed": 4055,
+                "upper": 0.9375
+              },
+              "relative_mean_abs_diff": 0.6375,
+              "synthetic_mean": 0.6375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.375,
+                "sample_count": 80,
+                "seed": 4053,
+                "upper": 0.925
+              },
+              "synthetic_std": 1.2373737309317667,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 19,
+                "seed": 4054,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "operation_count": {
+              "mean_abs_diff": 4.55,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 4.55,
+                "lower": 3.625,
+                "sample_count_left": 80,
+                "sample_count_right": 19,
+                "seed": 19,
+                "upper": 5.612500000000001
+              },
+              "relative_mean_abs_diff": 0.6026490066225165,
+              "synthetic_mean": 7.55,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 7.55,
+                "lower": 6.65,
+                "sample_count": 80,
+                "seed": 17,
+                "upper": 8.5875
+              },
+              "synthetic_std": 4.593201497866167,
+              "trace_mean": 3.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 3.0,
+                "lower": 3.0,
+                "sample_count": 19,
+                "seed": 18,
+                "upper": 3.0
+              },
+              "trace_std": 0.0
+            },
+            "policy_change_rate": {
+              "mean_abs_diff": 0.07583333333333334,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.042708333333333334,
+                "sample_count_left": 80,
+                "sample_count_right": 19,
+                "seed": 2037,
+                "upper": 0.11388888888888889
+              },
+              "relative_mean_abs_diff": 0.07583333333333334,
+              "synthetic_mean": 0.07583333333333334,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.04361111111111111,
+                "sample_count": 80,
+                "seed": 2035,
+                "upper": 0.11381944444444445
+              },
+              "synthetic_std": 0.1633774978083685,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 19,
+                "seed": 2036,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "provenance_depth": {
+              "mean_abs_diff": 0.5375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count_left": 80,
+                "sample_count_right": 19,
+                "seed": 3046,
+                "upper": 0.775
+              },
+              "relative_mean_abs_diff": 0.5375,
+              "synthetic_mean": 0.5375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.325,
+                "sample_count": 80,
+                "seed": 3044,
+                "upper": 0.7875
+              },
+              "synthetic_std": 1.0948030644823752,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 19,
+                "seed": 3045,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "transaction_size": {
+              "mean_abs_diff": 1.0625,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0625,
+                "lower": 0.7124999999999999,
+                "sample_count_left": 80,
+                "sample_count_right": 19,
+                "seed": 1028,
+                "upper": 1.4625
+              },
+              "relative_mean_abs_diff": 0.5151515151515151,
+              "synthetic_mean": 2.0625,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 2.0625,
+                "lower": 1.7125,
+                "sample_count": 80,
+                "seed": 1026,
+                "upper": 2.4625
+              },
+              "synthetic_std": 1.7488835724541527,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 19,
+                "seed": 1027,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            }
+          },
+          "mean_feature_relative_abs_diff": 0.3947723091845608,
+          "multivariate_test": {
+            "bandwidth": 2.121242033508423,
+            "claim_boundary": "a non-significant result is not evidence of distributional equivalence",
+            "feature_names": [
+              "operation_count",
+              "transaction_size",
+              "policy_change_rate",
+              "provenance_depth",
+              "branch_factor",
+              "agent_count"
+            ],
+            "method": "standardized_rbf_random_fourier_mmd_permutation",
+            "null_hypothesis": "synthetic and trace-grounded joint feature distributions are equal",
+            "p_value": 0.001,
+            "permutations": 999,
+            "rff_dimensions": 64,
+            "seed": 10024,
+            "small_sample_warning": "joint-test inference is low-power and unstable when either sample has fewer than 20 instances",
+            "statistic": 0.24764553117786675,
+            "status": "available",
+            "synthetic_count": 80,
+            "trace_count": 19
+          },
+          "synthetic_count": 80,
+          "trace_count": 19
+        },
+        "fold_index": 0,
+        "holdout_group_sha256": "6e4ee33fb28a3f42899a18f32b686156d00d6b452150f414d55c642e03ee9eec",
+        "holdout_record_count": 19,
+        "low_sample_warning": "joint-test inference is low-power and unstable when either sample has fewer than 20 instances",
+        "synthetic_instance_count": 80,
+        "train_group_count": 9,
+        "train_group_sha256": [
+          "09b0285d6d5729c48800bb783965e0ee48b712f9d712fe5009bb9c7dc529e94e",
+          "26270b2fc52ffe2508af31a2b649d38593a6990a766540af24adf1f1913c53cc",
+          "31bd8a4f246e67a06a789f518e9bfe77cf7b421193621b76cd6fa5a9d3ccb9a7",
+          "4e87b69c0186474076a4405aa3865639993c0b699e332815b66b7ed1d0e1d93d",
+          "b0357fff9a649a3c361f6f5c77416e44c9e51d44df0446e3cfe884ed5897738e",
+          "b5b0d716547192ed056fe2f4a602663a897b480a4f5c2513f39abc555e70866c",
+          "e3a6883cd9c837d0660fd31a80c3797adfb07c6edb8cbe55ceefaffc9754f0a6",
+          "f3c8f37b1e515ac464402cf4d88f61878cf36e871e60d148d990b6078f62dadb",
+          "f4c47acce5d2b00529f6e681bc0cd288a584bcb8ff955461e62547a1426d559b"
+        ],
+        "train_record_count": 253
+      },
+      {
+        "calibration": {
+          "agent_count": 1,
+          "branch_factor": 1,
+          "concurrency": 1,
+          "policy_churn": 0,
+          "provenance_depth": 1,
+          "txn_size": 1
+        },
+        "comparison": {
+          "bootstrap_repetitions": 2000,
+          "bootstrap_seed": 1026,
+          "comparison_method": "feature-wise bootstrap intervals plus a joint RBF-RFF MMD permutation test",
+          "features": {
+            "agent_count": {
+              "mean_abs_diff": 0.0,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count_left": 80,
+                "sample_count_right": 19,
+                "seed": 6073,
+                "upper": 0.0
+              },
+              "relative_mean_abs_diff": 0.0,
+              "synthetic_mean": 1.0,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 80,
+                "seed": 6071,
+                "upper": 1.0
+              },
+              "synthetic_std": 0.0,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 19,
+                "seed": 6072,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            },
+            "branch_factor": {
+              "mean_abs_diff": 0.6375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.375,
+                "sample_count_left": 80,
+                "sample_count_right": 19,
+                "seed": 5064,
+                "upper": 0.925
+              },
+              "relative_mean_abs_diff": 0.6375,
+              "synthetic_mean": 0.6375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.3875,
+                "sample_count": 80,
+                "seed": 5062,
+                "upper": 0.9125
+              },
+              "synthetic_std": 1.2373737309317667,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 19,
+                "seed": 5063,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "operation_count": {
+              "mean_abs_diff": 4.55,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 4.55,
+                "lower": 3.5875000000000004,
+                "sample_count_left": 80,
+                "sample_count_right": 19,
+                "seed": 1028,
+                "upper": 5.625
+              },
+              "relative_mean_abs_diff": 0.6026490066225165,
+              "synthetic_mean": 7.55,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 7.55,
+                "lower": 6.575,
+                "sample_count": 80,
+                "seed": 1026,
+                "upper": 8.65
+              },
+              "synthetic_std": 4.593201497866167,
+              "trace_mean": 3.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 3.0,
+                "lower": 3.0,
+                "sample_count": 19,
+                "seed": 1027,
+                "upper": 3.0
+              },
+              "trace_std": 0.0
+            },
+            "policy_change_rate": {
+              "mean_abs_diff": 0.07583333333333334,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.042430555555555555,
+                "sample_count_left": 80,
+                "sample_count_right": 19,
+                "seed": 3046,
+                "upper": 0.11597222222222223
+              },
+              "relative_mean_abs_diff": 0.07583333333333334,
+              "synthetic_mean": 0.07583333333333334,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.042361111111111106,
+                "sample_count": 80,
+                "seed": 3044,
+                "upper": 0.11472222222222223
+              },
+              "synthetic_std": 0.1633774978083685,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 19,
+                "seed": 3045,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "provenance_depth": {
+              "mean_abs_diff": 0.5375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count_left": 80,
+                "sample_count_right": 19,
+                "seed": 4055,
+                "upper": 0.8125
+              },
+              "relative_mean_abs_diff": 0.5375,
+              "synthetic_mean": 0.5375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count": 80,
+                "seed": 4053,
+                "upper": 0.7875
+              },
+              "synthetic_std": 1.0948030644823752,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 19,
+                "seed": 4054,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "transaction_size": {
+              "mean_abs_diff": 1.0625,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0625,
+                "lower": 0.7,
+                "sample_count_left": 80,
+                "sample_count_right": 19,
+                "seed": 2037,
+                "upper": 1.475
+              },
+              "relative_mean_abs_diff": 0.5151515151515151,
+              "synthetic_mean": 2.0625,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 2.0625,
+                "lower": 1.7125,
+                "sample_count": 80,
+                "seed": 2035,
+                "upper": 2.45
+              },
+              "synthetic_std": 1.7488835724541527,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 19,
+                "seed": 2036,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            }
+          },
+          "mean_feature_relative_abs_diff": 0.3947723091845608,
+          "multivariate_test": {
+            "bandwidth": 2.153414830323484,
+            "claim_boundary": "a non-significant result is not evidence of distributional equivalence",
+            "feature_names": [
+              "operation_count",
+              "transaction_size",
+              "policy_change_rate",
+              "provenance_depth",
+              "branch_factor",
+              "agent_count"
+            ],
+            "method": "standardized_rbf_random_fourier_mmd_permutation",
+            "null_hypothesis": "synthetic and trace-grounded joint feature distributions are equal",
+            "p_value": 0.001,
+            "permutations": 999,
+            "rff_dimensions": 64,
+            "seed": 11033,
+            "small_sample_warning": "joint-test inference is low-power and unstable when either sample has fewer than 20 instances",
+            "statistic": 0.1841668484084172,
+            "status": "available",
+            "synthetic_count": 80,
+            "trace_count": 19
+          },
+          "synthetic_count": 80,
+          "trace_count": 19
+        },
+        "fold_index": 1,
+        "holdout_group_sha256": "b5b0d716547192ed056fe2f4a602663a897b480a4f5c2513f39abc555e70866c",
+        "holdout_record_count": 19,
+        "low_sample_warning": "joint-test inference is low-power and unstable when either sample has fewer than 20 instances",
+        "synthetic_instance_count": 80,
+        "train_group_count": 9,
+        "train_group_sha256": [
+          "09b0285d6d5729c48800bb783965e0ee48b712f9d712fe5009bb9c7dc529e94e",
+          "26270b2fc52ffe2508af31a2b649d38593a6990a766540af24adf1f1913c53cc",
+          "31bd8a4f246e67a06a789f518e9bfe77cf7b421193621b76cd6fa5a9d3ccb9a7",
+          "4e87b69c0186474076a4405aa3865639993c0b699e332815b66b7ed1d0e1d93d",
+          "6e4ee33fb28a3f42899a18f32b686156d00d6b452150f414d55c642e03ee9eec",
+          "b0357fff9a649a3c361f6f5c77416e44c9e51d44df0446e3cfe884ed5897738e",
+          "e3a6883cd9c837d0660fd31a80c3797adfb07c6edb8cbe55ceefaffc9754f0a6",
+          "f3c8f37b1e515ac464402cf4d88f61878cf36e871e60d148d990b6078f62dadb",
+          "f4c47acce5d2b00529f6e681bc0cd288a584bcb8ff955461e62547a1426d559b"
+        ],
+        "train_record_count": 253
+      },
+      {
+        "calibration": {
+          "agent_count": 1,
+          "branch_factor": 1,
+          "concurrency": 1,
+          "policy_churn": 0,
+          "provenance_depth": 1,
+          "txn_size": 1
+        },
+        "comparison": {
+          "bootstrap_repetitions": 2000,
+          "bootstrap_seed": 2035,
+          "comparison_method": "feature-wise bootstrap intervals plus a joint RBF-RFF MMD permutation test",
+          "features": {
+            "agent_count": {
+              "mean_abs_diff": 0.0,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count_left": 80,
+                "sample_count_right": 32,
+                "seed": 7082,
+                "upper": 0.0
+              },
+              "relative_mean_abs_diff": 0.0,
+              "synthetic_mean": 1.0,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 80,
+                "seed": 7080,
+                "upper": 1.0
+              },
+              "synthetic_std": 0.0,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 32,
+                "seed": 7081,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            },
+            "branch_factor": {
+              "mean_abs_diff": 0.6375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.375,
+                "sample_count_left": 80,
+                "sample_count_right": 32,
+                "seed": 6073,
+                "upper": 0.9
+              },
+              "relative_mean_abs_diff": 0.6375,
+              "synthetic_mean": 0.6375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.375,
+                "sample_count": 80,
+                "seed": 6071,
+                "upper": 0.9375
+              },
+              "synthetic_std": 1.2373737309317667,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 32,
+                "seed": 6072,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "operation_count": {
+              "mean_abs_diff": 4.55,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 4.55,
+                "lower": 3.625,
+                "sample_count_left": 80,
+                "sample_count_right": 32,
+                "seed": 2037,
+                "upper": 5.625
+              },
+              "relative_mean_abs_diff": 0.6026490066225165,
+              "synthetic_mean": 7.55,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 7.55,
+                "lower": 6.6,
+                "sample_count": 80,
+                "seed": 2035,
+                "upper": 8.55
+              },
+              "synthetic_std": 4.593201497866167,
+              "trace_mean": 3.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 3.0,
+                "lower": 3.0,
+                "sample_count": 32,
+                "seed": 2036,
+                "upper": 3.0
+              },
+              "trace_std": 0.0
+            },
+            "policy_change_rate": {
+              "mean_abs_diff": 0.07583333333333334,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.04479166666666667,
+                "sample_count_left": 80,
+                "sample_count_right": 32,
+                "seed": 4055,
+                "upper": 0.11534722222222221
+              },
+              "relative_mean_abs_diff": 0.07583333333333334,
+              "synthetic_mean": 0.07583333333333334,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.043125,
+                "sample_count": 80,
+                "seed": 4053,
+                "upper": 0.11465277777777777
+              },
+              "synthetic_std": 0.1633774978083685,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 32,
+                "seed": 4054,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "provenance_depth": {
+              "mean_abs_diff": 0.5375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.325,
+                "sample_count_left": 80,
+                "sample_count_right": 32,
+                "seed": 5064,
+                "upper": 0.775
+              },
+              "relative_mean_abs_diff": 0.5375,
+              "synthetic_mean": 0.5375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count": 80,
+                "seed": 5062,
+                "upper": 0.7875
+              },
+              "synthetic_std": 1.0948030644823752,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 32,
+                "seed": 5063,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "transaction_size": {
+              "mean_abs_diff": 1.0625,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0625,
+                "lower": 0.7124999999999999,
+                "sample_count_left": 80,
+                "sample_count_right": 32,
+                "seed": 3046,
+                "upper": 1.4625
+              },
+              "relative_mean_abs_diff": 0.5151515151515151,
+              "synthetic_mean": 2.0625,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 2.0625,
+                "lower": 1.725,
+                "sample_count": 80,
+                "seed": 3044,
+                "upper": 2.4625
+              },
+              "synthetic_std": 1.7488835724541527,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 32,
+                "seed": 3045,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            }
+          },
+          "mean_feature_relative_abs_diff": 0.3947723091845608,
+          "multivariate_test": {
+            "bandwidth": 2.147584266496249,
+            "claim_boundary": "a non-significant result is not evidence of distributional equivalence",
+            "feature_names": [
+              "operation_count",
+              "transaction_size",
+              "policy_change_rate",
+              "provenance_depth",
+              "branch_factor",
+              "agent_count"
+            ],
+            "method": "standardized_rbf_random_fourier_mmd_permutation",
+            "null_hypothesis": "synthetic and trace-grounded joint feature distributions are equal",
+            "p_value": 0.001,
+            "permutations": 999,
+            "rff_dimensions": 64,
+            "seed": 12042,
+            "small_sample_warning": null,
+            "statistic": 0.2585548983090105,
+            "status": "available",
+            "synthetic_count": 80,
+            "trace_count": 32
+          },
+          "synthetic_count": 80,
+          "trace_count": 32
+        },
+        "fold_index": 2,
+        "holdout_group_sha256": "4e87b69c0186474076a4405aa3865639993c0b699e332815b66b7ed1d0e1d93d",
+        "holdout_record_count": 32,
+        "low_sample_warning": null,
+        "synthetic_instance_count": 80,
+        "train_group_count": 9,
+        "train_group_sha256": [
+          "09b0285d6d5729c48800bb783965e0ee48b712f9d712fe5009bb9c7dc529e94e",
+          "26270b2fc52ffe2508af31a2b649d38593a6990a766540af24adf1f1913c53cc",
+          "31bd8a4f246e67a06a789f518e9bfe77cf7b421193621b76cd6fa5a9d3ccb9a7",
+          "6e4ee33fb28a3f42899a18f32b686156d00d6b452150f414d55c642e03ee9eec",
+          "b0357fff9a649a3c361f6f5c77416e44c9e51d44df0446e3cfe884ed5897738e",
+          "b5b0d716547192ed056fe2f4a602663a897b480a4f5c2513f39abc555e70866c",
+          "e3a6883cd9c837d0660fd31a80c3797adfb07c6edb8cbe55ceefaffc9754f0a6",
+          "f3c8f37b1e515ac464402cf4d88f61878cf36e871e60d148d990b6078f62dadb",
+          "f4c47acce5d2b00529f6e681bc0cd288a584bcb8ff955461e62547a1426d559b"
+        ],
+        "train_record_count": 240
+      },
+      {
+        "calibration": {
+          "agent_count": 1,
+          "branch_factor": 1,
+          "concurrency": 1,
+          "policy_churn": 0,
+          "provenance_depth": 1,
+          "txn_size": 1
+        },
+        "comparison": {
+          "bootstrap_repetitions": 2000,
+          "bootstrap_seed": 3044,
+          "comparison_method": "feature-wise bootstrap intervals plus a joint RBF-RFF MMD permutation test",
+          "features": {
+            "agent_count": {
+              "mean_abs_diff": 0.0,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count_left": 80,
+                "sample_count_right": 29,
+                "seed": 8091,
+                "upper": 0.0
+              },
+              "relative_mean_abs_diff": 0.0,
+              "synthetic_mean": 1.0,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 80,
+                "seed": 8089,
+                "upper": 1.0
+              },
+              "synthetic_std": 0.0,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 29,
+                "seed": 8090,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            },
+            "branch_factor": {
+              "mean_abs_diff": 0.6375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.3875,
+                "sample_count_left": 80,
+                "sample_count_right": 29,
+                "seed": 7082,
+                "upper": 0.925
+              },
+              "relative_mean_abs_diff": 0.6375,
+              "synthetic_mean": 0.6375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.3875,
+                "sample_count": 80,
+                "seed": 7080,
+                "upper": 0.9125
+              },
+              "synthetic_std": 1.2373737309317667,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 29,
+                "seed": 7081,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "operation_count": {
+              "mean_abs_diff": 4.55,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 4.55,
+                "lower": 3.5999999999999996,
+                "sample_count_left": 80,
+                "sample_count_right": 29,
+                "seed": 3046,
+                "upper": 5.612500000000001
+              },
+              "relative_mean_abs_diff": 0.6026490066225165,
+              "synthetic_mean": 7.55,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 7.55,
+                "lower": 6.6125,
+                "sample_count": 80,
+                "seed": 3044,
+                "upper": 8.5875
+              },
+              "synthetic_std": 4.593201497866167,
+              "trace_mean": 3.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 3.0,
+                "lower": 3.0,
+                "sample_count": 29,
+                "seed": 3045,
+                "upper": 3.0
+              },
+              "trace_std": 0.0
+            },
+            "policy_change_rate": {
+              "mean_abs_diff": 0.07583333333333334,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.04409722222222222,
+                "sample_count_left": 80,
+                "sample_count_right": 29,
+                "seed": 5064,
+                "upper": 0.11395833333333333
+              },
+              "relative_mean_abs_diff": 0.07583333333333334,
+              "synthetic_mean": 0.07583333333333334,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.04145833333333333,
+                "sample_count": 80,
+                "seed": 5062,
+                "upper": 0.11333333333333333
+              },
+              "synthetic_std": 0.1633774978083685,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 29,
+                "seed": 5063,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "provenance_depth": {
+              "mean_abs_diff": 0.5375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count_left": 80,
+                "sample_count_right": 29,
+                "seed": 6073,
+                "upper": 0.7875
+              },
+              "relative_mean_abs_diff": 0.5375,
+              "synthetic_mean": 0.5375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count": 80,
+                "seed": 6071,
+                "upper": 0.7875
+              },
+              "synthetic_std": 1.0948030644823752,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 29,
+                "seed": 6072,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "transaction_size": {
+              "mean_abs_diff": 1.0625,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0625,
+                "lower": 0.7,
+                "sample_count_left": 80,
+                "sample_count_right": 29,
+                "seed": 4055,
+                "upper": 1.4874999999999998
+              },
+              "relative_mean_abs_diff": 0.5151515151515151,
+              "synthetic_mean": 2.0625,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 2.0625,
+                "lower": 1.7125,
+                "sample_count": 80,
+                "seed": 4053,
+                "upper": 2.45
+              },
+              "synthetic_std": 1.7488835724541527,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 29,
+                "seed": 4054,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            }
+          },
+          "mean_feature_relative_abs_diff": 0.3947723091845608,
+          "multivariate_test": {
+            "bandwidth": 2.1339496434015435,
+            "claim_boundary": "a non-significant result is not evidence of distributional equivalence",
+            "feature_names": [
+              "operation_count",
+              "transaction_size",
+              "policy_change_rate",
+              "provenance_depth",
+              "branch_factor",
+              "agent_count"
+            ],
+            "method": "standardized_rbf_random_fourier_mmd_permutation",
+            "null_hypothesis": "synthetic and trace-grounded joint feature distributions are equal",
+            "p_value": 0.001,
+            "permutations": 999,
+            "rff_dimensions": 64,
+            "seed": 13051,
+            "small_sample_warning": null,
+            "statistic": 0.29175841348757703,
+            "status": "available",
+            "synthetic_count": 80,
+            "trace_count": 29
+          },
+          "synthetic_count": 80,
+          "trace_count": 29
+        },
+        "fold_index": 3,
+        "holdout_group_sha256": "26270b2fc52ffe2508af31a2b649d38593a6990a766540af24adf1f1913c53cc",
+        "holdout_record_count": 29,
+        "low_sample_warning": null,
+        "synthetic_instance_count": 80,
+        "train_group_count": 9,
+        "train_group_sha256": [
+          "09b0285d6d5729c48800bb783965e0ee48b712f9d712fe5009bb9c7dc529e94e",
+          "31bd8a4f246e67a06a789f518e9bfe77cf7b421193621b76cd6fa5a9d3ccb9a7",
+          "4e87b69c0186474076a4405aa3865639993c0b699e332815b66b7ed1d0e1d93d",
+          "6e4ee33fb28a3f42899a18f32b686156d00d6b452150f414d55c642e03ee9eec",
+          "b0357fff9a649a3c361f6f5c77416e44c9e51d44df0446e3cfe884ed5897738e",
+          "b5b0d716547192ed056fe2f4a602663a897b480a4f5c2513f39abc555e70866c",
+          "e3a6883cd9c837d0660fd31a80c3797adfb07c6edb8cbe55ceefaffc9754f0a6",
+          "f3c8f37b1e515ac464402cf4d88f61878cf36e871e60d148d990b6078f62dadb",
+          "f4c47acce5d2b00529f6e681bc0cd288a584bcb8ff955461e62547a1426d559b"
+        ],
+        "train_record_count": 243
+      },
+      {
+        "calibration": {
+          "agent_count": 1,
+          "branch_factor": 1,
+          "concurrency": 1,
+          "policy_churn": 0,
+          "provenance_depth": 1,
+          "txn_size": 1
+        },
+        "comparison": {
+          "bootstrap_repetitions": 2000,
+          "bootstrap_seed": 4053,
+          "comparison_method": "feature-wise bootstrap intervals plus a joint RBF-RFF MMD permutation test",
+          "features": {
+            "agent_count": {
+              "mean_abs_diff": 0.0,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count_left": 80,
+                "sample_count_right": 29,
+                "seed": 9100,
+                "upper": 0.0
+              },
+              "relative_mean_abs_diff": 0.0,
+              "synthetic_mean": 1.0,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 80,
+                "seed": 9098,
+                "upper": 1.0
+              },
+              "synthetic_std": 0.0,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 29,
+                "seed": 9099,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            },
+            "branch_factor": {
+              "mean_abs_diff": 0.6375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.375,
+                "sample_count_left": 80,
+                "sample_count_right": 29,
+                "seed": 8091,
+                "upper": 0.925
+              },
+              "relative_mean_abs_diff": 0.6375,
+              "synthetic_mean": 0.6375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.3875,
+                "sample_count": 80,
+                "seed": 8089,
+                "upper": 0.9375
+              },
+              "synthetic_std": 1.2373737309317667,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 29,
+                "seed": 8090,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "operation_count": {
+              "mean_abs_diff": 4.55,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 4.55,
+                "lower": 3.55,
+                "sample_count_left": 80,
+                "sample_count_right": 29,
+                "seed": 4055,
+                "upper": 5.612500000000001
+              },
+              "relative_mean_abs_diff": 0.6026490066225165,
+              "synthetic_mean": 7.55,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 7.55,
+                "lower": 6.625,
+                "sample_count": 80,
+                "seed": 4053,
+                "upper": 8.6375
+              },
+              "synthetic_std": 4.593201497866167,
+              "trace_mean": 3.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 3.0,
+                "lower": 3.0,
+                "sample_count": 29,
+                "seed": 4054,
+                "upper": 3.0
+              },
+              "trace_std": 0.0
+            },
+            "policy_change_rate": {
+              "mean_abs_diff": 0.07583333333333334,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.043819444444444446,
+                "sample_count_left": 80,
+                "sample_count_right": 29,
+                "seed": 6073,
+                "upper": 0.11569444444444445
+              },
+              "relative_mean_abs_diff": 0.07583333333333334,
+              "synthetic_mean": 0.07583333333333334,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.04388888888888889,
+                "sample_count": 80,
+                "seed": 6071,
+                "upper": 0.11291666666666667
+              },
+              "synthetic_std": 0.1633774978083685,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 29,
+                "seed": 6072,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "provenance_depth": {
+              "mean_abs_diff": 0.5375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count_left": 80,
+                "sample_count_right": 29,
+                "seed": 7082,
+                "upper": 0.7875
+              },
+              "relative_mean_abs_diff": 0.5375,
+              "synthetic_mean": 0.5375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count": 80,
+                "seed": 7080,
+                "upper": 0.7875
+              },
+              "synthetic_std": 1.0948030644823752,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 29,
+                "seed": 7081,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "transaction_size": {
+              "mean_abs_diff": 1.0625,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0625,
+                "lower": 0.7,
+                "sample_count_left": 80,
+                "sample_count_right": 29,
+                "seed": 5064,
+                "upper": 1.4625
+              },
+              "relative_mean_abs_diff": 0.5151515151515151,
+              "synthetic_mean": 2.0625,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 2.0625,
+                "lower": 1.7,
+                "sample_count": 80,
+                "seed": 5062,
+                "upper": 2.475
+              },
+              "synthetic_std": 1.7488835724541527,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 29,
+                "seed": 5063,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            }
+          },
+          "mean_feature_relative_abs_diff": 0.3947723091845608,
+          "multivariate_test": {
+            "bandwidth": 2.1339496434015435,
+            "claim_boundary": "a non-significant result is not evidence of distributional equivalence",
+            "feature_names": [
+              "operation_count",
+              "transaction_size",
+              "policy_change_rate",
+              "provenance_depth",
+              "branch_factor",
+              "agent_count"
+            ],
+            "method": "standardized_rbf_random_fourier_mmd_permutation",
+            "null_hypothesis": "synthetic and trace-grounded joint feature distributions are equal",
+            "p_value": 0.001,
+            "permutations": 999,
+            "rff_dimensions": 64,
+            "seed": 14060,
+            "small_sample_warning": null,
+            "statistic": 0.2598395116972596,
+            "status": "available",
+            "synthetic_count": 80,
+            "trace_count": 29
+          },
+          "synthetic_count": 80,
+          "trace_count": 29
+        },
+        "fold_index": 4,
+        "holdout_group_sha256": "f4c47acce5d2b00529f6e681bc0cd288a584bcb8ff955461e62547a1426d559b",
+        "holdout_record_count": 29,
+        "low_sample_warning": null,
+        "synthetic_instance_count": 80,
+        "train_group_count": 9,
+        "train_group_sha256": [
+          "09b0285d6d5729c48800bb783965e0ee48b712f9d712fe5009bb9c7dc529e94e",
+          "26270b2fc52ffe2508af31a2b649d38593a6990a766540af24adf1f1913c53cc",
+          "31bd8a4f246e67a06a789f518e9bfe77cf7b421193621b76cd6fa5a9d3ccb9a7",
+          "4e87b69c0186474076a4405aa3865639993c0b699e332815b66b7ed1d0e1d93d",
+          "6e4ee33fb28a3f42899a18f32b686156d00d6b452150f414d55c642e03ee9eec",
+          "b0357fff9a649a3c361f6f5c77416e44c9e51d44df0446e3cfe884ed5897738e",
+          "b5b0d716547192ed056fe2f4a602663a897b480a4f5c2513f39abc555e70866c",
+          "e3a6883cd9c837d0660fd31a80c3797adfb07c6edb8cbe55ceefaffc9754f0a6",
+          "f3c8f37b1e515ac464402cf4d88f61878cf36e871e60d148d990b6078f62dadb"
+        ],
+        "train_record_count": 243
+      },
+      {
+        "calibration": {
+          "agent_count": 1,
+          "branch_factor": 1,
+          "concurrency": 1,
+          "policy_churn": 0,
+          "provenance_depth": 1,
+          "txn_size": 1
+        },
+        "comparison": {
+          "bootstrap_repetitions": 2000,
+          "bootstrap_seed": 5062,
+          "comparison_method": "feature-wise bootstrap intervals plus a joint RBF-RFF MMD permutation test",
+          "features": {
+            "agent_count": {
+              "mean_abs_diff": 0.0,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count_left": 80,
+                "sample_count_right": 28,
+                "seed": 10109,
+                "upper": 0.0
+              },
+              "relative_mean_abs_diff": 0.0,
+              "synthetic_mean": 1.0,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 80,
+                "seed": 10107,
+                "upper": 1.0
+              },
+              "synthetic_std": 0.0,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 28,
+                "seed": 10108,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            },
+            "branch_factor": {
+              "mean_abs_diff": 0.6375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.375,
+                "sample_count_left": 80,
+                "sample_count_right": 28,
+                "seed": 9100,
+                "upper": 0.9375
+              },
+              "relative_mean_abs_diff": 0.6375,
+              "synthetic_mean": 0.6375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.375,
+                "sample_count": 80,
+                "seed": 9098,
+                "upper": 0.9
+              },
+              "synthetic_std": 1.2373737309317667,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 28,
+                "seed": 9099,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "operation_count": {
+              "mean_abs_diff": 4.55,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 4.55,
+                "lower": 3.5625,
+                "sample_count_left": 80,
+                "sample_count_right": 28,
+                "seed": 5064,
+                "upper": 5.625
+              },
+              "relative_mean_abs_diff": 0.6026490066225165,
+              "synthetic_mean": 7.55,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 7.55,
+                "lower": 6.625,
+                "sample_count": 80,
+                "seed": 5062,
+                "upper": 8.6
+              },
+              "synthetic_std": 4.593201497866167,
+              "trace_mean": 3.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 3.0,
+                "lower": 3.0,
+                "sample_count": 28,
+                "seed": 5063,
+                "upper": 3.0
+              },
+              "trace_std": 0.0
+            },
+            "policy_change_rate": {
+              "mean_abs_diff": 0.07583333333333334,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.04416666666666667,
+                "sample_count_left": 80,
+                "sample_count_right": 28,
+                "seed": 7082,
+                "upper": 0.11430555555555555
+              },
+              "relative_mean_abs_diff": 0.07583333333333334,
+              "synthetic_mean": 0.07583333333333334,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.04347222222222222,
+                "sample_count": 80,
+                "seed": 7080,
+                "upper": 0.11347222222222222
+              },
+              "synthetic_std": 0.1633774978083685,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 28,
+                "seed": 7081,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "provenance_depth": {
+              "mean_abs_diff": 0.5375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3,
+                "sample_count_left": 80,
+                "sample_count_right": 28,
+                "seed": 8091,
+                "upper": 0.7875
+              },
+              "relative_mean_abs_diff": 0.5375,
+              "synthetic_mean": 0.5375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count": 80,
+                "seed": 8089,
+                "upper": 0.7875
+              },
+              "synthetic_std": 1.0948030644823752,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 28,
+                "seed": 8090,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "transaction_size": {
+              "mean_abs_diff": 1.0625,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0625,
+                "lower": 0.7124999999999999,
+                "sample_count_left": 80,
+                "sample_count_right": 28,
+                "seed": 6073,
+                "upper": 1.475
+              },
+              "relative_mean_abs_diff": 0.5151515151515151,
+              "synthetic_mean": 2.0625,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 2.0625,
+                "lower": 1.7125,
+                "sample_count": 80,
+                "seed": 6071,
+                "upper": 2.4625
+              },
+              "synthetic_std": 1.7488835724541527,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 28,
+                "seed": 6072,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            }
+          },
+          "mean_feature_relative_abs_diff": 0.3947723091845608,
+          "multivariate_test": {
+            "bandwidth": 2.129491295407642,
+            "claim_boundary": "a non-significant result is not evidence of distributional equivalence",
+            "feature_names": [
+              "operation_count",
+              "transaction_size",
+              "policy_change_rate",
+              "provenance_depth",
+              "branch_factor",
+              "agent_count"
+            ],
+            "method": "standardized_rbf_random_fourier_mmd_permutation",
+            "null_hypothesis": "synthetic and trace-grounded joint feature distributions are equal",
+            "p_value": 0.001,
+            "permutations": 999,
+            "rff_dimensions": 64,
+            "seed": 15069,
+            "small_sample_warning": null,
+            "statistic": 0.26167948128229035,
+            "status": "available",
+            "synthetic_count": 80,
+            "trace_count": 28
+          },
+          "synthetic_count": 80,
+          "trace_count": 28
+        },
+        "fold_index": 5,
+        "holdout_group_sha256": "b0357fff9a649a3c361f6f5c77416e44c9e51d44df0446e3cfe884ed5897738e",
+        "holdout_record_count": 28,
+        "low_sample_warning": null,
+        "synthetic_instance_count": 80,
+        "train_group_count": 9,
+        "train_group_sha256": [
+          "09b0285d6d5729c48800bb783965e0ee48b712f9d712fe5009bb9c7dc529e94e",
+          "26270b2fc52ffe2508af31a2b649d38593a6990a766540af24adf1f1913c53cc",
+          "31bd8a4f246e67a06a789f518e9bfe77cf7b421193621b76cd6fa5a9d3ccb9a7",
+          "4e87b69c0186474076a4405aa3865639993c0b699e332815b66b7ed1d0e1d93d",
+          "6e4ee33fb28a3f42899a18f32b686156d00d6b452150f414d55c642e03ee9eec",
+          "b5b0d716547192ed056fe2f4a602663a897b480a4f5c2513f39abc555e70866c",
+          "e3a6883cd9c837d0660fd31a80c3797adfb07c6edb8cbe55ceefaffc9754f0a6",
+          "f3c8f37b1e515ac464402cf4d88f61878cf36e871e60d148d990b6078f62dadb",
+          "f4c47acce5d2b00529f6e681bc0cd288a584bcb8ff955461e62547a1426d559b"
+        ],
+        "train_record_count": 244
+      },
+      {
+        "calibration": {
+          "agent_count": 1,
+          "branch_factor": 1,
+          "concurrency": 1,
+          "policy_churn": 0,
+          "provenance_depth": 1,
+          "txn_size": 1
+        },
+        "comparison": {
+          "bootstrap_repetitions": 2000,
+          "bootstrap_seed": 6071,
+          "comparison_method": "feature-wise bootstrap intervals plus a joint RBF-RFF MMD permutation test",
+          "features": {
+            "agent_count": {
+              "mean_abs_diff": 0.0,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count_left": 80,
+                "sample_count_right": 31,
+                "seed": 11118,
+                "upper": 0.0
+              },
+              "relative_mean_abs_diff": 0.0,
+              "synthetic_mean": 1.0,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 80,
+                "seed": 11116,
+                "upper": 1.0
+              },
+              "synthetic_std": 0.0,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 31,
+                "seed": 11117,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            },
+            "branch_factor": {
+              "mean_abs_diff": 0.6375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.3875,
+                "sample_count_left": 80,
+                "sample_count_right": 31,
+                "seed": 10109,
+                "upper": 0.9
+              },
+              "relative_mean_abs_diff": 0.6375,
+              "synthetic_mean": 0.6375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.375,
+                "sample_count": 80,
+                "seed": 10107,
+                "upper": 0.925
+              },
+              "synthetic_std": 1.2373737309317667,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 31,
+                "seed": 10108,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "operation_count": {
+              "mean_abs_diff": 4.55,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 4.55,
+                "lower": 3.6125,
+                "sample_count_left": 80,
+                "sample_count_right": 31,
+                "seed": 6073,
+                "upper": 5.6
+              },
+              "relative_mean_abs_diff": 0.6026490066225165,
+              "synthetic_mean": 7.55,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 7.55,
+                "lower": 6.5875,
+                "sample_count": 80,
+                "seed": 6071,
+                "upper": 8.5875
+              },
+              "synthetic_std": 4.593201497866167,
+              "trace_mean": 3.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 3.0,
+                "lower": 3.0,
+                "sample_count": 31,
+                "seed": 6072,
+                "upper": 3.0
+              },
+              "trace_std": 0.0
+            },
+            "policy_change_rate": {
+              "mean_abs_diff": 0.07583333333333334,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.042708333333333334,
+                "sample_count_left": 80,
+                "sample_count_right": 31,
+                "seed": 8091,
+                "upper": 0.11479166666666667
+              },
+              "relative_mean_abs_diff": 0.07583333333333334,
+              "synthetic_mean": 0.07583333333333334,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.043680555555555556,
+                "sample_count": 80,
+                "seed": 8089,
+                "upper": 0.11513888888888889
+              },
+              "synthetic_std": 0.1633774978083685,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 31,
+                "seed": 8090,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "provenance_depth": {
+              "mean_abs_diff": 0.5375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3,
+                "sample_count_left": 80,
+                "sample_count_right": 31,
+                "seed": 9100,
+                "upper": 0.7875
+              },
+              "relative_mean_abs_diff": 0.5375,
+              "synthetic_mean": 0.5375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count": 80,
+                "seed": 9098,
+                "upper": 0.7875
+              },
+              "synthetic_std": 1.0948030644823752,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 31,
+                "seed": 9099,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "transaction_size": {
+              "mean_abs_diff": 1.0625,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0625,
+                "lower": 0.7,
+                "sample_count_left": 80,
+                "sample_count_right": 31,
+                "seed": 7082,
+                "upper": 1.475
+              },
+              "relative_mean_abs_diff": 0.5151515151515151,
+              "synthetic_mean": 2.0625,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 2.0625,
+                "lower": 1.725,
+                "sample_count": 80,
+                "seed": 7080,
+                "upper": 2.4625
+              },
+              "synthetic_std": 1.7488835724541527,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 31,
+                "seed": 7081,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            }
+          },
+          "mean_feature_relative_abs_diff": 0.3947723091845608,
+          "multivariate_test": {
+            "bandwidth": 2.142998606809813,
+            "claim_boundary": "a non-significant result is not evidence of distributional equivalence",
+            "feature_names": [
+              "operation_count",
+              "transaction_size",
+              "policy_change_rate",
+              "provenance_depth",
+              "branch_factor",
+              "agent_count"
+            ],
+            "method": "standardized_rbf_random_fourier_mmd_permutation",
+            "null_hypothesis": "synthetic and trace-grounded joint feature distributions are equal",
+            "p_value": 0.001,
+            "permutations": 999,
+            "rff_dimensions": 64,
+            "seed": 16078,
+            "small_sample_warning": null,
+            "statistic": 0.3748142373433248,
+            "status": "available",
+            "synthetic_count": 80,
+            "trace_count": 31
+          },
+          "synthetic_count": 80,
+          "trace_count": 31
+        },
+        "fold_index": 6,
+        "holdout_group_sha256": "09b0285d6d5729c48800bb783965e0ee48b712f9d712fe5009bb9c7dc529e94e",
+        "holdout_record_count": 31,
+        "low_sample_warning": null,
+        "synthetic_instance_count": 80,
+        "train_group_count": 9,
+        "train_group_sha256": [
+          "26270b2fc52ffe2508af31a2b649d38593a6990a766540af24adf1f1913c53cc",
+          "31bd8a4f246e67a06a789f518e9bfe77cf7b421193621b76cd6fa5a9d3ccb9a7",
+          "4e87b69c0186474076a4405aa3865639993c0b699e332815b66b7ed1d0e1d93d",
+          "6e4ee33fb28a3f42899a18f32b686156d00d6b452150f414d55c642e03ee9eec",
+          "b0357fff9a649a3c361f6f5c77416e44c9e51d44df0446e3cfe884ed5897738e",
+          "b5b0d716547192ed056fe2f4a602663a897b480a4f5c2513f39abc555e70866c",
+          "e3a6883cd9c837d0660fd31a80c3797adfb07c6edb8cbe55ceefaffc9754f0a6",
+          "f3c8f37b1e515ac464402cf4d88f61878cf36e871e60d148d990b6078f62dadb",
+          "f4c47acce5d2b00529f6e681bc0cd288a584bcb8ff955461e62547a1426d559b"
+        ],
+        "train_record_count": 241
+      },
+      {
+        "calibration": {
+          "agent_count": 1,
+          "branch_factor": 1,
+          "concurrency": 1,
+          "policy_churn": 0,
+          "provenance_depth": 1,
+          "txn_size": 1
+        },
+        "comparison": {
+          "bootstrap_repetitions": 2000,
+          "bootstrap_seed": 7080,
+          "comparison_method": "feature-wise bootstrap intervals plus a joint RBF-RFF MMD permutation test",
+          "features": {
+            "agent_count": {
+              "mean_abs_diff": 0.0,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count_left": 80,
+                "sample_count_right": 30,
+                "seed": 12127,
+                "upper": 0.0
+              },
+              "relative_mean_abs_diff": 0.0,
+              "synthetic_mean": 1.0,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 80,
+                "seed": 12125,
+                "upper": 1.0
+              },
+              "synthetic_std": 0.0,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 30,
+                "seed": 12126,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            },
+            "branch_factor": {
+              "mean_abs_diff": 0.6375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.375,
+                "sample_count_left": 80,
+                "sample_count_right": 30,
+                "seed": 11118,
+                "upper": 0.925
+              },
+              "relative_mean_abs_diff": 0.6375,
+              "synthetic_mean": 0.6375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.3875,
+                "sample_count": 80,
+                "seed": 11116,
+                "upper": 0.9125
+              },
+              "synthetic_std": 1.2373737309317667,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 30,
+                "seed": 11117,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "operation_count": {
+              "mean_abs_diff": 4.55,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 4.55,
+                "lower": 3.5999999999999996,
+                "sample_count_left": 80,
+                "sample_count_right": 30,
+                "seed": 7082,
+                "upper": 5.6
+              },
+              "relative_mean_abs_diff": 0.6026490066225165,
+              "synthetic_mean": 7.55,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 7.55,
+                "lower": 6.6375,
+                "sample_count": 80,
+                "seed": 7080,
+                "upper": 8.5625
+              },
+              "synthetic_std": 4.593201497866167,
+              "trace_mean": 3.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 3.0,
+                "lower": 3.0,
+                "sample_count": 30,
+                "seed": 7081,
+                "upper": 3.0
+              },
+              "trace_std": 0.0
+            },
+            "policy_change_rate": {
+              "mean_abs_diff": 0.07583333333333334,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.042777777777777776,
+                "sample_count_left": 80,
+                "sample_count_right": 30,
+                "seed": 9100,
+                "upper": 0.11583333333333333
+              },
+              "relative_mean_abs_diff": 0.07583333333333334,
+              "synthetic_mean": 0.07583333333333334,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.044583333333333336,
+                "sample_count": 80,
+                "seed": 9098,
+                "upper": 0.11131944444444444
+              },
+              "synthetic_std": 0.1633774978083685,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 30,
+                "seed": 9099,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "provenance_depth": {
+              "mean_abs_diff": 0.5375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count_left": 80,
+                "sample_count_right": 30,
+                "seed": 10109,
+                "upper": 0.775
+              },
+              "relative_mean_abs_diff": 0.5375,
+              "synthetic_mean": 0.5375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count": 80,
+                "seed": 10107,
+                "upper": 0.8
+              },
+              "synthetic_std": 1.0948030644823752,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 30,
+                "seed": 10108,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "transaction_size": {
+              "mean_abs_diff": 1.0625,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0625,
+                "lower": 0.7124999999999999,
+                "sample_count_left": 80,
+                "sample_count_right": 30,
+                "seed": 8091,
+                "upper": 1.4874999999999998
+              },
+              "relative_mean_abs_diff": 0.5151515151515151,
+              "synthetic_mean": 2.0625,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 2.0625,
+                "lower": 1.7,
+                "sample_count": 80,
+                "seed": 8089,
+                "upper": 2.475
+              },
+              "synthetic_std": 1.7488835724541527,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 30,
+                "seed": 8090,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            }
+          },
+          "mean_feature_relative_abs_diff": 0.3947723091845608,
+          "multivariate_test": {
+            "bandwidth": 2.138452930423436,
+            "claim_boundary": "a non-significant result is not evidence of distributional equivalence",
+            "feature_names": [
+              "operation_count",
+              "transaction_size",
+              "policy_change_rate",
+              "provenance_depth",
+              "branch_factor",
+              "agent_count"
+            ],
+            "method": "standardized_rbf_random_fourier_mmd_permutation",
+            "null_hypothesis": "synthetic and trace-grounded joint feature distributions are equal",
+            "p_value": 0.001,
+            "permutations": 999,
+            "rff_dimensions": 64,
+            "seed": 17087,
+            "small_sample_warning": null,
+            "statistic": 0.2651985232314349,
+            "status": "available",
+            "synthetic_count": 80,
+            "trace_count": 30
+          },
+          "synthetic_count": 80,
+          "trace_count": 30
+        },
+        "fold_index": 7,
+        "holdout_group_sha256": "31bd8a4f246e67a06a789f518e9bfe77cf7b421193621b76cd6fa5a9d3ccb9a7",
+        "holdout_record_count": 30,
+        "low_sample_warning": null,
+        "synthetic_instance_count": 80,
+        "train_group_count": 9,
+        "train_group_sha256": [
+          "09b0285d6d5729c48800bb783965e0ee48b712f9d712fe5009bb9c7dc529e94e",
+          "26270b2fc52ffe2508af31a2b649d38593a6990a766540af24adf1f1913c53cc",
+          "4e87b69c0186474076a4405aa3865639993c0b699e332815b66b7ed1d0e1d93d",
+          "6e4ee33fb28a3f42899a18f32b686156d00d6b452150f414d55c642e03ee9eec",
+          "b0357fff9a649a3c361f6f5c77416e44c9e51d44df0446e3cfe884ed5897738e",
+          "b5b0d716547192ed056fe2f4a602663a897b480a4f5c2513f39abc555e70866c",
+          "e3a6883cd9c837d0660fd31a80c3797adfb07c6edb8cbe55ceefaffc9754f0a6",
+          "f3c8f37b1e515ac464402cf4d88f61878cf36e871e60d148d990b6078f62dadb",
+          "f4c47acce5d2b00529f6e681bc0cd288a584bcb8ff955461e62547a1426d559b"
+        ],
+        "train_record_count": 242
+      },
+      {
+        "calibration": {
+          "agent_count": 1,
+          "branch_factor": 1,
+          "concurrency": 1,
+          "policy_churn": 0,
+          "provenance_depth": 1,
+          "txn_size": 1
+        },
+        "comparison": {
+          "bootstrap_repetitions": 2000,
+          "bootstrap_seed": 8089,
+          "comparison_method": "feature-wise bootstrap intervals plus a joint RBF-RFF MMD permutation test",
+          "features": {
+            "agent_count": {
+              "mean_abs_diff": 0.0,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count_left": 80,
+                "sample_count_right": 25,
+                "seed": 13136,
+                "upper": 0.0
+              },
+              "relative_mean_abs_diff": 0.0,
+              "synthetic_mean": 1.0,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 80,
+                "seed": 13134,
+                "upper": 1.0
+              },
+              "synthetic_std": 0.0,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 25,
+                "seed": 13135,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            },
+            "branch_factor": {
+              "mean_abs_diff": 0.6375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.3875,
+                "sample_count_left": 80,
+                "sample_count_right": 25,
+                "seed": 12127,
+                "upper": 0.9125
+              },
+              "relative_mean_abs_diff": 0.6375,
+              "synthetic_mean": 0.6375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.3625,
+                "sample_count": 80,
+                "seed": 12125,
+                "upper": 0.9125
+              },
+              "synthetic_std": 1.2373737309317667,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 25,
+                "seed": 12126,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "operation_count": {
+              "mean_abs_diff": 4.55,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 4.55,
+                "lower": 3.575,
+                "sample_count_left": 80,
+                "sample_count_right": 25,
+                "seed": 8091,
+                "upper": 5.637499999999999
+              },
+              "relative_mean_abs_diff": 0.6026490066225165,
+              "synthetic_mean": 7.55,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 7.55,
+                "lower": 6.5625,
+                "sample_count": 80,
+                "seed": 8089,
+                "upper": 8.6
+              },
+              "synthetic_std": 4.593201497866167,
+              "trace_mean": 3.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 3.0,
+                "lower": 3.0,
+                "sample_count": 25,
+                "seed": 8090,
+                "upper": 3.0
+              },
+              "trace_std": 0.0
+            },
+            "policy_change_rate": {
+              "mean_abs_diff": 0.07583333333333334,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.043541666666666666,
+                "sample_count_left": 80,
+                "sample_count_right": 25,
+                "seed": 10109,
+                "upper": 0.11527777777777777
+              },
+              "relative_mean_abs_diff": 0.07583333333333334,
+              "synthetic_mean": 0.07583333333333334,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.041388888888888885,
+                "sample_count": 80,
+                "seed": 10107,
+                "upper": 0.11527777777777777
+              },
+              "synthetic_std": 0.1633774978083685,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 25,
+                "seed": 10108,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "provenance_depth": {
+              "mean_abs_diff": 0.5375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count_left": 80,
+                "sample_count_right": 25,
+                "seed": 11118,
+                "upper": 0.8
+              },
+              "relative_mean_abs_diff": 0.5375,
+              "synthetic_mean": 0.5375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count": 80,
+                "seed": 11116,
+                "upper": 0.7875
+              },
+              "synthetic_std": 1.0948030644823752,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 25,
+                "seed": 11117,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "transaction_size": {
+              "mean_abs_diff": 1.0625,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0625,
+                "lower": 0.6875,
+                "sample_count_left": 80,
+                "sample_count_right": 25,
+                "seed": 9100,
+                "upper": 1.4874999999999998
+              },
+              "relative_mean_abs_diff": 0.5151515151515151,
+              "synthetic_mean": 2.0625,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 2.0625,
+                "lower": 1.7,
+                "sample_count": 80,
+                "seed": 9098,
+                "upper": 2.4625
+              },
+              "synthetic_std": 1.7488835724541527,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 25,
+                "seed": 9099,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            }
+          },
+          "mean_feature_relative_abs_diff": 0.3947723091845608,
+          "multivariate_test": {
+            "bandwidth": 2.1164137592752104,
+            "claim_boundary": "a non-significant result is not evidence of distributional equivalence",
+            "feature_names": [
+              "operation_count",
+              "transaction_size",
+              "policy_change_rate",
+              "provenance_depth",
+              "branch_factor",
+              "agent_count"
+            ],
+            "method": "standardized_rbf_random_fourier_mmd_permutation",
+            "null_hypothesis": "synthetic and trace-grounded joint feature distributions are equal",
+            "p_value": 0.001,
+            "permutations": 999,
+            "rff_dimensions": 64,
+            "seed": 18096,
+            "small_sample_warning": null,
+            "statistic": 0.2697163604519509,
+            "status": "available",
+            "synthetic_count": 80,
+            "trace_count": 25
+          },
+          "synthetic_count": 80,
+          "trace_count": 25
+        },
+        "fold_index": 8,
+        "holdout_group_sha256": "f3c8f37b1e515ac464402cf4d88f61878cf36e871e60d148d990b6078f62dadb",
+        "holdout_record_count": 25,
+        "low_sample_warning": null,
+        "synthetic_instance_count": 80,
+        "train_group_count": 9,
+        "train_group_sha256": [
+          "09b0285d6d5729c48800bb783965e0ee48b712f9d712fe5009bb9c7dc529e94e",
+          "26270b2fc52ffe2508af31a2b649d38593a6990a766540af24adf1f1913c53cc",
+          "31bd8a4f246e67a06a789f518e9bfe77cf7b421193621b76cd6fa5a9d3ccb9a7",
+          "4e87b69c0186474076a4405aa3865639993c0b699e332815b66b7ed1d0e1d93d",
+          "6e4ee33fb28a3f42899a18f32b686156d00d6b452150f414d55c642e03ee9eec",
+          "b0357fff9a649a3c361f6f5c77416e44c9e51d44df0446e3cfe884ed5897738e",
+          "b5b0d716547192ed056fe2f4a602663a897b480a4f5c2513f39abc555e70866c",
+          "e3a6883cd9c837d0660fd31a80c3797adfb07c6edb8cbe55ceefaffc9754f0a6",
+          "f4c47acce5d2b00529f6e681bc0cd288a584bcb8ff955461e62547a1426d559b"
+        ],
+        "train_record_count": 247
+      },
+      {
+        "calibration": {
+          "agent_count": 1,
+          "branch_factor": 1,
+          "concurrency": 1,
+          "policy_churn": 0,
+          "provenance_depth": 1,
+          "txn_size": 1
+        },
+        "comparison": {
+          "bootstrap_repetitions": 2000,
+          "bootstrap_seed": 9098,
+          "comparison_method": "feature-wise bootstrap intervals plus a joint RBF-RFF MMD permutation test",
+          "features": {
+            "agent_count": {
+              "mean_abs_diff": 0.0,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count_left": 80,
+                "sample_count_right": 30,
+                "seed": 14145,
+                "upper": 0.0
+              },
+              "relative_mean_abs_diff": 0.0,
+              "synthetic_mean": 1.0,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 80,
+                "seed": 14143,
+                "upper": 1.0
+              },
+              "synthetic_std": 0.0,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 30,
+                "seed": 14144,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            },
+            "branch_factor": {
+              "mean_abs_diff": 0.6375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.375,
+                "sample_count_left": 80,
+                "sample_count_right": 30,
+                "seed": 13136,
+                "upper": 0.925
+              },
+              "relative_mean_abs_diff": 0.6375,
+              "synthetic_mean": 0.6375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.6375,
+                "lower": 0.3625,
+                "sample_count": 80,
+                "seed": 13134,
+                "upper": 0.925
+              },
+              "synthetic_std": 1.2373737309317667,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 30,
+                "seed": 13135,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "operation_count": {
+              "mean_abs_diff": 4.55,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 4.55,
+                "lower": 3.5875000000000004,
+                "sample_count_left": 80,
+                "sample_count_right": 30,
+                "seed": 9100,
+                "upper": 5.625
+              },
+              "relative_mean_abs_diff": 0.6026490066225165,
+              "synthetic_mean": 7.55,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 7.55,
+                "lower": 6.625,
+                "sample_count": 80,
+                "seed": 9098,
+                "upper": 8.675
+              },
+              "synthetic_std": 4.593201497866167,
+              "trace_mean": 3.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 3.0,
+                "lower": 3.0,
+                "sample_count": 30,
+                "seed": 9099,
+                "upper": 3.0
+              },
+              "trace_std": 0.0
+            },
+            "policy_change_rate": {
+              "mean_abs_diff": 0.07583333333333334,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.04465277777777778,
+                "sample_count_left": 80,
+                "sample_count_right": 30,
+                "seed": 11118,
+                "upper": 0.11562499999999999
+              },
+              "relative_mean_abs_diff": 0.07583333333333334,
+              "synthetic_mean": 0.07583333333333334,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.07583333333333334,
+                "lower": 0.043402777777777776,
+                "sample_count": 80,
+                "seed": 11116,
+                "upper": 0.11291666666666667
+              },
+              "synthetic_std": 0.1633774978083685,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 30,
+                "seed": 11117,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "provenance_depth": {
+              "mean_abs_diff": 0.5375,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.325,
+                "sample_count_left": 80,
+                "sample_count_right": 30,
+                "seed": 12127,
+                "upper": 0.7875
+              },
+              "relative_mean_abs_diff": 0.5375,
+              "synthetic_mean": 0.5375,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.5375,
+                "lower": 0.3125,
+                "sample_count": 80,
+                "seed": 12125,
+                "upper": 0.7875
+              },
+              "synthetic_std": 1.0948030644823752,
+              "trace_mean": 0.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 0.0,
+                "lower": 0.0,
+                "sample_count": 30,
+                "seed": 12126,
+                "upper": 0.0
+              },
+              "trace_std": 0.0
+            },
+            "transaction_size": {
+              "mean_abs_diff": 1.0625,
+              "mean_abs_diff_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0625,
+                "lower": 0.6875,
+                "sample_count_left": 80,
+                "sample_count_right": 30,
+                "seed": 10109,
+                "upper": 1.4625
+              },
+              "relative_mean_abs_diff": 0.5151515151515151,
+              "synthetic_mean": 2.0625,
+              "synthetic_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 2.0625,
+                "lower": 1.7,
+                "sample_count": 80,
+                "seed": 10107,
+                "upper": 2.4625
+              },
+              "synthetic_std": 1.7488835724541527,
+              "trace_mean": 1.0,
+              "trace_mean_interval": {
+                "bootstrap_repetitions": 2000,
+                "confidence": 0.95,
+                "estimate": 1.0,
+                "lower": 1.0,
+                "sample_count": 30,
+                "seed": 10108,
+                "upper": 1.0
+              },
+              "trace_std": 0.0
+            }
+          },
+          "mean_feature_relative_abs_diff": 0.3947723091845608,
+          "multivariate_test": {
+            "bandwidth": 2.138452930423436,
+            "claim_boundary": "a non-significant result is not evidence of distributional equivalence",
+            "feature_names": [
+              "operation_count",
+              "transaction_size",
+              "policy_change_rate",
+              "provenance_depth",
+              "branch_factor",
+              "agent_count"
+            ],
+            "method": "standardized_rbf_random_fourier_mmd_permutation",
+            "null_hypothesis": "synthetic and trace-grounded joint feature distributions are equal",
+            "p_value": 0.001,
+            "permutations": 999,
+            "rff_dimensions": 64,
+            "seed": 19105,
+            "small_sample_warning": null,
+            "statistic": 0.31653823596431596,
+            "status": "available",
+            "synthetic_count": 80,
+            "trace_count": 30
+          },
+          "synthetic_count": 80,
+          "trace_count": 30
+        },
+        "fold_index": 9,
+        "holdout_group_sha256": "e3a6883cd9c837d0660fd31a80c3797adfb07c6edb8cbe55ceefaffc9754f0a6",
+        "holdout_record_count": 30,
+        "low_sample_warning": null,
+        "synthetic_instance_count": 80,
+        "train_group_count": 9,
+        "train_group_sha256": [
+          "09b0285d6d5729c48800bb783965e0ee48b712f9d712fe5009bb9c7dc529e94e",
+          "26270b2fc52ffe2508af31a2b649d38593a6990a766540af24adf1f1913c53cc",
+          "31bd8a4f246e67a06a789f518e9bfe77cf7b421193621b76cd6fa5a9d3ccb9a7",
+          "4e87b69c0186474076a4405aa3865639993c0b699e332815b66b7ed1d0e1d93d",
+          "6e4ee33fb28a3f42899a18f32b686156d00d6b452150f414d55c642e03ee9eec",
+          "b0357fff9a649a3c361f6f5c77416e44c9e51d44df0446e3cfe884ed5897738e",
+          "b5b0d716547192ed056fe2f4a602663a897b480a4f5c2513f39abc555e70866c",
+          "f3c8f37b1e515ac464402cf4d88f61878cf36e871e60d148d990b6078f62dadb",
+          "f4c47acce5d2b00529f6e681bc0cd288a584bcb8ff955461e62547a1426d559b"
+        ],
+        "train_record_count": 242
+      }
+    ],
+    "group_count": 10,
+    "group_key": "conversation_id",
+    "group_selection_sha256": null,
+    "low_sample_warning": "one or more held-out groups contain fewer than 20 trace instances; fold-level joint tests are low-power and unstable",
+    "method": "group_aware_cross_fitted_realism",
+    "parameter_ranges": {
+      "branch_factor": [
+        1,
+        3
+      ],
+      "concurrency": [
+        1,
+        3
+      ],
+      "policy_churn": [
+        0,
+        2
+      ],
+      "provenance_depth": [
+        1,
+        4
+      ],
+      "txn_size": [
+        1,
+        4
+      ]
+    },
+    "raw_group_ids_retained": false,
+    "realism_config_sha256": "ffd33004de460ea9be597ab01f73c9940e10198f9e056ef63eb348f299b12aed",
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "source_group_instance_counts_by_sha256": {
+      "09b0285d6d5729c48800bb783965e0ee48b712f9d712fe5009bb9c7dc529e94e": 31,
+      "26270b2fc52ffe2508af31a2b649d38593a6990a766540af24adf1f1913c53cc": 29,
+      "31bd8a4f246e67a06a789f518e9bfe77cf7b421193621b76cd6fa5a9d3ccb9a7": 30,
+      "4e87b69c0186474076a4405aa3865639993c0b699e332815b66b7ed1d0e1d93d": 32,
+      "6e4ee33fb28a3f42899a18f32b686156d00d6b452150f414d55c642e03ee9eec": 19,
+      "b0357fff9a649a3c361f6f5c77416e44c9e51d44df0446e3cfe884ed5897738e": 28,
+      "b5b0d716547192ed056fe2f4a602663a897b480a4f5c2513f39abc555e70866c": 19,
+      "e3a6883cd9c837d0660fd31a80c3797adfb07c6edb8cbe55ceefaffc9754f0a6": 30,
+      "f3c8f37b1e515ac464402cf4d88f61878cf36e871e60d148d990b6078f62dadb": 25,
+      "f4c47acce5d2b00529f6e681bc0cd288a584bcb8ff955461e62547a1426d559b": 29
+    },
+    "split_method": "leave_one_group_out",
+    "workloads": [
+      "atomic_multi_write",
+      "crash_during_commit",
+      "revoke_before_commit",
+      "scope_bypass",
+      "supersession_consistency",
+      "provenance_chain_repair",
+      "provenance_branch_repair",
+      "mixed_stress"
+    ]
+  },
+  "evidence": {
+    "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+    "instance_count": 10,
+    "oracle_match_by_variant": {
+      "Naive": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      },
+      "TxnMem": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      },
+      "TxnMem-NoPolicyCommit": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      },
+      "TxnMem-NoRepair": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      },
+      "TxnMem-NoTxn": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      }
+    },
+    "production_latency_claim": false,
+    "replay_envelope_operation_count": 20,
+    "replay_operation_count": 292,
+    "source_operation_count": 272,
+    "trace_ground_truth_native": false
+  },
+  "features": {
+    "agent_count": {
+      "mean_abs_diff": 1.0,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.0,
+        "lower": 1.0,
+        "sample_count_left": 0,
+        "sample_count_right": 2,
+        "seed": 5064,
+        "upper": 1.0
+      },
+      "relative_mean_abs_diff": 1.0,
+      "synthetic_mean": 0.0,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 0,
+        "seed": 5062,
+        "upper": 0.0
+      },
+      "synthetic_std": 0.0,
+      "trace_mean": 1.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.0,
+        "lower": 1.0,
+        "sample_count": 2,
+        "seed": 5063,
+        "upper": 1.0
+      },
+      "trace_std": 0.0
+    },
+    "branch_factor": {
+      "mean_abs_diff": 0.0,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count_left": 0,
+        "sample_count_right": 2,
+        "seed": 4055,
+        "upper": 0.0
+      },
+      "relative_mean_abs_diff": 0.0,
+      "synthetic_mean": 0.0,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 0,
+        "seed": 4053,
+        "upper": 0.0
+      },
+      "synthetic_std": 0.0,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 2,
+        "seed": 4054,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "operation_count": {
+      "mean_abs_diff": 31.5,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 31.5,
+        "lower": 31.5,
+        "sample_count_left": 0,
+        "sample_count_right": 2,
+        "seed": 19,
+        "upper": 31.5
+      },
+      "relative_mean_abs_diff": 1.0,
+      "synthetic_mean": 0.0,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 0,
+        "seed": 17,
+        "upper": 0.0
+      },
+      "synthetic_std": 0.0,
+      "trace_mean": 31.5,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 31.5,
+        "lower": 31.0,
+        "sample_count": 2,
+        "seed": 18,
+        "upper": 32.0
+      },
+      "trace_std": 0.5
+    },
+    "policy_change_rate": {
+      "mean_abs_diff": 0.0,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count_left": 0,
+        "sample_count_right": 2,
+        "seed": 2037,
+        "upper": 0.0
+      },
+      "relative_mean_abs_diff": 0.0,
+      "synthetic_mean": 0.0,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 0,
+        "seed": 2035,
+        "upper": 0.0
+      },
+      "synthetic_std": 0.0,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 2,
+        "seed": 2036,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "provenance_depth": {
+      "mean_abs_diff": 0.0,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count_left": 0,
+        "sample_count_right": 2,
+        "seed": 3046,
+        "upper": 0.0
+      },
+      "relative_mean_abs_diff": 0.0,
+      "synthetic_mean": 0.0,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 0,
+        "seed": 3044,
+        "upper": 0.0
+      },
+      "synthetic_std": 0.0,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 2,
+        "seed": 3045,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "transaction_size": {
+      "mean_abs_diff": 29.5,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 29.5,
+        "lower": 29.5,
+        "sample_count_left": 0,
+        "sample_count_right": 2,
+        "seed": 1028,
+        "upper": 29.5
+      },
+      "relative_mean_abs_diff": 1.0,
+      "synthetic_mean": 0.0,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 0,
+        "seed": 1026,
+        "upper": 0.0
+      },
+      "synthetic_std": 0.0,
+      "trace_mean": 29.5,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 29.5,
+        "lower": 29.0,
+        "sample_count": 2,
+        "seed": 1027,
+        "upper": 30.0
+      },
+      "trace_std": 0.5
+    }
+  },
+  "holdout_evidence": {
+    "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+    "instance_count": 2,
+    "oracle_match_by_variant": {
+      "Naive": {
+        "matched": 2,
+        "rate": 1.0,
+        "total": 2
+      },
+      "TxnMem": {
+        "matched": 2,
+        "rate": 1.0,
+        "total": 2
+      },
+      "TxnMem-NoPolicyCommit": {
+        "matched": 2,
+        "rate": 1.0,
+        "total": 2
+      },
+      "TxnMem-NoRepair": {
+        "matched": 2,
+        "rate": 1.0,
+        "total": 2
+      },
+      "TxnMem-NoTxn": {
+        "matched": 2,
+        "rate": 1.0,
+        "total": 2
+      }
+    },
+    "production_latency_claim": false,
+    "replay_envelope_operation_count": 4,
+    "replay_operation_count": 63,
+    "source_operation_count": 59,
+    "trace_ground_truth_native": false
+  },
+  "holdout_trace_inventory": {
+    "adapters": [
+      "locomo"
+    ],
+    "event_count": 59,
+    "instance_count": 2,
+    "sources": [
+      "locomo10_official_trace_grounded_projection"
+    ],
+    "status": "trace_supplied"
+  },
+  "joint_feature_comparison": false,
+  "mean_feature_relative_abs_diff": 0.5,
+  "multivariate_test": {
+    "claim_boundary": "a non-significant result is not evidence of distributional equivalence",
+    "feature_names": [
+      "operation_count",
+      "transaction_size",
+      "policy_change_rate",
+      "provenance_depth",
+      "branch_factor",
+      "agent_count"
+    ],
+    "method": "standardized_rbf_random_fourier_mmd_permutation",
+    "null_hypothesis": "synthetic and trace-grounded joint feature distributions are equal",
+    "p_value": null,
+    "permutations": 999,
+    "rff_dimensions": 64,
+    "seed": 10024,
+    "small_sample_warning": "joint-test inference is low-power and unstable when either sample has fewer than 20 instances",
+    "statistic": null,
+    "status": "insufficient_data",
+    "synthetic_count": 0,
+    "trace_count": 2
+  },
+  "split": {
+    "calibration_instance_count": 8,
+    "holdout_fraction": 0.2,
+    "holdout_instance_count": 2,
+    "holdout_record_count": 2,
+    "seed": 17,
+    "test_instance_count": 2,
+    "train_instance_count": 8,
+    "train_record_count": 8,
+    "unit": "episode"
+  },
+  "synthetic_count": 0,
+  "synthetic_source": null,
+  "trace_adapter": "locomo",
+  "trace_count": 2,
+  "trace_grounded_status": "trace_supplied",
+  "trace_inventory": {
+    "adapters": [
+      "locomo"
+    ],
+    "event_count": 272,
+    "instance_count": 10,
+    "sources": [
+      "locomo10_official_trace_grounded_projection"
+    ],
+    "status": "trace_supplied"
+  },
+  "trace_source_label": "locomo10_official_trace_grounded_projection",
+  "trace_source_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+  "trace_source_size_bytes": 2805274,
+  "train_trace_inventory": {
+    "adapters": [
+      "locomo"
+    ],
+    "event_count": 213,
+    "instance_count": 8,
+    "sources": [
+      "locomo10_official_trace_grounded_projection"
+    ],
+    "status": "trace_supplied"
+  }
+}

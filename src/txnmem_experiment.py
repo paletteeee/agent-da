@@ -47,6 +47,7 @@ from txnmem_performance import benchmark_replay
 from txnmem_realism import (
     calibrate_config,
     compare_distributions,
+    cross_fitted_realism,
     extract_trace_features,
     split_holdout,
     trace_evidence_summary,
@@ -63,6 +64,7 @@ from txnmem_reference import ORACLE_VERSION, reference_outcome
 from txnmem_schema import DEFAULT_CONFIG, load_workload_config
 from txnmem_simulator import VARIANTS, run_instance
 from txnmem_trace_pipeline import (
+    build_grouped_trace_instances,
     build_trace_instances,
     load_trace_records,
     replay_trace_instances,
@@ -362,6 +364,23 @@ def _build_parser() -> argparse.ArgumentParser:
     trace_replay.add_argument("--bootstrap-repetitions", type=int, default=2000)
     trace_replay.add_argument("--joint-permutations", type=int, default=999)
     trace_replay.add_argument("--joint-rff-dimensions", type=int, default=64)
+    trace_replay.add_argument(
+        "--group-key",
+        default=None,
+        help="optional complete conversation/family key for leave-one-group-out realism",
+    )
+    trace_replay.add_argument(
+        "--realism-config",
+        type=Path,
+        default=None,
+        help="range/statistics config required when --group-key is supplied",
+    )
+    trace_replay.add_argument(
+        "--group-selection",
+        type=Path,
+        default=None,
+        help="optional disjoint calibration/evaluation group inventory",
+    )
 
     performance = subparsers.add_parser(
         "performance", help="measure local deterministic replay timing"
@@ -783,6 +802,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {report['witness_count']} minimal mutant witnesses -> {args.out}")
         return 0
     if args.command == "trace-replay":
+        if (args.group_key is None) != (args.realism_config is None):
+            raise ValueError("--group-key and --realism-config must be supplied together")
+        if args.group_selection is not None and args.group_key is None:
+            raise ValueError("--group-selection requires --group-key and --realism-config")
         records = load_trace_records(args.events)
         train_records, holdout_records = split_holdout(
             records, args.holdout_fraction, seed=args.seed
@@ -833,6 +856,10 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
         )
         realism["trace_grounded_status"] = "trace_supplied" if instances else "not_supplied"
+        realism["trace_source_label"] = args.source
+        realism["trace_source_sha256"] = hashlib.sha256(args.events.read_bytes()).hexdigest()
+        realism["trace_source_size_bytes"] = args.events.stat().st_size
+        realism["trace_adapter"] = args.adapter
         realism["synthetic_source"] = str(args.synthetic_instances) if args.synthetic_instances else None
         realism["joint_feature_comparison"] = (
             realism["multivariate_test"]["status"] == "available"
@@ -862,6 +889,90 @@ def main(argv: list[str] | None = None) -> int:
         realism["holdout_evidence"] = trace_evidence_summary(
             holdout_instances, holdout_rows
         )
+        if args.group_key is not None:
+            loaded_config = json.loads(args.realism_config.read_text(encoding="utf-8"))
+            if not isinstance(loaded_config, dict):
+                raise ValueError("realism config must be a mapping")
+            synthetic_config = loaded_config.get("synthetic")
+            statistics_config = loaded_config.get("statistics", {})
+            if not isinstance(synthetic_config, dict) or not isinstance(
+                statistics_config, dict
+            ):
+                raise ValueError("realism config needs synthetic/statistics mappings")
+            grouped_instances = build_grouped_trace_instances(
+                records,
+                args.adapter,
+                group_key=args.group_key,
+                source=args.source,
+                seed=args.seed,
+            )
+            feature_records: list[dict[str, Any]] = []
+            group_instance_counts: dict[str, int] = {}
+            for group, instance in grouped_instances:
+                group_hash = hashlib.sha256(
+                    f"{args.group_key}\0{group}".encode("utf-8")
+                ).hexdigest()
+                group_instance_counts[group_hash] = group_instance_counts.get(group_hash, 0) + 1
+                feature_records.append(
+                    {
+                        **extract_trace_features(
+                            instance.get("operations", []),
+                            instance.get("failure_schedule", []),
+                        ),
+                        args.group_key: group,
+                    }
+                )
+            evaluation_groups = None
+            calibration_groups = None
+            selection_sha256 = None
+            if args.group_selection is not None:
+                selection = json.loads(args.group_selection.read_text(encoding="utf-8"))
+                if not isinstance(selection, dict):
+                    raise ValueError("group selection must be a mapping")
+                if selection.get("group_key") != args.group_key:
+                    raise ValueError("group selection key does not match --group-key")
+                evaluation_groups = selection.get(
+                    "evaluation_groups", selection.get("evaluation_family_ids")
+                )
+                calibration_groups = selection.get(
+                    "calibration_groups", selection.get("calibration_family_ids")
+                )
+                selection_sha256 = hashlib.sha256(
+                    args.group_selection.read_bytes()
+                ).hexdigest()
+            realism["cross_fitted"] = cross_fitted_realism(
+                feature_records,
+                args.group_key,
+                parameter_ranges=synthetic_config.get("parameter_ranges", {}),
+                seeds=synthetic_config.get("seeds", []),
+                workloads=synthetic_config.get("workloads", WORKLOADS),
+                evaluation_groups=evaluation_groups,
+                calibration_groups=calibration_groups,
+                bootstrap_repetitions=int(
+                    statistics_config.get(
+                        "bootstrap_repetitions", args.bootstrap_repetitions
+                    )
+                ),
+                joint_test_permutations=int(
+                    statistics_config.get("joint_test_permutations", args.joint_permutations)
+                ),
+                joint_test_dimensions=int(
+                    statistics_config.get(
+                        "joint_test_dimensions", args.joint_rff_dimensions
+                    )
+                ),
+                cluster_bootstrap_repetitions=int(
+                    statistics_config.get("cluster_bootstrap_repetitions", 2000)
+                ),
+                seed=int(loaded_config.get("seed", args.seed)),
+            )
+            realism["cross_fitted"]["source_group_instance_counts_by_sha256"] = dict(
+                sorted(group_instance_counts.items())
+            )
+            realism["cross_fitted"]["realism_config_sha256"] = hashlib.sha256(
+                args.realism_config.read_bytes()
+            ).hexdigest()
+            realism["cross_fitted"]["group_selection_sha256"] = selection_sha256
         write_summary(realism, args.out_dir / "results" / "trace_realism.json")
         print(f"adapted {len(records)} records into {len(instances)} trace instances")
         print(f"wrote trace replay artifacts -> {args.out_dir}")
