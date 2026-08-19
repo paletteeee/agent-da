@@ -1,7 +1,9 @@
 import json
+import hashlib
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -352,7 +354,7 @@ class LongMemEvalRunnerTests(unittest.TestCase):
         self.assertEqual(aggregate["official_qa_status"], "blocked")
         self.assertNotIn("official_qa_metrics", aggregate)
 
-    def test_only_pinned_successful_official_evaluator_report_activates_qa(self):
+    def test_caller_supplied_hashes_and_metrics_cannot_activate_official_qa(self):
         rows = [
             {
                 "question_id": "a",
@@ -384,34 +386,161 @@ class LongMemEvalRunnerTests(unittest.TestCase):
             },
         )
 
+        self.assertEqual(aggregate["official_qa_status"], "blocked")
+        self.assertNotIn("official_qa_metrics", aggregate)
+
+    def test_artifact_backed_official_evaluator_recomputes_metrics(self):
+        question_ids = [f"question-{index:03d}" for index in range(470)] + [
+            f"question-{index:03d}_abs" for index in range(30)
+        ]
+        question_types = [
+            "single-session-user",
+            "single-session-preference",
+            "single-session-assistant",
+            "multi-session",
+            "temporal-reasoning",
+            "knowledge-update",
+        ]
+        rows = []
+        hypotheses = []
+        evaluation_log = []
+        oracle = []
+        labels = []
+        for index, question_id in enumerate(question_ids):
+            is_abstention = question_id.endswith("_abs")
+            label = index % 3 != 0
+            labels.append(label)
+            rows.append(
+                {
+                    "question_id": question_id,
+                    "is_abstention": is_abstention,
+                    "evidence_session_count": 0 if is_abstention else 1,
+                    "retrieved_evidence_session_count": 0 if is_abstention else 1,
+                    "evidence_session_recall": None if is_abstention else 1.0,
+                    "model_usage": {},
+                }
+            )
+            hypothesis = {"question_id": question_id, "hypothesis": f"answer-{index}"}
+            hypotheses.append(hypothesis)
+            evaluation_log.append(
+                {
+                    **hypothesis,
+                    "autoeval_label": {
+                        "model": "gpt-4o-2024-08-06",
+                        "label": label,
+                    },
+                }
+            )
+            oracle.append(
+                {
+                    "question_id": question_id,
+                    "question_type": question_types[index % len(question_types)],
+                    "question": f"question text {index}",
+                    "answer": f"answer-{index}",
+                }
+            )
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            hypotheses_path = root / "hypotheses.jsonl"
+            log_path = root / "hypotheses.jsonl.eval-results-gpt-4o"
+            oracle_path = root / "oracle.json"
+            evaluator_path = root / "evaluate_qa.py"
+            metrics_path = root / "print_qa_metrics.py"
+            hypotheses_path.write_text(
+                "".join(json.dumps(item) + "\n" for item in hypotheses),
+                encoding="utf-8",
+            )
+            log_path.write_text(
+                "".join(json.dumps(item) + "\n" for item in evaluation_log),
+                encoding="utf-8",
+            )
+            oracle_path.write_text(json.dumps(oracle), encoding="utf-8")
+            evaluator_path.write_text("# pinned evaluator fixture\n", encoding="utf-8")
+            metrics_path.write_text("# pinned metrics fixture\n", encoding="utf-8")
+
+            def digest(path):
+                return hashlib.sha256(path.read_bytes()).hexdigest()
+
+            with (
+                patch("longmemeval_eval.LONGMEMEVAL_ORACLE_SHA256", digest(oracle_path)),
+                patch("longmemeval_eval.LONGMEMEVAL_ORACLE_SIZE_BYTES", oracle_path.stat().st_size),
+                patch("longmemeval_eval.LONGMEMEVAL_OFFICIAL_EVALUATOR_SHA256", digest(evaluator_path)),
+                patch("longmemeval_eval.LONGMEMEVAL_OFFICIAL_METRICS_SHA256", digest(metrics_path)),
+            ):
+                aggregate = aggregate_longmemeval(
+                    rows,
+                    official_evaluator_report={
+                        "status": "available",
+                        "command_succeeded": True,
+                        "returncode": 0,
+                        "evaluator_commit": LONGMEMEVAL_OFFICIAL_REPO_COMMIT,
+                        "metric_model": "gpt-4o-2024-08-06",
+                        "hypotheses_path": str(hypotheses_path),
+                        "evaluation_log_path": str(log_path),
+                        "reference_path": str(oracle_path),
+                        "evaluator_path": str(evaluator_path),
+                        "metrics_script_path": str(metrics_path),
+                    },
+                )
+
         self.assertEqual(aggregate["official_qa_status"], "available")
-        self.assertEqual(
-            aggregate["official_qa_metrics"]["overall_accuracy"], 0.5
+        self.assertAlmostEqual(
+            aggregate["official_qa_metrics"]["overall_accuracy"],
+            sum(labels) / len(labels),
         )
+        abstention_labels = labels[-30:]
+        self.assertAlmostEqual(
+            aggregate["official_qa_metrics"]["abstention_accuracy"],
+            sum(abstention_labels) / len(abstention_labels),
+        )
+        self.assertEqual(aggregate["official_qa_evaluated_question_count"], 500)
+        self.assertEqual(aggregate["official_qa_abstention_count"], 30)
 
     def test_official_output_has_only_required_keys_and_is_immutable(self):
+        question_ids = [f"q-{index:03d}" for index in range(470)] + [
+            f"q-{index:03d}_abs" for index in range(30)
+        ]
         rows = [
             {
-                "question_id": "q1",
-                "hypothesis": "answer one",
+                "question_id": question_id,
+                "hypothesis": f"answer {index}",
                 "retrieved_session_ids": ["private-session"],
-            },
-            {"question_id": "q2", "hypothesis": "answer two", "model_usage": {}},
+            }
+            for index, question_id in enumerate(question_ids)
         ]
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "hypotheses.jsonl"
-            write_official_hypotheses(rows, path)
+            write_official_hypotheses(
+                rows,
+                path,
+                expected_question_ids=question_ids,
+            )
             payloads = [json.loads(line) for line in path.read_text().splitlines()]
             with self.assertRaises(FileExistsError):
-                write_official_hypotheses(rows, path)
+                write_official_hypotheses(
+                    rows,
+                    path,
+                    expected_question_ids=question_ids,
+                )
 
-        self.assertEqual(
-            payloads,
-            [
-                {"question_id": "q1", "hypothesis": "answer one"},
-                {"question_id": "q2", "hypothesis": "answer two"},
-            ],
-        )
+        self.assertEqual(len(payloads), 500)
+        self.assertEqual(set(payloads[0]), {"question_id", "hypothesis"})
+        self.assertNotIn("private-session", json.dumps(payloads))
+
+    def test_official_output_rejects_partial_or_wrong_question_set(self):
+        formal_ids = [f"q-{index:03d}" for index in range(470)] + [
+            f"q-{index:03d}_abs" for index in range(30)
+        ]
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "hypotheses.jsonl"
+            with self.assertRaisesRegex(ValueError, "exact formal question ID set"):
+                write_official_hypotheses(
+                    [{"question_id": formal_ids[0], "hypothesis": "partial"}],
+                    path,
+                    expected_question_ids=formal_ids,
+                )
+            self.assertFalse(path.exists())
 
 
 class LongMemEvalSetupTests(unittest.TestCase):

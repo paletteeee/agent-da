@@ -17,6 +17,7 @@ import math
 import os
 from pathlib import Path
 import re
+from statistics import mean
 from typing import Any
 
 from txnmem_conditions import canonical_fingerprint, file_sha256
@@ -520,56 +521,161 @@ def run_longmemeval_item(
 
 def _validated_official_evaluator_report(
     report: Mapping[str, Any] | None,
-    question_count: int,
+    question_ids: Sequence[str],
+    abstention_count: int,
 ) -> dict[str, Any] | None:
+    """Validate official QA from immutable artifacts, never caller summaries."""
+
     if not isinstance(report, Mapping):
         return None
-    evaluator_sha = report.get("evaluator_sha256")
-    metrics = report.get("metrics")
-    metric_names = {
-        "overall_accuracy",
-        "task_averaged_accuracy",
-        "abstention_accuracy",
-    }
-    metrics_valid = (
-        isinstance(metrics, Mapping)
-        and set(metrics) == metric_names
-        and all(
-            not isinstance(value, bool)
-            and isinstance(value, (int, float))
-            and math.isfinite(float(value))
-            and 0.0 <= float(value) <= 1.0
-            for value in metrics.values()
-        )
-    )
-    sha_fields = ("hypotheses_sha256", "evaluation_log_sha256")
     if not (
         report.get("status") == "available"
         and report.get("command_succeeded") is True
         and type(report.get("returncode")) is int
         and report.get("returncode") == 0
-        and type(report.get("question_count")) is int
-        and report.get("question_count") == question_count
         and report.get("evaluator_commit") == LONGMEMEVAL_OFFICIAL_REPO_COMMIT
-        and evaluator_sha == LONGMEMEVAL_OFFICIAL_EVALUATOR_SHA256
-        and report.get("reference_sha256") == LONGMEMEVAL_ORACLE_SHA256
         and report.get("metric_model") == "gpt-4o-2024-08-06"
-        and all(
-            isinstance(report.get(field), str)
-            and re.fullmatch(r"[0-9a-f]{64}", report[field])
-            for field in sha_fields
-        )
-        and metrics_valid
+        and len(question_ids) == FORMAL_QUESTION_COUNT
+        and len(set(question_ids)) == FORMAL_QUESTION_COUNT
+        and abstention_count == FORMAL_ABSTENTION_COUNT
     ):
         return None
+
+    def artifact_path(field: str) -> Path:
+        value = report.get(field)
+        if not isinstance(value, (str, os.PathLike)):
+            raise ValueError(f"official evaluator report needs {field}")
+        path = Path(value)
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"official evaluator {field} must be a regular file")
+        return path
+
+    def jsonl(path: Path, label: str) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        try:
+            with path.open("r", encoding="utf-8") as stream:
+                for line_number, line in enumerate(stream, start=1):
+                    if not line.strip():
+                        raise ValueError(f"{label} contains a blank line")
+                    item = json.loads(line, object_pairs_hook=_reject_duplicate_keys)
+                    if not isinstance(item, dict):
+                        raise ValueError(f"{label} row {line_number} must be a mapping")
+                    rows.append(item)
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"{label} is not valid UTF-8 JSONL") from exc
+        return rows
+
+    try:
+        hypotheses_path = artifact_path("hypotheses_path")
+        evaluation_log_path = artifact_path("evaluation_log_path")
+        reference_path = artifact_path("reference_path")
+        evaluator_path = artifact_path("evaluator_path")
+        metrics_script_path = artifact_path("metrics_script_path")
+        if file_sha256(evaluator_path) != LONGMEMEVAL_OFFICIAL_EVALUATOR_SHA256:
+            raise ValueError("official evaluator script hash mismatch")
+        if file_sha256(metrics_script_path) != LONGMEMEVAL_OFFICIAL_METRICS_SHA256:
+            raise ValueError("official metrics script hash mismatch")
+
+        expected_ids = list(question_ids)
+        preflight_longmemeval_oracle(
+            reference_path,
+            expected_question_ids=expected_ids,
+            formal=True,
+            require_pinned_source=True,
+        )
+        with reference_path.open("r", encoding="utf-8") as stream:
+            reference_rows = json.load(stream, object_pairs_hook=_reject_duplicate_keys)
+        reference_types = {
+            str(item["question_id"]): str(item["question_type"])
+            for item in reference_rows
+        }
+
+        hypotheses = jsonl(hypotheses_path, "official hypotheses")
+        logs = jsonl(evaluation_log_path, "official evaluation log")
+        if len(hypotheses) != FORMAL_QUESTION_COUNT or len(logs) != FORMAL_QUESTION_COUNT:
+            raise ValueError("official evaluator artifacts must contain exactly 500 rows")
+        hypothesis_ids: list[str] = []
+        hypothesis_by_id: dict[str, str] = {}
+        for position, item in enumerate(hypotheses):
+            if set(item) != {"question_id", "hypothesis"}:
+                raise ValueError(f"official hypothesis {position} has unexpected fields")
+            question_id = _required_string(
+                item.get("question_id"), f"official hypothesis {position}.question_id"
+            )
+            hypothesis = item.get("hypothesis")
+            if not isinstance(hypothesis, str):
+                raise ValueError(f"official hypothesis {position}.hypothesis must be a string")
+            hypothesis_ids.append(question_id)
+            hypothesis_by_id[question_id] = hypothesis
+        if (
+            len(set(hypothesis_ids)) != FORMAL_QUESTION_COUNT
+            or set(hypothesis_ids) != set(expected_ids)
+        ):
+            raise ValueError("official hypotheses do not match the formal question ID set")
+
+        labels_by_id: dict[str, bool] = {}
+        log_ids: list[str] = []
+        for position, item in enumerate(logs):
+            if set(item) != {"question_id", "hypothesis", "autoeval_label"}:
+                raise ValueError(f"official evaluation log {position} has unexpected fields")
+            question_id = _required_string(
+                item.get("question_id"), f"official evaluation log {position}.question_id"
+            )
+            if item.get("hypothesis") != hypothesis_by_id.get(question_id):
+                raise ValueError("official evaluation log hypothesis mismatch")
+            label = item.get("autoeval_label")
+            if (
+                not isinstance(label, Mapping)
+                or set(label) != {"model", "label"}
+                or label.get("model") != "gpt-4o-2024-08-06"
+                or type(label.get("label")) is not bool
+            ):
+                raise ValueError("official evaluation log has an invalid fixed-judge label")
+            log_ids.append(question_id)
+            labels_by_id[question_id] = label["label"]
+        if (
+            log_ids != hypothesis_ids
+            or len(labels_by_id) != FORMAL_QUESTION_COUNT
+            or set(labels_by_id) != set(expected_ids)
+        ):
+            raise ValueError("official evaluation log does not match the hypotheses")
+
+        type_labels: dict[str, list[bool]] = {name: [] for name in QUESTION_TYPES}
+        for question_id in expected_ids:
+            type_labels[reference_types[question_id]].append(labels_by_id[question_id])
+        if any(not values for values in type_labels.values()):
+            raise ValueError("official evaluation log is missing a question type")
+        abstention_labels = [
+            labels_by_id[question_id]
+            for question_id in expected_ids
+            if question_id.endswith("_abs")
+        ]
+        if len(abstention_labels) != FORMAL_ABSTENTION_COUNT:
+            raise ValueError("official evaluation log must contain 30 abstention questions")
+        metrics = {
+            "overall_accuracy": mean(
+                float(labels_by_id[question_id]) for question_id in expected_ids
+            ),
+            "task_averaged_accuracy": mean(
+                mean(float(label) for label in type_labels[name])
+                for name in sorted(type_labels)
+            ),
+            "abstention_accuracy": mean(float(label) for label in abstention_labels),
+        }
+    except (KeyError, OSError, TypeError, ValueError):
+        return None
+
     return {
         "evaluator_commit": LONGMEMEVAL_OFFICIAL_REPO_COMMIT,
-        "evaluator_sha256": evaluator_sha,
-        "reference_sha256": LONGMEMEVAL_ORACLE_SHA256,
+        "evaluator_sha256": file_sha256(evaluator_path),
+        "metrics_script_sha256": file_sha256(metrics_script_path),
+        "reference_sha256": file_sha256(reference_path),
         "metric_model": report["metric_model"],
-        "hypotheses_sha256": report["hypotheses_sha256"],
-        "evaluation_log_sha256": report["evaluation_log_sha256"],
-        "metrics": {key: float(metrics[key]) for key in sorted(metric_names)},
+        "hypotheses_sha256": file_sha256(hypotheses_path),
+        "evaluation_log_sha256": file_sha256(evaluation_log_path),
+        "evaluated_question_count": len(logs),
+        "abstention_count": len(abstention_labels),
+        "metrics": metrics,
     }
 
 
@@ -640,19 +746,26 @@ def aggregate_longmemeval(
         "official_qa_reason": "pinned_official_evaluator_has_not_succeeded",
     }
     official = _validated_official_evaluator_report(
-        official_evaluator_report, len(question_ids)
+        official_evaluator_report, question_ids, abstention_count
     )
     if official is not None:
         aggregate["official_qa_status"] = "available"
         aggregate.pop("official_qa_reason", None)
         aggregate["official_qa_evaluator_commit"] = official["evaluator_commit"]
         aggregate["official_qa_evaluator_sha256"] = official["evaluator_sha256"]
+        aggregate["official_qa_metrics_script_sha256"] = official[
+            "metrics_script_sha256"
+        ]
         aggregate["official_qa_reference_sha256"] = official["reference_sha256"]
         aggregate["official_qa_metric_model"] = official["metric_model"]
         aggregate["official_qa_hypotheses_sha256"] = official["hypotheses_sha256"]
         aggregate["official_qa_evaluation_log_sha256"] = official[
             "evaluation_log_sha256"
         ]
+        aggregate["official_qa_evaluated_question_count"] = official[
+            "evaluated_question_count"
+        ]
+        aggregate["official_qa_abstention_count"] = official["abstention_count"]
         aggregate["official_qa_metrics"] = official["metrics"]
     return aggregate
 
@@ -660,8 +773,22 @@ def aggregate_longmemeval(
 def write_official_hypotheses(
     rows: Sequence[Mapping[str, Any]],
     path: str | Path,
+    *,
+    expected_question_ids: Sequence[str],
 ) -> None:
-    """Write the official two-field JSONL input without raw retrieval traces."""
+    """Write only a complete, exact formal question set for official QA."""
+
+    expected_ids = [
+        _required_string(value, f"expected_question_ids[{index}]")
+        for index, value in enumerate(expected_question_ids)
+    ]
+    if (
+        len(expected_ids) != FORMAL_QUESTION_COUNT
+        or len(set(expected_ids)) != FORMAL_QUESTION_COUNT
+        or sum(value.endswith("_abs") for value in expected_ids)
+        != FORMAL_ABSTENTION_COUNT
+    ):
+        raise ValueError("expected_question_ids must be the exact formal question ID set")
 
     payloads: list[dict[str, str]] = []
     question_ids: list[str] = []
@@ -676,6 +803,8 @@ def write_official_hypotheses(
         payloads.append({"question_id": question_id, "hypothesis": hypothesis})
     if len(set(question_ids)) != len(question_ids):
         raise ValueError("official hypotheses contain duplicate question IDs")
+    if len(question_ids) != FORMAL_QUESTION_COUNT or set(question_ids) != set(expected_ids):
+        raise ValueError("official hypotheses must match the exact formal question ID set")
     encoded = "".join(
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
         for payload in payloads
