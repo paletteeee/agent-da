@@ -269,7 +269,7 @@ def aggregate_repetition_summaries(
     if any(summary.get("model") != model for summary in summaries):
         raise ValueError("repetition model IDs differ")
     model_identity_values = [summary.get("model_identity") for summary in summaries]
-    if not all(isinstance(value, Mapping) for value in model_identity_values):
+    if not all(isinstance(value, Mapping) and value for value in model_identity_values):
         raise ValueError("repetition model identities differ or are missing")
     model_identities = {
         canonical_fingerprint(value) for value in model_identity_values
@@ -284,8 +284,14 @@ def aggregate_repetition_summaries(
         for summary in summaries
     ]
     available_scores = [score for score in scores if score is not None]
-    question_counts = [int(summary.get("question_count", 0)) for summary in summaries]
-    sample_counts = [int(summary.get("sample_count", 0)) for summary in summaries]
+    question_counts = [summary.get("question_count") for summary in summaries]
+    sample_counts = [summary.get("sample_count") for summary in summaries]
+    if any(type(value) is not int or value < 1 for value in question_counts):
+        raise ValueError("repetition question denominators are invalid")
+    if any(type(value) is not int or value < 1 for value in sample_counts):
+        raise ValueError("repetition sample denominators are invalid")
+    if len(set(question_counts)) != 1 or len(set(sample_counts)) != 1:
+        raise ValueError("repetition denominators differ")
     category_names = sorted(
         {
             str(category)
@@ -322,6 +328,8 @@ def aggregate_repetition_summaries(
         for repetition_index, items in enumerate(conversation_summary_sets):
             assert isinstance(items, list)
             conversation_ids: list[str] = []
+            repetition_question_count = 0
+            repetition_score_sum = 0.0
             for item in items:
                 if not isinstance(item, Mapping):
                     raise ValueError("invalid conversation score summary")
@@ -340,26 +348,38 @@ def aggregate_repetition_summaries(
                     raise ValueError("invalid conversation score sum")
                 conversation_ids.append(conversation_id)
                 conversation_mean = float(score_sum) / question_count
-                combined = combined_conversations.setdefault(
-                    conversation_id,
-                    {
-                        "conversation_id_sha256": conversation_id,
-                        "question_evaluation_count": 0,
-                        "score_sum": 0.0,
-                    },
-                )
-                combined["question_evaluation_count"] += question_count
-                combined["score_sum"] += float(score_sum)
-                cluster_rows.extend(
-                    {
-                        "conversation_id_sha256": conversation_id,
-                        "score": conversation_mean,
-                        "repetition": repetition_index + 1,
-                    }
-                    for _ in range(question_count)
-                )
+                repetition_question_count += question_count
+                repetition_score_sum += float(score_sum)
+                if summaries[repetition_index].get("status") == "available":
+                    combined = combined_conversations.setdefault(
+                        conversation_id,
+                        {
+                            "conversation_id_sha256": conversation_id,
+                            "question_evaluation_count": 0,
+                            "score_sum": 0.0,
+                        },
+                    )
+                    combined["question_evaluation_count"] += question_count
+                    combined["score_sum"] += float(score_sum)
+                    cluster_rows.extend(
+                        {
+                            "conversation_id_sha256": conversation_id,
+                            "score": conversation_mean,
+                            "repetition": repetition_index + 1,
+                        }
+                        for _ in range(question_count)
+                    )
             if len(conversation_ids) != len(set(conversation_ids)):
                 raise ValueError("duplicate conversation score identity")
+            if len(conversation_ids) != sample_counts[repetition_index]:
+                raise ValueError("conversation count disagrees with sample denominator")
+            if repetition_question_count != question_counts[repetition_index]:
+                raise ValueError("conversation questions disagree with repetition denominator")
+            if summaries[repetition_index].get("status") == "available" and abs(
+                repetition_score_sum / repetition_question_count
+                - float(summaries[repetition_index].get("mean_f1", 0.0))
+            ) > 1e-12:
+                raise ValueError("conversation scores disagree with repetition mean")
             if expected_conversation_ids is None:
                 expected_conversation_ids = conversation_ids
             elif conversation_ids != expected_conversation_ids:

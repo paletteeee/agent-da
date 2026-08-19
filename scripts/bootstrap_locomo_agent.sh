@@ -65,27 +65,66 @@ if [[ -n "$TXNMEM_EXISTING_PYTHONPATH" ]]; then
   TXNMEM_EVAL_PYTHONPATH="${TXNMEM_EVAL_PYTHONPATH}:${TXNMEM_EXISTING_PYTHONPATH}"
 fi
 
-if ! PYTHONPATH="$TXNMEM_EVAL_PYTHONPATH" "$TXNMEM_BASE_PYTHON" -c \
-  "import bert_score, joblib, matplotlib, nltk, pandas" 2>/dev/null; then
-  TXNMEM_LOCOMO_PACKAGES_PINNED=(
-    "nltk==3.9.2"
-    "joblib==1.5.3"
-    "bert-score==0.3.13"
-    "pandas==3.0.5"
-    "matplotlib==3.11.1"
-    "python-dateutil==2.9.0.post0"
-    "contourpy==1.3.3"
-    "cycler==0.12.1"
-    "fonttools==4.63.0"
-    "kiwisolver==1.5.0"
-    "pyparsing==3.3.2"
-  )
+TXNMEM_LOCOMO_PACKAGES_PINNED=(
+  "nltk==3.9.2"
+  "joblib==1.5.3"
+  "bert-score==0.3.13"
+  "pandas==3.0.5"
+  "matplotlib==3.11.1"
+  "python-dateutil==2.9.0.post0"
+  "contourpy==1.3.3"
+  "cycler==0.12.1"
+  "fonttools==4.63.0"
+  "kiwisolver==1.5.0"
+  "pyparsing==3.3.2"
+)
+
+verify_pinned_packages() {
+  TXNMEM_PACKAGES_PATH="$TXNMEM_LOCOMO_PACKAGES" \
+  PYTHONPATH="$TXNMEM_EVAL_PYTHONPATH" \
+  "$TXNMEM_BASE_PYTHON" - <<'PY'
+import os
+from importlib.metadata import PackageNotFoundError, distribution
+from pathlib import Path
+
+expected = {
+    "bert-score": "0.3.13",
+    "contourpy": "1.3.3",
+    "cycler": "0.12.1",
+    "fonttools": "4.63.0",
+    "joblib": "1.5.3",
+    "kiwisolver": "1.5.0",
+    "matplotlib": "3.11.1",
+    "nltk": "3.9.2",
+    "pandas": "3.0.5",
+    "pyparsing": "3.3.2",
+    "python-dateutil": "2.9.0.post0",
+}
+target = Path(os.environ["TXNMEM_PACKAGES_PATH"]).resolve()
+for name, pinned_version in expected.items():
+    try:
+        installed_version = distribution(name).version
+        location = Path(distribution(name).locate_file("")).resolve()
+    except PackageNotFoundError as exc:
+        raise SystemExit(f"missing pinned evaluator package: {name}") from exc
+    if installed_version != pinned_version:
+        raise SystemExit(
+            f"evaluator package version mismatch: {name} "
+            f"expected {pinned_version}, got {installed_version}"
+        )
+    if location != target and target not in location.parents:
+        raise SystemExit(f"evaluator package is outside isolated target: {name}")
+PY
+}
+
+if ! verify_pinned_packages 2>/dev/null; then
   "$TXNMEM_BASE_PYTHON" -m pip install \
     --target "$TXNMEM_LOCOMO_PACKAGES" \
     --no-deps \
     --upgrade \
     "${TXNMEM_LOCOMO_PACKAGES_PINNED[@]}"
 fi
+verify_pinned_packages
 
 PYTHONPATH="$TXNMEM_EVAL_PYTHONPATH" "$TXNMEM_BASE_PYTHON" - <<'PY'
 from task_eval.evaluation import eval_question_answering

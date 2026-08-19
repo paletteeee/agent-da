@@ -1,3 +1,4 @@
+import copy
 import unittest
 
 from txnmem_prompt_comparison import (
@@ -7,6 +8,32 @@ from txnmem_prompt_comparison import (
 
 
 class TxnMemPromptComparisonTests(unittest.TestCase):
+    @staticmethod
+    def _formal_locomo_summary(profile):
+        return {
+            "model": "qwen",
+            "model_identity": {"model": "qwen", "revision": "same"},
+            "condition_fingerprint": "same-condition",
+            "task_manifest_sha256": "same-task-manifest",
+            "prompt_profile": profile,
+            "repetition_count": 5,
+            "successful_repetition_count": 5,
+            "repetition_seeds": [17, 1017, 2017, 3017, 4017],
+            "mean_f1_by_repetition": [0.1] * 5,
+            "question_count_per_repetition": [2] * 5,
+            "sample_count_per_repetition": [1] * 5,
+            "category_f1_mean": {"1": 0.1},
+            "conversation_score_summaries": [
+                {
+                    "conversation_id_sha256": "a" * 64,
+                    "question_evaluation_count": 10,
+                    "score_sum": 1.0,
+                }
+            ],
+            "model_usage": {"total_tokens": 10},
+            "token_usage_complete": True,
+        }
+
     def test_locomo_comparison_pairs_identical_repetition_seeds(self):
         common = {
             "model": "qwen2.5-7b-instruct",
@@ -14,9 +41,10 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
             "task_manifest_sha256": "same-task-manifest",
             "model_identity": {"model": "qwen2.5-7b-instruct", "revision": "same"},
             "repetition_count": 5,
+            "successful_repetition_count": 5,
             "repetition_seeds": [17, 1017, 2017, 3017, 4017],
-            "question_count_per_repetition": [100, 100, 100, 100, 100],
-            "sample_count_per_repetition": [10, 10, 10, 10, 10],
+            "question_count_per_repetition": [6, 6, 6, 6, 6],
+            "sample_count_per_repetition": [2, 2, 2, 2, 2],
             "category_f1_mean": {"1": 0.1, "2": 0.2},
             "model_usage": {"total_tokens": 1000},
             "token_usage_complete": True,
@@ -103,18 +131,22 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
             "model_identity": {"model": "qwen", "revision": "same"},
             "condition_fingerprint": "same-condition",
             "task_manifest_sha256": "same-task-manifest",
+            "repetition_count": 3,
+            "successful_repetition_count": 3,
             "repetition_seeds": [17, 1017, 2017],
             "mean_f1_by_repetition": [0.1, 0.1, 0.1],
             "question_count_per_repetition": [1, 1, 1],
             "sample_count_per_repetition": [1, 1, 1],
         }
-        with self.assertRaisesRegex(ValueError, "five-seed"):
+        with self.assertRaisesRegex(ValueError, "repetition_count|five-seed"):
             compare_locomo_prompt_profiles(
                 {**common, "prompt_profile": "baseline"},
                 {**common, "prompt_profile": "tuned"},
             )
         formal = {
             **common,
+            "repetition_count": 5,
+            "successful_repetition_count": 5,
             "repetition_seeds": [17, 1017, 2017, 3017, 4017],
             "mean_f1_by_repetition": [0.1] * 5,
             "question_count_per_repetition": [1] * 5,
@@ -153,6 +185,34 @@ class TxnMemPromptComparisonTests(unittest.TestCase):
                     "condition_fingerprint": "condition-b",
                 },
             )
+
+    def test_locomo_comparison_requires_complete_formal_identity_and_denominators(self):
+        valid_baseline = self._formal_locomo_summary("baseline")
+        valid_tuned = self._formal_locomo_summary("tuned")
+        mutations = {
+            "missing repetition count": lambda row: row.pop("repetition_count"),
+            "wrong repetition count": lambda row: row.__setitem__("repetition_count", 4),
+            "empty model identity": lambda row: row.__setitem__("model_identity", {}),
+            "missing question denominators": lambda row: row.pop(
+                "question_count_per_repetition"
+            ),
+            "zero question denominator": lambda row: row.__setitem__(
+                "question_count_per_repetition", [2, 2, 0, 2, 2]
+            ),
+            "question total mismatch": lambda row: row.__setitem__(
+                "question_count_per_repetition", [2, 2, 2, 2, 3]
+            ),
+            "sample total mismatch": lambda row: row.__setitem__(
+                "sample_count_per_repetition", [2] * 5
+            ),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label):
+                baseline = copy.deepcopy(valid_baseline)
+                tuned = copy.deepcopy(valid_tuned)
+                mutate(tuned)
+                with self.assertRaises(ValueError):
+                    compare_locomo_prompt_profiles(baseline, tuned)
 
     def test_appworld_comparison_pairs_task_ids_and_official_assertions(self):
         def summary(profile, successes, passes, tokens):

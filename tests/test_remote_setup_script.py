@@ -45,6 +45,12 @@ class RemoteSetupScriptTests(unittest.TestCase):
         self.assertIn("bert-score==0.3.13", self.locomo_script)
         self.assertNotRegex(self.locomo_script, r"pip install[^\n]*torch")
 
+    def test_locomo_evaluator_rejects_importable_but_unpinned_packages(self):
+        self.assertIn("verify_pinned_packages", self.locomo_script)
+        self.assertGreaterEqual(self.locomo_script.count("verify_pinned_packages"), 3)
+        self.assertIn('"bert-score": "0.3.13"', self.locomo_script)
+        self.assertIn("distribution(name).locate_file", self.locomo_script)
+
     def test_locomo_evaluator_setup_runs_official_f1_smoke(self):
         self.assertIn("from task_eval.evaluation import eval_question_answering", self.locomo_script)
         self.assertIn("assert float(result[0][0]) == 1.0", self.locomo_script)

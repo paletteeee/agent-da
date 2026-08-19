@@ -4,7 +4,7 @@
 
 The LoCoMo paired evaluator now ingests every chronological session without a whole-conversation head/tail cap, bounds each individual model request, isolates memory by conversation/profile/repetition seed, enforces the formal five-seed schedule, and reports deterministic conversation-cluster bootstrap intervals. The baseline/tuned comparison rejects mismatched task manifests, model identities, condition fingerprints, seeds, per-repetition denominators, conversation IDs, or conversation denominators.
 
-Task 5 implementation and evaluator-environment preparation are complete. The formal five-repetition GPU batch belongs to Task 11 and has not been started while an unrelated user-owned GPU process occupies the server.
+Task 5 implementation and evaluator-environment preparation are complete. A first independent review found four fail-closedness/reproducibility gaps; all four have been corrected and the fresh corrective review is pending. The formal five-repetition GPU batch belongs to Task 11 and has not been started while an unrelated user-owned GPU process occupies the server.
 
 ## Interfaces implemented
 
@@ -18,7 +18,7 @@ Task 5 implementation and evaluator-environment preparation are complete. The fo
 
 ## Formal source preflight
 
-Fresh read-only inspection of `/home/suma/txnmem/external_data/raw/locomo10.json` produced:
+Fresh read-only inspection of `<remote-locomo-source>` produced:
 
 - Source SHA-256: `79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4`.
 - File size: 2,805,274 bytes.
@@ -56,6 +56,16 @@ Fresh read-only inspection of `/home/suma/txnmem/external_data/raw/locomo10.json
 - Full suite: 674 tests passed in 107.043 seconds; 4 optional dependency/data tests skipped; 0 failures/errors.
 - Claim audit: 15 active claims, 0 findings; diagnostic output only at `/tmp/txnmem-task5-controller-claim-audit.json`.
 - Artifact audit: 0 findings.
+
+## Independent-review correction pass
+
+The first fresh independent review returned `FAIL` with four actionable findings. The comparison now requires a nonempty identical model identity, exactly five successful repetitions, the exact formal seed schedule, five positive question/sample denominators, and consistency between those denominators and the combined per-conversation totals. Partial/error repetitions are excluded from both the profile estimate and the conversation bootstrap input, so the point estimate and interval use the same completed repetitions. The evaluator bootstrap verifies every exact lightweight dependency version and verifies that each distribution is physically loaded from the isolated target before and after installation. The environment-specific source path in this report was replaced by `<remote-locomo-source>`.
+
+- Corrective local focused suite: 38 tests passed, including path privacy.
+- Corrective server focused suite: 49 tests passed under the server model Python.
+- Exact server package verification: all 11 pinned lightweight distributions matched their declared versions and resolved inside the isolated target.
+- Python compilation, both setup-script syntax checks, `git diff --check`, and added-line private-material scan passed.
+- Final independent corrective review: pending.
 
 ## Security and evidence boundaries
 

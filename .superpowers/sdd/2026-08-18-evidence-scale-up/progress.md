@@ -162,3 +162,11 @@ Ruling: Bootstrap LoCoMo outcomes by whole conversation while preserving each co
 Ruling: Accept a baseline/tuned LoCoMo comparison only when task-manifest hash, model identity, condition fingerprint, five-seed schedule, repetition denominators, conversation identities, and conversation denominators all match — cost if wrong: otherwise plausible historical aggregates may be rejected until regenerated with complete identity metadata.
 
 Ruling: Pin the official LoCoMo evaluator to repository commit `3eb6f2c5…` and evaluator SHA-256 `8e3be5d5…`, install lightweight dependencies in an isolated target path, and never replace official F1 with a local judge — cost if wrong: environment setup is more explicit but avoids source drift and vLLM dependency mutation.
+
+Ruling: A formal LoCoMo profile comparison requires two complete five-repetition aggregates: nonempty identical model identities, five successful repetitions under the exact seed schedule, five positive question/sample denominators, and equality with combined conversation totals — cost if wrong: partial or underspecified historical comparisons remain diagnostic and cannot support the prompt-effect claim.
+
+Ruling: Profile means and conversation-cluster intervals include the same available repetitions; partial/error repetitions remain in execution accounting but contribute to neither score estimate — cost if wrong: intervals may be absent for wholly failed runs, but cannot contradict the reported point estimate.
+
+Ruling: Importability is not dependency reproducibility: every pinned lightweight LoCoMo distribution must match its exact version and resolve physically inside the isolated target before the evaluator smoke can pass — cost if wrong: an already importable global package set may trigger a one-time isolated installation.
+
+Task 5: corrective implementation complete; fresh independent re-review pending (first review found four issues; controller verification: 38 local focused tests and 49 server focused tests passed, all 11 lightweight package pins resolved inside the isolated target, private-path fix applied).

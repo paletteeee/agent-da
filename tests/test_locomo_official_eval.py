@@ -289,7 +289,7 @@ class LoCoMoOfficialEvalTests(unittest.TestCase):
                 {
                     "status": "available",
                     "model": "qwen2.5-7b-instruct",
-                    "sample_count": 10,
+                    "sample_count": 1,
                     "question_count": 1986,
                     "mean_f1": 0.2,
                     "condition_fingerprint": "same-condition",
@@ -316,7 +316,7 @@ class LoCoMoOfficialEvalTests(unittest.TestCase):
                 {
                     "status": "available",
                     "model": "qwen2.5-7b-instruct",
-                    "sample_count": 10,
+                    "sample_count": 1,
                     "question_count": 1986,
                     "mean_f1": 0.4,
                     "condition_fingerprint": "same-condition",
@@ -526,6 +526,15 @@ class LoCoMoOfficialEvalTests(unittest.TestCase):
         self.assertEqual(aggregate["status"], "partial")
         self.assertEqual(aggregate["successful_repetition_count"], 1)
         self.assertEqual(aggregate["mean_f1_by_repetition"], [0.5, None])
+        self.assertEqual(
+            aggregate["cluster_bootstrap_interval"]["estimate"], 0.5
+        )
+        self.assertEqual(
+            aggregate["conversation_score_summaries"][0][
+                "question_evaluation_count"
+            ],
+            2,
+        )
         self.assertEqual(aggregate["qa_batch_failure_count_total"], 1)
         self.assertEqual(aggregate["qa_question_successful_response_count_total"], 2)
         self.assertFalse(aggregate["token_usage_complete"])

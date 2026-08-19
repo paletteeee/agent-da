@@ -58,6 +58,17 @@ def _numbers(value: Any, field: str) -> list[float]:
     return numbers
 
 
+def _formal_positive_denominators(
+    summary: Mapping[str, Any], field: str
+) -> list[int]:
+    value = summary.get(field)
+    if not isinstance(value, list) or len(value) != 5:
+        raise ValueError(f"LoCoMo {field} must contain five denominators")
+    if any(type(item) is not int or item < 1 for item in value):
+        raise ValueError(f"LoCoMo {field} must contain five positive integers")
+    return list(value)
+
+
 def _locomo_conversation_scores(
     summary: Mapping[str, Any],
 ) -> dict[str, tuple[int, float]]:
@@ -92,13 +103,21 @@ def compare_locomo_prompt_profiles(
     _profile(baseline, "baseline")
     _profile(tuned, "tuned")
     condition_fingerprint = _condition_fingerprint_pair(baseline, tuned)
-    if baseline.get("model") != tuned.get("model"):
-        raise ValueError("LoCoMo model IDs differ")
+    baseline_model = baseline.get("model")
+    tuned_model = tuned.get("model")
+    if (
+        not isinstance(baseline_model, str)
+        or not baseline_model
+        or baseline_model != tuned_model
+    ):
+        raise ValueError("LoCoMo model IDs differ or are missing")
     baseline_identity = baseline.get("model_identity")
     tuned_identity = tuned.get("model_identity")
     if (
         not isinstance(baseline_identity, Mapping)
         or not isinstance(tuned_identity, Mapping)
+        or not baseline_identity
+        or not tuned_identity
         or dict(baseline_identity) != dict(tuned_identity)
     ):
         raise ValueError("LoCoMo model identities differ or are missing")
@@ -110,9 +129,25 @@ def compare_locomo_prompt_profiles(
         or baseline_manifest != tuned_manifest
     ):
         raise ValueError("LoCoMo task manifests differ or are missing")
-    baseline_seeds = list(baseline.get("repetition_seeds", []))
-    tuned_seeds = list(tuned.get("repetition_seeds", []))
-    if not baseline_seeds or baseline_seeds != tuned_seeds:
+    for summary in (baseline, tuned):
+        if type(summary.get("repetition_count")) is not int or summary.get(
+            "repetition_count"
+        ) != 5:
+            raise ValueError("LoCoMo comparison requires repetition_count=5")
+        if (
+            type(summary.get("successful_repetition_count")) is not int
+            or summary.get("successful_repetition_count") != 5
+        ):
+            raise ValueError("LoCoMo comparison requires five successful repetitions")
+    raw_baseline_seeds = baseline.get("repetition_seeds")
+    raw_tuned_seeds = tuned.get("repetition_seeds")
+    if not isinstance(raw_baseline_seeds, list) or not isinstance(
+        raw_tuned_seeds, list
+    ):
+        raise ValueError("LoCoMo repetition seed schedules are missing")
+    baseline_seeds = list(raw_baseline_seeds)
+    tuned_seeds = list(raw_tuned_seeds)
+    if baseline_seeds != tuned_seeds:
         raise ValueError("LoCoMo repetition seed schedules differ")
     if baseline_seeds != [17, 1017, 2017, 3017, 4017]:
         raise ValueError("LoCoMo comparison requires the formal five-seed schedule")
@@ -120,9 +155,13 @@ def compare_locomo_prompt_profiles(
     tuned_scores = _numbers(tuned.get("mean_f1_by_repetition"), "tuned scores")
     if len(baseline_scores) != len(tuned_scores) or len(baseline_scores) != len(baseline_seeds):
         raise ValueError("LoCoMo repetition denominators differ")
+    denominators: dict[str, list[int]] = {}
     for field in ("question_count_per_repetition", "sample_count_per_repetition"):
-        if list(baseline.get(field, [])) != list(tuned.get(field, [])):
+        baseline_denominators = _formal_positive_denominators(baseline, field)
+        tuned_denominators = _formal_positive_denominators(tuned, field)
+        if baseline_denominators != tuned_denominators:
             raise ValueError(f"LoCoMo {field} differs")
+        denominators[field] = baseline_denominators
     deltas = [round(right - left, 12) for left, right in zip(baseline_scores, tuned_scores)]
     categories = sorted(
         set(str(key) for key in baseline.get("category_f1_mean", {}))
@@ -137,6 +176,25 @@ def compare_locomo_prompt_profiles(
     tuned_conversations = _locomo_conversation_scores(tuned)
     if set(baseline_conversations) != set(tuned_conversations):
         raise ValueError("LoCoMo conversation task IDs differ")
+    expected_conversation_count = len(baseline_conversations)
+    sample_denominators = denominators["sample_count_per_repetition"]
+    if any(count != expected_conversation_count for count in sample_denominators):
+        raise ValueError("LoCoMo sample denominators disagree with conversation totals")
+    question_denominators = denominators["question_count_per_repetition"]
+    if len(set(question_denominators)) != 1:
+        raise ValueError("LoCoMo question denominators differ across repetitions")
+    expected_question_evaluations = sum(question_denominators)
+    if (
+        sum(count for count, _score in baseline_conversations.values())
+        != expected_question_evaluations
+        or sum(count for count, _score in tuned_conversations.values())
+        != expected_question_evaluations
+        or any(
+            count % 5 != 0
+            for count, _score in baseline_conversations.values()
+        )
+    ):
+        raise ValueError("LoCoMo question denominators disagree with conversation totals")
     paired_cluster_rows: list[dict[str, Any]] = []
     for conversation_id in sorted(baseline_conversations):
         left_count, left_sum = baseline_conversations[conversation_id]
@@ -161,14 +219,14 @@ def compare_locomo_prompt_profiles(
     token_comparison = _token_comparison(baseline, tuned)
     return {
         "comparison": "locomo_paired_prompt_profiles",
-        "model": baseline.get("model"),
+        "model": baseline_model,
         "condition_fingerprint": condition_fingerprint,
         "task_manifest_sha256": baseline_manifest,
         "model_identity": dict(baseline_identity),
         "paired_repetition_count": len(deltas),
         "repetition_seeds": baseline_seeds,
-        "question_count_per_repetition": baseline.get("question_count_per_repetition", []),
-        "sample_count_per_repetition": baseline.get("sample_count_per_repetition", []),
+        "question_count_per_repetition": question_denominators,
+        "sample_count_per_repetition": sample_denominators,
         "baseline_mean_f1_by_repetition": baseline_scores,
         "tuned_mean_f1_by_repetition": tuned_scores,
         "paired_mean_f1_deltas": deltas,
