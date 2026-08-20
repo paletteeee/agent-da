@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -1448,6 +1449,7 @@ class TxnMemRealExperimentTests(unittest.TestCase):
                 Path(tmp),
             )
             raw = (Path(tmp) / "data" / "native_model_traces.jsonl").read_text(encoding="utf-8")
+            raw_bytes = (Path(tmp) / "data" / "native_model_traces.jsonl").read_bytes()
             summary = (Path(tmp) / "results" / "native_model_summary.json").read_text(encoding="utf-8")
             parsed_summary = json.loads(summary)
         self.assertIn("native_event_count", result)
@@ -1456,6 +1458,15 @@ class TxnMemRealExperimentTests(unittest.TestCase):
         self.assertEqual(
             parsed_summary["raw_trace_path"],
             str(Path(tmp) / "data" / "native_model_traces.jsonl"),
+        )
+        self.assertEqual(
+            parsed_summary["native_trace_artifact"],
+            {
+                "line_count": 1,
+                "relative_path": "data/native_model_traces.jsonl",
+                "sha256": hashlib.sha256(raw_bytes).hexdigest(),
+                "size_bytes": len(raw_bytes),
+            },
         )
         self.assertNotIn("events", result)
 
@@ -1559,6 +1570,19 @@ class TxnMemRealExperimentTests(unittest.TestCase):
         self.assertEqual(report["model_usage"]["total_tokens"], 26)
         self.assertTrue(report["token_usage_complete"])
         self.assertEqual(report["task_summaries"][0]["benchmark_tool_trace"], [])
+        self.assertEqual(
+            [item["relative_path"] for item in report["native_trace_artifacts"]],
+            [
+                "rep_01/data/native_model_traces.jsonl",
+                "rep_02/data/native_model_traces.jsonl",
+            ],
+        )
+        self.assertTrue(
+            all(
+                len(item["sha256"]) == 64 and item["line_count"] == 1
+                for item in report["native_trace_artifacts"]
+            )
+        )
 
     def test_benchmark_batch_propagates_task_mode_with_unique_repetition_transactions(self):
         class _BatchTransactionBackend(InMemoryTransactionBackend):

@@ -286,6 +286,9 @@ class AppWorldAdapter(BenchmarkAdapter):
             if not isinstance(record, dict):
                 expanded.append(record)
                 continue
+            if super().classify(record) is not None:
+                expanded.append(record)
+                continue
             calls = record.get("api_calls") or record.get("calls")
             if isinstance(calls, list):
                 for call_index, call in enumerate(calls, start=1):

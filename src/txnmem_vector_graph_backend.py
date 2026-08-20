@@ -132,20 +132,43 @@ class _QdrantHTTPClient:
         }
 
     def _scroll(self, filters: Mapping[str, Any], limit: int = 1000) -> list[dict[str, Any]]:
+        if type(limit) is not int or limit <= 0:
+            raise ValueError("scroll limit must be positive")
         self._ensure_collection()
-        result = self._request(
-            "POST",
-            f"/collections/{self.collection}/points/scroll",
-            {
+        rows: list[dict[str, Any]] = []
+        offset: Any = None
+        observed_offsets: set[str] = set()
+        while len(rows) < limit:
+            page_limit = min(1000, limit - len(rows))
+            payload: dict[str, Any] = {
                 "filter": dict(filters),
-                "limit": int(limit),
+                "limit": page_limit,
                 "with_payload": True,
                 "with_vector": False,
-            },
-        )
-        page = result.get("result", {}) if isinstance(result, Mapping) else {}
-        rows = page.get("points", []) if isinstance(page, Mapping) else []
-        return [dict(row.get("payload", {})) for row in rows]
+            }
+            if offset is not None:
+                payload["offset"] = offset
+            result = self._request(
+                "POST",
+                f"/collections/{self.collection}/points/scroll",
+                payload,
+            )
+            page = result.get("result", {}) if isinstance(result, Mapping) else {}
+            page_rows = page.get("points", []) if isinstance(page, Mapping) else []
+            rows.extend(
+                dict(row.get("payload", {}))
+                for row in page_rows
+                if isinstance(row, Mapping)
+            )
+            next_offset = page.get("next_page_offset") if isinstance(page, Mapping) else None
+            if next_offset is None or not page_rows:
+                break
+            offset_key = json.dumps(next_offset, sort_keys=True, default=str)
+            if offset_key in observed_offsets:
+                raise RuntimeError("Qdrant scroll returned a repeated offset")
+            observed_offsets.add(offset_key)
+            offset = next_offset
+        return rows[:limit]
 
     def retrieve_many_by_txn(self, namespace, txn_id):
         try:
@@ -164,9 +187,11 @@ class _QdrantHTTPClient:
         return {"read_ok": True, "rows": rows}
 
     def scan_namespace(self, namespace, limit=1000):
+        if type(limit) is not int or limit <= 0:
+            raise ValueError("namespace scan limit must be a positive integer")
         try:
             rows = self._scroll(
-                self._must_filter(namespace=namespace), limit=int(limit)
+                self._must_filter(namespace=namespace), limit=limit
             )
         except Exception as exc:
             return {"read_ok": False, "error": type(exc).__name__}
@@ -190,8 +215,37 @@ class _Neo4jBoltClient:
             from neo4j import GraphDatabase
         except ImportError as exc:  # pragma: no cover - exercised on remote host
             raise RuntimeError("neo4j driver is required for the real graph backend") from exc
-        self.driver = GraphDatabase.driver(str(uri), auth=tuple(auth))
+        # Managed transactions retry callbacks implicitly.  Formal latency and
+        # retry accounting require one driver attempt per explicit transaction.
+        self.max_transaction_retry_time_seconds = 0.0
+        self.driver = GraphDatabase.driver(
+            str(uri),
+            auth=tuple(auth),
+            max_transaction_retry_time=self.max_transaction_retry_time_seconds,
+        )
         self._initialize_schema()
+
+    def _execute_write_once(self, work: Callable[[Any], Any]) -> Any:
+        """Execute exactly one explicit transaction without driver callback retry."""
+
+        if not callable(work):
+            raise ValueError("Neo4j transaction work must be callable")
+        with self.driver.session() as session:
+            transaction = session.begin_transaction()
+            try:
+                result = work(transaction)
+                transaction.commit()
+                return result
+            except BaseException:
+                try:
+                    transaction.rollback()
+                except BaseException:
+                    pass
+                raise
+            finally:
+                close = getattr(transaction, "close", None)
+                if callable(close):
+                    close()
 
     def _initialize_schema(self) -> None:
         """Atomically reconcile every legacy identity before installing constraints."""
@@ -375,12 +429,7 @@ class _Neo4jBoltClient:
             ).consume()
             return {"winner_count": len(winners), "loser_count": len(losers)}
 
-        with self.driver.session() as session:
-            execute_write = getattr(session, "execute_write", None)
-            if callable(execute_write):
-                execute_write(migrate)
-            else:  # pragma: no cover - compatibility with older driver shims
-                session.write_transaction(migrate)
+        self._execute_write_once(migrate)
         with self.driver.session() as session:
             session.run(
                 "CREATE CONSTRAINT memory_identity_unique IF NOT EXISTS "
@@ -693,11 +742,7 @@ class _Neo4jBoltClient:
                 ).consume()
             return {"status": "claimed", "memory_ids": []}
 
-        with self.driver.session() as session:
-            execute_write = getattr(session, "execute_write", None)
-            if callable(execute_write):
-                return execute_write(reserve)
-            return session.write_transaction(reserve)
+        return self._execute_write_once(reserve)
 
     def release_transaction_claims(
         self, namespace, txn_id, idempotency_key
@@ -978,11 +1023,7 @@ class _Neo4jBoltClient:
                 },
             }
 
-        with self.driver.session() as session:
-            execute_write = getattr(session, "execute_write", None)
-            if callable(execute_write):
-                return execute_write(transition)
-            return session.write_transaction(transition)
+        return self._execute_write_once(transition)
 
     def project_if_current(
         self, namespace, memory_id, operation_id, projector
@@ -1002,11 +1043,7 @@ class _Neo4jBoltClient:
             projector()
             return {"status": "projected"}
 
-        with self.driver.session() as session:
-            execute_write = getattr(session, "execute_write", None)
-            if callable(execute_write):
-                return execute_write(project)
-            return session.write_transaction(project)
+        return self._execute_write_once(project)
 
     def update_status(self, namespace, memory_id, status, idempotency_key, version=None):
         with self.driver.session() as session:
@@ -1058,6 +1095,41 @@ class _Neo4jBoltClient:
             "state_hash": record.get("state_hash"),
             "operation_id": record.get("operation_id"),
         }
+
+    def scan_namespace(self, namespace, limit=1000):
+        """Read canonical memory identities and provenance for one namespace."""
+
+        if type(limit) is not int or limit <= 0:
+            raise ValueError("namespace scan limit must be a positive integer")
+        try:
+            with self.driver.session() as session:
+                records = session.run(
+                    "MATCH (m:MemoryIdentity:Memory {namespace:$namespace}) "
+                    "WHERE coalesce(m.canonical, true) "
+                    "OPTIONAL MATCH (m)-[:DERIVED_FROM]->"
+                    "(s:MemoryIdentity {namespace:$namespace}) "
+                    "RETURN m.memory_id AS memory_id, m.status AS status, "
+                    "collect(DISTINCT s.memory_id) AS source_ids "
+                    "ORDER BY memory_id LIMIT $limit",
+                    namespace=namespace,
+                    limit=limit,
+                )
+                rows = [
+                    {
+                        "memory_id": str(record.get("memory_id")),
+                        "status": str(record.get("status")),
+                        "source_ids": sorted(
+                            str(source_id)
+                            for source_id in (record.get("source_ids") or [])
+                            if source_id is not None
+                        ),
+                    }
+                    for record in records
+                    if record.get("memory_id") is not None
+                ]
+        except Exception as exc:
+            return {"read_ok": False, "error": type(exc).__name__}
+        return {"read_ok": True, "rows": rows}
 
     def retrieve_many_by_txn(self, namespace, txn_id):
         try:
@@ -1165,6 +1237,9 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             self.qdrant_url, timeout_seconds=request_timeout_seconds
         )
         self.neo4j = neo4j_client or _Neo4jBoltClient(self.neo4j_uri, self.neo4j_auth)
+        self.neo4j_max_transaction_retry_time_seconds = getattr(
+            self.neo4j, "max_transaction_retry_time_seconds", None
+        )
         self.proxy_requester = proxy_requester
         self.embedder = embedder or _embedding
         self.max_retries = max(0, int(max_retries))
@@ -3569,6 +3644,121 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             "namespace": self.db_namespace,
             "qdrant": self.qdrant.healthcheck(),
             "neo4j": self.neo4j.healthcheck(),
+        }
+
+    def provenance_inventory(self, limit: int = 1000) -> dict[str, Any]:
+        """Return a payload-free cross-store graph inventory.
+
+        The inventory is complete only when Qdrant and Neo4j expose exactly
+        the same canonical IDs, statuses and provenance parents.  Read errors
+        are unknown; any disagreement is partial.
+        """
+
+        if type(limit) is not int or limit <= 0:
+            raise ValueError("provenance inventory limit must be a positive integer")
+        qdrant_scan = getattr(self.qdrant, "scan_namespace", None)
+        neo4j_scan = getattr(self.neo4j, "scan_namespace", None)
+        if not callable(qdrant_scan) or not callable(neo4j_scan):
+            return {
+                "classification": "unknown",
+                "node_count": None,
+                "edge_count": None,
+                "graph_sha256": None,
+                "status_counts": {},
+            }
+        key = self._key("provenance_inventory", str(limit))
+        try:
+            qdrant_result = self._call(
+                "qdrant",
+                "provenance_inventory",
+                lambda: qdrant_scan(self.db_namespace, limit=limit),
+                key,
+            )
+            neo4j_result = self._call(
+                "neo4j",
+                "provenance_inventory",
+                lambda: neo4j_scan(self.db_namespace, limit=limit),
+                key,
+            )
+        except Exception:
+            return {
+                "classification": "unknown",
+                "node_count": None,
+                "edge_count": None,
+                "graph_sha256": None,
+                "status_counts": {},
+            }
+        if (
+            not isinstance(qdrant_result, Mapping)
+            or not isinstance(neo4j_result, Mapping)
+            or qdrant_result.get("read_ok") is not True
+            or neo4j_result.get("read_ok") is not True
+            or not isinstance(qdrant_result.get("rows"), list)
+            or not isinstance(neo4j_result.get("rows"), list)
+        ):
+            return {
+                "classification": "unknown",
+                "node_count": None,
+                "edge_count": None,
+                "graph_sha256": None,
+                "status_counts": {},
+            }
+
+        def canonical_rows(
+            rows: Iterable[Mapping[str, Any]], source_field: str
+        ) -> dict[str, tuple[str, tuple[str, ...]]] | None:
+            canonical: dict[str, tuple[str, tuple[str, ...]]] = {}
+            for row in rows:
+                if not isinstance(row, Mapping) or row.get("memory_id") is None:
+                    return None
+                memory_id = str(row["memory_id"])
+                status = str(row.get("status", "unknown"))
+                raw_sources = row.get(source_field, []) or []
+                if isinstance(raw_sources, (str, bytes)) or not isinstance(
+                    raw_sources, Iterable
+                ):
+                    return None
+                source_ids = tuple(sorted({str(source) for source in raw_sources}))
+                material = (status, source_ids)
+                if memory_id in canonical:
+                    return None
+                canonical[memory_id] = material
+            return canonical
+
+        qdrant_rows = canonical_rows(qdrant_result["rows"], "derived_from")
+        neo4j_rows = canonical_rows(neo4j_result["rows"], "source_ids")
+        if qdrant_rows is None or neo4j_rows is None:
+            classification = "unknown"
+        elif qdrant_rows != neo4j_rows:
+            classification = "partial"
+        else:
+            classification = "complete"
+        if classification != "complete":
+            return {
+                "classification": classification,
+                "node_count": None,
+                "edge_count": None,
+                "graph_sha256": None,
+                "status_counts": {},
+            }
+
+        from txnmem_provenance_performance import canonical_graph_sha256
+
+        nodes = sorted(qdrant_rows)
+        edges = sorted(
+            (source_id, memory_id)
+            for memory_id, (_status, source_ids) in qdrant_rows.items()
+            for source_id in source_ids
+        )
+        statuses = [status for status, _source_ids in qdrant_rows.values()]
+        return {
+            "classification": "complete",
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "graph_sha256": canonical_graph_sha256(nodes, edges),
+            "status_counts": {
+                status: statuses.count(status) for status in sorted(set(statuses))
+            },
         }
 
     def metrics(self) -> dict[str, Any]:

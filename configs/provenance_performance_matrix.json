@@ -1,0 +1,11 @@
+{
+  "schema": "txnmem-provenance-performance-v1",
+  "graph_node_counts": [100, 1000, 10000],
+  "concurrency_levels": [1, 2, 4, 8, 16],
+  "repetitions": 30,
+  "graph_seed": 17,
+  "operations_per_type": 8,
+  "bootstrap_repetitions": 10000,
+  "bootstrap_seed": 17,
+  "request_timeout_seconds": 30.0
+}

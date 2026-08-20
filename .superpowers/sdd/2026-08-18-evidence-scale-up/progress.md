@@ -194,3 +194,138 @@ Ruling: A LongMemEval official score is derived only from immutable artifacts re
 Task 6: complete (implementation `768a760`, review correction `a9ad933`, final independent review PASS; 20/20 post-review local tests, 42/42 post-review combined server tests, 10 additional reviewer adversarial assertions, exact 500-question S/oracle preflight, 23,867 sessions, 246,750 turns, 890 retrieval evidence sessions, and a two-real-question/98-session offline wiring smoke; full 500-question Qwen run deferred to the formal-run task).
 
 Task 5: complete (implementation commit `962ba6f`, corrective commits `1d247ac`, `97c6375`, and `7327f58`; fourth fresh independent review PASS; 39 local focused tests, 36 latest Task-5 server tests, 11 exact isolated package pins, official F1 smoke, shell/privacy checks all passed).
+
+Ruling: AppWorld reference `api_calls.json` projection is diagnostic only and
+can never satisfy the formal realism gate. Formal evidence must be re-derived
+from a protected native Agent run bound to the frozen official parent manifest
+`f1b5946a…`, Test-N split `c3af4149…`, exact 168-task/56-family order,
+shard/task/repetition reports, execution/model/runtime/treatment/source
+identity, and SHA-256/size/line count for every private native trace — cost if
+wrong: AppWorld realism remains blocked until the full native Task-11 run
+exists, but copied split files plus fabricated source projections cannot acquire
+formal status.
+
+Ruling: Native AppWorld realism exports only structural memory evidence:
+operation order/kind and provenance identity relations survive deterministic
+local aliasing, while values, queries, prompts, tool arguments, endpoints and
+raw identifiers stay in private server traces — cost if wrong: semantic-content
+realism is outside this claim, but committed aggregates remain payload-free.
+
+Task 7: second independent review FAIL recorded (caller-controlled API-call
+source remained forgeable); native-trace corrective implementation now has
+12/12 focused tests and 94/94 latest combined AppWorld/real-model/CLI tests
+before final hardening. Third independent review and a fresh full-suite run are
+pending; no formal AppWorld result is active until Task 11 executes all 168
+native tasks.
+
+Ruling: A self-consistent native AppWorld run tree is only a
+`candidate_native_bundle`; formal promotion additionally requires an
+out-of-tree Task-11 launch/completion attestation whose exact byte hash is
+pre-registered by treatment outside the submitted run tree and whose launch,
+shard, condition, model/runtime/source/treatment and completion hashes all
+match fresh re-derivation — cost if wrong: AppWorld remains explicitly blocked
+until Task 11 produces and independently registers both treatment attestations,
+but caller-selected model/runtime identities cannot obtain formal status.
+
+Ruling: Native AppWorld selection is a closed exact schema and the CLI consumes
+only groups returned by the validated binding; prompt profile, trusted
+preflight and app-tool strategy must match at shard, task-summary and raw-trace
+levels; repetitions are exact positive integers and all shard/repetition
+directories are enumerated — cost if wrong: malformed historical bundles must
+be regenerated instead of being repaired by alias fields or ignored extras.
+
+Ruling: Native realism event and inventory exports are distinct, exclusive,
+no-follow files outside the protected run tree, and repository tracking status
+is not asserted by the bundle validator — cost if wrong: reruns use fresh
+versioned export paths and Git privacy is certified separately by artifact
+audit.
+
+Task 7: third independent review FAIL recorded (self-consistent caller-forged
+native execution plus five integrity findings). Trust-anchor correction now has
+20/20 focused tests, 101/101 combined AppWorld/real-model/CLI tests, diff check
+and artifact audit 0 findings; the fresh full suite passed 751 tests with four
+optional runtime/data skips. Fourth independent review is pending.
+
+Ruling: JSON bool/int equality is never evidence equality: per-task preflight
+flags require exact booleans and event counts require exact nonnegative
+integers; rejected output paths are resolved and checked against the protected
+run before any parent creation; event and inventory paths must be neither equal
+nor ancestors of one another — cost if wrong: loosely typed or aliased bundles
+fail closed and must be regenerated into fresh sibling files.
+
+Ruling: Bundle producers describe whether raw payloads are included in an
+export/summary and do not assert whether files are Git-committed; repository
+tracking is certified only by the separate artifact audit — cost if wrong:
+legacy field names are not reused for new evidence schemas.
+
+Task 7: fourth independent review FAIL recorded after confirming the central
+trust anchor; bool/int type confusion, pre-rejection mutation, ancestor aliases
+and two Git-state labels are fixed. Controller verification is 23/23 focused,
+140/140 combined, 754/754 full-suite tests with four optional skips, diff check
+and artifact audit 0; fifth review is pending.
+
+Task 7: complete. Fifth fresh independent review PASS with no critical,
+important or minor findings; reviewer re-ran forged 168-task native trees,
+unregistered/mismatched attestations, bool/int confusion, missing in-tree output
+parents, equality/ancestor aliases, existing files and symlinks. Current
+Task-11 registry intentionally remains empty, so no formal AppWorld result is
+active before the real baseline/tuned execution and attestation registration.
+
+Ruling: Backend performance uses one unique namespace and one whole-repetition
+statistical unit per matrix repetition; preload/readback are excluded from
+latency, throughput counts successful operations only, and any unverified
+health/isolation/graph state makes the repetition ineligible — cost if wrong:
+failed or shared-host runs remain diagnostic and the formal curve may require a
+fresh idle-host rerun.
+
+Ruling: Formal provenance inventory requires exact Qdrant/Neo4j equality for
+canonical memory IDs, statuses and provenance parents, with paginated reads
+beyond 1,000 rows; partial or unreadable stores never collapse to absence —
+cost if wrong: readback adds unmeasured setup/verification time to every
+repetition but prevents a split store from entering the performance aggregate.
+
+Task 8: producer implementation verified; independent review and Task-10 real
+15×30 service execution pending (full local suite 731 passed with four optional
+skips; artifact audit 0; no production performance claim activated).
+
+Task 8/9: seventh independent review BLOCKED formal execution on three critical
+and three important findings: bootstrap export omitted configs, installation and
+commit approval were mutable, Neo4j managed transactions could retry invisibly,
+continuous load was not fail-closed, and the child-exit boundary lacked a
+terminal sample. The reviewer separately confirmed that post-nft Toxiproxy
+zero-counter attribution, locked runtime import, process isolation, candidate
+sealing and backend port isolation were effective.
+
+Ruling: a formal controller executes only source/config/compose/wrapper blobs in
+a canonical root-owned approval manifest generated from an administrator-supplied
+exact Git commit; HEAD drift, blob drift, a mixed interrupted installation or a
+dirty running installer fails closed — cost if wrong: every source correction
+requires reinstalling a newly approved generation before any formal run.
+
+Ruling: Neo4j formal writes use one explicit transaction and configure
+`max_transaction_retry_time=0`; both the TxnMem retry ceiling and driver retry
+window are recorded as zero in every eligible repetition — cost if wrong:
+transient failures remain failures and are rerun only as new statistical units.
+
+Ruling: continuous execution integrity uses a normalized load-1 ceiling of one
+runnable task per logical CPU, rejects drift at every sample, and records a
+synchronous terminal probe after observed child exit while the nft guard remains
+active — cost if wrong: a busy host or a boundary gap invalidates the complete
+450-repetition candidate rather than selectively dropping affected rows.
+
+Task 8/9 corrective verification after the seventh review: 180/180 focused
+tests, 840/840 full-suite tests with four optional skips, Python compilation,
+three shell syntax checks, diff check, artifact audit 0 and claim audit 15/15
+passed. Eighth fresh independent review and real Linux/Docker production-entry
+smoke remain pending; no production performance claim is active.
+
+Task 8/9 eighth fresh independent review: PASS with no Critical/Important
+findings across the fixed eight-item boundary; the reviewer independently ran
+17/17 targeted tests and rechecked shell syntax, Python compilation and diff
+integrity. The local full suite was also rerun after the final safe-directory
+change (840 tests passed, four optional skips), with artifact audit 0 and claim
+audit 15/15. Real Linux/Docker production-entry execution remains pending: the
+authorized server currently accepts the SSH TCP connection but closes it before
+authentication, while its alternate IPv6 route times out. No formal provenance
+candidate or production performance claim is active until that infrastructure
+boundary is restored and the controller smoke succeeds.

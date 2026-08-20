@@ -990,6 +990,11 @@ def run_benchmark_agent(
         "trusted_preflight_enabled": (
             prompt_profile == "tuned" and adapter.dataset == "appworld"
         ),
+        "app_tool_strategy": (
+            str(getattr(adapter, "tool_strategy", "manifest_scoped"))
+            if adapter.dataset == "appworld"
+            else "benchmark_default_tools"
+        ),
     }
     memory_schemas = NativeMemoryToolGateway.schemas()
     schemas = build_merged_schemas(memory_schemas, benchmark_schemas)

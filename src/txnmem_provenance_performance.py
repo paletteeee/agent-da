@@ -1,0 +1,2583 @@
+"""Deterministic provenance-DAG performance workloads and accounting.
+
+The module deliberately separates measured operations from graph preload and
+readback.  Formal runs fail closed unless both persistent stores are healthy,
+the namespace is initially empty, the preloaded graph is exact, the final
+provenance closure is exact, and the execution environment is attested as
+isolated.  Only generated identifiers, counts, hashes and timing metadata are
+returned; memory values and service endpoints never enter result artifacts.
+"""
+
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import math
+import os
+import random
+import re
+import secrets
+import stat
+import threading
+import time
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Iterable, Mapping, Sequence
+
+from txnmem_backend import InstrumentedMemoryBackend
+from txnmem_provenance_contract import is_registered_service_version
+
+
+GRAPH_SCHEMA = "txnmem-provenance-dag-v1"
+MATRIX_SCHEMA = "txnmem-provenance-performance-v1"
+OPERATION_TYPES = ("read", "search", "derive", "invalidate_repair")
+_SAFE_ERROR_CLASS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+ENVIRONMENT_SCHEMA = "txnmem-provenance-environment-v1"
+FORMAL_MATRIX_CONFIG = {
+    "schema": MATRIX_SCHEMA,
+    "graph_node_counts": [100, 1000, 10000],
+    "concurrency_levels": [1, 2, 4, 8, 16],
+    "repetitions": 30,
+    "graph_seed": 17,
+    "operations_per_type": 8,
+    "bootstrap_repetitions": 10_000,
+    "bootstrap_seed": 17,
+    "request_timeout_seconds": 30.0,
+}
+_CONFIG_FIELDS = frozenset(FORMAL_MATRIX_CONFIG)
+_ENVIRONMENT_FIELDS = frozenset(
+    {
+        "schema",
+        "isolation_verified",
+        "co_tenant_load_detected",
+        "source",
+        "cpu_logical_count",
+        "memory_total_bytes",
+        "disk_medium",
+        "toxiproxy_version",
+    }
+)
+_ENVIRONMENT_SOURCES = frozenset(
+    {
+        "host-observation-v1",
+        "scheduler-observation-v1",
+        "cross-host-observation-v1",
+        "collector-observation-v2",
+    }
+)
+_DISK_MEDIA = frozenset({"nvme", "ssd", "hdd", "network-block"})
+
+
+class ProvenancePerformanceError(RuntimeError):
+    """Raised when evidence cannot satisfy the formal performance boundary."""
+
+
+@dataclass(frozen=True)
+class GraphSpec:
+    """A canonical, topologically ordered provenance graph."""
+
+    nodes: tuple[str, ...]
+    edges: tuple[tuple[str, str], ...]
+    layers: tuple[int, ...]
+    seed: int
+    graph_sha256: str
+
+    @property
+    def node_count(self) -> int:
+        return len(self.nodes)
+
+    @property
+    def edge_count(self) -> int:
+        return len(self.edges)
+
+    @property
+    def depth(self) -> int:
+        return max(self.layers, default=-1) + 1
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "schema": GRAPH_SCHEMA,
+            "node_count": self.node_count,
+            "edge_count": self.edge_count,
+            "depth": self.depth,
+            "seed": self.seed,
+            "graph_sha256": self.graph_sha256,
+        }
+
+
+def _strict_positive_integer(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def _strict_integer(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+    return value
+
+
+def _strict_nonnegative_integer(value: Any, name: str) -> int:
+    value = _strict_integer(value, name)
+    if value < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return value
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite_json(value: str) -> Any:
+    raise ValueError(f"non-finite JSON number: {value}")
+
+
+def _finite_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError(f"non-finite JSON number: {value}")
+    return parsed
+
+
+def load_strict_json_document(path: str | Path) -> tuple[Any, bytes]:
+    """Load one regular JSON file without symlinks, duplicates, or nonfinite values."""
+
+    requested = Path(os.path.abspath(os.fspath(Path(path).expanduser())))
+    parts = requested.parts
+    if not parts or parts[0] != os.sep or len(parts) < 2:
+        raise ValueError("formal JSON input must be an absolute regular file")
+    directory_descriptor: int | None = None
+    descriptor: int | None = None
+    try:
+        directory_descriptor = os.open(
+            os.sep,
+            os.O_RDONLY
+            | os.O_DIRECTORY
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
+        )
+        for component in parts[1:-1]:
+            child = os.open(
+                component,
+                os.O_RDONLY
+                | os.O_DIRECTORY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+                dir_fd=directory_descriptor,
+            )
+            os.close(directory_descriptor)
+            directory_descriptor = child
+        descriptor = os.open(
+            parts[-1],
+            os.O_RDONLY
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
+            dir_fd=directory_descriptor,
+        )
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("formal JSON input must be a regular file")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = None
+            raw = stream.read()
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("cannot read strict JSON input") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+        if directory_descriptor is not None:
+            os.close(directory_descriptor)
+    try:
+        decoded = raw.decode("utf-8")
+        value = json.loads(
+            decoded,
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_nonfinite_json,
+            parse_float=_finite_json_float,
+        )
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("malformed strict JSON input") from exc
+    return value, raw
+
+
+def load_strict_json_file(path: str | Path) -> Any:
+    return load_strict_json_document(path)[0]
+
+
+def _canonical_json_bytes(value: Any) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("value is not finite canonical JSON") from exc
+
+
+def validate_matrix_config(config: Mapping[str, Any], *, formal: bool) -> dict[str, Any]:
+    """Validate the closed performance configuration before any backend call."""
+
+    if type(formal) is not bool:
+        raise ValueError("formal must be a boolean")
+    if not isinstance(config, Mapping):
+        raise ValueError("provenance performance config must be a mapping")
+    if set(config) != _CONFIG_FIELDS:
+        raise ValueError("provenance performance config fields do not match schema")
+    normalized = copy.deepcopy(dict(config))
+    if normalized.get("schema") != MATRIX_SCHEMA:
+        raise ValueError("provenance performance config schema mismatch")
+    expand_matrix(normalized)
+    _strict_positive_integer(
+        normalized.get("bootstrap_repetitions"), "bootstrap_repetitions"
+    )
+    _strict_integer(normalized.get("bootstrap_seed"), "bootstrap_seed")
+    timeout = normalized.get("request_timeout_seconds")
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(float(timeout))
+        or float(timeout) <= 0.0
+    ):
+        raise ValueError("request_timeout_seconds must be a positive finite number")
+    _canonical_json_bytes(normalized)
+    if formal and _canonical_json_bytes(normalized) != _canonical_json_bytes(
+        FORMAL_MATRIX_CONFIG
+    ):
+        raise ValueError("formal provenance performance config must match the frozen config")
+    return normalized
+
+
+def formal_matrix_config_sha256() -> str:
+    return hashlib.sha256(_canonical_json_bytes(FORMAL_MATRIX_CONFIG)).hexdigest()
+
+
+def formal_config_file_sha256() -> str:
+    path = Path(__file__).resolve().parents[1] / "configs" / "provenance_performance_matrix.json"
+    document, raw = load_strict_json_document(path)
+    validated = validate_matrix_config(document, formal=True)
+    if _canonical_json_bytes(validated) != _canonical_json_bytes(FORMAL_MATRIX_CONFIG):
+        raise ProvenancePerformanceError("repository formal config file is not frozen")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def formal_matrix_workload_sha256() -> str:
+    config = validate_matrix_config(FORMAL_MATRIX_CONFIG, formal=True)
+    graph_metadata = [
+        build_layered_dag(node_count, int(config["graph_seed"])).metadata()
+        for node_count in config["graph_node_counts"]
+    ]
+    material = {
+        "schema": "txnmem-provenance-formal-workload-v1",
+        "config_sha256": formal_matrix_config_sha256(),
+        "graphs": graph_metadata,
+        "operation_types": list(OPERATION_TYPES),
+    }
+    return hashlib.sha256(_canonical_json_bytes(material)).hexdigest()
+
+
+def cell_reports_sha256(reports: Sequence[Mapping[str, Any]]) -> str:
+    if isinstance(reports, (str, bytes)) or not isinstance(reports, Sequence):
+        raise ValueError("cell reports must be a sequence")
+    material = []
+    for report in reports:
+        if not isinstance(report, Mapping):
+            raise ValueError("cell report must be a mapping")
+        material.append(copy.deepcopy(dict(report)))
+    material.sort(key=lambda report: str(report.get("cell_id", "")))
+    return hashlib.sha256(_canonical_json_bytes(material)).hexdigest()
+
+
+def _canonical_graph_material(
+    nodes: Iterable[str], edges: Iterable[Sequence[str]]
+) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
+    canonical_nodes = tuple(sorted(str(node) for node in nodes))
+    if len(set(canonical_nodes)) != len(canonical_nodes):
+        raise ValueError("graph node identifiers must be unique")
+    node_set = set(canonical_nodes)
+    canonical_edges_list: list[tuple[str, str]] = []
+    for raw_edge in edges:
+        if len(raw_edge) != 2:
+            raise ValueError("each graph edge must have two endpoints")
+        source, target = (str(raw_edge[0]), str(raw_edge[1]))
+        if source == target:
+            raise ValueError("self edges are not permitted")
+        if source not in node_set or target not in node_set:
+            raise ValueError("graph edge endpoint is missing from nodes")
+        canonical_edges_list.append((source, target))
+    canonical_edges = tuple(sorted(canonical_edges_list))
+    if len(set(canonical_edges)) != len(canonical_edges):
+        raise ValueError("graph edges must be unique")
+    return canonical_nodes, canonical_edges
+
+
+def canonical_graph_sha256(
+    nodes: Iterable[str], edges: Iterable[Sequence[str]]
+) -> str:
+    """Hash only graph identity and provenance edges, never payload values."""
+
+    canonical_nodes, canonical_edges = _canonical_graph_material(nodes, edges)
+    encoded = json.dumps(
+        {
+            "schema": GRAPH_SCHEMA,
+            "nodes": canonical_nodes,
+            "edges": canonical_edges,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _stable_rank(seed: int, target: str, parent: str) -> bytes:
+    return hashlib.sha256(
+        f"{seed}\0{target}\0{parent}".encode("utf-8")
+    ).digest()
+
+
+def build_layered_dag(node_count: int, seed: int) -> GraphSpec:
+    """Build a connected deterministic DAG with one or two prior-layer parents."""
+
+    node_count = _strict_positive_integer(node_count, "node_count")
+    seed = _strict_integer(seed, "seed")
+    width = max(6, len(str(node_count - 1)))
+    nodes = tuple(f"n{index:0{width}d}" for index in range(node_count))
+    layers = tuple(int(math.floor(math.log2(index + 1))) for index in range(node_count))
+    edges: list[tuple[str, str]] = []
+    for target_index in range(1, node_count):
+        layer = layers[target_index]
+        previous_start = (2 ** (layer - 1)) - 1
+        previous_end = min((2**layer) - 2, target_index - 1)
+        candidates = list(range(previous_start, previous_end + 1))
+        target = nodes[target_index]
+        ranked = sorted(
+            candidates,
+            key=lambda index: (_stable_rank(seed, target, nodes[index]), nodes[index]),
+        )
+        count_digest = hashlib.sha256(
+            f"{seed}\0{target}\0parent-count".encode("utf-8")
+        ).digest()
+        parent_count = 1 if len(ranked) == 1 else 1 + (count_digest[0] % 2)
+        for parent_index in sorted(ranked[:parent_count]):
+            edges.append((nodes[parent_index], target))
+    canonical_nodes, canonical_edges = _canonical_graph_material(nodes, edges)
+    graph_hash = canonical_graph_sha256(canonical_nodes, canonical_edges)
+    return GraphSpec(
+        nodes=nodes,
+        edges=canonical_edges,
+        layers=layers,
+        seed=seed,
+        graph_sha256=graph_hash,
+    )
+
+
+def _positive_axis(config: Mapping[str, Any], key: str) -> tuple[int, ...]:
+    raw = config.get(key)
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(f"{key} must be a non-empty list")
+    values = tuple(_strict_positive_integer(value, key) for value in raw)
+    if len(set(values)) != len(values):
+        raise ValueError(f"{key} must not contain duplicates")
+    return values
+
+
+def expand_matrix(config: Mapping[str, Any]) -> list[dict[str, int | str]]:
+    """Expand graph-size and concurrency axes in stable source order."""
+
+    if not isinstance(config, Mapping):
+        raise ValueError("matrix config must be a mapping")
+    node_counts = _positive_axis(config, "graph_node_counts")
+    concurrency_levels = _positive_axis(config, "concurrency_levels")
+    repetitions = _strict_positive_integer(config.get("repetitions"), "repetitions")
+    operations_per_type = _strict_positive_integer(
+        config.get("operations_per_type"), "operations_per_type"
+    )
+    graph_seed = _strict_integer(config.get("graph_seed", 17), "graph_seed")
+    cells: list[dict[str, int | str]] = []
+    for node_count in node_counts:
+        for concurrency in concurrency_levels:
+            cells.append(
+                {
+                    "cell_id": f"n{node_count}-c{concurrency}",
+                    "graph_node_count": node_count,
+                    "concurrency": concurrency,
+                    "repetitions": repetitions,
+                    "operations_per_type": operations_per_type,
+                    "graph_seed": graph_seed,
+                }
+            )
+    return cells
+
+
+def _hash_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _safe_health(raw: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    if not isinstance(raw, Mapping):
+        return result
+    for service in ("qdrant", "neo4j"):
+        value = raw.get(service)
+        if not isinstance(value, Mapping):
+            continue
+        version = value.get("version")
+        safe_version = version if is_registered_service_version(service, version) else None
+        result[service] = {
+            "available": value.get("available") is True,
+            "version": safe_version,
+        }
+    return result
+
+
+def _safe_environment(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, Mapping):
+        return {
+            "schema": ENVIRONMENT_SCHEMA,
+            "isolation_verified": False,
+            "co_tenant_load_detected": None,
+            "source": "unavailable",
+            "cpu_logical_count": None,
+            "memory_total_bytes": None,
+            "disk_medium": None,
+            "toxiproxy_version": None,
+            "attestation_sha256": None,
+        }
+
+    if set(raw) != _ENVIRONMENT_FIELDS:
+        raise ProvenancePerformanceError(
+            "environment attestation fields do not match the closed schema"
+        )
+    if raw.get("schema") != ENVIRONMENT_SCHEMA:
+        raise ProvenancePerformanceError("environment attestation schema mismatch")
+    if type(raw.get("isolation_verified")) is not bool or type(
+        raw.get("co_tenant_load_detected")
+    ) is not bool:
+        raise ProvenancePerformanceError("environment isolation fields must be booleans")
+    source = raw.get("source")
+    if source not in _ENVIRONMENT_SOURCES:
+        raise ProvenancePerformanceError("environment source is not an approved enum")
+    try:
+        cpu_count = _strict_positive_integer(
+            raw.get("cpu_logical_count"), "cpu_logical_count"
+        )
+        memory_bytes = _strict_positive_integer(
+            raw.get("memory_total_bytes"), "memory_total_bytes"
+        )
+    except ValueError as exc:
+        raise ProvenancePerformanceError(str(exc)) from exc
+    disk_medium = raw.get("disk_medium")
+    if disk_medium not in _DISK_MEDIA:
+        raise ProvenancePerformanceError("environment disk_medium is not approved")
+    toxiproxy_version = raw.get("toxiproxy_version")
+    if not is_registered_service_version("toxiproxy", toxiproxy_version):
+        raise ProvenancePerformanceError("unsafe Toxiproxy version")
+    try:
+        canonical = _canonical_json_bytes(dict(raw))
+    except ValueError as exc:
+        raise ProvenancePerformanceError("environment attestation is not finite JSON") from exc
+    return {
+        "schema": ENVIRONMENT_SCHEMA,
+        "isolation_verified": raw.get("isolation_verified"),
+        "co_tenant_load_detected": raw.get("co_tenant_load_detected"),
+        "source": source,
+        "cpu_logical_count": cpu_count,
+        "memory_total_bytes": memory_bytes,
+        "disk_medium": disk_medium,
+        "toxiproxy_version": toxiproxy_version,
+        "attestation_sha256": hashlib.sha256(canonical).hexdigest(),
+    }
+
+
+def validate_environment_attestation(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate a closed raw attestation while retaining only approved fields."""
+
+    _safe_environment(raw)
+    return copy.deepcopy(dict(raw))
+
+
+def _memory_inventory(backend: InstrumentedMemoryBackend) -> dict[str, Any]:
+    snapshot = backend.snapshot()
+    nodes = sorted(str(node) for node in snapshot)
+    edges = sorted(
+        (str(source), str(target))
+        for target, row in snapshot.items()
+        for source in row.get("derived_from", [])
+    )
+    statuses = [str(row.get("status", "unknown")) for row in snapshot.values()]
+    return {
+        "classification": "complete",
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "graph_sha256": canonical_graph_sha256(nodes, edges),
+        "status_counts": {
+            status: statuses.count(status) for status in sorted(set(statuses))
+        },
+    }
+
+
+def _inventory(backend: Any, limit: int) -> dict[str, Any]:
+    limit = _strict_positive_integer(limit, "inventory limit")
+    provider = getattr(backend, "provenance_inventory", None)
+    if callable(provider):
+        try:
+            raw = provider(limit=limit)
+        except TypeError:
+            raw = provider()
+    elif isinstance(backend, InstrumentedMemoryBackend):
+        raw = _memory_inventory(backend)
+    else:
+        return {
+            "classification": "unknown",
+            "node_count": None,
+            "edge_count": None,
+            "graph_sha256": None,
+            "status_counts": {},
+        }
+    if not isinstance(raw, Mapping):
+        return {
+            "classification": "unknown",
+            "node_count": None,
+            "edge_count": None,
+            "graph_sha256": None,
+            "status_counts": {},
+        }
+    classification = str(raw.get("classification", "unknown"))
+    if classification not in {"complete", "partial", "unknown"}:
+        classification = "unknown"
+    status_counts = raw.get("status_counts", {})
+    if not isinstance(status_counts, Mapping):
+        status_counts = {}
+    node_count = raw.get("node_count")
+    edge_count = raw.get("edge_count")
+    graph_sha256 = raw.get("graph_sha256")
+    counts_valid = all(
+        type(value) is int and value >= 0 for value in (node_count, edge_count)
+    )
+    hash_valid = isinstance(graph_sha256, str) and _SHA256.fullmatch(graph_sha256)
+    statuses_valid = all(
+        isinstance(key, str)
+        and bool(key)
+        and _SAFE_ERROR_CLASS.fullmatch(key)
+        and type(value) is int
+        and value >= 0
+        for key, value in status_counts.items()
+    )
+    if (
+        classification == "complete"
+        and (
+            not counts_valid
+            or not hash_valid
+            or not statuses_valid
+            or sum(status_counts.values()) != node_count
+        )
+    ):
+        classification = "unknown"
+    return {
+        "classification": classification,
+        "node_count": node_count if counts_valid else None,
+        "edge_count": edge_count if counts_valid else None,
+        "graph_sha256": graph_sha256 if hash_valid else None,
+        "status_counts": {
+            key: value
+            for key, value in sorted(status_counts.items())
+            if isinstance(key, str)
+            and _SAFE_ERROR_CLASS.fullmatch(key)
+            and type(value) is int
+            and value >= 0
+        },
+    }
+
+
+def _inventory_matches(
+    inventory: Mapping[str, Any],
+    nodes: Sequence[str],
+    edges: Sequence[Sequence[str]],
+    status_counts: Mapping[str, int],
+) -> bool:
+    if set(inventory) != {
+        "classification",
+        "node_count",
+        "edge_count",
+        "graph_sha256",
+        "status_counts",
+    }:
+        return False
+    node_count = inventory.get("node_count")
+    edge_count = inventory.get("edge_count")
+    inventory_statuses = inventory.get("status_counts")
+    return bool(
+        inventory.get("classification") == "complete"
+        and type(node_count) is int
+        and type(edge_count) is int
+        and node_count == len(nodes)
+        and edge_count == len(edges)
+        and inventory.get("graph_sha256") == canonical_graph_sha256(nodes, edges)
+        and isinstance(inventory_statuses, Mapping)
+        and all(type(value) is int for value in inventory_statuses.values())
+        and dict(inventory_statuses) == dict(status_counts)
+    )
+
+
+def _namespace(run_id: str, graph: GraphSpec, concurrency: int, repetition: int) -> str:
+    digest = hashlib.sha256(
+        f"{run_id}\0{graph.graph_sha256}\0{concurrency}\0{repetition}".encode("utf-8")
+    ).hexdigest()
+    return f"txnmem-prov-{digest[:24]}"
+
+
+def _preload_graph(backend: Any, graph: GraphSpec) -> None:
+    parents: dict[str, list[str]] = {node: [] for node in graph.nodes}
+    for source, target in graph.edges:
+        parents[target].append(source)
+    for node in graph.nodes:
+        source_ids = sorted(parents[node])
+        value = f"provenance:{node}"
+        if source_ids:
+            backend.derive(node, source_ids, value=value)
+        else:
+            backend.write(node, value=value)
+
+
+def _operation_plan(
+    graph: GraphSpec, operations_per_type: int
+) -> list[dict[str, Any]]:
+    plan: list[dict[str, Any]] = []
+    for operation_rank, operation in enumerate(OPERATION_TYPES):
+        for index in range(operations_per_type):
+            digest = hashlib.sha256(
+                f"{graph.seed}\0{graph.graph_sha256}\0{operation}\0{index}".encode(
+                    "utf-8"
+                )
+            ).digest()
+            source_index = int.from_bytes(digest[:8], "big") % graph.node_count
+            plan.append(
+                {
+                    "operation": operation,
+                    "operation_rank": operation_rank,
+                    "operation_index": index,
+                    "source": graph.nodes[source_index],
+                }
+            )
+    return plan
+
+
+def _apply_measured_operation(backend: Any, operation: Mapping[str, Any]) -> None:
+    name = str(operation["operation"])
+    index = int(operation["operation_index"])
+    source = str(operation["source"])
+    if name == "read":
+        if backend.read(source) is None:
+            raise ProvenancePerformanceError("read returned no active record")
+        return
+    if name == "search":
+        if not backend.search(f"provenance:{source}"):
+            raise ProvenancePerformanceError("search returned no record")
+        return
+    if name == "derive":
+        memory_id = f"perf-derived-{index:06d}"
+        backend.derive(memory_id, [source], value=f"provenance:{memory_id}")
+        return
+    if name == "invalidate_repair":
+        invalid_id = f"perf-invalid-{index:06d}"
+        repair_id = f"perf-repair-{index:06d}"
+        backend.derive(invalid_id, [source], value=f"provenance:{invalid_id}")
+        backend.invalidate(invalid_id)
+        backend.derive(repair_id, [source], value=f"provenance:{repair_id}")
+        return
+    raise ValueError(f"unsupported provenance operation: {name}")
+
+
+def _safe_error_name(exc: Exception) -> str:
+    value = type(exc).__name__
+    return value if _SAFE_ERROR_CLASS.fullmatch(value) else "BackendError"
+
+
+def _expected_final_graph(
+    graph: GraphSpec, plan: Sequence[Mapping[str, Any]]
+) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...], dict[str, int]]:
+    nodes = list(graph.nodes)
+    edges = list(graph.edges)
+    invalid_count = 0
+    for operation in plan:
+        name = str(operation["operation"])
+        index = int(operation["operation_index"])
+        source = str(operation["source"])
+        if name == "derive":
+            target = f"perf-derived-{index:06d}"
+            nodes.append(target)
+            edges.append((source, target))
+        elif name == "invalidate_repair":
+            invalid_id = f"perf-invalid-{index:06d}"
+            repair_id = f"perf-repair-{index:06d}"
+            nodes.extend((invalid_id, repair_id))
+            edges.extend(((source, invalid_id), (source, repair_id)))
+            invalid_count += 1
+    statuses = {"active": len(nodes) - invalid_count}
+    if invalid_count:
+        statuses["invalid"] = invalid_count
+    return tuple(nodes), tuple(sorted(edges)), statuses
+
+
+def run_matrix_cell(
+    backend_factory: Callable[[str], Any],
+    graph: GraphSpec,
+    concurrency: int,
+    repetitions: int,
+    *,
+    operations_per_type: int = 8,
+    run_id: str,
+    formal: bool = False,
+    environment_attestation: Mapping[str, Any]
+    | Callable[[Any], Mapping[str, Any]]
+    | None = None,
+) -> dict[str, Any]:
+    """Run one matrix cell and return sanitized samples plus repetition units."""
+
+    concurrency = _strict_positive_integer(concurrency, "concurrency")
+    repetitions = _strict_positive_integer(repetitions, "repetitions")
+    operations_per_type = _strict_positive_integer(
+        operations_per_type, "operations_per_type"
+    )
+    if not isinstance(graph, GraphSpec):
+        raise ValueError("graph must be a GraphSpec")
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("run_id must be a non-empty string")
+    if type(formal) is not bool:
+        raise ValueError("formal must be a boolean")
+    plan = _operation_plan(graph, operations_per_type)
+    expected_nodes, expected_edges, expected_statuses = _expected_final_graph(graph, plan)
+    all_samples: list[dict[str, Any]] = []
+    repetition_rows: list[dict[str, Any]] = []
+    cell_id = f"n{graph.node_count}-c{concurrency}"
+    namespace_hashes: set[str] = set()
+
+    for repetition in range(repetitions):
+        namespace = _namespace(run_id, graph, concurrency, repetition)
+        namespace_sha256 = _hash_text(namespace)
+        if namespace_sha256 in namespace_hashes:
+            raise ProvenancePerformanceError("namespace collision within matrix cell")
+        namespace_hashes.add(namespace_sha256)
+        backend = backend_factory(namespace)
+        try:
+            health_provider = getattr(backend, "healthcheck", None)
+            health = _safe_health(health_provider() if callable(health_provider) else None)
+            services_available = all(
+                health.get(service, {}).get("available") is True
+                and isinstance(health.get(service, {}).get("version"), str)
+                for service in ("qdrant", "neo4j")
+            )
+            if callable(environment_attestation):
+                raw_environment = environment_attestation(backend)
+            elif environment_attestation is not None:
+                raw_environment = environment_attestation
+            else:
+                environment_provider = getattr(backend, "performance_environment", None)
+                raw_environment = (
+                    environment_provider() if callable(environment_provider) else None
+                )
+            environment = _safe_environment(raw_environment)
+            isolation_valid = bool(
+                environment["isolation_verified"]
+                and environment["co_tenant_load_detected"] is False
+            )
+            if formal and not services_available:
+                raise ProvenancePerformanceError(
+                    "formal run requires available Qdrant and Neo4j health checks"
+                )
+            if formal and not isolation_valid:
+                raise ProvenancePerformanceError(
+                    "formal run requires verified isolation without co-tenant load"
+                )
+
+            empty_inventory = _inventory(backend, limit=1)
+            empty_hash = canonical_graph_sha256((), ())
+            namespace_empty = bool(
+                empty_inventory.get("classification") == "complete"
+                and empty_inventory.get("node_count") == 0
+                and empty_inventory.get("edge_count") == 0
+                and empty_inventory.get("graph_sha256") == empty_hash
+                and empty_inventory.get("status_counts") == {}
+            )
+            if formal and not namespace_empty:
+                raise ProvenancePerformanceError(
+                    "formal run requires a new empty namespace"
+                )
+
+            _preload_graph(backend, graph)
+            preload_inventory = _inventory(backend, limit=graph.node_count + 1)
+            preload_closed = _inventory_matches(
+                preload_inventory,
+                graph.nodes,
+                graph.edges,
+                {"active": graph.node_count},
+            )
+            if formal and not preload_closed:
+                raise ProvenancePerformanceError(
+                    "preloaded graph count, status, or hash mismatch"
+                )
+
+            backend_max_retries = getattr(backend, "max_retries", None)
+            driver_retry_seconds = getattr(
+                backend, "neo4j_max_transaction_retry_time_seconds", None
+            )
+            driver_retry_policy_valid = bool(
+                not isinstance(driver_retry_seconds, bool)
+                and isinstance(driver_retry_seconds, (int, float))
+                and math.isfinite(float(driver_retry_seconds))
+                and float(driver_retry_seconds) == 0.0
+            )
+            retry_policy_valid = bool(
+                type(backend_max_retries) is int
+                and backend_max_retries == 0
+                and driver_retry_policy_valid
+            )
+            metrics_provider = getattr(backend, "metrics", None)
+
+            def retry_metric() -> int | None:
+                if not callable(metrics_provider):
+                    return None
+                raw_metrics = metrics_provider()
+                if not isinstance(raw_metrics, Mapping):
+                    return None
+                value = raw_metrics.get("retry_count")
+                return value if type(value) is int and value >= 0 else None
+
+            retries_before = retry_metric()
+            retry_metric_valid = retries_before is not None
+            if formal and not retry_policy_valid:
+                raise ProvenancePerformanceError(
+                    "formal run requires attested zero retry at both backend and driver"
+                )
+            if formal and not retry_metric_valid:
+                raise ProvenancePerformanceError(
+                    "formal run requires an exact backend retry metric"
+                )
+
+            activity_lock = threading.Lock()
+            active_operations = 0
+            observed_peak_concurrency = 0
+            concurrency_target = min(concurrency, len(plan))
+            start_barrier = threading.Barrier(concurrency_target)
+
+            def measured(operation: Mapping[str, Any]) -> dict[str, Any]:
+                nonlocal active_operations, observed_peak_concurrency
+                with activity_lock:
+                    active_operations += 1
+                    observed_peak_concurrency = max(
+                        observed_peak_concurrency, active_operations
+                    )
+                started_ns: int | None = None
+                error_class = None
+                success = True
+                try:
+                    ordinal = (
+                        int(operation["operation_rank"]) * operations_per_type
+                        + int(operation["operation_index"])
+                    )
+                    if ordinal < concurrency_target:
+                        start_barrier.wait(timeout=30.0)
+                    started_ns = time.perf_counter_ns()
+                    _apply_measured_operation(backend, operation)
+                except Exception as exc:  # failures are retained as aggregate-safe classes
+                    success = False
+                    error_class = _safe_error_name(exc)
+                finally:
+                    latency_ns = (
+                        0
+                        if started_ns is None
+                        else max(0, time.perf_counter_ns() - started_ns)
+                    )
+                    with activity_lock:
+                        active_operations -= 1
+                row = {
+                    "cell_id": cell_id,
+                    "repetition": repetition,
+                    "namespace_sha256": namespace_sha256,
+                    "operation": str(operation["operation"]),
+                    "latency_ns": latency_ns,
+                    "success": success,
+                    # Formal factories use max_retries=0. Backends with an
+                    # operation-local counter may opt in without global races.
+                    "retry_count": 0,
+                    "_operation_rank": int(operation["operation_rank"]),
+                    "_operation_index": int(operation["operation_index"]),
+                }
+                if error_class is not None:
+                    row["error_class"] = error_class
+                return row
+
+            repetition_started_ns = time.perf_counter_ns()
+            with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                futures = [executor.submit(measured, operation) for operation in plan]
+                measured_rows = [future.result() for future in futures]
+            elapsed_ns = max(1, time.perf_counter_ns() - repetition_started_ns)
+            retries_after = retry_metric()
+            if retries_before is None or retries_after is None or retries_after < retries_before:
+                retry_delta = None
+            else:
+                retry_delta = retries_after - retries_before
+            measured_rows.sort(
+                key=lambda row: (row["_operation_rank"], row["_operation_index"])
+            )
+            for row in measured_rows:
+                row.pop("_operation_rank", None)
+                row.pop("_operation_index", None)
+
+            final_inventory = _inventory(backend, limit=len(expected_nodes) + 1)
+            state_closed = _inventory_matches(
+                final_inventory,
+                expected_nodes,
+                expected_edges,
+                expected_statuses,
+            )
+            success_count = sum(1 for row in measured_rows if row["success"])
+            failure_count = len(measured_rows) - success_count
+            sample_retry_count = sum(int(row["retry_count"]) for row in measured_rows)
+            retry_count = retry_delta if retry_delta is not None else sample_retry_count
+            eligible = bool(
+                services_available
+                and isolation_valid
+                and retry_policy_valid
+                and retry_delta == 0
+                and observed_peak_concurrency == concurrency_target
+                and namespace_empty
+                and preload_closed
+                and state_closed
+                and failure_count == 0
+            )
+            diagnostic_eligible = bool(
+                namespace_empty
+                and preload_closed
+                and state_closed
+                and failure_count == 0
+            )
+            repetition_row = {
+                "cell_id": cell_id,
+                "repetition": repetition,
+                "namespace_sha256": namespace_sha256,
+                "graph_node_count": graph.node_count,
+                "graph_edge_count": graph.edge_count,
+                "graph_sha256": graph.graph_sha256,
+                "concurrency": concurrency,
+                "operation_count": len(measured_rows),
+                "success_count": success_count,
+                "failure_count": failure_count,
+                "retry_count": retry_count,
+                "backend_max_retries": backend_max_retries,
+                "neo4j_driver_max_transaction_retry_time_ms": (
+                    0 if driver_retry_policy_valid else None
+                ),
+                "observed_peak_concurrency": observed_peak_concurrency,
+                "elapsed_ns": elapsed_ns,
+                "namespace_initially_empty": namespace_empty,
+                "preload_closed": preload_closed,
+                "state_closed": state_closed,
+                "state_classification": final_inventory["classification"],
+                "eligible_for_formal": eligible,
+                "eligible_for_diagnostic": diagnostic_eligible,
+                "service_health": health,
+                "environment": environment,
+                "preload_inventory": preload_inventory,
+                "final_inventory": final_inventory,
+            }
+            if formal and not eligible:
+                raise ProvenancePerformanceError(
+                    "formal repetition has failures or non-closed persistent state"
+                )
+            all_samples.extend(measured_rows)
+            repetition_rows.append(repetition_row)
+        finally:
+            close = getattr(backend, "close", None)
+            if callable(close):
+                close()
+
+    return {
+        "schema": MATRIX_SCHEMA,
+        "cell_id": cell_id,
+        "graph": graph.metadata(),
+        "concurrency": concurrency,
+        "repetition_count": repetitions,
+        "operations_per_type": operations_per_type,
+        "operation_mix": list(OPERATION_TYPES),
+        "run_id_sha256": _hash_text(run_id),
+        "samples": all_samples,
+        "repetitions": repetition_rows,
+        "formal_requested": bool(formal),
+        "formal_eligible": all(row["eligible_for_formal"] for row in repetition_rows),
+    }
+
+
+def _percentile(values: Sequence[float], quantile: float) -> float:
+    if not values:
+        raise ProvenancePerformanceError("cannot compute a percentile without samples")
+    ordered = sorted(float(value) for value in values)
+    if len(ordered) == 1:
+        return ordered[0]
+    position = (len(ordered) - 1) * quantile
+    lower = int(math.floor(position))
+    upper = int(math.ceil(position))
+    if lower == upper:
+        return ordered[lower]
+    fraction = position - lower
+    return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
+
+
+def _report_sequence(source: Any) -> list[Mapping[str, Any]]:
+    if isinstance(source, Mapping):
+        reports = [source]
+    elif isinstance(source, Sequence) and not isinstance(source, (str, bytes)):
+        reports = list(source)
+    else:
+        raise ValueError("aggregate input must be a report or report sequence")
+    if not reports or any(not isinstance(report, Mapping) for report in reports):
+        raise ValueError("each aggregate input must be a report mapping")
+    return reports
+
+
+def _flatten_reports(source: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    reports = _report_sequence(source)
+    samples: list[dict[str, Any]] = []
+    repetitions: list[dict[str, Any]] = []
+    for report in reports:
+        raw_samples = report.get("samples")
+        raw_repetitions = report.get("repetitions")
+        if not isinstance(raw_samples, list) or not isinstance(raw_repetitions, list):
+            raise ValueError("report must include sample and repetition lists")
+        samples.extend(copy.deepcopy(raw_samples))
+        repetitions.extend(copy.deepcopy(raw_repetitions))
+    return samples, repetitions
+
+
+def _exact_int_field(
+    row: Mapping[str, Any],
+    field: str,
+    *,
+    minimum: int = 0,
+    expected: int | None = None,
+) -> int:
+    value = row.get(field)
+    if type(value) is not int or value < minimum:
+        raise ProvenancePerformanceError(f"{field} must be an exact integer")
+    if expected is not None and value != expected:
+        raise ProvenancePerformanceError(f"{field} mismatch")
+    return value
+
+
+def _formal_environment_valid(environment: Any) -> bool:
+    if not isinstance(environment, Mapping):
+        return False
+    if set(environment) != _ENVIRONMENT_FIELDS | {"attestation_sha256"}:
+        return False
+    attestation_hash = environment.get("attestation_sha256")
+    if not isinstance(attestation_hash, str) or not _SHA256.fullmatch(attestation_hash):
+        return False
+    raw = {key: environment[key] for key in _ENVIRONMENT_FIELDS}
+    try:
+        expected = _safe_environment(raw)
+        return _canonical_json_bytes(dict(environment)) == _canonical_json_bytes(expected)
+    except (ProvenancePerformanceError, ValueError):
+        return False
+
+
+def _formal_health_valid(health: Any) -> bool:
+    if not isinstance(health, Mapping) or set(health) != {"qdrant", "neo4j"}:
+        return False
+    sanitized = _safe_health(health)
+    try:
+        return bool(
+            _canonical_json_bytes(dict(health)) == _canonical_json_bytes(sanitized)
+            and all(
+                health[service].get("available") is True
+                and isinstance(health[service].get("version"), str)
+                for service in ("qdrant", "neo4j")
+            )
+        )
+    except (AttributeError, ValueError):
+        return False
+
+
+def _validate_formal_reports(
+    reports: Sequence[Mapping[str, Any]], expected_cells: Sequence[Mapping[str, Any]]
+) -> None:
+    if isinstance(expected_cells, (str, bytes)) or not isinstance(
+        expected_cells, Sequence
+    ):
+        raise ProvenancePerformanceError("formal aggregate requires expected matrix cells")
+    expected_by_id: dict[str, dict[str, int | str]] = {}
+    for raw_cell in expected_cells:
+        if not isinstance(raw_cell, Mapping):
+            raise ProvenancePerformanceError("expected matrix cell must be a mapping")
+        node_count = _exact_int_field(raw_cell, "graph_node_count", minimum=1)
+        concurrency = _exact_int_field(raw_cell, "concurrency", minimum=1)
+        repetitions = _exact_int_field(raw_cell, "repetitions", minimum=1)
+        operations_per_type = _exact_int_field(
+            raw_cell, "operations_per_type", minimum=1
+        )
+        graph_seed = _exact_int_field(raw_cell, "graph_seed", minimum=0)
+        cell_id = raw_cell.get("cell_id")
+        expected_id = f"n{node_count}-c{concurrency}"
+        if cell_id != expected_id or cell_id in expected_by_id:
+            raise ProvenancePerformanceError("invalid or duplicate expected matrix cell")
+        expected_by_id[expected_id] = {
+            "cell_id": expected_id,
+            "graph_node_count": node_count,
+            "concurrency": concurrency,
+            "repetitions": repetitions,
+            "operations_per_type": operations_per_type,
+            "graph_seed": graph_seed,
+        }
+    if not expected_by_id:
+        raise ProvenancePerformanceError("formal expected matrix must not be empty")
+
+    report_by_id: dict[str, Mapping[str, Any]] = {}
+    for report in reports:
+        cell_id = report.get("cell_id")
+        if not isinstance(cell_id, str) or cell_id in report_by_id:
+            raise ProvenancePerformanceError("invalid or duplicate formal cell report")
+        report_by_id[cell_id] = report
+    if set(report_by_id) != set(expected_by_id):
+        raise ProvenancePerformanceError("formal reports do not cover the expected matrix")
+
+    report_fields = {
+        "schema",
+        "cell_id",
+        "graph",
+        "concurrency",
+        "repetition_count",
+        "operations_per_type",
+        "operation_mix",
+        "run_id_sha256",
+        "samples",
+        "repetitions",
+        "formal_requested",
+        "formal_eligible",
+    }
+    repetition_fields = {
+        "cell_id",
+        "repetition",
+        "namespace_sha256",
+        "graph_node_count",
+        "graph_edge_count",
+        "graph_sha256",
+        "concurrency",
+        "operation_count",
+        "success_count",
+        "failure_count",
+        "retry_count",
+        "backend_max_retries",
+        "neo4j_driver_max_transaction_retry_time_ms",
+        "observed_peak_concurrency",
+        "elapsed_ns",
+        "namespace_initially_empty",
+        "preload_closed",
+        "state_closed",
+        "state_classification",
+        "eligible_for_formal",
+        "eligible_for_diagnostic",
+        "service_health",
+        "environment",
+        "preload_inventory",
+        "final_inventory",
+    }
+    sample_fields = {
+        "cell_id",
+        "repetition",
+        "namespace_sha256",
+        "operation",
+        "latency_ns",
+        "success",
+        "retry_count",
+    }
+    namespaces: set[str] = set()
+    run_hashes: set[str] = set()
+    for cell_id, expected in expected_by_id.items():
+        report = report_by_id[cell_id]
+        if set(report) != report_fields:
+            raise ProvenancePerformanceError("formal cell report fields do not match schema")
+        if report.get("schema") != MATRIX_SCHEMA:
+            raise ProvenancePerformanceError("formal cell report schema mismatch")
+        if report.get("formal_requested") is not True or report.get(
+            "formal_eligible"
+        ) is not True:
+            raise ProvenancePerformanceError("diagnostic cell cannot be promoted to formal")
+        graph = build_layered_dag(
+            int(expected["graph_node_count"]), int(expected["graph_seed"])
+        )
+        if _canonical_json_bytes(report.get("graph")) != _canonical_json_bytes(
+            graph.metadata()
+        ):
+            raise ProvenancePerformanceError("formal graph metadata mismatch")
+        _exact_int_field(
+            report, "concurrency", minimum=1, expected=int(expected["concurrency"])
+        )
+        _exact_int_field(
+            report,
+            "repetition_count",
+            minimum=1,
+            expected=int(expected["repetitions"]),
+        )
+        operations_per_type = _exact_int_field(
+            report,
+            "operations_per_type",
+            minimum=1,
+            expected=int(expected["operations_per_type"]),
+        )
+        if report.get("operation_mix") != list(OPERATION_TYPES):
+            raise ProvenancePerformanceError("formal operation mix mismatch")
+        run_hash = report.get("run_id_sha256")
+        if not isinstance(run_hash, str) or not _SHA256.fullmatch(run_hash):
+            raise ProvenancePerformanceError("formal run identity hash is invalid")
+        run_hashes.add(run_hash)
+        raw_repetitions = report.get("repetitions")
+        raw_samples = report.get("samples")
+        if not isinstance(raw_repetitions, list) or not isinstance(raw_samples, list):
+            raise ProvenancePerformanceError("formal report evidence must be lists")
+        if len(raw_repetitions) != int(expected["repetitions"]):
+            raise ProvenancePerformanceError("formal repetition count mismatch")
+
+        plan = _operation_plan(graph, operations_per_type)
+        expected_nodes, expected_edges, expected_statuses = _expected_final_graph(
+            graph, plan
+        )
+        expected_operation_count = len(OPERATION_TYPES) * operations_per_type
+        repetitions_by_id: dict[int, Mapping[str, Any]] = {}
+        for repetition_row in raw_repetitions:
+            if not isinstance(repetition_row, Mapping) or set(
+                repetition_row
+            ) != repetition_fields:
+                raise ProvenancePerformanceError(
+                    "formal repetition fields do not match schema"
+                )
+            repetition = _exact_int_field(repetition_row, "repetition", minimum=0)
+            if repetition in repetitions_by_id:
+                raise ProvenancePerformanceError("duplicate formal repetition")
+            repetitions_by_id[repetition] = repetition_row
+        if set(repetitions_by_id) != set(range(int(expected["repetitions"]))):
+            raise ProvenancePerformanceError("formal repetition identities are incomplete")
+
+        samples_by_repetition: dict[int, list[Mapping[str, Any]]] = {
+            repetition: [] for repetition in repetitions_by_id
+        }
+        for sample in raw_samples:
+            if not isinstance(sample, Mapping) or set(sample) != sample_fields:
+                raise ProvenancePerformanceError("formal sample fields do not match schema")
+            repetition = _exact_int_field(sample, "repetition", minimum=0)
+            if repetition not in samples_by_repetition:
+                raise ProvenancePerformanceError("formal sample repetition is unknown")
+            samples_by_repetition[repetition].append(sample)
+
+        for repetition, repetition_row in repetitions_by_id.items():
+            if repetition_row.get("cell_id") != cell_id:
+                raise ProvenancePerformanceError("formal repetition cell mismatch")
+            namespace_hash = repetition_row.get("namespace_sha256")
+            if not isinstance(namespace_hash, str) or not _SHA256.fullmatch(
+                namespace_hash
+            ):
+                raise ProvenancePerformanceError("invalid namespace identity hash")
+            if namespace_hash in namespaces:
+                raise ProvenancePerformanceError("duplicate namespace identity")
+            namespaces.add(namespace_hash)
+            _exact_int_field(
+                repetition_row,
+                "graph_node_count",
+                minimum=1,
+                expected=graph.node_count,
+            )
+            _exact_int_field(
+                repetition_row,
+                "graph_edge_count",
+                minimum=0,
+                expected=graph.edge_count,
+            )
+            if repetition_row.get("graph_sha256") != graph.graph_sha256:
+                raise ProvenancePerformanceError("formal repetition graph hash mismatch")
+            _exact_int_field(
+                repetition_row,
+                "concurrency",
+                minimum=1,
+                expected=int(expected["concurrency"]),
+            )
+            _exact_int_field(
+                repetition_row,
+                "operation_count",
+                minimum=1,
+                expected=expected_operation_count,
+            )
+            _exact_int_field(
+                repetition_row,
+                "success_count",
+                minimum=0,
+                expected=expected_operation_count,
+            )
+            _exact_int_field(repetition_row, "failure_count", expected=0)
+            _exact_int_field(repetition_row, "retry_count", expected=0)
+            _exact_int_field(repetition_row, "backend_max_retries", expected=0)
+            _exact_int_field(
+                repetition_row,
+                "neo4j_driver_max_transaction_retry_time_ms",
+                expected=0,
+            )
+            peak = _exact_int_field(
+                repetition_row, "observed_peak_concurrency", minimum=1
+            )
+            if peak != int(expected["concurrency"]):
+                raise ProvenancePerformanceError(
+                    "observed concurrency does not match the requested level"
+                )
+            _exact_int_field(repetition_row, "elapsed_ns", minimum=1)
+            for field in (
+                "namespace_initially_empty",
+                "preload_closed",
+                "state_closed",
+                "eligible_for_formal",
+                "eligible_for_diagnostic",
+            ):
+                if repetition_row.get(field) is not True:
+                    raise ProvenancePerformanceError(f"formal repetition {field} is false")
+            if repetition_row.get("state_classification") != "complete":
+                raise ProvenancePerformanceError("formal state is not complete")
+            if not _formal_health_valid(repetition_row.get("service_health")):
+                raise ProvenancePerformanceError("formal service health is invalid")
+            if not _formal_environment_valid(repetition_row.get("environment")):
+                raise ProvenancePerformanceError("formal environment is invalid")
+            preload_inventory = repetition_row.get("preload_inventory")
+            final_inventory = repetition_row.get("final_inventory")
+            if not isinstance(preload_inventory, Mapping) or not _inventory_matches(
+                preload_inventory,
+                graph.nodes,
+                graph.edges,
+                {"active": graph.node_count},
+            ):
+                raise ProvenancePerformanceError("formal preload inventory mismatch")
+            if not isinstance(final_inventory, Mapping) or not _inventory_matches(
+                final_inventory, expected_nodes, expected_edges, expected_statuses
+            ):
+                raise ProvenancePerformanceError("formal final inventory mismatch")
+
+            repetition_samples = samples_by_repetition[repetition]
+            if len(repetition_samples) != expected_operation_count:
+                raise ProvenancePerformanceError("formal sample count mismatch")
+            operation_counts: Counter[str] = Counter()
+            for sample in repetition_samples:
+                if sample.get("cell_id") != cell_id or sample.get(
+                    "namespace_sha256"
+                ) != namespace_hash:
+                    raise ProvenancePerformanceError("formal sample identity mismatch")
+                operation = sample.get("operation")
+                if operation not in OPERATION_TYPES:
+                    raise ProvenancePerformanceError("formal sample operation is invalid")
+                operation_counts[str(operation)] += 1
+                _exact_int_field(sample, "latency_ns", minimum=0)
+                if sample.get("success") is not True:
+                    raise ProvenancePerformanceError("formal sample failed")
+                _exact_int_field(sample, "retry_count", expected=0)
+            if operation_counts != Counter(
+                {operation: operations_per_type for operation in OPERATION_TYPES}
+            ):
+                raise ProvenancePerformanceError("formal per-repetition operation mix mismatch")
+    if len(run_hashes) != 1:
+        raise ProvenancePerformanceError("formal cell reports disagree on run identity")
+
+
+def _formal_observed_service_versions(
+    reports: Sequence[Mapping[str, Any]],
+) -> dict[str, str]:
+    observed: dict[str, set[str]] = {
+        "qdrant": set(),
+        "neo4j": set(),
+        "toxiproxy": set(),
+    }
+    for report in reports:
+        for row in report.get("repetitions", []):
+            if not isinstance(row, Mapping):
+                raise ProvenancePerformanceError("formal repetition is malformed")
+            health = row.get("service_health")
+            environment = row.get("environment")
+            if not isinstance(health, Mapping) or not isinstance(environment, Mapping):
+                raise ProvenancePerformanceError("formal service evidence is missing")
+            for service in ("qdrant", "neo4j"):
+                service_health = health.get(service)
+                if not isinstance(service_health, Mapping) or not isinstance(
+                    service_health.get("version"), str
+                ):
+                    raise ProvenancePerformanceError("formal service version is missing")
+                observed[service].add(str(service_health["version"]))
+            toxiproxy_version = environment.get("toxiproxy_version")
+            if not isinstance(toxiproxy_version, str):
+                raise ProvenancePerformanceError("formal Toxiproxy version is missing")
+            observed["toxiproxy"].add(toxiproxy_version)
+    if any(len(versions) != 1 for versions in observed.values()):
+        raise ProvenancePerformanceError("formal service versions drifted during the run")
+    return {service: next(iter(versions)) for service, versions in observed.items()}
+
+
+def _bootstrap_throughput(
+    repetitions: Sequence[Mapping[str, Any]], count: int, seed: int, cell_id: str
+) -> dict[str, float]:
+    estimate_successes = sum(int(row["success_count"]) for row in repetitions)
+    estimate_elapsed = sum(int(row["elapsed_ns"]) for row in repetitions)
+    if estimate_elapsed <= 0:
+        raise ProvenancePerformanceError("repetition elapsed time must be positive")
+    estimate = estimate_successes * 1_000_000_000.0 / estimate_elapsed
+    derived_seed = int.from_bytes(
+        hashlib.sha256(f"{seed}\0{cell_id}".encode("utf-8")).digest()[:8], "big"
+    )
+    generator = random.Random(derived_seed)
+    draws: list[float] = []
+    for _ in range(count):
+        selected = [repetitions[generator.randrange(len(repetitions))] for _ in repetitions]
+        successes = sum(int(row["success_count"]) for row in selected)
+        elapsed = sum(int(row["elapsed_ns"]) for row in selected)
+        draws.append(successes * 1_000_000_000.0 / elapsed)
+    return {
+        "estimate": estimate,
+        "lower": _percentile(draws, 0.025),
+        "upper": _percentile(draws, 0.975),
+    }
+
+
+def aggregate_matrix(
+    samples: Mapping[str, Any] | Sequence[Mapping[str, Any]],
+    *,
+    bootstrap_repetitions: int = 10_000,
+    seed: int = 17,
+    require_formal: bool = True,
+    topology_attestation: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Aggregate operation samples with whole-repetition throughput bootstrap."""
+
+    bootstrap_repetitions = _strict_positive_integer(
+        bootstrap_repetitions, "bootstrap_repetitions"
+    )
+    seed = _strict_integer(seed, "seed")
+    if type(require_formal) is not bool:
+        raise ProvenancePerformanceError("require_formal must be a boolean")
+    reports = _report_sequence(samples)
+    validated_topology: dict[str, Any] | None = None
+    if require_formal:
+        config = validate_matrix_config(FORMAL_MATRIX_CONFIG, formal=True)
+        if (
+            bootstrap_repetitions != config["bootstrap_repetitions"]
+            or seed != config["bootstrap_seed"]
+        ):
+            raise ProvenancePerformanceError(
+                "formal bootstrap settings must match the frozen matrix config"
+            )
+        expected_cells = expand_matrix(config)
+        _validate_formal_reports(reports, expected_cells)
+        run_hashes = {str(report.get("run_id_sha256")) for report in reports}
+        environment_hashes = {
+            str(row.get("environment", {}).get("attestation_sha256"))
+            for report in reports
+            for row in report.get("repetitions", [])
+            if isinstance(row, Mapping)
+            and isinstance(row.get("environment"), Mapping)
+        }
+        if len(run_hashes) != 1 or len(environment_hashes) != 1:
+            raise ProvenancePerformanceError(
+                "formal reports must bind one run and one environment attestation"
+            )
+        if not isinstance(topology_attestation, Mapping):
+            raise ProvenancePerformanceError(
+                "formal aggregate requires a registered completion attestation"
+            )
+        candidate_operation_rows, candidate_repetition_rows = _flatten_reports(
+            reports
+        )
+        formal_run_hash = next(iter(run_hashes))
+        candidate_bundle_id = provenance_bundle_id(
+            config_sha256=formal_matrix_config_sha256(),
+            run_id_sha256=formal_run_hash,
+            formal=False,
+            backend="vector-graph",
+        )
+        try:
+            from txnmem_topology_attestation import (
+                validate_registered_topology_attestation,
+            )
+
+            validated_topology = validate_registered_topology_attestation(
+                topology_attestation,
+                expected_run_id_sha256=formal_run_hash,
+                expected_config_sha256=formal_matrix_config_sha256(),
+                expected_config_file_sha256=formal_config_file_sha256(),
+                expected_workload_sha256=formal_matrix_workload_sha256(),
+                expected_environment_attestation_sha256=next(
+                    iter(environment_hashes)
+                ),
+                expected_evidence_manifest_sha256=cell_reports_sha256(reports),
+                expected_candidate_bundle_id=candidate_bundle_id,
+                expected_candidate_operation_samples_sha256=canonical_jsonl_sha256(
+                    candidate_operation_rows
+                ),
+                expected_candidate_repetitions_sha256=canonical_jsonl_sha256(
+                    candidate_repetition_rows
+                ),
+            )
+        except ValueError as exc:
+            raise ProvenancePerformanceError(
+                "formal topology completion attestation is invalid"
+            ) from exc
+        expected_repetitions = sum(int(cell["repetitions"]) for cell in expected_cells)
+        expected_samples = sum(
+            int(cell["repetitions"])
+            * int(cell["operations_per_type"])
+            * len(OPERATION_TYPES)
+            for cell in expected_cells
+        )
+        if (
+            validated_topology.get("matrix_cell_count") != len(expected_cells)
+            or validated_topology.get("repetition_count") != expected_repetitions
+            or validated_topology.get("operation_sample_count") != expected_samples
+        ):
+            raise ProvenancePerformanceError(
+                "formal topology counts do not match the frozen matrix"
+            )
+        observed_versions = _formal_observed_service_versions(reports)
+        topology_versions = {
+            str(row.get("role")): row.get("service_version")
+            for row in validated_topology.get("roles", [])
+            if isinstance(row, Mapping)
+        }
+        if any(
+            topology_versions.get(service) != version
+            for service, version in observed_versions.items()
+        ):
+            raise ProvenancePerformanceError(
+                "attested service versions do not match observed health evidence"
+            )
+    operation_rows, repetition_rows = _flatten_reports(samples)
+    if not operation_rows or not repetition_rows:
+        raise ProvenancePerformanceError("matrix aggregate requires non-empty evidence")
+    seen_repetitions: set[tuple[str, int]] = set()
+    repetitions_by_cell: dict[str, list[dict[str, Any]]] = {}
+    for row in repetition_rows:
+        cell_id = str(row.get("cell_id", ""))
+        repetition = row.get("repetition")
+        if not cell_id or isinstance(repetition, bool) or not isinstance(repetition, int):
+            raise ProvenancePerformanceError("invalid repetition identity")
+        if repetition < 0:
+            raise ProvenancePerformanceError("repetition identity must be non-negative")
+        for field, minimum in (
+            ("elapsed_ns", 1),
+            ("success_count", 0),
+            ("failure_count", 0),
+            ("retry_count", 0),
+            ("graph_node_count", 1),
+            ("concurrency", 1),
+        ):
+            _exact_int_field(row, field, minimum=minimum)
+        key = (cell_id, repetition)
+        if key in seen_repetitions:
+            raise ProvenancePerformanceError("duplicate repetition identity")
+        seen_repetitions.add(key)
+        eligible = (
+            row.get("eligible_for_formal") is True
+            if require_formal
+            else row.get("eligible_for_diagnostic") is True
+            or row.get("eligible_for_formal") is True
+        )
+        if not eligible:
+            raise ProvenancePerformanceError(
+                "ineligible repetition cannot enter the requested aggregate"
+            )
+        repetitions_by_cell.setdefault(cell_id, []).append(row)
+
+    samples_by_cell: dict[str, list[dict[str, Any]]] = {}
+    for row in operation_rows:
+        cell_id = str(row.get("cell_id", ""))
+        repetition = row.get("repetition")
+        if (cell_id, repetition) not in seen_repetitions:
+            raise ProvenancePerformanceError("sample references an unknown repetition")
+        if row.get("operation") not in OPERATION_TYPES:
+            raise ProvenancePerformanceError("sample has an unknown operation")
+        if type(row.get("success")) is not bool:
+            raise ProvenancePerformanceError("sample success must be a boolean")
+        latency = row.get("latency_ns")
+        if isinstance(latency, bool) or not isinstance(latency, int) or latency < 0:
+            raise ProvenancePerformanceError("sample latency must be non-negative nanoseconds")
+        _exact_int_field(row, "retry_count", minimum=0)
+        if row.get("success") is False:
+            error_class = row.get("error_class")
+            if not isinstance(error_class, str) or not _SAFE_ERROR_CLASS.fullmatch(
+                error_class
+            ):
+                raise ProvenancePerformanceError("failed sample error class is invalid")
+        samples_by_cell.setdefault(cell_id, []).append(row)
+
+    samples_by_repetition: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for row in operation_rows:
+        samples_by_repetition.setdefault(
+            (str(row["cell_id"]), int(row["repetition"])), []
+        ).append(row)
+    for repetition_row in repetition_rows:
+        key = (str(repetition_row["cell_id"]), int(repetition_row["repetition"]))
+        rows = samples_by_repetition.get(key, [])
+        successes = sum(1 for row in rows if row["success"] is True)
+        failures = len(rows) - successes
+        retries = sum(int(row["retry_count"]) for row in rows)
+        if (
+            successes != repetition_row["success_count"]
+            or failures != repetition_row["failure_count"]
+            or retries != repetition_row["retry_count"]
+        ):
+            raise ProvenancePerformanceError(
+                "sample and repetition accounting disagree within a repetition"
+            )
+
+    rows: list[dict[str, Any]] = []
+    for cell_id in sorted(repetitions_by_cell):
+        cell_repetitions = sorted(
+            repetitions_by_cell[cell_id], key=lambda row: int(row["repetition"])
+        )
+        cell_samples = samples_by_cell.get(cell_id, [])
+        successful = [row for row in cell_samples if row.get("success") is True]
+        failed = [row for row in cell_samples if row.get("success") is not True]
+        if not successful:
+            raise ProvenancePerformanceError("cell has no successful operation samples")
+        expected_successes = sum(int(row["success_count"]) for row in cell_repetitions)
+        expected_failures = sum(int(row["failure_count"]) for row in cell_repetitions)
+        if len(successful) != expected_successes or len(failed) != expected_failures:
+            raise ProvenancePerformanceError("sample and repetition accounting disagree")
+        latencies = [int(row["latency_ns"]) for row in successful]
+        interval = _bootstrap_throughput(
+            cell_repetitions, bootstrap_repetitions, seed, cell_id
+        )
+        operation_breakdown: list[dict[str, Any]] = []
+        for operation in OPERATION_TYPES:
+            operation_samples = [
+                row for row in cell_samples if row["operation"] == operation
+            ]
+            operation_success = [
+                int(row["latency_ns"])
+                for row in operation_samples
+                if row.get("success") is True
+            ]
+            operation_breakdown.append(
+                {
+                    "operation": operation,
+                    "successful_count": len(operation_success),
+                    "failed_count": len(operation_samples) - len(operation_success),
+                    "p50_latency_ns": _percentile(operation_success, 0.50)
+                    if operation_success
+                    else None,
+                    "p95_latency_ns": _percentile(operation_success, 0.95)
+                    if operation_success
+                    else None,
+                    "p99_latency_ns": _percentile(operation_success, 0.99)
+                    if operation_success
+                    else None,
+                }
+            )
+        error_counts: dict[str, int] = {}
+        for row in failed:
+            error = str(row.get("error_class", "BackendError"))
+            error_counts[error] = error_counts.get(error, 0) + 1
+        first = cell_repetitions[0]
+        rows.append(
+            {
+                "cell_id": cell_id,
+                "graph_node_count": int(first["graph_node_count"]),
+                "concurrency": int(first["concurrency"]),
+                "repetition_count": len(cell_repetitions),
+                "successful_operation_count": len(successful),
+                "failed_operation_count": len(failed),
+                "retry_count": sum(int(row["retry_count"]) for row in cell_repetitions),
+                "p50_latency_ns": _percentile(latencies, 0.50),
+                "p95_latency_ns": _percentile(latencies, 0.95),
+                "p99_latency_ns": _percentile(latencies, 0.99),
+                "successful_throughput_ops_per_second": interval["estimate"],
+                "successful_throughput_95ci": interval,
+                "error_class_counts": dict(sorted(error_counts.items())),
+                "operations": operation_breakdown,
+            }
+        )
+    result = {
+        "schema": MATRIX_SCHEMA,
+        "bootstrap_unit": "whole_repetition",
+        "bootstrap_repetitions": bootstrap_repetitions,
+        "bootstrap_seed": seed,
+        "throughput_numerator": "successful_operations_only",
+        "latency_population": "successful_operations_only",
+        "evidence_scope": "formal" if require_formal else "diagnostic",
+        "rows": rows,
+    }
+    if validated_topology is not None:
+        result.update(
+            {
+                "config_sha256": formal_matrix_config_sha256(),
+                "workload_sha256": formal_matrix_workload_sha256(),
+                "evidence_manifest_sha256": cell_reports_sha256(reports),
+                "topology_attestation_sha256": validated_topology[
+                    "attestation_sha256"
+                ],
+            }
+        )
+    return result
+
+
+def make_vector_graph_backend_factory(
+    *,
+    qdrant_url: str,
+    neo4j_uri: str,
+    neo4j_auth: Sequence[str],
+    environment_attestation: Mapping[str, Any],
+    request_timeout_seconds: float = 30.0,
+) -> Callable[[str], Any]:
+    """Create a zero-retry real-backend factory for unbiased operation timing."""
+
+    if (
+        isinstance(request_timeout_seconds, bool)
+        or not isinstance(request_timeout_seconds, (int, float))
+        or not math.isfinite(float(request_timeout_seconds))
+        or float(request_timeout_seconds) <= 0.0
+    ):
+        raise ValueError("request_timeout_seconds must be positive and finite")
+    validate_environment_attestation(environment_attestation)
+    attestation = copy.deepcopy(dict(environment_attestation))
+
+    def factory(namespace: str) -> Any:
+        from txnmem_vector_graph_backend import VectorGraphMemoryBackend
+
+        backend = VectorGraphMemoryBackend(
+            namespace,
+            qdrant_url,
+            neo4j_uri,
+            neo4j_auth,
+            max_retries=0,
+            request_timeout_seconds=request_timeout_seconds,
+        )
+        backend.performance_environment = lambda: copy.deepcopy(attestation)
+        return backend
+
+    return factory
+
+
+def provenance_bundle_id(
+    *, config_sha256: str, run_id_sha256: str, formal: bool, backend: str
+) -> str:
+    if not isinstance(config_sha256, str) or not _SHA256.fullmatch(config_sha256):
+        raise ValueError("invalid config hash")
+    if not isinstance(run_id_sha256, str) or not _SHA256.fullmatch(run_id_sha256):
+        raise ValueError("invalid run hash")
+    if type(formal) is not bool:
+        raise ValueError("formal must be a boolean")
+    if backend not in {"memory", "vector-graph"}:
+        raise ValueError("invalid provenance backend")
+    scope = "formal" if formal else "diagnostic"
+    backend_name = backend.replace("-", "_")
+    return f"{scope}-{backend_name}-{config_sha256[:16]}-{run_id_sha256[:16]}"
+
+
+def _parse_provenance_bundle_id(bundle_id: str) -> tuple[str, str]:
+    match = re.fullmatch(
+        r"(formal|diagnostic)-(memory|vector_graph)-[0-9a-f]{16}-[0-9a-f]{16}",
+        bundle_id if isinstance(bundle_id, str) else "",
+    )
+    if match is None:
+        raise ProvenancePerformanceError("invalid provenance bundle identifier")
+    return match.group(1), match.group(2).replace("_", "-")
+
+
+def preflight_provenance_output(out_dir: str | Path, bundle_id: str):
+    """Reject ambiguous legacy paths or an already-published condition."""
+
+    from txnmem_formal_io import FormalIOError, FormalStore
+
+    if not isinstance(bundle_id, str) or not re.fullmatch(
+        r"[a-z0-9_]+-[a-z0-9_]+-[0-9a-f]{16}-[0-9a-f]{16}", bundle_id
+    ):
+        raise FormalIOError("invalid provenance bundle identity")
+    store = FormalStore(out_dir)
+    for legacy in ("data", "results"):
+        if store.entry_kind(legacy) != "missing":
+            raise FormalIOError(
+                f"legacy provenance output path is ambiguous: {legacy}"
+            )
+    for container in ("bundles", "bundle_objects"):
+        kind = store.entry_kind(container)
+        if kind not in {"missing", "directory"}:
+            raise FormalIOError(f"provenance output container is unsafe: {container}")
+    if store.entry_kind("bundles", f"{bundle_id}.json") != "missing":
+        raise FormalIOError("refusing to overwrite an existing provenance bundle")
+    return store
+
+
+def _jsonl_bytes(rows: Sequence[Mapping[str, Any]]) -> bytes:
+    try:
+        return b"".join(
+            _canonical_json_bytes(dict(row)) + b"\n" for row in rows
+        )
+    except (TypeError, ValueError) as exc:
+        raise ProvenancePerformanceError("JSONL evidence is not canonical JSON") from exc
+
+
+def canonical_jsonl_sha256(rows: Sequence[Mapping[str, Any]]) -> str:
+    return hashlib.sha256(_jsonl_bytes(rows)).hexdigest()
+
+
+def _reconstruct_formal_cell_reports(
+    operation_samples: Sequence[Mapping[str, Any]],
+    repetitions: Sequence[Mapping[str, Any]],
+    report: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    config = validate_matrix_config(FORMAL_MATRIX_CONFIG, formal=True)
+    cells = expand_matrix(config)
+    run_hash = report.get("run_id_sha256")
+    reports: list[dict[str, Any]] = []
+    for cell in cells:
+        cell_id = str(cell["cell_id"])
+        graph = build_layered_dag(
+            int(cell["graph_node_count"]), int(cell["graph_seed"])
+        )
+        cell_samples = [
+            copy.deepcopy(dict(row))
+            for row in operation_samples
+            if isinstance(row, Mapping) and row.get("cell_id") == cell_id
+        ]
+        cell_repetitions = [
+            copy.deepcopy(dict(row))
+            for row in repetitions
+            if isinstance(row, Mapping) and row.get("cell_id") == cell_id
+        ]
+        reports.append(
+            {
+                "schema": MATRIX_SCHEMA,
+                "cell_id": cell_id,
+                "graph": graph.metadata(),
+                "concurrency": int(cell["concurrency"]),
+                "repetition_count": int(cell["repetitions"]),
+                "operations_per_type": int(cell["operations_per_type"]),
+                "operation_mix": list(OPERATION_TYPES),
+                "run_id_sha256": run_hash,
+                "samples": cell_samples,
+                "repetitions": cell_repetitions,
+                "formal_requested": True,
+                "formal_eligible": all(
+                    row.get("eligible_for_formal") is True
+                    for row in cell_repetitions
+                ),
+            }
+        )
+    return reports
+
+
+def _validate_formal_bundle(
+    *,
+    bundle_id: str,
+    operation_samples: Sequence[Mapping[str, Any]],
+    repetitions: Sequence[Mapping[str, Any]],
+    report: Mapping[str, Any],
+    topology_attestation: Mapping[str, Any] | None,
+) -> None:
+    fields = {
+        "schema",
+        "backend",
+        "formal_requested",
+        "bundle_id",
+        "publication_status",
+        "production_backend_claim",
+        "config",
+        "config_sha256",
+        "config_file_sha256",
+        "run_id_sha256",
+        "matrix_cell_count",
+        "repetition_count",
+        "operation_sample_count",
+        "operation_samples_sha256",
+        "repetitions_sha256",
+        "graphs",
+        "aggregate",
+        "topology_attestation_sha256",
+    }
+    if set(report) != fields:
+        raise ProvenancePerformanceError("formal publication report fields mismatch")
+    if (
+        report.get("schema") != "txnmem-provenance-performance-report-v1"
+        or report.get("backend") != "vector-graph"
+        or report.get("formal_requested") is not True
+        or report.get("production_backend_claim") is not True
+        or report.get("publication_status") != "complete"
+        or report.get("bundle_id") != bundle_id
+    ):
+        raise ProvenancePerformanceError("formal publication identity is invalid")
+    config_hash = formal_matrix_config_sha256()
+    run_hash = report.get("run_id_sha256")
+    if (
+        _canonical_json_bytes(report.get("config"))
+        != _canonical_json_bytes(FORMAL_MATRIX_CONFIG)
+        or
+        report.get("config_sha256") != config_hash
+        or report.get("config_file_sha256") != formal_config_file_sha256()
+        or not isinstance(run_hash, str)
+        or not _SHA256.fullmatch(run_hash)
+        or provenance_bundle_id(
+            config_sha256=config_hash,
+            run_id_sha256=run_hash,
+            formal=True,
+            backend="vector-graph",
+        )
+        != bundle_id
+    ):
+        raise ProvenancePerformanceError("formal publication config/run binding mismatch")
+    config = validate_matrix_config(FORMAL_MATRIX_CONFIG, formal=True)
+    cells = expand_matrix(config)
+    expected_repetitions = sum(int(cell["repetitions"]) for cell in cells)
+    expected_samples = sum(
+        int(cell["repetitions"])
+        * int(cell["operations_per_type"])
+        * len(OPERATION_TYPES)
+        for cell in cells
+    )
+    if (
+        type(report.get("matrix_cell_count")) is not int
+        or report.get("matrix_cell_count") != len(cells)
+        or type(report.get("repetition_count")) is not int
+        or report.get("repetition_count") != expected_repetitions
+        or len(repetitions) != expected_repetitions
+        or type(report.get("operation_sample_count")) is not int
+        or report.get("operation_sample_count") != expected_samples
+        or len(operation_samples) != expected_samples
+    ):
+        raise ProvenancePerformanceError("formal publication matrix counts mismatch")
+    if (
+        report.get("operation_samples_sha256")
+        != canonical_jsonl_sha256(operation_samples)
+        or report.get("repetitions_sha256") != canonical_jsonl_sha256(repetitions)
+    ):
+        raise ProvenancePerformanceError("formal publication data hash mismatch")
+    expected_graphs = [
+        build_layered_dag(
+            int(cell["graph_node_count"]), int(cell["graph_seed"])
+        ).metadata()
+        for cell in cells
+    ]
+    if _canonical_json_bytes(report.get("graphs")) != _canonical_json_bytes(
+        expected_graphs
+    ):
+        raise ProvenancePerformanceError("formal publication graph list mismatch")
+    cell_reports = _reconstruct_formal_cell_reports(
+        operation_samples, repetitions, report
+    )
+    recomputed = aggregate_matrix(
+        cell_reports,
+        bootstrap_repetitions=int(config["bootstrap_repetitions"]),
+        seed=int(config["bootstrap_seed"]),
+        require_formal=True,
+        topology_attestation=topology_attestation,
+    )
+    if _canonical_json_bytes(report.get("aggregate")) != _canonical_json_bytes(
+        recomputed
+    ):
+        raise ProvenancePerformanceError("formal publication aggregate mismatch")
+    if not isinstance(topology_attestation, Mapping) or report.get(
+        "topology_attestation_sha256"
+    ) != topology_attestation.get("attestation_sha256"):
+        raise ProvenancePerformanceError("formal publication topology binding mismatch")
+
+
+def _validate_diagnostic_bundle(
+    *,
+    bundle_id: str,
+    operation_samples: Sequence[Mapping[str, Any]],
+    repetitions: Sequence[Mapping[str, Any]],
+    report: Mapping[str, Any],
+) -> None:
+    fields = {
+        "schema",
+        "backend",
+        "formal_requested",
+        "bundle_id",
+        "publication_status",
+        "production_backend_claim",
+        "config",
+        "config_sha256",
+        "config_file_sha256",
+        "run_id_sha256",
+        "matrix_cell_count",
+        "repetition_count",
+        "operation_sample_count",
+        "operation_samples_sha256",
+        "repetitions_sha256",
+        "graphs",
+        "aggregate",
+        "topology_attestation_sha256",
+    }
+    scope, backend_from_id = _parse_provenance_bundle_id(bundle_id)
+    backend = report.get("backend")
+    if (
+        set(report) != fields
+        or scope != "diagnostic"
+        or backend not in {"memory", "vector-graph"}
+        or backend != backend_from_id
+        or report.get("schema") != "txnmem-provenance-performance-report-v1"
+        or report.get("formal_requested") is not False
+        or report.get("production_backend_claim") is not False
+        or report.get("bundle_id") != bundle_id
+        or report.get("publication_status") != "complete"
+        or report.get("topology_attestation_sha256") is not None
+    ):
+        raise ProvenancePerformanceError("diagnostic publication identity mismatch")
+    config_raw = report.get("config")
+    if not isinstance(config_raw, Mapping):
+        raise ProvenancePerformanceError("diagnostic publication config is missing")
+    config = validate_matrix_config(config_raw, formal=False)
+    config_hash = hashlib.sha256(_canonical_json_bytes(config)).hexdigest()
+    run_hash = report.get("run_id_sha256")
+    if (
+        report.get("config_sha256") != config_hash
+        or not isinstance(report.get("config_file_sha256"), str)
+        or not _SHA256.fullmatch(str(report.get("config_file_sha256")))
+        or not isinstance(run_hash, str)
+        or not _SHA256.fullmatch(run_hash)
+        or provenance_bundle_id(
+            config_sha256=config_hash,
+            run_id_sha256=run_hash,
+            formal=False,
+            backend=str(backend),
+        )
+        != bundle_id
+    ):
+        raise ProvenancePerformanceError("diagnostic config/run binding mismatch")
+    cells = expand_matrix(config)
+    expected_repetitions = sum(int(cell["repetitions"]) for cell in cells)
+    expected_samples = sum(
+        int(cell["repetitions"])
+        * int(cell["operations_per_type"])
+        * len(OPERATION_TYPES)
+        for cell in cells
+    )
+    if (
+        not cells
+        or type(report.get("matrix_cell_count")) is not int
+        or report.get("matrix_cell_count") != len(cells)
+        or type(report.get("repetition_count")) is not int
+        or report.get("repetition_count") != expected_repetitions
+        or len(repetitions) != expected_repetitions
+        or type(report.get("operation_sample_count")) is not int
+        or report.get("operation_sample_count") != expected_samples
+        or len(operation_samples) != expected_samples
+        or expected_repetitions <= 0
+        or expected_samples <= 0
+    ):
+        raise ProvenancePerformanceError("diagnostic matrix counts mismatch")
+    if (
+        report.get("operation_samples_sha256")
+        != canonical_jsonl_sha256(operation_samples)
+        or report.get("repetitions_sha256") != canonical_jsonl_sha256(repetitions)
+    ):
+        raise ProvenancePerformanceError("diagnostic publication data hash mismatch")
+    expected_graphs = [
+        build_layered_dag(
+            int(cell["graph_node_count"]), int(cell["graph_seed"])
+        ).metadata()
+        for cell in cells
+    ]
+    if _canonical_json_bytes(report.get("graphs")) != _canonical_json_bytes(
+        expected_graphs
+    ):
+        raise ProvenancePerformanceError("diagnostic publication graph list mismatch")
+    recomputed = aggregate_matrix(
+        {"samples": list(operation_samples), "repetitions": list(repetitions)},
+        bootstrap_repetitions=int(config["bootstrap_repetitions"]),
+        seed=int(config["bootstrap_seed"]),
+        require_formal=False,
+    )
+    if (
+        not isinstance(report.get("aggregate"), Mapping)
+        or report["aggregate"].get("evidence_scope") != "diagnostic"
+        or _canonical_json_bytes(report["aggregate"])
+        != _canonical_json_bytes(recomputed)
+    ):
+        raise ProvenancePerformanceError("diagnostic aggregate mismatch")
+
+
+def publish_provenance_bundle(
+    out_dir: str | Path,
+    *,
+    bundle_id: str,
+    operation_samples: Sequence[Mapping[str, Any]],
+    repetitions: Sequence[Mapping[str, Any]],
+    report: Mapping[str, Any],
+    topology_attestation: Mapping[str, Any] | None = None,
+) -> Path:
+    """Write an immutable object, then atomically publish one exclusive pointer."""
+
+    from txnmem_formal_io import FormalIOError
+
+    sample_bytes = _jsonl_bytes(operation_samples)
+    repetition_bytes = _jsonl_bytes(repetitions)
+    report_payload = copy.deepcopy(dict(report))
+    if report_payload.get("bundle_id") != bundle_id:
+        raise FormalIOError("report bundle identity mismatch")
+    if report_payload.get("operation_samples_sha256") != hashlib.sha256(
+        sample_bytes
+    ).hexdigest() or report_payload.get("repetitions_sha256") != hashlib.sha256(
+        repetition_bytes
+    ).hexdigest():
+        raise FormalIOError("report data hashes do not match staged evidence")
+    scope, backend_from_id = _parse_provenance_bundle_id(bundle_id)
+    if report_payload.get("backend") != backend_from_id:
+        raise ProvenancePerformanceError("bundle backend does not match report")
+    if scope == "formal":
+        _validate_formal_bundle(
+            bundle_id=bundle_id,
+            operation_samples=operation_samples,
+            repetitions=repetitions,
+            report=report_payload,
+            topology_attestation=topology_attestation,
+        )
+    elif scope == "diagnostic":
+        _validate_diagnostic_bundle(
+            bundle_id=bundle_id,
+            operation_samples=operation_samples,
+            repetitions=repetitions,
+            report=report_payload,
+        )
+    else:  # pragma: no cover - parser is exhaustive
+        raise ProvenancePerformanceError("unknown bundle scope")
+
+    store = preflight_provenance_output(out_dir, bundle_id)
+    object_id = f"object-{secrets.token_hex(16)}"
+    store.ensure_directory("bundles")
+    store.ensure_directory("bundle_objects")
+    store.create_directory_exclusive("bundle_objects", object_id)
+    store.ensure_directory("bundle_objects", object_id, "data")
+    store.ensure_directory("bundle_objects", object_id, "results")
+    topology_payload: dict[str, Any] | None = None
+    topology_canonical_hash: str | None = None
+    if scope == "formal":
+        if not isinstance(topology_attestation, Mapping):
+            raise ProvenancePerformanceError(
+                "formal publication requires topology evidence"
+            )
+        topology_payload = copy.deepcopy(dict(topology_attestation))
+        topology_canonical_hash = hashlib.sha256(
+            _canonical_json_bytes(topology_payload)
+        ).hexdigest()
+        store.ensure_directory("bundle_objects", object_id, "evidence")
+    with store.open_text_exclusive(
+        "bundle_objects", object_id, "data", "provenance_operation_samples.jsonl"
+    ) as stream:
+        stream.write(sample_bytes.decode("utf-8"))
+    with store.open_text_exclusive(
+        "bundle_objects", object_id, "data", "provenance_repetitions.jsonl"
+    ) as stream:
+        stream.write(repetition_bytes.decode("utf-8"))
+    store.write_json_exclusive(
+        "bundle_objects",
+        object_id,
+        "results",
+        "provenance_performance.json",
+        payload=report_payload,
+    )
+    if topology_payload is not None:
+        store.write_json_exclusive(
+            "bundle_objects",
+            object_id,
+            "evidence",
+            "topology_attestation.json",
+            payload=topology_payload,
+        )
+    completion = {
+        "schema": "txnmem-provenance-performance-bundle-v1",
+        "bundle_id": bundle_id,
+        "operation_samples_sha256": hashlib.sha256(sample_bytes).hexdigest(),
+        "repetitions_sha256": hashlib.sha256(repetition_bytes).hexdigest(),
+        "report_canonical_sha256": hashlib.sha256(
+            _canonical_json_bytes(report_payload)
+        ).hexdigest(),
+        "topology_attestation_sha256": (
+            topology_payload.get("attestation_sha256")
+            if topology_payload is not None
+            else None
+        ),
+        "topology_attestation_canonical_sha256": topology_canonical_hash,
+        "publication_status": "complete",
+    }
+    store.write_json_exclusive(
+        "bundle_objects", object_id, "COMPLETED.json", payload=completion
+    )
+    pointer = {
+        "schema": "txnmem-provenance-performance-pointer-v1",
+        "bundle_id": bundle_id,
+        "object_id": object_id,
+        "report_path": f"bundle_objects/{object_id}/results/provenance_performance.json",
+        "completion_sha256": hashlib.sha256(
+            _canonical_json_bytes(completion)
+        ).hexdigest(),
+        "publication_status": "complete",
+    }
+    store.write_json_exclusive(
+        "bundles", f"{bundle_id}.json", payload=pointer
+    )
+    return store.path(
+        "bundle_objects", object_id, "results", "provenance_performance.json"
+    )
+
+
+def _decode_canonical_jsonl(raw: bytes) -> list[dict[str, Any]]:
+    if not raw:
+        raise ProvenancePerformanceError("candidate JSONL must not be empty")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeError as exc:
+        raise ProvenancePerformanceError("candidate JSONL is not UTF-8") from exc
+    rows: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        try:
+            value = json.loads(
+                line,
+                object_pairs_hook=_reject_duplicate_json_keys,
+                parse_constant=_reject_nonfinite_json,
+                parse_float=_finite_json_float,
+            )
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise ProvenancePerformanceError("candidate JSONL is malformed") from exc
+        if not isinstance(value, dict):
+            raise ProvenancePerformanceError("candidate JSONL row must be a mapping")
+        rows.append(value)
+    if _jsonl_bytes(rows) != raw:
+        raise ProvenancePerformanceError("candidate JSONL is not canonical")
+    return rows
+
+
+def _load_provenance_candidate(
+    candidate_root: str | Path, bundle_id: str
+) -> dict[str, Any]:
+    from txnmem_formal_io import FormalStore
+
+    scope, _backend = _parse_provenance_bundle_id(bundle_id)
+    if scope != "diagnostic":
+        raise ProvenancePerformanceError("promotion source must be diagnostic")
+    root = Path(candidate_root).expanduser().absolute()
+    if root.is_symlink() or not root.is_dir():
+        raise ProvenancePerformanceError("candidate root must be a real directory")
+    store = FormalStore(root)
+    pointer = store.load_json("bundles", f"{bundle_id}.json")
+    pointer_fields = {
+        "schema",
+        "bundle_id",
+        "object_id",
+        "report_path",
+        "completion_sha256",
+        "publication_status",
+    }
+    if not isinstance(pointer, Mapping) or set(pointer) != pointer_fields:
+        raise ProvenancePerformanceError("candidate pointer schema mismatch")
+    object_id = pointer.get("object_id")
+    expected_report_path = (
+        f"bundle_objects/{object_id}/results/provenance_performance.json"
+    )
+    if (
+        pointer.get("schema") != "txnmem-provenance-performance-pointer-v1"
+        or pointer.get("bundle_id") != bundle_id
+        or pointer.get("publication_status") != "complete"
+        or not isinstance(object_id, str)
+        or not re.fullmatch(r"object-[0-9a-f]{32}", object_id)
+        or pointer.get("report_path") != expected_report_path
+        or not isinstance(pointer.get("completion_sha256"), str)
+        or not _SHA256.fullmatch(str(pointer.get("completion_sha256")))
+    ):
+        raise ProvenancePerformanceError("candidate pointer identity mismatch")
+    completion = store.load_json("bundle_objects", object_id, "COMPLETED.json")
+    completion_fields = {
+        "schema",
+        "bundle_id",
+        "operation_samples_sha256",
+        "repetitions_sha256",
+        "report_canonical_sha256",
+        "topology_attestation_sha256",
+        "topology_attestation_canonical_sha256",
+        "publication_status",
+    }
+    if (
+        not isinstance(completion, Mapping)
+        or set(completion) != completion_fields
+        or completion.get("schema") != "txnmem-provenance-performance-bundle-v1"
+        or completion.get("bundle_id") != bundle_id
+        or completion.get("publication_status") != "complete"
+        or completion.get("topology_attestation_sha256") is not None
+        or completion.get("topology_attestation_canonical_sha256") is not None
+        or hashlib.sha256(_canonical_json_bytes(dict(completion))).hexdigest()
+        != pointer.get("completion_sha256")
+    ):
+        raise ProvenancePerformanceError("candidate completion marker mismatch")
+    report = store.load_json(
+        "bundle_objects", object_id, "results", "provenance_performance.json"
+    )
+    sample_raw = store.load_bytes(
+        "bundle_objects", object_id, "data", "provenance_operation_samples.jsonl"
+    )
+    repetition_raw = store.load_bytes(
+        "bundle_objects", object_id, "data", "provenance_repetitions.jsonl"
+    )
+    samples = _decode_canonical_jsonl(sample_raw)
+    repetitions = _decode_canonical_jsonl(repetition_raw)
+    if (
+        completion.get("operation_samples_sha256")
+        != hashlib.sha256(sample_raw).hexdigest()
+        or completion.get("repetitions_sha256")
+        != hashlib.sha256(repetition_raw).hexdigest()
+        or completion.get("report_canonical_sha256")
+        != hashlib.sha256(_canonical_json_bytes(report)).hexdigest()
+    ):
+        raise ProvenancePerformanceError("candidate object hash mismatch")
+    if not isinstance(report, Mapping):
+        raise ProvenancePerformanceError("candidate report must be a mapping")
+    _validate_diagnostic_bundle(
+        bundle_id=bundle_id,
+        operation_samples=samples,
+        repetitions=repetitions,
+        report=report,
+    )
+    return {
+        "report": copy.deepcopy(dict(report)),
+        "operation_samples": samples,
+        "repetitions": repetitions,
+        "sample_bytes_sha256": hashlib.sha256(sample_raw).hexdigest(),
+        "repetition_bytes_sha256": hashlib.sha256(repetition_raw).hexdigest(),
+    }
+
+
+def _candidate_formal_reports(candidate: Mapping[str, Any]) -> list[dict[str, Any]]:
+    report = candidate.get("report")
+    samples = candidate.get("operation_samples")
+    repetitions = candidate.get("repetitions")
+    if (
+        not isinstance(report, Mapping)
+        or not isinstance(samples, list)
+        or not isinstance(repetitions, list)
+    ):
+        raise ProvenancePerformanceError("candidate evidence is incomplete")
+    if (
+        report.get("backend") != "vector-graph"
+        or _canonical_json_bytes(report.get("config"))
+        != _canonical_json_bytes(FORMAL_MATRIX_CONFIG)
+        or report.get("config_sha256") != formal_matrix_config_sha256()
+        or report.get("config_file_sha256") != formal_config_file_sha256()
+    ):
+        raise ProvenancePerformanceError(
+            "candidate is not bound to the frozen real-backend config"
+        )
+    return _reconstruct_formal_cell_reports(samples, repetitions, report)
+
+
+def candidate_attestation_material(
+    candidate_root: str | Path, bundle_id: str
+) -> dict[str, Any]:
+    """Return only sanitized hashes/counts needed by the out-of-tree collector."""
+
+    candidate = _load_provenance_candidate(candidate_root, bundle_id)
+    reports = _candidate_formal_reports(candidate)
+    _validate_formal_reports(reports, expand_matrix(FORMAL_MATRIX_CONFIG))
+    observed_versions = _formal_observed_service_versions(reports)
+    environment_hashes = {
+        str(row["environment"]["attestation_sha256"])
+        for report in reports
+        for row in report["repetitions"]
+    }
+    if len(environment_hashes) != 1:
+        raise ProvenancePerformanceError("candidate environment attestation drifted")
+    config = validate_matrix_config(FORMAL_MATRIX_CONFIG, formal=True)
+    cells = expand_matrix(config)
+    return {
+        "schema": "txnmem-provenance-candidate-attestation-material-v1",
+        "candidate_bundle_id": bundle_id,
+        "run_id_sha256": reports[0]["run_id_sha256"],
+        "config_sha256": formal_matrix_config_sha256(),
+        "config_file_sha256": formal_config_file_sha256(),
+        "workload_sha256": formal_matrix_workload_sha256(),
+        "environment_attestation_sha256": next(iter(environment_hashes)),
+        "evidence_manifest_sha256": cell_reports_sha256(reports),
+        "matrix_cell_count": len(cells),
+        "repetition_count": sum(int(cell["repetitions"]) for cell in cells),
+        "operation_sample_count": sum(
+            int(cell["repetitions"])
+            * int(cell["operations_per_type"])
+            * len(OPERATION_TYPES)
+            for cell in cells
+        ),
+        "observed_service_versions": observed_versions,
+        "candidate_operation_samples_sha256": candidate["sample_bytes_sha256"],
+        "candidate_repetitions_sha256": candidate["repetition_bytes_sha256"],
+    }
+
+
+def _observe_sealed_candidate_tree(candidate_root: str | Path) -> dict[str, Any]:
+    """Recompute the immutable candidate tree identity used by promotion."""
+
+    root = Path(candidate_root).expanduser().absolute()
+    if root.is_symlink() or not root.is_dir():
+        raise ProvenancePerformanceError("sealed candidate root is invalid")
+    root = root.resolve(strict=True)
+    rows: list[dict[str, Any]] = []
+    directory_count = 0
+    file_count = 0
+    for path in [root, *sorted(root.rglob("*"), key=lambda item: item.as_posix())]:
+        metadata = path.lstat()
+        relative = "." if path == root else path.relative_to(root).as_posix()
+        if stat.S_ISLNK(metadata.st_mode):
+            raise ProvenancePerformanceError("sealed candidate contains a link")
+        if stat.S_ISDIR(metadata.st_mode):
+            if stat.S_IMODE(metadata.st_mode) != 0o500:
+                raise ProvenancePerformanceError(
+                    "sealed candidate directory mode changed"
+                )
+            directory_count += 1
+            rows.append(
+                {
+                    "path": relative,
+                    "kind": "directory",
+                    "device": int(metadata.st_dev),
+                    "inode": int(metadata.st_ino),
+                    "size": 0,
+                    "sha256": "0" * 64,
+                }
+            )
+        elif stat.S_ISREG(metadata.st_mode):
+            if stat.S_IMODE(metadata.st_mode) != 0o400 or metadata.st_nlink != 1:
+                raise ProvenancePerformanceError(
+                    "sealed candidate file identity changed"
+                )
+            try:
+                descriptor = os.open(
+                    path,
+                    os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                )
+                with os.fdopen(descriptor, "rb", closefd=True) as stream:
+                    payload = stream.read()
+            except OSError as exc:
+                raise ProvenancePerformanceError(
+                    "sealed candidate file is unreadable"
+                ) from exc
+            file_count += 1
+            rows.append(
+                {
+                    "path": relative,
+                    "kind": "file",
+                    "device": int(metadata.st_dev),
+                    "inode": int(metadata.st_ino),
+                    "size": len(payload),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                }
+            )
+        else:
+            raise ProvenancePerformanceError(
+                "sealed candidate contains a special file"
+            )
+    root_metadata = root.stat()
+    return {
+        "root_device_sha256": hashlib.sha256(
+            str(int(root_metadata.st_dev)).encode("utf-8")
+        ).hexdigest(),
+        "root_inode_sha256": hashlib.sha256(
+            str(int(root_metadata.st_ino)).encode("utf-8")
+        ).hexdigest(),
+        "directory_count": directory_count,
+        "file_count": file_count,
+        "tree_sha256": hashlib.sha256(_canonical_json_bytes(rows)).hexdigest(),
+    }
+
+
+def _require_candidate_seal_matches(
+    candidate_root: str | Path, topology_attestation: Mapping[str, Any]
+) -> None:
+    seal = topology_attestation.get("candidate_seal")
+    if not isinstance(seal, Mapping):
+        raise ProvenancePerformanceError("formal topology omits candidate seal")
+    observed = _observe_sealed_candidate_tree(candidate_root)
+    if any(seal.get(field) != value for field, value in observed.items()):
+        raise ProvenancePerformanceError(
+            "candidate tree no longer matches completion attestation"
+        )
+
+
+def promote_provenance_candidate(
+    candidate_root: str | Path,
+    bundle_id: str,
+    *,
+    topology_attestation: Mapping[str, Any],
+    out_dir: str | Path,
+) -> Path:
+    """Promote the exact immutable candidate bytes without rerunning measurement."""
+
+    candidate = _load_provenance_candidate(candidate_root, bundle_id)
+    reports = _candidate_formal_reports(candidate)
+    config = validate_matrix_config(FORMAL_MATRIX_CONFIG, formal=True)
+    aggregate = aggregate_matrix(
+        reports,
+        bootstrap_repetitions=int(config["bootstrap_repetitions"]),
+        seed=int(config["bootstrap_seed"]),
+        require_formal=True,
+        topology_attestation=topology_attestation,
+    )
+    _require_candidate_seal_matches(candidate_root, topology_attestation)
+    source_report = candidate["report"]
+    operation_samples = candidate["operation_samples"]
+    repetitions = candidate["repetitions"]
+    run_hash = str(source_report["run_id_sha256"])
+    config_hash = formal_matrix_config_sha256()
+    formal_id = provenance_bundle_id(
+        config_sha256=config_hash,
+        run_id_sha256=run_hash,
+        formal=True,
+        backend="vector-graph",
+    )
+    cells = expand_matrix(config)
+    formal_report = {
+        "schema": "txnmem-provenance-performance-report-v1",
+        "backend": "vector-graph",
+        "formal_requested": True,
+        "bundle_id": formal_id,
+        "publication_status": "complete",
+        "production_backend_claim": True,
+        "config": copy.deepcopy(config),
+        "config_sha256": config_hash,
+        "config_file_sha256": formal_config_file_sha256(),
+        "run_id_sha256": run_hash,
+        "matrix_cell_count": len(cells),
+        "repetition_count": len(repetitions),
+        "operation_sample_count": len(operation_samples),
+        "operation_samples_sha256": canonical_jsonl_sha256(operation_samples),
+        "repetitions_sha256": canonical_jsonl_sha256(repetitions),
+        "graphs": [report["graph"] for report in reports],
+        "aggregate": aggregate,
+        "topology_attestation_sha256": topology_attestation.get(
+            "attestation_sha256"
+        ),
+    }
+    return publish_provenance_bundle(
+        out_dir,
+        bundle_id=formal_id,
+        operation_samples=operation_samples,
+        repetitions=repetitions,
+        report=formal_report,
+        topology_attestation=topology_attestation,
+    )
+
+
+def write_provenance_blocked_report(
+    out_dir: str | Path, payload: Mapping[str, Any]
+) -> Path:
+    """Write a redacted blocked marker without following or overwriting paths."""
+
+    from txnmem_formal_io import FormalStore
+
+    store = FormalStore(out_dir)
+    store.write_json_exclusive(
+        "results", "provenance_performance_blocked.json", payload=dict(payload)
+    )
+    return store.path("results", "provenance_performance_blocked.json")

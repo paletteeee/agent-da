@@ -1,12 +1,14 @@
 services:
   qdrant:
-    image: qdrant/qdrant:v1.11.5
+    image: qdrant/qdrant:v1.11.5@sha256:7a4788934788a7ed9cbf6b8cc3ca1ee880dcd969cf8c6639dc7d0e446cbd4b47
     container_name: txnmem-qdrant
     expose:
       - "6333"
       - "6334"
     volumes:
       - txnmem_qdrant:/qdrant/storage
+    networks:
+      - backend
     healthcheck:
       test:
         - CMD-SHELL
@@ -19,10 +21,11 @@ services:
       retries: 20
 
   neo4j:
-    image: neo4j:5.22-community
+    image: neo4j:5.22-community@sha256:9317a2941a9641169aa2ea8470cdda184ff7a9ee1914b5429126d0db4828edd2
     container_name: txnmem-neo4j
     environment:
-      NEO4J_AUTH: neo4j/txnmem-local-only
+      NEO4J_AUTH: neo4j/${TXNMEM_NEO4J_PASSWORD:?TXNMEM_NEO4J_PASSWORD is required}
+      TXNMEM_NEO4J_PASSWORD: ${TXNMEM_NEO4J_PASSWORD:?TXNMEM_NEO4J_PASSWORD is required}
       NEO4J_server_memory_heap_initial__size: 256m
       NEO4J_server_memory_heap_max__size: 512m
     expose:
@@ -30,19 +33,23 @@ services:
       - "7687"
     volumes:
       - txnmem_neo4j:/data
+    networks:
+      - backend
     healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p txnmem-local-only 'RETURN 1' >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${TXNMEM_NEO4J_PASSWORD}\" 'RETURN 1' >/dev/null 2>&1"]
       interval: 5s
       timeout: 5s
       retries: 30
 
   toxiproxy:
-    image: shopify/toxiproxy:2.5.0
+    image: shopify/toxiproxy:2.5.0@sha256:927c797a2115a193ae3a527e5a36782b938419904ac6706ca0efa029ebea58cb
     container_name: txnmem-toxiproxy
     ports:
-      - "8474:8474"
-      - "19000:19000"
-      - "19001:19001"
+      - "127.0.0.1:8474:8474"
+      - "127.0.0.1:19000:19000"
+      - "127.0.0.1:19001:19001"
+    networks:
+      - backend
     depends_on:
       qdrant:
         condition: service_healthy
@@ -52,3 +59,8 @@ services:
 volumes:
   txnmem_qdrant:
   txnmem_neo4j:
+
+networks:
+  backend:
+    name: txnmem-backend
+    internal: true

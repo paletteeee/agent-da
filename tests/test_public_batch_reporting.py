@@ -90,7 +90,9 @@ class PublicBatchReportingTests(unittest.TestCase):
             self.assertTrue((Path(tmp) / "results" / "native_batch_summary.json").exists())
             raw = json.loads((Path(tmp) / "results" / "native_batch_summary.json").read_text())
             self.assertNotIn("events", raw)
-            self.assertTrue(raw["raw_reports_committed"] is False)
+            self.assertTrue(
+                raw["raw_report_payloads_included_in_summary"] is False
+            )
 
     def test_task_aware_adapter_factory_receives_manifest_metadata(self):
         manifest = {

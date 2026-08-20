@@ -10,11 +10,81 @@ from txnmem_appworld_projection import (
     regenerate_appworld_projection,
     select_appworld_realism_families,
     select_appworld_realism_families_from_dataset,
+    validate_appworld_realism_bundle,
 )
 from txnmem_trace_pipeline import build_trace_instances, load_trace_records
 
 
 class AppWorldProjectionRegenerationTests(unittest.TestCase):
+    @staticmethod
+    def _formal_bundle(root):
+        task_ids = [
+            f"family{family:03d}_{task_number}"
+            for family in range(56)
+            for task_number in (1, 2, 3)
+        ]
+        dataset = root / "data" / "datasets" / "test_normal.txt"
+        dataset.parent.mkdir(parents=True)
+        dataset.write_text("\n".join(task_ids) + "\n", encoding="utf-8")
+        for index, task_id in enumerate(task_ids):
+            directory = root / "data" / "tasks" / task_id / "ground_truth"
+            directory.mkdir(parents=True)
+            calls = [] if index == 0 else [{"method": "get", "url": f"/resource/{index}"}]
+            (directory / "api_calls.json").write_text(
+                json.dumps(calls), encoding="utf-8"
+            )
+        events = root / "projection.jsonl"
+        inventory_path = root / "inventory.json"
+        selection_path = root / "selection.json"
+        inventory = regenerate_appworld_projection(
+            root,
+            task_ids,
+            events,
+            official_split="test_normal",
+            dataset_path=dataset,
+        )
+        selection = select_appworld_realism_families_from_dataset(
+            dataset,
+            evaluation_family_count=50,
+            calibration_family_count=None,
+            seed=17,
+            official_split="test_normal",
+        )
+        inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
+        selection_path.write_text(json.dumps(selection), encoding="utf-8")
+        return {
+            "events": events,
+            "inventory": inventory_path,
+            "selection": selection_path,
+            "dataset": dataset,
+            "dataset_sha256": selection["dataset_file_sha256"],
+        }
+
+    def test_reference_bundle_cannot_be_used_as_formal_native_evidence(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bundle = self._formal_bundle(root)
+
+            with self.assertRaisesRegex(ValueError, "diagnostic.*native Agent trace"):
+                validate_appworld_realism_bundle(
+                    events_path=bundle["events"],
+                    selection_path=bundle["selection"],
+                    projection_inventory_path=bundle["inventory"],
+                    dataset_path=bundle["dataset"],
+                    appworld_root=root,
+                    expected_dataset_sha256=bundle["dataset_sha256"],
+                )
+
+    def test_reference_projection_inventory_is_explicitly_non_native(self):
+        with TemporaryDirectory() as tmp:
+            bundle = self._formal_bundle(Path(tmp))
+            inventory = json.loads(bundle["inventory"].read_text(encoding="utf-8"))
+
+        self.assertFalse(inventory["trace_ground_truth_native"])
+        self.assertFalse(inventory["production_latency_claim"])
+        self.assertFalse(
+            inventory["raw_official_request_values_included_in_projection"]
+        )
     def test_regeneration_preserves_method_url_order_and_drops_request_values(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

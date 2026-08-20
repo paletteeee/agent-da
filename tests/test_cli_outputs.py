@@ -11,6 +11,496 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TxnMemCliOutputTests(unittest.TestCase):
+    @staticmethod
+    def _provenance_environment():
+        return {
+            "schema": "txnmem-provenance-environment-v1",
+            "isolation_verified": True,
+            "co_tenant_load_detected": False,
+            "source": "host-observation-v1",
+            "cpu_logical_count": 8,
+            "memory_total_bytes": 16 * 1024**3,
+            "disk_medium": "ssd",
+            "toxiproxy_version": "2.9.0",
+        }
+
+    def test_provenance_blocked_report_does_not_persist_backend_exception_text(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        class FailingBackend:
+            def healthcheck(self):
+                raise RuntimeError("password=private at http://203.0.113.10:6333")
+
+            def close(self):
+                return None
+
+        with TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", {"TXNMEM_NEO4J_PASSWORD": "runtime-only"}, clear=False
+        ), patch(
+            "txnmem_provenance_performance.make_vector_graph_backend_factory",
+            return_value=lambda _namespace: FailingBackend(),
+        ):
+            root = Path(tmp).resolve()
+            attestation = root / "environment.json"
+            attestation.write_text(
+                json.dumps(self._provenance_environment()),
+                encoding="utf-8",
+            )
+            out_dir = root / "out"
+
+            exit_code = main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "vector-graph",
+                    "--config",
+                    str(ROOT / "configs" / "provenance_performance_matrix.json"),
+                    "--run-id",
+                    "blocked-fixture",
+                    "--environment-attestation",
+                    str(attestation),
+                    "--out-dir",
+                    str(out_dir),
+                ]
+            )
+            blocked_text = (
+                out_dir / "results" / "provenance_performance_blocked.json"
+            ).read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 2)
+        self.assertNotIn("private", blocked_text)
+        self.assertNotIn("203.0.113.10", blocked_text)
+        blocked = json.loads(blocked_text)
+        self.assertEqual(blocked["error_class"], "RuntimeError")
+        self.assertEqual(blocked["reason_code"], "formal_preflight_or_execution_failed")
+
+    def test_provenance_formal_config_rejects_duplicate_keys_before_backend(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        formal = json.loads(
+            (ROOT / "configs" / "provenance_performance_matrix.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        duplicate_text = json.dumps(formal)[:-1] + ',"graph_seed":17}'
+        with TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", {"TXNMEM_NEO4J_PASSWORD": "runtime-only"}, clear=False
+        ), patch(
+            "txnmem_provenance_performance.make_vector_graph_backend_factory"
+        ) as factory:
+            root = Path(tmp).resolve()
+            config = root / "config.json"
+            config.write_text(duplicate_text, encoding="utf-8")
+            attestation = root / "environment.json"
+            attestation.write_text(
+                json.dumps(self._provenance_environment()), encoding="utf-8"
+            )
+            topology = root / "topology.json"
+            topology.write_text("{}", encoding="utf-8")
+            out_dir = root / "out"
+
+            exit_code = main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "vector-graph",
+                    "--config",
+                    str(config),
+                    "--run-id",
+                    "duplicate-config",
+                    "--environment-attestation",
+                    str(attestation),
+                    "--topology-attestation",
+                    str(topology),
+                    "--formal",
+                    "--out-dir",
+                    str(out_dir),
+                ]
+            )
+
+        self.assertEqual(exit_code, 2)
+        factory.assert_not_called()
+
+    def test_provenance_one_stage_formal_mode_is_disabled_before_backend(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        with TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", {"TXNMEM_NEO4J_PASSWORD": "runtime-only"}, clear=False
+        ), patch(
+            "txnmem_provenance_performance.make_vector_graph_backend_factory"
+        ) as factory:
+            root = Path(tmp).resolve()
+            attestation = root / "environment.json"
+            attestation.write_text(
+                json.dumps(self._provenance_environment()), encoding="utf-8"
+            )
+            topology = root / "topology.json"
+            topology.write_text("{}", encoding="utf-8")
+
+            exit_code = main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "vector-graph",
+                    "--config",
+                    str(ROOT / "configs" / "provenance_performance_matrix.json"),
+                    "--run-id",
+                    "one-stage-disabled",
+                    "--environment-attestation",
+                    str(attestation),
+                    "--topology-attestation",
+                    str(topology),
+                    "--formal",
+                    "--out-dir",
+                    str(root / "out"),
+                ]
+            )
+
+        self.assertEqual(exit_code, 2)
+        factory.assert_not_called()
+
+    def test_provenance_formal_output_is_an_immutable_published_bundle(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "schema": "txnmem-provenance-performance-v1",
+                        "graph_node_counts": [10],
+                        "concurrency_levels": [1],
+                        "repetitions": 1,
+                        "graph_seed": 17,
+                        "operations_per_type": 1,
+                        "bootstrap_repetitions": 10,
+                        "bootstrap_seed": 17,
+                        "request_timeout_seconds": 30.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            out_dir = root / "out"
+            arguments = [
+                "provenance-performance",
+                "--backend",
+                "memory",
+                "--config",
+                str(config),
+                "--run-id",
+                "immutable-bundle",
+                "--out-dir",
+                str(out_dir),
+            ]
+
+            first = main(arguments)
+            bundles = list((out_dir / "bundles").glob("*.json"))
+            second = main(arguments)
+
+        self.assertEqual(first, 0)
+        self.assertEqual(len(bundles), 1)
+        self.assertEqual(second, 2)
+
+    def test_provenance_formal_output_refuses_legacy_and_symlink_targets(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        with TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", {"TXNMEM_NEO4J_PASSWORD": "runtime-only"}, clear=False
+        ):
+            root = Path(tmp).resolve()
+            attestation = root / "environment.json"
+            attestation.write_text(
+                json.dumps(self._provenance_environment()), encoding="utf-8"
+            )
+            external = root / "external.json"
+            external.write_text("sentinel", encoding="utf-8")
+            out_dir = root / "out"
+            (out_dir / "results").mkdir(parents=True)
+            (out_dir / "results" / "provenance_performance.json").symlink_to(external)
+
+            exit_code = main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "memory",
+                    "--config",
+                    str(ROOT / "configs" / "provenance_performance_matrix.json"),
+                    "--run-id",
+                    "unsafe-output",
+                    "--out-dir",
+                    str(out_dir),
+                ]
+            )
+            external_text = external.read_text(encoding="utf-8")
+            data_exists = (out_dir / "data").exists()
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(external_text, "sentinel")
+        self.assertFalse(data_exists)
+
+    def test_provenance_blocked_report_refuses_symlink_without_partial_data(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            config = root / "bad.json"
+            config.write_text('{"schema":"x","schema":"y"}', encoding="utf-8")
+            out_dir = root / "out"
+            (out_dir / "results").mkdir(parents=True)
+            external = root / "external.json"
+            external.write_text("sentinel", encoding="utf-8")
+            (out_dir / "results" / "provenance_performance_blocked.json").symlink_to(
+                external
+            )
+
+            exit_code = main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "memory",
+                    "--config",
+                    str(config),
+                    "--run-id",
+                    "blocked-symlink",
+                    "--out-dir",
+                    str(out_dir),
+                ]
+            )
+            external_text = external.read_text(encoding="utf-8")
+            bundles_exist = (out_dir / "bundles").exists()
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(external_text, "sentinel")
+        self.assertFalse(bundles_exist)
+
+    def test_appworld_group_selection_requires_a_source_bound_native_agent_bundle(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            events = root / "events.jsonl"
+            selection = root / "selection.json"
+            config = root / "realism.json"
+            out_dir = root / "out"
+            events.write_text(
+                json.dumps(
+                    {
+                        "task_id": "family001_1",
+                        "event_id": "family001_1:reference_api:0001",
+                        "sequence": 1,
+                        "method": "get",
+                        "url": "/resource",
+                        "official_split": "wrong",
+                        "family_id": "family001",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            selection.write_text(
+                json.dumps(
+                    {
+                        "group_key": "family_id",
+                        "official_split": "wrong",
+                        "evaluation_family_ids": ["family001"],
+                        "calibration_family_ids": ["family999"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config.write_text(
+                json.dumps(
+                    {
+                        "synthetic": {"workloads": ["atomic_multi_write"], "seeds": [0]},
+                        "statistics": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "source-bound native Agent bundle"):
+                main(
+                    [
+                        "trace-replay",
+                        "--events",
+                        str(events),
+                        "--adapter",
+                        "appworld",
+                        "--group-key",
+                        "family_id",
+                        "--group-selection",
+                        str(selection),
+                        "--realism-config",
+                        str(config),
+                        "--out-dir",
+                        str(out_dir),
+                    ]
+                )
+            self.assertFalse(out_dir.exists())
+
+    def test_provenance_performance_cli_runs_small_diagnostic_matrix(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        config = {
+            "schema": "txnmem-provenance-performance-v1",
+            "graph_node_counts": [10, 20],
+            "concurrency_levels": [1, 2],
+            "repetitions": 2,
+            "graph_seed": 17,
+            "operations_per_type": 1,
+            "bootstrap_repetitions": 100,
+            "bootstrap_seed": 17,
+            "request_timeout_seconds": 30.0,
+        }
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            config_path = root / "matrix.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            out_dir = root / "out"
+
+            exit_code = main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "memory",
+                    "--config",
+                    str(config_path),
+                    "--run-id",
+                    "cli-fixture",
+                    "--out-dir",
+                    str(out_dir),
+                ]
+            )
+
+            self.assertEqual(exit_code, 0)
+            pointer_paths = list((out_dir / "bundles").glob("*.json"))
+            self.assertEqual(len(pointer_paths), 1)
+            pointer = json.loads(pointer_paths[0].read_text(encoding="utf-8"))
+            report_path = out_dir / pointer["report_path"]
+            aggregate = json.loads(report_path.read_text(encoding="utf-8"))
+            bundle_root = report_path.parents[1]
+            samples = (
+                bundle_root / "data" / "provenance_operation_samples.jsonl"
+            ).read_text(encoding="utf-8").splitlines()
+            repetitions = (
+                bundle_root / "data" / "provenance_repetitions.jsonl"
+            ).read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(aggregate["backend"], "memory")
+        self.assertEqual(aggregate["aggregate"]["evidence_scope"], "diagnostic")
+        self.assertEqual(len(aggregate["aggregate"]["rows"]), 4)
+        self.assertEqual(len(samples), 32)
+        self.assertEqual(len(repetitions), 8)
+
+    def test_provenance_candidate_material_cli_writes_once(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        material = {
+            "schema": "txnmem-provenance-candidate-attestation-material-v1",
+            "candidate_bundle_id": "diagnostic-vector_graph-"
+            + "a" * 16
+            + "-"
+            + "b" * 16,
+            "run_id_sha256": "1" * 64,
+            "config_sha256": "2" * 64,
+            "config_file_sha256": "3" * 64,
+            "workload_sha256": "4" * 64,
+            "environment_attestation_sha256": "5" * 64,
+            "evidence_manifest_sha256": "6" * 64,
+            "matrix_cell_count": 15,
+            "repetition_count": 450,
+            "operation_sample_count": 14_400,
+            "observed_service_versions": {
+                "qdrant": "1.15.4",
+                "neo4j": "5.26.0",
+                "toxiproxy": "2.9.0",
+            },
+            "candidate_operation_samples_sha256": "7" * 64,
+            "candidate_repetitions_sha256": "8" * 64,
+        }
+        bundle_id = "diagnostic-vector_graph-" + "a" * 16 + "-" + "b" * 16
+        with TemporaryDirectory() as tmp, patch(
+            "txnmem_provenance_performance.candidate_attestation_material",
+            return_value=material,
+        ) as build_material:
+            root = Path(tmp).resolve()
+            candidate_root = root / "candidate"
+            candidate_root.mkdir()
+            output = root / "attestation-material.json"
+            arguments = [
+                "provenance-candidate-material",
+                "--candidate-root",
+                str(candidate_root),
+                "--bundle-id",
+                bundle_id,
+                "--out",
+                str(output),
+            ]
+
+            first = main(arguments)
+            before = output.read_bytes()
+            second = main(arguments)
+            after = output.read_bytes()
+
+        self.assertEqual(first, 0)
+        self.assertEqual(second, 2)
+        self.assertEqual(before, after)
+        self.assertEqual(json.loads(before), material)
+        self.assertEqual(build_material.call_count, 2)
+        build_material.assert_called_with(candidate_root, bundle_id)
+
+    def test_provenance_promote_cli_loads_strict_topology_without_rerun(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        bundle_id = "diagnostic-vector_graph-" + "c" * 16 + "-" + "d" * 16
+        topology = {"schema": "fixture-topology", "attestation_sha256": "e" * 64}
+        with TemporaryDirectory() as tmp, patch(
+            "txnmem_provenance_performance.promote_provenance_candidate",
+            return_value=Path(tmp) / "formal" / "report.json",
+        ) as promote, patch(
+            "txnmem_provenance_performance.run_matrix_cell"
+        ) as rerun:
+            root = Path(tmp).resolve()
+            candidate_root = root / "candidate"
+            candidate_root.mkdir()
+            topology_path = root / "topology.json"
+            topology_path.write_text(json.dumps(topology), encoding="utf-8")
+            out_dir = root / "formal"
+
+            exit_code = main(
+                [
+                    "provenance-promote",
+                    "--candidate-root",
+                    str(candidate_root),
+                    "--bundle-id",
+                    bundle_id,
+                    "--topology-attestation",
+                    str(topology_path),
+                    "--out-dir",
+                    str(out_dir),
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        promote.assert_called_once_with(
+            candidate_root,
+            bundle_id,
+            topology_attestation=topology,
+            out_dir=out_dir,
+        )
+        rerun.assert_not_called()
+
     def test_vector_graph_fault_cli_binds_scenario_to_toxiproxy_requester(self):
         sys.path.insert(0, str(ROOT / "src"))
         from txnmem_experiment import main

@@ -236,6 +236,18 @@ def sanitize_run_report(report: Mapping[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
+def _native_trace_artifact(path: Path, relative_path: str) -> dict[str, Any]:
+    """Describe one private native trace without retaining its payload."""
+
+    raw = path.read_bytes()
+    return {
+        "relative_path": relative_path,
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "size_bytes": len(raw),
+        "line_count": sum(bool(line.strip()) for line in raw.splitlines()),
+    }
+
+
 def _variant_summary(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     summary: dict[str, dict[str, Any]] = {}
     variants = sorted({str(row.get("variant")) for row in rows})
@@ -397,6 +409,9 @@ def run_benchmark_experiment_manifest(
                 "trusted_preflight_enabled": bool(
                     run_report.get("trusted_preflight_enabled", False)
                 ),
+                "app_tool_strategy": str(
+                    run_report.get("app_tool_strategy", "benchmark_default_tools")
+                ),
                 "unauthorized_tool_attempt_count": int(
                     run_report.get("unauthorized_tool_attempt_count", 0) or 0
                 ),
@@ -467,6 +482,9 @@ def run_benchmark_experiment_manifest(
         "trace_ground_truth_native": True,
         "production_latency_claim": False,
         "raw_trace_path": str(raw_path),
+        "native_trace_artifact": _native_trace_artifact(
+            raw_path, "data/native_model_traces.jsonl"
+        ),
     }
     sanitized = sanitize_run_report(report)
     store.write_json_exclusive(
@@ -650,8 +668,22 @@ def run_benchmark_batch(
         and model_usage["request_count"] == model_usage["responses_with_usage"],
         "trace_ground_truth_native": True,
         "raw_reports_location": "rep_*/results/native_model_summary.json" if repetitions > 1 else "results/native_model_summary.json",
-        "raw_reports_committed": False,
+        "raw_report_payloads_included_in_summary": False,
         "production_latency_claim": False,
+        "native_trace_artifacts": [
+            {
+                **report["native_trace_artifact"],
+                "relative_path": (
+                    report["native_trace_artifact"]["relative_path"]
+                    if repetitions == 1
+                    else (
+                        f"rep_{repetition + 1:02d}/"
+                        f"{report['native_trace_artifact']['relative_path']}"
+                    )
+                ),
+            }
+            for repetition, report in enumerate(reports)
+        ],
     }
     sanitized = sanitize_run_report(result)
     if write_summary:
@@ -803,6 +835,9 @@ def run_experiment_manifest(
         "trace_ground_truth_native": True,
         "production_latency_claim": False,
         "raw_trace_path": str(raw_path),
+        "native_trace_artifact": _native_trace_artifact(
+            raw_path, "data/native_model_traces.jsonl"
+        ),
     }
     sanitized = sanitize_run_report(report)
     _write_json(out_dir / "results" / "native_model_summary.json", sanitized)

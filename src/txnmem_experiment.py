@@ -381,6 +381,27 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="optional disjoint calibration/evaluation group inventory",
     )
+    trace_replay.add_argument(
+        "--appworld-native-run-root",
+        type=Path,
+        default=None,
+        help="protected formal AppWorld native Agent run root",
+    )
+    trace_replay.add_argument(
+        "--appworld-native-inventory",
+        type=Path,
+        default=None,
+        help="inventory emitted with the redacted native Agent memory stream",
+    )
+    trace_replay.add_argument(
+        "--appworld-task11-execution-attestation",
+        type=Path,
+        default=None,
+        help=(
+            "optional out-of-tree Task-11 launch/completion attestation; "
+            "without a pre-registered hash the bundle remains candidate/blocked"
+        ),
+    )
 
     performance = subparsers.add_parser(
         "performance", help="measure local deterministic replay timing"
@@ -398,6 +419,54 @@ def _build_parser() -> argparse.ArgumentParser:
     backend_performance.add_argument("--events", type=int, nargs="+", default=[50, 200, 1000])
     backend_performance.add_argument("--repetitions", type=int, default=30)
     backend_performance.add_argument("--out-dir", type=Path, default=Path("."))
+
+    provenance_performance = subparsers.add_parser(
+        "provenance-performance",
+        help="run the deterministic provenance DAG backend performance matrix",
+    )
+    provenance_performance.add_argument(
+        "--backend", choices=("memory", "vector-graph"), default="memory"
+    )
+    provenance_performance.add_argument("--config", type=Path, required=True)
+    provenance_performance.add_argument("--run-id", required=True)
+    provenance_performance.add_argument("--out-dir", type=Path, default=Path("."))
+    provenance_performance.add_argument(
+        "--service-url", default="http://127.0.0.1:6333"
+    )
+    provenance_performance.add_argument(
+        "--environment-attestation", type=Path, default=None
+    )
+    provenance_performance.add_argument(
+        "--topology-attestation", type=Path, default=None
+    )
+    provenance_performance.add_argument("--formal", action="store_true")
+
+    provenance_candidate_material = subparsers.add_parser(
+        "provenance-candidate-material",
+        help=(
+            "validate an immutable diagnostic candidate and emit the sanitized "
+            "hashes/counts needed by an independent topology collector"
+        ),
+    )
+    provenance_candidate_material.add_argument(
+        "--candidate-root", type=Path, required=True
+    )
+    provenance_candidate_material.add_argument("--bundle-id", required=True)
+    provenance_candidate_material.add_argument("--out", type=Path, required=True)
+
+    provenance_promote = subparsers.add_parser(
+        "provenance-promote",
+        help=(
+            "promote exact immutable candidate bytes after registered topology "
+            "completion validation, without rerunning the backend"
+        ),
+    )
+    provenance_promote.add_argument("--candidate-root", type=Path, required=True)
+    provenance_promote.add_argument("--bundle-id", required=True)
+    provenance_promote.add_argument(
+        "--topology-attestation", type=Path, required=True
+    )
+    provenance_promote.add_argument("--out-dir", type=Path, required=True)
 
     process_smoke = subparsers.add_parser(
         "process-smoke", help="run the dependency-free process linearization smoke test"
@@ -806,6 +875,34 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("--group-key and --realism-config must be supplied together")
         if args.group_selection is not None and args.group_key is None:
             raise ValueError("--group-selection requires --group-key and --realism-config")
+        appworld_binding = None
+        appworld_bundle_paths = (
+            args.appworld_native_run_root,
+            args.appworld_native_inventory,
+        )
+        if args.adapter == "appworld" and args.group_selection is not None:
+            if any(path is None for path in appworld_bundle_paths):
+                raise ValueError(
+                    "AppWorld --group-selection requires a source-bound native Agent "
+                    "bundle: --appworld-native-run-root and --appworld-native-inventory"
+                )
+            from txnmem_appworld_projection import (
+                validate_appworld_native_realism_bundle,
+            )
+
+            appworld_binding = validate_appworld_native_realism_bundle(
+                events_path=args.events,
+                selection_path=args.group_selection,
+                inventory_path=args.appworld_native_inventory,
+                native_run_root=args.appworld_native_run_root,
+                task11_attestation_path=args.appworld_task11_execution_attestation,
+            )
+        elif any(path is not None for path in appworld_bundle_paths) or (
+            args.appworld_task11_execution_attestation is not None
+        ):
+            raise ValueError(
+                "AppWorld native bundle arguments require the appworld adapter and --group-selection"
+            )
         records = load_trace_records(args.events)
         train_records, holdout_records = split_holdout(
             records, args.holdout_fraction, seed=args.seed
@@ -925,7 +1022,12 @@ def main(argv: list[str] | None = None) -> int:
             evaluation_groups = None
             calibration_groups = None
             selection_sha256 = None
-            if args.group_selection is not None:
+            if appworld_binding is not None:
+                selection = appworld_binding["family_selection"]
+                evaluation_groups = selection["evaluation_family_ids"]
+                calibration_groups = selection["calibration_family_ids"]
+                selection_sha256 = appworld_binding["selection_sha256"]
+            elif args.group_selection is not None:
                 selection = json.loads(args.group_selection.read_text(encoding="utf-8"))
                 if not isinstance(selection, dict):
                     raise ValueError("group selection must be a mapping")
@@ -973,6 +1075,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.realism_config.read_bytes()
             ).hexdigest()
             realism["cross_fitted"]["group_selection_sha256"] = selection_sha256
+            realism["cross_fitted"]["appworld_formal_binding"] = appworld_binding
         write_summary(realism, args.out_dir / "results" / "trace_realism.json")
         print(f"adapted {len(records)} records into {len(instances)} trace instances")
         print(f"wrote trace replay artifacts -> {args.out_dir}")
@@ -1123,6 +1226,226 @@ def main(argv: list[str] | None = None) -> int:
             print(f"backend performance blocked: {exc}")
             return 2
         print(f"wrote backend performance report -> {args.out_dir / 'results' / 'backend_performance.json'}")
+        return 0
+    if args.command == "provenance-candidate-material":
+        from txnmem_provenance_performance import candidate_attestation_material
+
+        try:
+            material = candidate_attestation_material(
+                args.candidate_root, args.bundle_id
+            )
+            output = args.out.expanduser().absolute()
+            FormalStore(output.parent).write_json_exclusive(
+                output.name, payload=material
+            )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, RuntimeError) as exc:
+            print(f"provenance candidate material blocked: {type(exc).__name__}")
+            return 2
+        print(f"wrote provenance candidate attestation material -> {output}")
+        return 0
+    if args.command == "provenance-promote":
+        from txnmem_provenance_performance import (
+            load_strict_json_document,
+            promote_provenance_candidate,
+        )
+
+        try:
+            topology, _topology_raw = load_strict_json_document(
+                args.topology_attestation
+            )
+            if not isinstance(topology, dict):
+                raise ValueError("topology attestation must be a mapping")
+            output_path = promote_provenance_candidate(
+                args.candidate_root,
+                args.bundle_id,
+                topology_attestation=topology,
+                out_dir=args.out_dir,
+            )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, RuntimeError) as exc:
+            print(f"provenance promotion blocked: {type(exc).__name__}")
+            return 2
+        print(f"wrote promoted provenance performance report -> {output_path}")
+        return 0
+    if args.command == "provenance-performance":
+        from txnmem_provenance_performance import (
+            aggregate_matrix,
+            build_layered_dag,
+            canonical_jsonl_sha256,
+            expand_matrix,
+            load_strict_json_document,
+            make_vector_graph_backend_factory,
+            preflight_provenance_output,
+            provenance_bundle_id,
+            publish_provenance_bundle,
+            run_matrix_cell,
+            validate_environment_attestation,
+            validate_matrix_config,
+            write_provenance_blocked_report,
+        )
+
+        output_path = None
+        try:
+            config_document, config_raw = load_strict_json_document(args.config)
+            config = validate_matrix_config(config_document, formal=args.formal)
+            cells = expand_matrix(config)
+            if args.formal:
+                raise ValueError(
+                    "direct formal measurement is disabled; use the attested "
+                    "candidate and provenance-promote workflow"
+                )
+            environment = {
+                "schema": "txnmem-provenance-environment-v1",
+                "isolation_verified": False,
+                "co_tenant_load_detected": False,
+                "source": "host-observation-v1",
+                "cpu_logical_count": 1,
+                "memory_total_bytes": 1,
+                "disk_medium": "ssd",
+                "toxiproxy_version": "diagnostic",
+            }
+            if args.environment_attestation is not None:
+                environment_document, _environment_raw = load_strict_json_document(
+                    args.environment_attestation
+                )
+                if not isinstance(environment_document, dict):
+                    raise ValueError("environment attestation must be a mapping")
+                environment = validate_environment_attestation(environment_document)
+            topology_attestation = None
+            if args.topology_attestation is not None:
+                topology_document, _topology_raw = load_strict_json_document(
+                    args.topology_attestation
+                )
+                if not isinstance(topology_document, dict):
+                    raise ValueError("topology attestation must be a mapping")
+                topology_attestation = topology_document
+
+            config_canonical = json.dumps(
+                config,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+            config_sha256 = hashlib.sha256(config_canonical).hexdigest()
+            run_id_sha256 = hashlib.sha256(args.run_id.encode("utf-8")).hexdigest()
+            bundle_id = provenance_bundle_id(
+                config_sha256=config_sha256,
+                run_id_sha256=run_id_sha256,
+                formal=args.formal,
+                backend=args.backend,
+            )
+            preflight_provenance_output(args.out_dir, bundle_id)
+
+            if args.backend == "memory":
+                from txnmem_backend import InstrumentedMemoryBackend
+
+                def backend_factory(_namespace):
+                    return InstrumentedMemoryBackend()
+
+            else:
+                neo4j_password = os.environ.get("TXNMEM_NEO4J_PASSWORD")
+                if not neo4j_password:
+                    raise ValueError("TXNMEM_NEO4J_PASSWORD is required")
+                backend_factory = make_vector_graph_backend_factory(
+                    qdrant_url=args.service_url,
+                    neo4j_uri=os.environ.get(
+                        "TXNMEM_NEO4J_URI", "bolt://127.0.0.1:7687"
+                    ),
+                    neo4j_auth=(
+                        os.environ.get("TXNMEM_NEO4J_USER", "neo4j"),
+                        neo4j_password,
+                    ),
+                    environment_attestation=environment,
+                    request_timeout_seconds=float(
+                        config.get("request_timeout_seconds", 30.0)
+                    ),
+                )
+
+            cell_reports = []
+            for cell in cells:
+                graph = build_layered_dag(
+                    int(cell["graph_node_count"]), int(cell["graph_seed"])
+                )
+                cell_reports.append(
+                    run_matrix_cell(
+                        backend_factory,
+                        graph,
+                        concurrency=int(cell["concurrency"]),
+                        repetitions=int(cell["repetitions"]),
+                        operations_per_type=int(cell["operations_per_type"]),
+                        run_id=args.run_id,
+                        formal=args.formal,
+                        environment_attestation=(
+                            environment if args.backend == "vector-graph" else None
+                        ),
+                    )
+                )
+            operation_samples = [
+                row for report in cell_reports for row in report["samples"]
+            ]
+            repetition_rows = [
+                row for report in cell_reports for row in report["repetitions"]
+            ]
+            aggregate = aggregate_matrix(
+                cell_reports,
+                bootstrap_repetitions=int(
+                    config.get("bootstrap_repetitions", 10_000)
+                ),
+                seed=int(config.get("bootstrap_seed", 17)),
+                require_formal=args.formal,
+                topology_attestation=topology_attestation,
+            )
+            report = {
+                "schema": "txnmem-provenance-performance-report-v1",
+                "backend": args.backend,
+                "formal_requested": args.formal,
+                "bundle_id": bundle_id,
+                "publication_status": "complete",
+                "production_backend_claim": bool(
+                    args.formal and args.backend == "vector-graph"
+                ),
+                "config": config,
+                "config_sha256": config_sha256,
+                "config_file_sha256": hashlib.sha256(config_raw).hexdigest(),
+                "run_id_sha256": run_id_sha256,
+                "matrix_cell_count": len(cells),
+                "repetition_count": len(repetition_rows),
+                "operation_sample_count": len(operation_samples),
+                "operation_samples_sha256": canonical_jsonl_sha256(operation_samples),
+                "repetitions_sha256": canonical_jsonl_sha256(repetition_rows),
+                "graphs": [report["graph"] for report in cell_reports],
+                "aggregate": aggregate,
+                "topology_attestation_sha256": (
+                    topology_attestation.get("attestation_sha256")
+                    if isinstance(topology_attestation, dict)
+                    else None
+                ),
+            }
+            output_path = publish_provenance_bundle(
+                args.out_dir,
+                bundle_id=bundle_id,
+                operation_samples=operation_samples,
+                repetitions=repetition_rows,
+                report=report,
+                topology_attestation=topology_attestation,
+            )
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, RuntimeError) as exc:
+            blocked = {
+                "schema": "txnmem-provenance-performance-blocked-v1",
+                "status": "blocked",
+                "backend": args.backend,
+                "formal_requested": args.formal,
+                "reason_code": "formal_preflight_or_execution_failed",
+                "error_class": type(exc).__name__,
+                "production_backend_claim": False,
+            }
+            try:
+                write_provenance_blocked_report(args.out_dir, blocked)
+            except (OSError, ValueError):
+                pass
+            print(f"provenance performance blocked: {type(exc).__name__}")
+            return 2
+        print(f"wrote provenance performance report -> {output_path}")
         return 0
     if args.command == "process-smoke":
         raw_report = run_process_action_sequences(

@@ -10,6 +10,8 @@ import json
 import threading
 import tempfile
 from pathlib import Path
+from types import ModuleType
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -20,6 +22,11 @@ from txnmem_vector_graph_backend import (
     _Neo4jBoltClient,
     _QdrantHTTPClient,
     _qdrant_point_id,
+)
+from txnmem_provenance_performance import (
+    build_layered_dag,
+    canonical_graph_sha256,
+    run_matrix_cell,
 )
 from txnmem_task_transaction import TaskTransactionError, TaskTransactionGateway
 from txnmem_transaction_journal import TransactionJournal
@@ -108,11 +115,12 @@ class _FakeQdrant:
         self.points.pop((namespace, point_id), None)
 
     def healthcheck(self):
-        return {"available": True, "version": "fake-qdrant"}
+        return {"available": True, "version": "1.15.4"}
 
 
 class _FakeNeo4j:
     def __init__(self):
+        self.max_transaction_retry_time_seconds = 0.0
         self.memories = {}
         self.edges = []
         self.staged_memories = {}
@@ -427,6 +435,28 @@ class _FakeNeo4j:
             "operation_id": row.get("_canonical_operation_id"),
         }
 
+    def scan_namespace(self, namespace, limit=1000):
+        if self.fail_readback:
+            raise TimeoutError("neo4j scan unavailable")
+        rows = []
+        for (space, memory_id), row in sorted(self.memories.items()):
+            if space != namespace:
+                continue
+            rows.append(
+                {
+                    "memory_id": memory_id,
+                    "status": row.get("status"),
+                    "source_ids": sorted(
+                        source_id
+                        for edge_namespace, source_id, target_id, kind in self.edges
+                        if edge_namespace == namespace
+                        and target_id == memory_id
+                        and kind == "DERIVED_FROM"
+                    ),
+                }
+            )
+        return {"read_ok": True, "rows": rows[:limit]}
+
     def retrieve_many_by_txn(self, namespace, txn_id):
         if self.fail_readback:
             raise TimeoutError("neo4j transaction readback unavailable")
@@ -475,7 +505,7 @@ class _FakeNeo4j:
             raise ConnectionResetError("neo4j cleanup response lost")
 
     def healthcheck(self):
-        return {"available": True, "version": "fake-neo4j"}
+        return {"available": True, "version": "5.26.0"}
 
 
 class _MigrationRows:
@@ -627,6 +657,32 @@ class _MigrationDriver:
             self.driver.events.append("migration_commit")
             return result
 
+        class _ExplicitTransaction(_MigrationTransaction):
+            def __init__(self, driver):
+                self.driver = driver
+                self.working_nodes = copy.deepcopy(driver.nodes)
+                self.working_relationships = copy.deepcopy(driver.relationships)
+                super().__init__(self.working_nodes, self.working_relationships)
+                self.finished = False
+                self.driver.events.append("migration_begin")
+
+            def commit(self):
+                self.driver.nodes = self.working_nodes
+                self.driver.relationships = self.working_relationships
+                self.driver.events.append("migration_commit")
+                self.finished = True
+
+            def rollback(self):
+                self.driver.rollback_count += 1
+                self.driver.events.append("migration_rollback")
+                self.finished = True
+
+            def close(self):
+                return None
+
+        def begin_transaction(self):
+            return self._ExplicitTransaction(self.driver)
+
         def run(self, query, **_parameters):
             if query.startswith(
                 "MATCH (m:MemoryIdentity:Memory {namespace:$namespace, memory_id:$memory_id})"
@@ -719,6 +775,70 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         with self.assertRaises(VectorGraphBackendError) as raised:
             backend.current_version(memory_id)
         self.assertEqual(raised.exception.code, "backend_state_unknown")
+
+    def test_neo4j_driver_and_writes_disable_implicit_retry(self):
+        observed = {}
+
+        class Driver:
+            pass
+
+        class GraphDatabase:
+            @staticmethod
+            def driver(uri, **kwargs):
+                observed.update({"uri": uri, **kwargs})
+                return Driver()
+
+        module = ModuleType("neo4j")
+        module.GraphDatabase = GraphDatabase
+        with patch.dict(sys.modules, {"neo4j": module}), patch.object(
+            _Neo4jBoltClient, "_initialize_schema"
+        ):
+            client = _Neo4jBoltClient("bolt://proxy", ("neo4j", "secret"))
+
+        self.assertEqual(observed["max_transaction_retry_time"], 0.0)
+        self.assertEqual(client.max_transaction_retry_time_seconds, 0.0)
+
+        events = []
+
+        class Transaction:
+            def commit(self):
+                events.append("commit")
+
+            def rollback(self):
+                events.append("rollback")
+
+            def close(self):
+                events.append("close")
+
+        class Session:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def begin_transaction(self):
+                events.append("begin")
+                return Transaction()
+
+            def execute_write(self, _work):
+                raise AssertionError("managed transaction retry path was used")
+
+        class ExplicitDriver:
+            def session(self):
+                return Session()
+
+        client = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
+        client.driver = ExplicitDriver()
+        self.assertEqual(client._execute_write_once(lambda _tx: "ok"), "ok")
+        self.assertEqual(events, ["begin", "commit", "close"])
+
+        events.clear()
+        with self.assertRaisesRegex(RuntimeError, "transient"):
+            client._execute_write_once(
+                lambda _tx: (_ for _ in ()).throw(RuntimeError("transient"))
+            )
+        self.assertEqual(events, ["begin", "rollback", "close"])
 
     def test_neo4j_healthcheck_reports_server_version(self):
         class Session:
@@ -1425,6 +1545,87 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             {"read_ok": True, "rows": []},
         )
 
+    def test_qdrant_namespace_scan_paginates_beyond_one_thousand_rows(self):
+        client = _QdrantHTTPClient("http://qdrant")
+        offsets = []
+
+        def request(method, path, payload=None):
+            if method == "PUT":
+                return {}
+            self.assertTrue(path.endswith("/points/scroll"))
+            offset = payload.get("offset")
+            offsets.append(offset)
+            start = 0 if offset is None else int(offset)
+            stop = min(start + int(payload["limit"]), 1500)
+            points = [
+                {"payload": {"memory_id": f"m{index}"}}
+                for index in range(start, stop)
+            ]
+            return {
+                "result": {
+                    "points": points,
+                    "next_page_offset": stop if stop < 1500 else None,
+                }
+            }
+
+        client._request = request
+
+        result = client.scan_namespace("tenant", limit=1501)
+
+        self.assertTrue(result["read_ok"])
+        self.assertEqual(len(result["rows"]), 1500)
+        self.assertEqual(offsets, [None, 1000])
+
+    def test_namespace_scans_reject_bool_and_fractional_limits(self):
+        qdrant = _QdrantHTTPClient("http://qdrant")
+        neo4j = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
+        for client in (qdrant, neo4j):
+            for limit in (True, 1.5):
+                with self.subTest(client=type(client).__name__, limit=limit):
+                    with self.assertRaises(ValueError):
+                        client.scan_namespace("tenant", limit=limit)
+
+    def test_neo4j_namespace_scan_returns_canonical_rows_only(self):
+        calls = []
+
+        class Session:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def run(self, query, **parameters):
+                calls.append((query, parameters))
+                return [
+                    {
+                        "memory_id": "m1",
+                        "status": "active",
+                        "source_ids": ["m0", None],
+                    }
+                ]
+
+        class Driver:
+            def session(self):
+                return Session()
+
+        client = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
+        client.driver = Driver()
+
+        result = client.scan_namespace("tenant", limit=11)
+
+        self.assertEqual(
+            result,
+            {
+                "read_ok": True,
+                "rows": [
+                    {"memory_id": "m1", "status": "active", "source_ids": ["m0"]}
+                ],
+            },
+        )
+        self.assertEqual(calls[0][1], {"namespace": "tenant", "limit": 11})
+        self.assertIn("MemoryIdentity:Memory", calls[0][0])
+
     def test_qdrant_mutations_wait_for_operation_after_readback(self):
         client = _QdrantHTTPClient("http://qdrant")
         requests = []
@@ -1543,6 +1744,103 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.backend.write("m0", value="source")
         self.backend.invalidate("m0")
         self.assertEqual(self.backend.read("m0"), None)
+
+    def test_provenance_inventory_matches_both_persistent_stores(self):
+        self.backend.write("m0", value="source")
+        self.backend.derive("m1", ["m0"], value="derived")
+        self.backend.invalidate("m1")
+
+        inventory = self.backend.provenance_inventory(limit=10)
+
+        self.assertEqual(inventory["classification"], "complete")
+        self.assertEqual(inventory["node_count"], 2)
+        self.assertEqual(inventory["edge_count"], 1)
+        self.assertEqual(
+            inventory["graph_sha256"],
+            canonical_graph_sha256(["m0", "m1"], [("m0", "m1")]),
+        )
+        self.assertEqual(inventory["status_counts"], {"active": 1, "invalid": 1})
+        self.assertNotIn("nodes", inventory)
+        self.assertNotIn("edges", inventory)
+
+    def test_provenance_inventory_fails_closed_on_cross_store_mismatch(self):
+        self.backend.write("m0", value="source")
+        self.backend.derive("m1", ["m0"], value="derived")
+        self.qdrant.points[("episode-1", "m1")]["payload"]["derived_from"] = []
+
+        inventory = self.backend.provenance_inventory(limit=10)
+
+        self.assertEqual(inventory["classification"], "partial")
+        self.assertIsNone(inventory["graph_sha256"])
+
+    def test_provenance_inventory_fails_closed_on_unreadable_store(self):
+        self.backend.write("m0", value="source")
+        self.neo4j.fail_readback = True
+
+        inventory = self.backend.provenance_inventory(limit=10)
+
+        self.assertEqual(inventory["classification"], "unknown")
+        self.assertIsNone(inventory["node_count"])
+
+    def test_provenance_inventory_rejects_duplicate_physical_rows(self):
+        self.backend.write("m0", value="source")
+        original = self.qdrant.scan_namespace
+
+        def duplicate_scan(namespace, limit=1000):
+            result = original(namespace, limit=limit)
+            result["rows"].append(copy.deepcopy(result["rows"][0]))
+            return result
+
+        self.qdrant.scan_namespace = duplicate_scan
+
+        inventory = self.backend.provenance_inventory(limit=10)
+
+        self.assertNotEqual(inventory["classification"], "complete")
+
+    def test_provenance_inventory_rejects_bool_and_fractional_limits(self):
+        for limit in (True, 1.5):
+            with self.subTest(limit=limit):
+                with self.assertRaises(ValueError):
+                    self.backend.provenance_inventory(limit=limit)
+
+    def test_provenance_matrix_cell_closes_real_backend_seam(self):
+        namespaces = []
+
+        def factory(namespace):
+            namespaces.append(namespace)
+            return VectorGraphMemoryBackend(
+                namespace,
+                "http://qdrant",
+                "bolt://neo4j",
+                ("neo4j", "fixture"),
+                qdrant_client=_FakeQdrant(),
+                neo4j_client=_FakeNeo4j(),
+                max_retries=0,
+            )
+
+        report = run_matrix_cell(
+            factory,
+            build_layered_dag(10, seed=17),
+            concurrency=2,
+            repetitions=1,
+            operations_per_type=1,
+            run_id="vector-graph-fixture",
+            formal=True,
+            environment_attestation={
+                "schema": "txnmem-provenance-environment-v1",
+                "isolation_verified": True,
+                "co_tenant_load_detected": False,
+                "source": "host-observation-v1",
+                "cpu_logical_count": 8,
+                "memory_total_bytes": 16 * 1024**3,
+                "disk_medium": "ssd",
+                "toxiproxy_version": "2.9.0",
+            },
+        )
+
+        self.assertEqual(len(namespaces), 1)
+        self.assertTrue(report["formal_eligible"])
+        self.assertTrue(report["repetitions"][0]["state_closed"])
 
     def test_proxy_requester_observes_semantic_write_and_commit_boundaries(self):
         observed = []

@@ -101,8 +101,10 @@ class RealBackendScriptTests(unittest.TestCase):
 
         self.assertNotIn('"6333:6333"', compose)
         self.assertNotIn('"7687:7687"', compose)
-        self.assertIn('"19000:19000"', compose)
-        self.assertIn('"19001:19001"', compose)
+        self.assertIn('"127.0.0.1:19000:19000"', compose)
+        self.assertIn('"127.0.0.1:19001:19001"', compose)
+        self.assertIn('"127.0.0.1:8474:8474"', compose)
+        self.assertIn("internal: true", compose)
 
     def test_qdrant_healthcheck_uses_tools_present_in_the_pinned_image(self):
         compose = (ROOT / "infra" / "real_backend" / "docker-compose.yml").read_text(

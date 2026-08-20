@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import stat
 from contextlib import contextmanager
 from collections.abc import Mapping, Sequence
@@ -234,12 +235,42 @@ class FormalStore:
                 os.close(descriptor)
             os.close(parent)
 
+    def load_bytes(self, *parts: str) -> bytes:
+        """Read one regular artifact without following a symbolic link."""
+
+        parent, name = self._open_parent(parts, create=False)
+        descriptor: int | None = None
+        try:
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(name, flags, dir_fd=parent)
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise FormalIOError(
+                    f"formal artifact is not a regular file: {self.path(*parts)}"
+                )
+            with os.fdopen(descriptor, "rb") as stream:
+                descriptor = None
+                return stream.read()
+        except FormalIOError:
+            raise
+        except OSError as exc:
+            raise FormalIOError(
+                f"cannot read formal artifact as a regular file: {self.path(*parts)}"
+            ) from exc
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            os.close(parent)
+
     def write_json_exclusive(
         self,
         *parts: str,
         payload: Any,
         sort_keys: bool = True,
+        mode: int = 0o644,
     ) -> None:
+        if type(mode) is not int or mode not in {0o600, 0o644}:
+            raise FormalIOError("formal JSON mode must be 0600 or 0644")
         try:
             encoded = (
                 json.dumps(
@@ -263,7 +294,7 @@ class FormalStore:
                 | getattr(os, "O_NOFOLLOW", 0)
                 | getattr(os, "O_CLOEXEC", 0)
             )
-            descriptor = os.open(name, flags, 0o644, dir_fd=parent)
+            descriptor = os.open(name, flags, mode, dir_fd=parent)
             with os.fdopen(descriptor, "wb") as stream:
                 descriptor = None
                 stream.write(encoded)
@@ -490,6 +521,75 @@ def bind_native_shard_report(shard: Any, raw: Any) -> dict[str, Any]:
         "repetitions": repetitions,
         "task_summaries": bound_rows,
     }
+    execution_condition_document = raw.get("condition")
+    if execution_condition_document is not None:
+        if not isinstance(execution_condition_document, Mapping):
+            raise FormalIOError("native report execution condition must be a mapping")
+        if _canonical_hash(execution_condition_document) != execution_condition:
+            raise FormalIOError("native report execution condition fingerprint is stale")
+        report["execution_condition"] = dict(execution_condition_document)
+    trace_artifacts = raw.get("native_trace_artifacts")
+    if trace_artifacts is not None:
+        if not isinstance(trace_artifacts, list) or len(trace_artifacts) != repetitions:
+            raise FormalIOError("native report trace artifacts do not cover repetitions")
+        normalized_artifacts: list[dict[str, Any]] = []
+        for repetition, artifact in enumerate(trace_artifacts, start=1):
+            if not isinstance(artifact, Mapping):
+                raise FormalIOError("native report trace artifact must be a mapping")
+            expected_path = (
+                "data/native_model_traces.jsonl"
+                if repetitions == 1
+                else f"rep_{repetition:02d}/data/native_model_traces.jsonl"
+            )
+            if artifact.get("relative_path") != expected_path:
+                raise FormalIOError("native report trace artifact path is not canonical")
+            digest = artifact.get("sha256")
+            if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise FormalIOError("native report trace artifact hash is malformed")
+            for field in ("size_bytes", "line_count"):
+                value = artifact.get(field)
+                if type(value) is not int or value < 0:
+                    raise FormalIOError(
+                        f"native report trace artifact {field} must be non-negative"
+                    )
+            normalized_artifacts.append(
+                {
+                    "relative_path": expected_path,
+                    "sha256": digest,
+                    "size_bytes": artifact["size_bytes"],
+                    "line_count": artifact["line_count"],
+                }
+            )
+        report["native_trace_artifacts"] = normalized_artifacts
+    treatment = raw.get("treatment")
+    prompt_profile = raw.get("prompt_profile")
+    if treatment is not None or prompt_profile is not None:
+        if not isinstance(treatment, Mapping):
+            raise FormalIOError("native report treatment must be a mapping")
+        if not isinstance(prompt_profile, str) or not prompt_profile:
+            raise FormalIOError("native report prompt profile must be non-empty")
+        if set(treatment) != {
+            "prompt_profile",
+            "trusted_preflight_enabled",
+            "app_tool_strategy",
+        }:
+            raise FormalIOError("native report treatment has unregistered fields")
+        if prompt_profile not in {"baseline", "tuned"}:
+            raise FormalIOError("native report prompt profile is unsupported")
+        if type(treatment.get("trusted_preflight_enabled")) is not bool:
+            raise FormalIOError("native report treatment preflight flag must be boolean")
+        app_tool_strategy = treatment.get("app_tool_strategy")
+        if app_tool_strategy not in {
+            "instruction_inferred",
+            "manifest_scoped",
+            "all_public",
+            "benchmark_default_tools",
+        }:
+            raise FormalIOError("native report treatment tool strategy is unsupported")
+        if treatment.get("prompt_profile") != prompt_profile:
+            raise FormalIOError("native report treatment and prompt profile disagree")
+        report["treatment"] = dict(treatment)
+        report["prompt_profile"] = prompt_profile
     if "domain" in shard:
         report["domain"] = shard["domain"]
     return report
