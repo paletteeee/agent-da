@@ -14,6 +14,7 @@ from txnmem_topology_attestation import (
     _read_private_authorization_nonce,
     execution_authorization_proof,
     sanitize_topology_attestation,
+    _validate_runtime_manifest,
     validate_registered_topology_attestation,
 )
 from txnmem_provenance_contract import FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS
@@ -21,6 +22,18 @@ from txnmem_provenance_contract import FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS
 
 class TopologyAttestationTests(unittest.TestCase):
     AUTHORIZATION_NONCE = b"topology-fixture-authorization-nonce-0001"
+
+    def test_runtime_manifest_accepts_registered_system_python_3_10_12(self):
+        launch, _completion = self._documents()
+        runtime_manifest = copy.deepcopy(
+            launch["command_manifest"]["runtime_manifest"]
+        )
+        runtime_manifest["python"]["version"] = "3.10.12"
+
+        validated = _validate_runtime_manifest(runtime_manifest)
+
+        self.assertEqual(validated["python"]["version"], "3.10.12")
+
     @staticmethod
     def _file_bytes(value):
         return (

@@ -329,3 +329,27 @@ authorized server currently accepts the SSH TCP connection but closes it before
 authentication, while its alternate IPv6 route times out. No formal provenance
 candidate or production performance claim is active until that infrastructure
 boundary is restored and the controller smoke succeeds.
+
+Ruling: Source-register the remote host's exact root-protected system CPython
+3.10.12 in both the locked runtime and formal client identity contract; do not
+substitute either user-owned Conda interpreter even though one already matches a
+newer supported language level — cost if wrong: formal evidence is intentionally
+bound to the reviewed 3.10.12 executable, and every future interpreter version
+requires an explicit source review and new approved commit.
+
+Task 10 remote preflight resumed after SSH authentication was restored. A fresh
+bundle clone at exact approved commit `c37c16b` remained clean and the remote
+host exposed the required GPU, Docker/Compose and nftables boundaries. The full
+suite under `/usr/bin/python3` ran 813 tests with four optional skips and six
+errors: three missing optional `python-docx` test imports, two expected failures
+because CPython 3.10.12 was not yet source-registered, and one Python-version
+dependent bare Toxiproxy listen-address parse failure. No formal controller or
+performance candidate was installed from that failed preflight.
+
+Task 10 compatibility correction: three independently failing RED tests cover
+the Python-3.10 bare-listen parse, runtime-lock acceptance, and topology runtime
+identity. The minimal local correction now passes those focused tests; a fresh
+local full suite passed 843 tests with four optional skips, claim audit passed
+15/15 active claims, artifact audit found zero issues, and diff check passed.
+Independent review, exact-commit deployment and remote CPython 3.10.12 replay
+remain pending, so no formal performance claim is active.

@@ -76,7 +76,7 @@ class ToxiproxyFaultController:
     @staticmethod
     def _port(value: str) -> int | None:
         parsed = urlparse(value)
-        if parsed.scheme:
+        if parsed.netloc:
             return parsed.port
         match = re.search(r":(\d+)$", value)
         return int(match.group(1)) if match else None

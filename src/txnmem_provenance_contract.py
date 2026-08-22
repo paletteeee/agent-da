@@ -15,7 +15,7 @@ FORMAL_RUNNER_GID = 65532
 # IPv4 addresses such as ``203.0.113`` are syntactically indistinguishable from
 # semantic versions.
 FORMAL_SERVICE_VERSION_ALLOWLIST: Mapping[str, frozenset[str]] = {
-    "client": frozenset({"3.9.6", "3.11.9", "3.14.6"}),
+    "client": frozenset({"3.9.6", "3.10.12", "3.11.9", "3.14.6"}),
     "qdrant": frozenset({"1.11.5", "1.15.4"}),
     "neo4j": frozenset({"5.22.0", "5.26.0"}),
     "toxiproxy": frozenset({"2.5.0", "2.9.0"}),

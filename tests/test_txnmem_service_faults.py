@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+from urllib.parse import ParseResult, urlparse as stdlib_urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -122,6 +124,31 @@ class ServiceFaultTests(unittest.TestCase):
             if call[0] == "DELETE" and "/toxics/" in call[1]
         )
         self.assertLess(install_index, clear_index)
+
+    def test_proxy_path_accepts_python_3_10_bare_listen_parse(self):
+        api = _FakeToxiproxyAPI()
+        controller = ToxiproxyFaultController(
+            {
+                "name": "delay",
+                "service": "qdrant",
+                "trigger_operation": "write",
+                "action": "delay",
+                "seed": 17,
+                "recovery_action": "continue",
+            },
+            proxy_routes=_routes(),
+            api_requester=api,
+        )
+
+        def python_3_10_urlparse(value):
+            if value == "0.0.0.0:19000":
+                return ParseResult("0.0.0.0", "", "19000", "", "", "")
+            return stdlib_urlparse(value)
+
+        with patch("txnmem_service_faults.urlparse", side_effect=python_3_10_urlparse):
+            evidence = controller.verify_proxy_path("qdrant")
+
+        self.assertTrue(evidence["verified"])
 
     def test_wrong_client_port_fails_proxy_path_evidence_closed(self):
         api = _FakeToxiproxyAPI()

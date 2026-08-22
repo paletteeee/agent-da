@@ -32,6 +32,20 @@ from txnmem_topology_attestation import (
 class ProvenanceExecutionCollectorTests(unittest.TestCase):
     AUTHORIZATION_NONCE = b"collector-fixture-authorization-nonce-0001"
 
+    def test_repository_runtime_lock_accepts_protected_python_3_10_12(self):
+        runtime_lock = (
+            Path(__file__).resolve().parents[1]
+            / "configs"
+            / "provenance_runtime_lock.json"
+        )
+
+        with patch.object(
+            collector_module.platform, "python_version", return_value="3.10.12"
+        ):
+            lock, _lock_sha256 = collector_module._load_runtime_lock(runtime_lock)
+
+        self.assertIn("3.10.12", lock["python_versions"])
+
     @staticmethod
     def _runtime_manifest(
         *, executable_hash="a" * 64, version="3.11.9", file_hash="1" * 64
