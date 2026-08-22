@@ -675,11 +675,13 @@ class ProvenanceAggregationTests(unittest.TestCase):
             "cmdline_sha256": "a" * 64,
         }
         shared["network_guard"] = {
-            "schema": "txnmem-provenance-network-guard-v2",
+            "schema": "txnmem-provenance-network-guard-v3",
             "table_name_sha256": "b" * 64,
             "runner_uid": 65532,
             "controller_uid": 0,
             "allowed_ipv4_loopback_ports": [19000, 19001],
+            "allowed_root_ingress_ports": [8474, 19000, 19001],
+            "root_ingress_destination_exact": True,
             "management_port_root_only": True,
             "non_runner_proxy_traffic_blocked": True,
             "host_bridge_access_blocked": True,
@@ -688,6 +690,9 @@ class ProvenanceAggregationTests(unittest.TestCase):
             "ingress_ipv4_subnet_sha256": "9" * 64,
             "backend_bridge_interface_sha256": "0" * 64,
             "ingress_bridge_interface_sha256": "1" * 64,
+            "toxiproxy_ingress_ipv4_sha256": hashlib.sha256(
+                b"172.20.0.2"
+            ).hexdigest(),
             "policy_sha256": "c" * 64,
             "ruleset_sha256": "d" * 64,
         }
@@ -696,11 +701,20 @@ class ProvenanceAggregationTests(unittest.TestCase):
         )
 
         shared["backend_isolation"] = {
-            "schema": "txnmem-provenance-backend-isolation-v2",
+            "schema": "txnmem-provenance-backend-isolation-v3",
             "network_name_sha256": "e" * 64,
             "network_id_sha256": "f" * 64,
             "ingress_network_name_sha256": "6" * 64,
             "ingress_network_id_sha256": "7" * 64,
+            "toxiproxy_ingress_ipv4": "172.20.0.2",
+            "toxiproxy_ingress_ipv4_sha256": hashlib.sha256(
+                b"172.20.0.2"
+            ).hexdigest(),
+            "toxiproxy_ingress_endpoint_id_sha256": hashlib.sha256(
+                ("4" * 64).encode("utf-8")
+            ).hexdigest(),
+            "toxiproxy_ingress_membership_verified": True,
+            "ingress_unique_workload_container_verified": True,
             "backend_network_internal": True,
             "ingress_network_external": True,
             "ingress_proxy_only": True,
