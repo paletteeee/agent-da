@@ -353,3 +353,13 @@ local full suite passed 843 tests with four optional skips, claim audit passed
 15/15 active claims, artifact audit found zero issues, and diff check passed.
 Independent review, exact-commit deployment and remote CPython 3.10.12 replay
 remain pending, so no formal performance claim is active.
+
+Task 10 proxy-route correction: strict TDD added consumer-visible fail-closed
+coverage for malformed client/listen/upstream endpoints, missing or disabled
+proxy state, incomplete/wrong upstreams, listen-host mismatch, normalized valid
+hosts, and the protected Python-3.10 bare-listen characterization. The initial
+focused RED run recorded 15 unsafe acceptances and one malformed-port exception;
+the strict normalized host/port verifier is GREEN on 10 focused tests, the full
+local suite exits 0, claim audit reports 15 claims/0 findings, artifact audit
+reports 0 findings, and diff check passes. No public result, paper claim,
+remote file, or deployment was changed.

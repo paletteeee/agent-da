@@ -74,12 +74,31 @@ class ToxiproxyFaultController:
         return json.loads(raw) if raw else {}
 
     @staticmethod
-    def _port(value: str) -> int | None:
-        parsed = urlparse(value)
-        if parsed.netloc:
-            return parsed.port
-        match = re.search(r":(\d+)$", value)
-        return int(match.group(1)) if match else None
+    def _endpoint_identity(value: str) -> tuple[str, int] | None:
+        """Return a normalized endpoint host/port pair or reject the value."""
+
+        value = str(value)
+        if not value or value != value.strip():
+            return None
+        try:
+            parsed = urlparse(value) if "://" in value else urlparse(f"//{value}")
+            if (
+                not parsed.netloc
+                or parsed.path
+                or parsed.params
+                or parsed.query
+                or parsed.fragment
+                or parsed.username is not None
+                or parsed.password is not None
+            ):
+                return None
+            host = parsed.hostname
+            port = parsed.port
+        except ValueError:
+            return None
+        if not host or port is None or not 1 <= port <= 65535:
+            return None
+        return host.lower(), port
 
     def verify_proxy_path(self, service: str) -> dict[str, Any]:
         """Verify that the client endpoint enters the configured proxy."""
@@ -102,14 +121,23 @@ class ToxiproxyFaultController:
         client_endpoint = str(route.get("client_endpoint", ""))
         observed_listen = str(observed.get("listen", ""))
         observed_upstream = str(observed.get("upstream", ""))
+        client_identity = self._endpoint_identity(client_endpoint)
+        expected_listen_identity = self._endpoint_identity(expected_listen)
+        observed_listen_identity = self._endpoint_identity(observed_listen)
+        expected_upstream_identity = self._endpoint_identity(expected_upstream)
+        observed_upstream_identity = self._endpoint_identity(observed_upstream)
         verified = bool(
             proxy_name
             and observed.get("name") == proxy_name
-            and observed.get("enabled", True) is True
-            and self._port(client_endpoint) is not None
-            and self._port(client_endpoint) == self._port(observed_listen)
-            and self._port(expected_listen) == self._port(observed_listen)
-            and expected_upstream == observed_upstream
+            and observed.get("enabled") is True
+            and client_identity is not None
+            and expected_listen_identity is not None
+            and observed_listen_identity is not None
+            and expected_upstream_identity is not None
+            and observed_upstream_identity is not None
+            and client_identity[1] == observed_listen_identity[1]
+            and expected_listen_identity == observed_listen_identity
+            and expected_upstream_identity == observed_upstream_identity
         )
         evidence = {
             "service": service,

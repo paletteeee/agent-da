@@ -150,6 +150,141 @@ class ServiceFaultTests(unittest.TestCase):
 
         self.assertTrue(evidence["verified"])
 
+    def test_proxy_path_rejects_malformed_client_endpoints_even_when_ports_match(self):
+        invalid_endpoints = {
+            "scheme without authority": "http:127.0.0.1:19000",
+            "path": "junk/path:19000",
+            "zero port": "0.0.0.0:0",
+            "out of range port": "0.0.0.0:99999",
+            "credentials": "http://user:pass@127.0.0.1:19000",
+            "query": "http://127.0.0.1:19000?query=value",
+            "fragment": "http://127.0.0.1:19000#fragment",
+            "parameters": "http://127.0.0.1:19000;param",
+        }
+        for description, endpoint in invalid_endpoints.items():
+            with self.subTest(description=description):
+                api = _FakeToxiproxyAPI()
+                routes = _routes()
+                routes["qdrant"]["client_endpoint"] = endpoint
+                controller = ToxiproxyFaultController(
+                    {
+                        "name": "delay",
+                        "service": "qdrant",
+                        "trigger_operation": "write",
+                        "action": "delay",
+                        "seed": 17,
+                        "recovery_action": "continue",
+                    },
+                    proxy_routes=routes,
+                    api_requester=api,
+                )
+
+                with self.assertRaisesRegex(RuntimeError, "does not traverse configured proxy"):
+                    controller.verify_proxy_path("qdrant")
+
+    def test_proxy_path_rejects_malformed_listen_and_upstream_endpoints(self):
+        invalid_endpoints = (
+            "http:127.0.0.1:19000",
+            "junk/path:19000",
+            "0.0.0.0:0",
+            "0.0.0.0:99999",
+        )
+        for field in ("listen", "upstream"):
+            for endpoint in invalid_endpoints:
+                with self.subTest(field=field, endpoint=endpoint):
+                    api = _FakeToxiproxyAPI()
+                    routes = _routes()
+                    routes["qdrant"][field] = endpoint
+                    api.proxies["txnmem-qdrant"][field] = endpoint
+                    controller = ToxiproxyFaultController(
+                        {
+                            "name": "delay",
+                            "service": "qdrant",
+                            "trigger_operation": "write",
+                            "action": "delay",
+                            "seed": 17,
+                            "recovery_action": "continue",
+                        },
+                        proxy_routes=routes,
+                        api_requester=api,
+                    )
+
+                    with self.assertRaisesRegex(RuntimeError, "does not traverse configured proxy"):
+                        controller.verify_proxy_path("qdrant")
+
+    def test_proxy_path_requires_enabled_and_complete_matching_upstream(self):
+        cases = {
+            "missing enabled": lambda api, routes: api.proxies["txnmem-qdrant"].pop("enabled"),
+            "disabled": lambda api, routes: api.proxies["txnmem-qdrant"].update(enabled=False),
+            "missing expected upstream": lambda api, routes: routes["qdrant"].update(upstream=""),
+            "missing observed upstream": lambda api, routes: api.proxies["txnmem-qdrant"].pop("upstream"),
+            "both upstreams missing": lambda api, routes: (
+                routes["qdrant"].update(upstream=""),
+                api.proxies["txnmem-qdrant"].pop("upstream"),
+            ),
+            "wrong upstream": lambda api, routes: api.proxies["txnmem-qdrant"].update(upstream="other:6333"),
+        }
+        for description, configure in cases.items():
+            with self.subTest(description=description):
+                api = _FakeToxiproxyAPI()
+                routes = _routes()
+                configure(api, routes)
+                controller = ToxiproxyFaultController(
+                    {
+                        "name": "delay",
+                        "service": "qdrant",
+                        "trigger_operation": "write",
+                        "action": "delay",
+                        "seed": 17,
+                        "recovery_action": "continue",
+                    },
+                    proxy_routes=routes,
+                    api_requester=api,
+                )
+
+                with self.assertRaisesRegex(RuntimeError, "does not traverse configured proxy"):
+                    controller.verify_proxy_path("qdrant")
+
+    def test_proxy_path_requires_matching_listen_host(self):
+        api = _FakeToxiproxyAPI()
+        routes = _routes()
+        api.proxies["txnmem-qdrant"]["listen"] = "127.0.0.1:19000"
+        controller = ToxiproxyFaultController(
+            {
+                "name": "delay",
+                "service": "qdrant",
+                "trigger_operation": "write",
+                "action": "delay",
+                "seed": 17,
+                "recovery_action": "continue",
+            },
+            proxy_routes=routes,
+            api_requester=api,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "does not traverse configured proxy"):
+            controller.verify_proxy_path("qdrant")
+
+    def test_proxy_path_normalizes_valid_endpoint_hostnames(self):
+        api = _FakeToxiproxyAPI()
+        routes = _routes()
+        routes["qdrant"]["upstream"] = "http://QDRANT:6333"
+        api.proxies["txnmem-qdrant"]["upstream"] = "http://qdrant:6333"
+        controller = ToxiproxyFaultController(
+            {
+                "name": "delay",
+                "service": "qdrant",
+                "trigger_operation": "write",
+                "action": "delay",
+                "seed": 17,
+                "recovery_action": "continue",
+            },
+            proxy_routes=routes,
+            api_requester=api,
+        )
+
+        self.assertTrue(controller.verify_proxy_path("qdrant")["verified"])
+
     def test_wrong_client_port_fails_proxy_path_evidence_closed(self):
         api = _FakeToxiproxyAPI()
         routes = _routes()
