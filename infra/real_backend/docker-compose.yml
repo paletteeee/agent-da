@@ -50,6 +50,7 @@ services:
       - "127.0.0.1:19001:19001"
     networks:
       - backend
+      - ingress
     depends_on:
       qdrant:
         condition: service_healthy
@@ -63,4 +64,8 @@ volumes:
 networks:
   backend:
     name: txnmem-backend
+    driver: bridge
     internal: true
+  ingress:
+    name: txnmem-ingress
+    driver: bridge

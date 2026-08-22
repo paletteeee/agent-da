@@ -15,6 +15,7 @@ from email import policy as email_policy
 from email.parser import BytesParser
 import functools
 import hashlib
+import ipaddress
 import importlib
 import io
 import json
@@ -73,9 +74,13 @@ from txnmem_topology_attestation import (
 )
 
 
-SNAPSHOT_SCHEMA = "txnmem-provenance-topology-snapshot-v1"
+SNAPSHOT_SCHEMA = "txnmem-provenance-topology-snapshot-v2"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_CONTAINER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_RFC1918_IPV4_NETWORKS = tuple(
+    ipaddress.ip_network(value)
+    for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
 _FORMAL_QDRANT_PROXY = "txnmem-qdrant"
 _FORMAL_NEO4J_PROXY = "txnmem-neo4j"
 _FORMAL_QDRANT_CONTAINER = "txnmem-qdrant"
@@ -1485,7 +1490,15 @@ def _formal_network_table_name(run_hash: str) -> str:
     return "txnmem_" + _validate_hash(run_hash, "formal network run")[:16]
 
 
-def _nft_guard_batch(table_name: str, *, runner_uid: int) -> str:
+def _nft_guard_batch(
+    table_name: str,
+    *,
+    runner_uid: int,
+    backend_ipv4_subnet: str,
+    ingress_ipv4_subnet: str,
+    backend_bridge_interface: str,
+    ingress_bridge_interface: str,
+) -> str:
     if (
         not isinstance(table_name, str)
         or not re.fullmatch(r"txnmem_[0-9a-f]{16}", table_name)
@@ -1493,15 +1506,64 @@ def _nft_guard_batch(table_name: str, *, runner_uid: int) -> str:
         or runner_uid <= 0
     ):
         raise CollectorError("formal nftables guard identity is invalid")
+    normalized_subnets: list[str] = []
+    for value in (backend_ipv4_subnet, ingress_ipv4_subnet):
+        try:
+            subnet = ipaddress.ip_network(value, strict=True)
+        except (TypeError, ValueError) as exc:
+            raise CollectorError("formal nftables bridge subnet is invalid") from exc
+        if (
+            not isinstance(subnet, ipaddress.IPv4Network)
+            or str(subnet) != value
+            or not any(
+                subnet.subnet_of(parent) for parent in _RFC1918_IPV4_NETWORKS
+            )
+        ):
+            raise CollectorError("formal nftables bridge subnet is invalid")
+        normalized_subnets.append(str(subnet))
+    if (
+        normalized_subnets[0] == normalized_subnets[1]
+        or ipaddress.ip_network(normalized_subnets[0]).overlaps(
+            ipaddress.ip_network(normalized_subnets[1])
+        )
+    ):
+        raise CollectorError("formal nftables bridge subnets overlap")
+    bridge_interfaces = (
+        backend_bridge_interface,
+        ingress_bridge_interface,
+    )
+    if (
+        any(
+            not isinstance(value, str)
+            or not re.fullmatch(r"br-[0-9a-f]{12}", value)
+            for value in bridge_interfaces
+        )
+        or bridge_interfaces[0] == bridge_interfaces[1]
+    ):
+        raise CollectorError("formal nftables bridge interface is invalid")
+    subnet_set = ", ".join(normalized_subnets)
+    interface_set = ", ".join(f'"{value}"' for value in bridge_interfaces)
     return (
         f"table inet {table_name} {{\n"
         "  chain output {\n"
         "    type filter hook output priority -150; policy accept;\n"
         f"    meta skuid {runner_uid} ip daddr 127.0.0.1 "
         "tcp dport { 19000, 19001 } accept comment \"txnmem-proxy-allow\"\n"
+        "    meta skuid 0 ip daddr 127.0.0.1 tcp dport 8474 "
+        "accept comment \"txnmem-management-allow\"\n"
         f"    meta skuid {runner_uid} reject comment \"txnmem-runner-deny\"\n"
+        "    ip daddr 127.0.0.1 tcp dport 8474 "
+        "reject comment \"txnmem-management-deny\"\n"
         "    ip daddr 127.0.0.1 tcp dport { 19000, 19001 } "
         "reject comment \"txnmem-attribution-deny\"\n"
+        f"    ip daddr {{ {subnet_set} }} "
+        "reject comment \"txnmem-host-bridge-deny\"\n"
+        "  }\n"
+        "  chain forward {\n"
+        "    type filter hook forward priority -150; policy accept;\n"
+        f"    iifname != {{ {interface_set} }} "
+        f"ip daddr {{ {subnet_set} }} "
+        "reject comment \"txnmem-forward-bridge-deny\"\n"
         "  }\n"
         "}\n"
     )
@@ -1540,7 +1602,7 @@ def _normalize_nft_snapshot(document: Any, *, table_name: str) -> dict[str, Any]
     normalized: list[Any] = []
     comments: list[str] = []
     table_seen = False
-    chain_seen = False
+    chains_seen: set[str] = set()
     for item in document["nftables"]:
         if not isinstance(item, Mapping) or len(item) != 1:
             raise CollectorError("formal nftables snapshot item is invalid")
@@ -1561,14 +1623,16 @@ def _normalize_nft_snapshot(document: Any, *, table_name: str) -> dict[str, Any]
                 raise CollectorError("formal nftables table identity mismatch")
             table_seen = True
         elif kind == "chain":
+            name = value.get("name")
+            if name not in {"output", "forward"} or name in chains_seen:
+                raise CollectorError("formal nftables chain identity mismatch")
             if (
-                value.get("name") != "output"
-                or value.get("type") != "filter"
-                or value.get("hook") != "output"
+                value.get("type") != "filter"
+                or value.get("hook") != name
                 or value.get("policy") != "accept"
             ):
                 raise CollectorError("formal nftables chain identity mismatch")
-            chain_seen = True
+            chains_seen.add(str(name))
         elif kind == "rule":
             comment = value.get("comment")
             if not isinstance(comment, str):
@@ -1577,8 +1641,12 @@ def _normalize_nft_snapshot(document: Any, *, table_name: str) -> dict[str, Any]
         else:
             raise CollectorError("formal nftables snapshot contains an extra object")
         normalized.append({kind: value})
-    if not table_seen or not chain_seen or sorted(comments) != [
+    if not table_seen or chains_seen != {"output", "forward"} or sorted(comments) != [
         "txnmem-attribution-deny",
+        "txnmem-forward-bridge-deny",
+        "txnmem-host-bridge-deny",
+        "txnmem-management-allow",
+        "txnmem-management-deny",
         "txnmem-proxy-allow",
         "txnmem-runner-deny",
     ]:
@@ -1589,6 +1657,10 @@ def _normalize_nft_snapshot(document: Any, *, table_name: str) -> dict[str, Any]
 @dataclass
 class _NftNetworkGuard:
     table_name: str
+    backend_ipv4_subnet: str
+    ingress_ipv4_subnet: str
+    backend_bridge_interface: str
+    ingress_bridge_interface: str
     runner_uid: int = FORMAL_RUNNER_UID
     executable: Path = Path(_FORMAL_NFT_EXECUTABLE)
     active: bool = False
@@ -1653,17 +1725,37 @@ class _NftNetworkGuard:
             table_name=self.table_name,
         )
         return {
-            "schema": "txnmem-provenance-network-guard-v1",
+            "schema": "txnmem-provenance-network-guard-v2",
             "table_name_sha256": hashlib.sha256(
                 self.table_name.encode("utf-8")
             ).hexdigest(),
             "runner_uid": self.runner_uid,
+            "controller_uid": 0,
             "allowed_ipv4_loopback_ports": [19000, 19001],
-            "management_port_blocked": True,
+            "management_port_root_only": True,
             "non_runner_proxy_traffic_blocked": True,
+            "host_bridge_access_blocked": True,
+            "forwarded_bridge_access_blocked": True,
+            "backend_ipv4_subnet_sha256": hashlib.sha256(
+                self.backend_ipv4_subnet.encode("utf-8")
+            ).hexdigest(),
+            "ingress_ipv4_subnet_sha256": hashlib.sha256(
+                self.ingress_ipv4_subnet.encode("utf-8")
+            ).hexdigest(),
+            "backend_bridge_interface_sha256": hashlib.sha256(
+                self.backend_bridge_interface.encode("utf-8")
+            ).hexdigest(),
+            "ingress_bridge_interface_sha256": hashlib.sha256(
+                self.ingress_bridge_interface.encode("utf-8")
+            ).hexdigest(),
             "policy_sha256": hashlib.sha256(
                 _nft_guard_batch(
-                    self.table_name, runner_uid=self.runner_uid
+                    self.table_name,
+                    runner_uid=self.runner_uid,
+                    backend_ipv4_subnet=self.backend_ipv4_subnet,
+                    ingress_ipv4_subnet=self.ingress_ipv4_subnet,
+                    backend_bridge_interface=self.backend_bridge_interface,
+                    ingress_bridge_interface=self.ingress_bridge_interface,
                 ).encode("utf-8")
             ).hexdigest(),
             "ruleset_sha256": hashlib.sha256(
@@ -1674,7 +1766,14 @@ class _NftNetworkGuard:
     def activate(self) -> dict[str, Any]:
         if self.active or self.table_name in self._table_names():
             raise CollectorError("formal nftables guard already exists")
-        batch = _nft_guard_batch(self.table_name, runner_uid=self.runner_uid)
+        batch = _nft_guard_batch(
+            self.table_name,
+            runner_uid=self.runner_uid,
+            backend_ipv4_subnet=self.backend_ipv4_subnet,
+            ingress_ipv4_subnet=self.ingress_ipv4_subnet,
+            backend_bridge_interface=self.backend_bridge_interface,
+            ingress_bridge_interface=self.ingress_bridge_interface,
+        )
         self._run(("--check", "-f", "-"), stdin=batch)
         try:
             self._run(("-f", "-"), stdin=batch)
@@ -2500,6 +2599,16 @@ def _collect_execution_evidence(
         )
     except ValueError as exc:
         raise CollectorError("formal network guard activation is invalid") from exc
+    for field in (
+        "backend_ipv4_subnet_sha256",
+        "ingress_ipv4_subnet_sha256",
+        "backend_bridge_interface_sha256",
+        "ingress_bridge_interface_sha256",
+    ):
+        if network_guard_before.get(field) != backend_isolation_before.get(field):
+            raise CollectorError(
+                "formal network guard is not bound to backend isolation"
+            )
     shared_before = {
         "collector_id": COLLECTOR_ID,
         "formal_execution_requested": True,
@@ -3345,28 +3454,146 @@ def _docker_owner(container_name: str) -> str:
     return result
 
 
-def _normalize_docker_backend_isolation(
-    containers: Mapping[str, Any], network: Mapping[str, Any]
-) -> dict[str, Any]:
-    roles = ("qdrant", "neo4j", "toxiproxy")
-    if not isinstance(containers, Mapping) or set(containers) != set(roles):
-        raise CollectorError("formal backend container closure is incomplete")
+def _validate_formal_docker_network(
+    network: Mapping[str, Any],
+    *,
+    expected_name: str,
+    expected_internal: bool,
+    role: str,
+) -> tuple[str, ipaddress.IPv4Network, str]:
     network_id = network.get("Id") if isinstance(network, Mapping) else None
     if (
         not isinstance(network, Mapping)
-        or network.get("Name") != "txnmem-backend"
-        or network.get("Internal") is not True
+        or network.get("Name") != expected_name
+        or network.get("Driver") != "bridge"
+        or network.get("Scope") != "local"
+        or network.get("Internal") is not expected_internal
+        or network.get("Attachable") is not False
+        or network.get("Ingress") is not False
+        or network.get("ConfigOnly") is not False
+        or network.get("EnableIPv4") is not True
+        or network.get("EnableIPv6") is not False
+        or network.get("Options") != {}
         or not isinstance(network_id, str)
         or not re.fullmatch(r"[0-9a-f]{64}", network_id)
         or not isinstance(network.get("Containers"), Mapping)
     ):
-        raise CollectorError("formal backend Docker network is not internal")
+        raise CollectorError(f"formal {role} Docker network type is invalid")
+
+    ipam = network.get("IPAM")
+    if (
+        not isinstance(ipam, Mapping)
+        or set(ipam) != {"Driver", "Options", "Config"}
+        or ipam.get("Driver") != "default"
+        or ipam.get("Options") not in (None, {})
+        or not isinstance(ipam.get("Config"), list)
+        or len(ipam["Config"]) != 1
+        or not isinstance(ipam["Config"][0], Mapping)
+        or set(ipam["Config"][0]) != {"Subnet", "IPRange", "Gateway"}
+        or ipam["Config"][0].get("IPRange") != ""
+        or not isinstance(ipam["Config"][0].get("Subnet"), str)
+        or not isinstance(ipam["Config"][0].get("Gateway"), str)
+    ):
+        raise CollectorError(f"formal {role} Docker network IPAM is invalid")
+    try:
+        subnet = ipaddress.ip_network(ipam["Config"][0]["Subnet"], strict=True)
+        gateway = ipaddress.ip_address(ipam["Config"][0]["Gateway"])
+    except ValueError as exc:
+        raise CollectorError(
+            f"formal {role} Docker network IPAM is invalid"
+        ) from exc
+    if (
+        not isinstance(subnet, ipaddress.IPv4Network)
+        or not isinstance(gateway, ipaddress.IPv4Address)
+        or gateway not in subnet
+        or gateway in {subnet.network_address, subnet.broadcast_address}
+    ):
+        raise CollectorError(f"formal {role} Docker network IPAM is invalid")
+    if not any(subnet.subnet_of(parent) for parent in _RFC1918_IPV4_NETWORKS):
+        raise CollectorError(
+            f"formal {role} Docker network requires a private RFC1918 subnet"
+        )
+    return network_id, subnet, f"br-{network_id[:12]}"
+
+
+def _normalize_docker_network_guard_profile(
+    backend_network: Mapping[str, Any],
+    ingress_network: Mapping[str, Any],
+    *,
+    sys_class_net: Path = Path("/sys/class/net"),
+) -> dict[str, str]:
+    (
+        _backend_network_id,
+        backend_subnet,
+        backend_interface,
+    ) = _validate_formal_docker_network(
+        backend_network,
+        expected_name="txnmem-backend",
+        expected_internal=True,
+        role="backend",
+    )
+    (
+        _ingress_network_id,
+        ingress_subnet,
+        ingress_interface,
+    ) = _validate_formal_docker_network(
+        ingress_network,
+        expected_name="txnmem-ingress",
+        expected_internal=False,
+        role="ingress",
+    )
+    if backend_subnet.overlaps(ingress_subnet):
+        raise CollectorError("formal Docker network IPv4 subnets overlap")
+    for interface_name in (backend_interface, ingress_interface):
+        if not (sys_class_net / interface_name / "bridge").is_dir():
+            raise CollectorError("formal Docker bridge interface is unavailable")
+    return {
+        "backend_ipv4_subnet": str(backend_subnet),
+        "ingress_ipv4_subnet": str(ingress_subnet),
+        "backend_bridge_interface": backend_interface,
+        "ingress_bridge_interface": ingress_interface,
+    }
+
+
+def _normalize_docker_backend_isolation(
+    containers: Mapping[str, Any],
+    backend_network: Mapping[str, Any],
+    ingress_network: Mapping[str, Any],
+) -> dict[str, Any]:
+    roles = ("qdrant", "neo4j", "toxiproxy")
+    if not isinstance(containers, Mapping) or set(containers) != set(roles):
+        raise CollectorError("formal backend container closure is incomplete")
+    (
+        backend_network_id,
+        backend_ipv4_subnet,
+        backend_bridge_interface,
+    ) = _validate_formal_docker_network(
+        backend_network,
+        expected_name="txnmem-backend",
+        expected_internal=True,
+        role="backend",
+    )
+    (
+        ingress_network_id,
+        ingress_ipv4_subnet,
+        ingress_bridge_interface,
+    ) = _validate_formal_docker_network(
+        ingress_network,
+        expected_name="txnmem-ingress",
+        expected_internal=False,
+        role="ingress",
+    )
+    if backend_ipv4_subnet.overlaps(ingress_ipv4_subnet):
+        raise CollectorError("formal Docker network IPv4 subnets overlap")
     normalized_containers: list[dict[str, Any]] = []
     container_ids: set[str] = set()
+    toxiproxy_container_id: str | None = None
     for role in roles:
         row = containers[role]
         if not isinstance(row, Mapping):
-            raise CollectorError("formal backend container identity is invalid")
+            raise CollectorError(
+                "formal backend container network or identity is invalid"
+            )
         container_id = row.get("Id")
         runtime_image_id = row.get("Image")
         config = row.get("Config")
@@ -3382,14 +3609,29 @@ def _normalize_docker_backend_isolation(
             or not str(config["Image"]).endswith("@sha256:" + expected_manifest)
             or not isinstance(settings, Mapping)
             or not isinstance(settings.get("Networks"), Mapping)
-            or set(settings["Networks"]) != {"txnmem-backend"}
+            or set(settings["Networks"])
+            != (
+                {"txnmem-backend", "txnmem-ingress"}
+                if role == "toxiproxy"
+                else {"txnmem-backend"}
+            )
             or not isinstance(settings["Networks"]["txnmem-backend"], Mapping)
             or settings["Networks"]["txnmem-backend"].get("NetworkID")
-            != network_id
+            != backend_network_id
             or not isinstance(settings.get("Ports"), Mapping)
         ):
-            raise CollectorError("formal backend container identity is invalid")
+            raise CollectorError(
+                "formal backend container network or identity is invalid"
+            )
+        if role == "toxiproxy" and (
+            not isinstance(settings["Networks"]["txnmem-ingress"], Mapping)
+            or settings["Networks"]["txnmem-ingress"].get("NetworkID")
+            != ingress_network_id
+        ):
+            raise CollectorError("formal proxy ingress network identity is invalid")
         container_ids.add(container_id)
+        if role == "toxiproxy":
+            toxiproxy_container_id = container_id
         normalized_containers.append(
             {
                 "role": role,
@@ -3402,11 +3644,19 @@ def _normalize_docker_backend_isolation(
                 "manifest_digest": expected_manifest,
             }
         )
-    network_container_ids = {
-        str(value) for value in network["Containers"].keys()
+    backend_network_container_ids = {
+        str(value) for value in backend_network["Containers"].keys()
     }
-    if network_container_ids != container_ids:
+    if backend_network_container_ids != container_ids:
         raise CollectorError("formal backend Docker network membership drifted")
+    ingress_network_container_ids = {
+        str(value) for value in ingress_network["Containers"].keys()
+    }
+    if (
+        toxiproxy_container_id is None
+        or ingress_network_container_ids != {toxiproxy_container_id}
+    ):
+        raise CollectorError("formal ingress network is not proxy-only")
 
     for role in ("qdrant", "neo4j"):
         ports = containers[role]["NetworkSettings"]["Ports"]
@@ -3435,12 +3685,44 @@ def _normalize_docker_backend_isolation(
     if observed_proxy_ports != expected_proxy_ports:
         raise CollectorError("formal proxy port closure is incomplete")
     return {
-        "schema": "txnmem-provenance-backend-isolation-v1",
+        "schema": "txnmem-provenance-backend-isolation-v2",
         "network_name_sha256": hashlib.sha256(
             b"txnmem-backend"
         ).hexdigest(),
-        "network_id_sha256": hashlib.sha256(network_id.encode("utf-8")).hexdigest(),
+        "network_id_sha256": hashlib.sha256(
+            backend_network_id.encode("utf-8")
+        ).hexdigest(),
+        "ingress_network_name_sha256": hashlib.sha256(
+            b"txnmem-ingress"
+        ).hexdigest(),
+        "ingress_network_id_sha256": hashlib.sha256(
+            ingress_network_id.encode("utf-8")
+        ).hexdigest(),
         "backend_network_internal": True,
+        "ingress_network_external": True,
+        "ingress_proxy_only": True,
+        "backend_network_driver": "bridge",
+        "ingress_network_driver": "bridge",
+        "backend_network_scope": "local",
+        "ingress_network_scope": "local",
+        "network_driver_options_empty": True,
+        "docker_default_ipam_driver_verified": True,
+        "private_non_overlapping_ipv4_subnets_verified": True,
+        "backend_ipv4_subnet_sha256": hashlib.sha256(
+            str(backend_ipv4_subnet).encode("utf-8")
+        ).hexdigest(),
+        "ingress_ipv4_subnet_sha256": hashlib.sha256(
+            str(ingress_ipv4_subnet).encode("utf-8")
+        ).hexdigest(),
+        "backend_bridge_interface_sha256": hashlib.sha256(
+            backend_bridge_interface.encode("utf-8")
+        ).hexdigest(),
+        "ingress_bridge_interface_sha256": hashlib.sha256(
+            ingress_bridge_interface.encode("utf-8")
+        ).hexdigest(),
+        "networks_non_attachable": True,
+        "networks_non_swarm_ingress": True,
+        "networks_non_config_only": True,
         "direct_backend_ports_unpublished": True,
         "proxy_ports_loopback_only": True,
         "published_proxy_ports": [8474, 19000, 19001],
@@ -3470,34 +3752,61 @@ def _collect_docker_backend_isolation(
             check=True,
             capture_output=True,
         )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise CollectorError("cannot inspect formal Docker isolation") from exc
+    documents = _strict_json_bytes(
+        container_result.stdout, "formal Docker container isolation"
+    )
+    if not isinstance(documents, list) or len(documents) != 3:
+        raise CollectorError("formal Docker isolation output is incomplete")
+    networks_by_name = _inspect_formal_docker_networks()
+    return _normalize_docker_backend_isolation(
+        {role: documents[index] for index, role in enumerate(names)},
+        networks_by_name["txnmem-backend"],
+        networks_by_name["txnmem-ingress"],
+    )
+
+
+def _inspect_formal_docker_networks() -> dict[str, Mapping[str, Any]]:
+    try:
         network_result = subprocess.run(
             [
                 _FORMAL_DOCKER_EXECUTABLE,
                 "network",
                 "inspect",
                 "txnmem-backend",
+                "txnmem-ingress",
             ],
             check=True,
             capture_output=True,
         )
     except (OSError, subprocess.CalledProcessError) as exc:
         raise CollectorError("cannot inspect formal Docker isolation") from exc
-    documents = _strict_json_bytes(
-        container_result.stdout, "formal Docker container isolation"
-    )
     networks = _strict_json_bytes(
         network_result.stdout, "formal Docker network isolation"
     )
-    if (
-        not isinstance(documents, list)
-        or len(documents) != 3
-        or not isinstance(networks, list)
-        or len(networks) != 1
-    ):
+    if not isinstance(networks, list) or len(networks) != 2:
         raise CollectorError("formal Docker isolation output is incomplete")
-    return _normalize_docker_backend_isolation(
-        {role: documents[index] for index, role in enumerate(names)},
-        networks[0],
+    networks_by_name: dict[str, Mapping[str, Any]] = {}
+    for network in networks:
+        if not isinstance(network, Mapping) or not isinstance(
+            network.get("Name"), str
+        ):
+            raise CollectorError("formal Docker network identity is invalid")
+        name = str(network["Name"])
+        if name in networks_by_name:
+            raise CollectorError("formal Docker network identity is duplicated")
+        networks_by_name[name] = network
+    if set(networks_by_name) != {"txnmem-backend", "txnmem-ingress"}:
+        raise CollectorError("formal Docker network closure is incomplete")
+    return networks_by_name
+
+
+def _collect_docker_network_guard_profile() -> dict[str, str]:
+    networks = _inspect_formal_docker_networks()
+    return _normalize_docker_network_guard_profile(
+        networks["txnmem-backend"],
+        networks["txnmem-ingress"],
     )
 
 
@@ -4079,7 +4388,8 @@ def collect_formal_execution(
             },
         )
         network_guard = _NftNetworkGuard(
-            _formal_network_table_name(run_hash)
+            _formal_network_table_name(run_hash),
+            **_collect_docker_network_guard_profile(),
         )
         child_start_ticks = child_start_identity.rsplit(":", 1)[-1]
 

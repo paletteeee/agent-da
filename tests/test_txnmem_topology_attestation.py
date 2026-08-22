@@ -234,20 +234,45 @@ class TopologyAttestationTests(unittest.TestCase):
             ).hexdigest(),
             "child_process": child_process,
             "network_guard": {
-                "schema": "txnmem-provenance-network-guard-v1",
+                "schema": "txnmem-provenance-network-guard-v2",
                 "table_name_sha256": "b" * 64,
                 "runner_uid": 65532,
+                "controller_uid": 0,
                 "allowed_ipv4_loopback_ports": [19000, 19001],
-                "management_port_blocked": True,
+                "management_port_root_only": True,
                 "non_runner_proxy_traffic_blocked": True,
+                "host_bridge_access_blocked": True,
+                "forwarded_bridge_access_blocked": True,
+                "backend_ipv4_subnet_sha256": "8" * 64,
+                "ingress_ipv4_subnet_sha256": "9" * 64,
+                "backend_bridge_interface_sha256": "0" * 64,
+                "ingress_bridge_interface_sha256": "1" * 64,
                 "policy_sha256": "c" * 64,
                 "ruleset_sha256": "d" * 64,
             },
             "backend_isolation": {
-                "schema": "txnmem-provenance-backend-isolation-v1",
+                "schema": "txnmem-provenance-backend-isolation-v2",
                 "network_name_sha256": "e" * 64,
                 "network_id_sha256": "f" * 64,
+                "ingress_network_name_sha256": "6" * 64,
+                "ingress_network_id_sha256": "7" * 64,
                 "backend_network_internal": True,
+                "ingress_network_external": True,
+                "ingress_proxy_only": True,
+                "backend_network_driver": "bridge",
+                "ingress_network_driver": "bridge",
+                "backend_network_scope": "local",
+                "ingress_network_scope": "local",
+                "network_driver_options_empty": True,
+                "docker_default_ipam_driver_verified": True,
+                "private_non_overlapping_ipv4_subnets_verified": True,
+                "backend_ipv4_subnet_sha256": "8" * 64,
+                "ingress_ipv4_subnet_sha256": "9" * 64,
+                "backend_bridge_interface_sha256": "0" * 64,
+                "ingress_bridge_interface_sha256": "1" * 64,
+                "networks_non_attachable": True,
+                "networks_non_swarm_ingress": True,
+                "networks_non_config_only": True,
                 "direct_backend_ports_unpublished": True,
                 "proxy_ports_loopback_only": True,
                 "published_proxy_ports": [8474, 19000, 19001],
@@ -349,7 +374,7 @@ class TopologyAttestationTests(unittest.TestCase):
             ).hexdigest(),
         }
         launch = {
-            "schema": "txnmem-provenance-execution-launch-raw-v2",
+            "schema": "txnmem-provenance-execution-launch-raw-v3",
             **shared,
             "roles": launch_roles,
             "proxy_routes": copy.deepcopy(proxy_routes),
@@ -362,7 +387,7 @@ class TopologyAttestationTests(unittest.TestCase):
         )
         launch_hash = hashlib.sha256(self._file_bytes(launch)).hexdigest()
         completion = {
-            "schema": "txnmem-provenance-execution-completion-raw-v3",
+            "schema": "txnmem-provenance-execution-completion-raw-v4",
             **shared,
             "launch_file_sha256": launch_hash,
             "exit_code": 0,
@@ -468,6 +493,7 @@ class TopologyAttestationTests(unittest.TestCase):
         encoded = json.dumps(sanitized, sort_keys=True)
         roles = {row["role"]: row for row in sanitized["roles"]}
 
+        self.assertEqual(sanitized["schema"], "txnmem-topology-attestation-v5")
         self.assertNotIn("private-client-host", encoded)
         self.assertNotIn("private-backend-host", encoded)
         self.assertNotIn("process-", encoded)
@@ -491,6 +517,12 @@ class TopologyAttestationTests(unittest.TestCase):
         )
         self.assertTrue(
             sanitized["backend_isolation"]["backend_network_internal"]
+        )
+        self.assertTrue(
+            sanitized["backend_isolation"]["ingress_network_external"]
+        )
+        self.assertTrue(
+            sanitized["backend_isolation"]["ingress_proxy_only"]
         )
         self.assertEqual(
             [
@@ -555,6 +587,22 @@ class TopologyAttestationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             TopologyAttestationError, "backend_isolation changed"
+        ):
+            self._sanitize(launch, completion)
+
+        launch, completion = self._documents()
+        launch["backend_isolation"]["ingress_proxy_only"] = False
+        completion["backend_isolation"]["ingress_proxy_only"] = False
+        with self.assertRaisesRegex(
+            TopologyAttestationError, "formal backend isolation"
+        ):
+            self._sanitize(launch, completion)
+
+        launch, completion = self._documents()
+        launch["network_guard"]["backend_ipv4_subnet_sha256"] = "2" * 64
+        completion["network_guard"]["backend_ipv4_subnet_sha256"] = "2" * 64
+        with self.assertRaisesRegex(
+            TopologyAttestationError, "network guard.*backend isolation"
         ):
             self._sanitize(launch, completion)
 
@@ -851,6 +899,41 @@ class TopologyAttestationTests(unittest.TestCase):
                 validate_registered_topology_attestation(tampered, **arguments)
 
         self.assertEqual(validated, sanitized)
+
+    def test_registered_sanitized_attestation_rejects_guard_backend_mismatch(self):
+        sanitized = self._sanitize()
+        sanitized["network_guard"]["backend_ipv4_subnet_sha256"] = "2" * 64
+        without_hash = dict(sanitized)
+        without_hash.pop("attestation_sha256")
+        sanitized["attestation_sha256"] = hashlib.sha256(
+            json.dumps(
+                without_hash,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
+        with patch.dict(
+            FORMAL_PROVENANCE_TOPOLOGY_ATTESTATION_SHA256_BY_RUN,
+            {"1" * 64: sanitized["attestation_sha256"]},
+            clear=True,
+        ), patch.dict(
+            FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
+            {
+                "1" * 64: hashlib.sha256(
+                    self.AUTHORIZATION_NONCE
+                ).hexdigest()
+            },
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                TopologyAttestationError,
+                "network guard.*backend isolation",
+            ):
+                validate_registered_topology_attestation(
+                    sanitized, **self._validation_arguments()
+                )
 
     def test_cross_host_transport_cannot_be_promoted_without_remote_collector(self):
         launch, completion = self._documents()

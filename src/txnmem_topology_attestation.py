@@ -21,9 +21,9 @@ from txnmem_provenance_contract import (
 )
 
 
-RAW_LAUNCH_SCHEMA = "txnmem-provenance-execution-launch-raw-v2"
-RAW_COMPLETION_SCHEMA = "txnmem-provenance-execution-completion-raw-v3"
-SANITIZED_SCHEMA = "txnmem-topology-attestation-v4"
+RAW_LAUNCH_SCHEMA = "txnmem-provenance-execution-launch-raw-v3"
+RAW_COMPLETION_SCHEMA = "txnmem-provenance-execution-completion-raw-v4"
+SANITIZED_SCHEMA = "txnmem-topology-attestation-v5"
 COLLECTOR_ID = "txnmem-provenance-execution-collector-v1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _GIT_COMMIT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
@@ -223,9 +223,16 @@ _NETWORK_GUARD_FIELDS = frozenset(
         "schema",
         "table_name_sha256",
         "runner_uid",
+        "controller_uid",
         "allowed_ipv4_loopback_ports",
-        "management_port_blocked",
+        "management_port_root_only",
         "non_runner_proxy_traffic_blocked",
+        "host_bridge_access_blocked",
+        "forwarded_bridge_access_blocked",
+        "backend_ipv4_subnet_sha256",
+        "ingress_ipv4_subnet_sha256",
+        "backend_bridge_interface_sha256",
+        "ingress_bridge_interface_sha256",
         "policy_sha256",
         "ruleset_sha256",
     }
@@ -235,7 +242,25 @@ _BACKEND_ISOLATION_FIELDS = frozenset(
         "schema",
         "network_name_sha256",
         "network_id_sha256",
+        "ingress_network_name_sha256",
+        "ingress_network_id_sha256",
         "backend_network_internal",
+        "ingress_network_external",
+        "ingress_proxy_only",
+        "backend_network_driver",
+        "ingress_network_driver",
+        "backend_network_scope",
+        "ingress_network_scope",
+        "network_driver_options_empty",
+        "docker_default_ipam_driver_verified",
+        "private_non_overlapping_ipv4_subnets_verified",
+        "backend_ipv4_subnet_sha256",
+        "ingress_ipv4_subnet_sha256",
+        "backend_bridge_interface_sha256",
+        "ingress_bridge_interface_sha256",
+        "networks_non_attachable",
+        "networks_non_swarm_ingress",
+        "networks_non_config_only",
         "direct_backend_ports_unpublished",
         "proxy_ports_loopback_only",
         "published_proxy_ports",
@@ -995,22 +1020,44 @@ def _validate_network_guard_attestation(value: Any) -> dict[str, Any]:
     if (
         not isinstance(value, Mapping)
         or set(value) != _NETWORK_GUARD_FIELDS
-        or value.get("schema") != "txnmem-provenance-network-guard-v1"
+        or value.get("schema") != "txnmem-provenance-network-guard-v2"
         or value.get("runner_uid") != FORMAL_RUNNER_UID
+        or value.get("controller_uid") != 0
         or value.get("allowed_ipv4_loopback_ports") != [19000, 19001]
-        or value.get("management_port_blocked") is not True
+        or value.get("management_port_root_only") is not True
         or value.get("non_runner_proxy_traffic_blocked") is not True
+        or value.get("host_bridge_access_blocked") is not True
+        or value.get("forwarded_bridge_access_blocked") is not True
     ):
         raise TopologyAttestationError("formal network guard is invalid")
     return {
-        "schema": "txnmem-provenance-network-guard-v1",
+        "schema": "txnmem-provenance-network-guard-v2",
         "table_name_sha256": _exact_hash(
             value.get("table_name_sha256"), "network guard table"
         ),
         "runner_uid": FORMAL_RUNNER_UID,
+        "controller_uid": 0,
         "allowed_ipv4_loopback_ports": [19000, 19001],
-        "management_port_blocked": True,
+        "management_port_root_only": True,
         "non_runner_proxy_traffic_blocked": True,
+        "host_bridge_access_blocked": True,
+        "forwarded_bridge_access_blocked": True,
+        "backend_ipv4_subnet_sha256": _exact_hash(
+            value.get("backend_ipv4_subnet_sha256"),
+            "network guard backend subnet",
+        ),
+        "ingress_ipv4_subnet_sha256": _exact_hash(
+            value.get("ingress_ipv4_subnet_sha256"),
+            "network guard ingress subnet",
+        ),
+        "backend_bridge_interface_sha256": _exact_hash(
+            value.get("backend_bridge_interface_sha256"),
+            "network guard backend bridge interface",
+        ),
+        "ingress_bridge_interface_sha256": _exact_hash(
+            value.get("ingress_bridge_interface_sha256"),
+            "network guard ingress bridge interface",
+        ),
         "policy_sha256": _exact_hash(
             value.get("policy_sha256"), "network guard policy"
         ),
@@ -1024,8 +1071,20 @@ def _validate_backend_isolation(value: Any) -> dict[str, Any]:
     if (
         not isinstance(value, Mapping)
         or set(value) != _BACKEND_ISOLATION_FIELDS
-        or value.get("schema") != "txnmem-provenance-backend-isolation-v1"
+        or value.get("schema") != "txnmem-provenance-backend-isolation-v2"
         or value.get("backend_network_internal") is not True
+        or value.get("ingress_network_external") is not True
+        or value.get("ingress_proxy_only") is not True
+        or value.get("backend_network_driver") != "bridge"
+        or value.get("ingress_network_driver") != "bridge"
+        or value.get("backend_network_scope") != "local"
+        or value.get("ingress_network_scope") != "local"
+        or value.get("network_driver_options_empty") is not True
+        or value.get("docker_default_ipam_driver_verified") is not True
+        or value.get("private_non_overlapping_ipv4_subnets_verified") is not True
+        or value.get("networks_non_attachable") is not True
+        or value.get("networks_non_swarm_ingress") is not True
+        or value.get("networks_non_config_only") is not True
         or value.get("direct_backend_ports_unpublished") is not True
         or value.get("proxy_ports_loopback_only") is not True
         or value.get("published_proxy_ports") != [8474, 19000, 19001]
@@ -1060,19 +1119,71 @@ def _validate_backend_isolation(value: Any) -> dict[str, Any]:
             }
         )
     return {
-        "schema": "txnmem-provenance-backend-isolation-v1",
+        "schema": "txnmem-provenance-backend-isolation-v2",
         "network_name_sha256": _exact_hash(
             value.get("network_name_sha256"), "backend network name"
         ),
         "network_id_sha256": _exact_hash(
             value.get("network_id_sha256"), "backend network identity"
         ),
+        "ingress_network_name_sha256": _exact_hash(
+            value.get("ingress_network_name_sha256"),
+            "ingress network name",
+        ),
+        "ingress_network_id_sha256": _exact_hash(
+            value.get("ingress_network_id_sha256"),
+            "ingress network identity",
+        ),
         "backend_network_internal": True,
+        "ingress_network_external": True,
+        "ingress_proxy_only": True,
+        "backend_network_driver": "bridge",
+        "ingress_network_driver": "bridge",
+        "backend_network_scope": "local",
+        "ingress_network_scope": "local",
+        "network_driver_options_empty": True,
+        "docker_default_ipam_driver_verified": True,
+        "private_non_overlapping_ipv4_subnets_verified": True,
+        "backend_ipv4_subnet_sha256": _exact_hash(
+            value.get("backend_ipv4_subnet_sha256"),
+            "backend IPv4 subnet",
+        ),
+        "ingress_ipv4_subnet_sha256": _exact_hash(
+            value.get("ingress_ipv4_subnet_sha256"),
+            "ingress IPv4 subnet",
+        ),
+        "backend_bridge_interface_sha256": _exact_hash(
+            value.get("backend_bridge_interface_sha256"),
+            "backend bridge interface",
+        ),
+        "ingress_bridge_interface_sha256": _exact_hash(
+            value.get("ingress_bridge_interface_sha256"),
+            "ingress bridge interface",
+        ),
+        "networks_non_attachable": True,
+        "networks_non_swarm_ingress": True,
+        "networks_non_config_only": True,
         "direct_backend_ports_unpublished": True,
         "proxy_ports_loopback_only": True,
         "published_proxy_ports": [8474, 19000, 19001],
         "containers": normalized_containers,
     }
+
+
+def _validate_network_guard_backend_binding(
+    network_guard: Mapping[str, Any],
+    backend_isolation: Mapping[str, Any],
+) -> None:
+    for field in (
+        "backend_ipv4_subnet_sha256",
+        "ingress_ipv4_subnet_sha256",
+        "backend_bridge_interface_sha256",
+        "ingress_bridge_interface_sha256",
+    ):
+        if network_guard.get(field) != backend_isolation.get(field):
+            raise TopologyAttestationError(
+                "network guard is not bound to backend isolation"
+            )
 
 
 def _validate_execution_monitor_attestation(value: Any) -> dict[str, Any]:
@@ -1257,8 +1368,13 @@ def _validate_shared(document: Mapping[str, Any], *, expected_schema: str) -> No
     ):
         raise TopologyAttestationError("command manifest hash mismatch")
     _validate_child_process(document.get("child_process"), command_manifest)
-    _validate_network_guard_attestation(document.get("network_guard"))
-    _validate_backend_isolation(document.get("backend_isolation"))
+    network_guard = _validate_network_guard_attestation(
+        document.get("network_guard")
+    )
+    backend_isolation = _validate_backend_isolation(
+        document.get("backend_isolation")
+    )
+    _validate_network_guard_backend_binding(network_guard, backend_isolation)
     if expected_schema == RAW_COMPLETION_SCHEMA:
         _validate_execution_monitor_attestation(document.get("execution_monitor"))
     if document.get("transport") not in _TRANSPORTS:
@@ -1617,8 +1733,13 @@ def _validate_sanitized_shape(attestation: Mapping[str, Any]) -> None:
         or child_process.get("argv_sha256") != command_manifest.get("argv_sha256")
     ):
         raise TopologyAttestationError("sanitized child process is not command-bound")
-    _validate_network_guard_attestation(attestation.get("network_guard"))
-    _validate_backend_isolation(attestation.get("backend_isolation"))
+    network_guard = _validate_network_guard_attestation(
+        attestation.get("network_guard")
+    )
+    backend_isolation = _validate_backend_isolation(
+        attestation.get("backend_isolation")
+    )
+    _validate_network_guard_backend_binding(network_guard, backend_isolation)
     _validate_sanitized_execution_monitor(attestation.get("execution_monitor"))
     candidate_seal = attestation.get("candidate_seal")
     if (

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import unittest
@@ -104,7 +105,72 @@ class RealBackendScriptTests(unittest.TestCase):
         self.assertIn('"127.0.0.1:19000:19000"', compose)
         self.assertIn('"127.0.0.1:19001:19001"', compose)
         self.assertIn('"127.0.0.1:8474:8474"', compose)
-        self.assertIn("internal: true", compose)
+        self.assertIn("txnmem-ingress", compose)
+        self.assertEqual(compose.count("      - ingress"), 1)
+        qdrant_block, remainder = compose.split("  neo4j:", 1)
+        neo4j_block, toxiproxy_block = remainder.split("  toxiproxy:", 1)
+        self.assertNotIn("      - ingress", qdrant_block)
+        self.assertNotIn("      - ingress", neo4j_block)
+        self.assertIn("      - ingress", toxiproxy_block)
+        network_definitions = compose.split("\nnetworks:\n", 1)[1]
+        backend_network, ingress_network = network_definitions.split(
+            "  ingress:\n", 1
+        )
+        self.assertIn("internal: true", backend_network)
+        self.assertIn("driver: bridge", backend_network)
+        self.assertNotIn("internal: true", ingress_network)
+        self.assertIn("driver: bridge", ingress_network)
+
+    @unittest.skipUnless(shutil.which("docker"), "Docker Compose CLI is optional")
+    def test_compose_resolves_to_proxy_only_external_ingress(self):
+        compose_path = ROOT / "infra" / "real_backend" / "docker-compose.yml"
+        environment = os.environ.copy()
+        environment["TXNMEM_NEO4J_PASSWORD"] = "compose-validation-only"
+        completed = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "-f",
+                str(compose_path),
+                "config",
+                "--format",
+                "json",
+            ],
+            cwd=ROOT,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        document = json.loads(completed.stdout)
+        networks = document["networks"]
+        services = document["services"]
+        self.assertEqual(networks["backend"]["name"], "txnmem-backend")
+        self.assertEqual(networks["backend"]["driver"], "bridge")
+        self.assertIs(networks["backend"]["internal"], True)
+        self.assertEqual(networks["ingress"]["name"], "txnmem-ingress")
+        self.assertEqual(networks["ingress"]["driver"], "bridge")
+        self.assertIs(networks["ingress"].get("internal", False), False)
+        self.assertEqual(set(services["qdrant"]["networks"]), {"backend"})
+        self.assertEqual(set(services["neo4j"]["networks"]), {"backend"})
+        self.assertEqual(
+            set(services["toxiproxy"]["networks"]), {"backend", "ingress"}
+        )
+        self.assertNotIn("ports", services["qdrant"])
+        self.assertNotIn("ports", services["neo4j"])
+        self.assertEqual(
+            {
+                (row["host_ip"], int(row["published"]), int(row["target"]))
+                for row in services["toxiproxy"]["ports"]
+            },
+            {
+                ("127.0.0.1", 8474, 8474),
+                ("127.0.0.1", 19000, 19000),
+                ("127.0.0.1", 19001, 19001),
+            },
+        )
 
     def test_qdrant_healthcheck_uses_tools_present_in_the_pinned_image(self):
         compose = (ROOT / "infra" / "real_backend" / "docker-compose.yml").read_text(

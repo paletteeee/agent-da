@@ -111,12 +111,19 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
     @staticmethod
     def _network_guard():
         return {
-            "schema": "txnmem-provenance-network-guard-v1",
+            "schema": "txnmem-provenance-network-guard-v2",
             "table_name_sha256": "a" * 64,
             "runner_uid": 65532,
+            "controller_uid": 0,
             "allowed_ipv4_loopback_ports": [19000, 19001],
-            "management_port_blocked": True,
+            "management_port_root_only": True,
             "non_runner_proxy_traffic_blocked": True,
+            "host_bridge_access_blocked": True,
+            "forwarded_bridge_access_blocked": True,
+            "backend_ipv4_subnet_sha256": "8" * 64,
+            "ingress_ipv4_subnet_sha256": "9" * 64,
+            "backend_bridge_interface_sha256": "0" * 64,
+            "ingress_bridge_interface_sha256": "1" * 64,
             "policy_sha256": "b" * 64,
             "ruleset_sha256": "c" * 64,
         }
@@ -128,10 +135,28 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         )
 
         return {
-            "schema": "txnmem-provenance-backend-isolation-v1",
+            "schema": "txnmem-provenance-backend-isolation-v2",
             "network_name_sha256": "d" * 64,
             "network_id_sha256": "e" * 64,
+            "ingress_network_name_sha256": "6" * 64,
+            "ingress_network_id_sha256": "7" * 64,
             "backend_network_internal": True,
+            "ingress_network_external": True,
+            "ingress_proxy_only": True,
+            "backend_network_driver": "bridge",
+            "ingress_network_driver": "bridge",
+            "backend_network_scope": "local",
+            "ingress_network_scope": "local",
+            "network_driver_options_empty": True,
+            "docker_default_ipam_driver_verified": True,
+            "private_non_overlapping_ipv4_subnets_verified": True,
+            "backend_ipv4_subnet_sha256": "8" * 64,
+            "ingress_ipv4_subnet_sha256": "9" * 64,
+            "backend_bridge_interface_sha256": "0" * 64,
+            "ingress_bridge_interface_sha256": "1" * 64,
+            "networks_non_attachable": True,
+            "networks_non_swarm_ingress": True,
+            "networks_non_config_only": True,
             "direct_backend_ports_unpublished": True,
             "proxy_ports_loopback_only": True,
             "published_proxy_ports": [8474, 19000, 19001],
@@ -227,7 +252,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             "toxiproxy": "2.9.0",
         }
         return {
-            "schema": "txnmem-provenance-topology-snapshot-v1",
+            "schema": "txnmem-provenance-topology-snapshot-v2",
             "roles": [
                 {
                     "role": role,
@@ -837,27 +862,63 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         run_hash = "5" * 64
         table_name = collector_module._formal_network_table_name(run_hash)
         batch = collector_module._nft_guard_batch(
-            table_name, runner_uid=65532
+            table_name,
+            runner_uid=65532,
+            backend_ipv4_subnet="172.19.0.0/16",
+            ingress_ipv4_subnet="172.20.0.0/16",
+            backend_bridge_interface="br-aaaaaaaaaaaa",
+            ingress_bridge_interface="br-bbbbbbbbbbbb",
         )
 
         self.assertEqual(table_name, "txnmem_" + run_hash[:16])
         self.assertIn("meta skuid 65532", batch)
         self.assertIn("tcp dport { 19000, 19001 } accept", batch)
+        self.assertIn(
+            "meta skuid 0 ip daddr 127.0.0.1 tcp dport 8474 accept",
+            batch,
+        )
         self.assertIn("meta skuid 65532 reject", batch)
+        self.assertIn("tcp dport 8474 reject", batch)
         self.assertIn(
             "ip daddr 127.0.0.1 tcp dport { 19000, 19001 } reject",
             batch,
         )
-        self.assertNotIn("8474 accept", batch)
-        self.assertEqual(batch.count(" accept comment"), 1)
-        self.assertEqual(batch.count(" reject comment"), 2)
+        self.assertIn(
+            "ip daddr { 172.19.0.0/16, 172.20.0.0/16 } reject",
+            batch,
+        )
+        self.assertIn("chain forward", batch)
+        self.assertIn(
+            'iifname != { "br-aaaaaaaaaaaa", "br-bbbbbbbbbbbb" }',
+            batch,
+        )
+        self.assertIn('comment "txnmem-forward-bridge-deny"', batch)
+        self.assertEqual(batch.count(" accept comment"), 2)
+        self.assertEqual(batch.count(" reject comment"), 5)
 
-    def test_docker_backend_isolation_requires_internal_network_and_loopback_proxy_only(self):
+    def test_topology_snapshot_v2_binds_backend_isolation_v2(self):
+        roles, routes, isolation = collector_module._snapshot_components(
+            self._snapshot()
+        )
+
+        self.assertEqual(len(roles), 4)
+        self.assertEqual(len(routes), 2)
+        self.assertEqual(
+            isolation["schema"], "txnmem-provenance-backend-isolation-v2"
+        )
+
+        legacy = self._snapshot()
+        legacy["schema"] = "txnmem-provenance-topology-snapshot-v1"
+        with self.assertRaisesRegex(CollectorError, "snapshot"):
+            collector_module._snapshot_components(legacy)
+
+    def test_docker_backend_isolation_requires_proxy_only_ingress_network(self):
         from txnmem_provenance_contract import (
             FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS,
         )
 
-        network_id = "a" * 64
+        backend_network_id = "a" * 64
+        ingress_network_id = "9" * 64
 
         def container(role, ports):
             digest = FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS[role]
@@ -866,6 +927,13 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 "neo4j": "neo4j:5.22-community",
                 "toxiproxy": "shopify/toxiproxy:2.5.0",
             }[role]
+            networks = {
+                "txnmem-backend": {"NetworkID": backend_network_id}
+            }
+            if role == "toxiproxy":
+                networks["txnmem-ingress"] = {
+                    "NetworkID": ingress_network_id
+                }
             return {
                 "Id": {
                     "qdrant": "d",
@@ -876,7 +944,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 "Image": "sha256:" + ("b" if role == "qdrant" else "c") * 64,
                 "Config": {"Image": repository + "@sha256:" + digest},
                 "NetworkSettings": {
-                    "Networks": {"txnmem-backend": {"NetworkID": network_id}},
+                    "Networks": networks,
                     "Ports": ports,
                 },
             }
@@ -893,35 +961,248 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 },
             ),
         }
-        network = {
-            "Id": network_id,
+        backend_network = {
+            "Id": backend_network_id,
             "Name": "txnmem-backend",
+            "Driver": "bridge",
+            "Scope": "local",
             "Internal": True,
+            "Attachable": False,
+            "Ingress": False,
+            "ConfigOnly": False,
+            "EnableIPv4": True,
+            "EnableIPv6": False,
+            "Options": {},
+            "IPAM": {
+                "Driver": "default",
+                "Options": None,
+                "Config": [
+                    {
+                        "Subnet": "172.19.0.0/16",
+                        "IPRange": "",
+                        "Gateway": "172.19.0.1",
+                    }
+                ],
+            },
             "Containers": {
                 row["Id"]: {} for row in containers.values()
             },
         }
+        ingress_network = {
+            "Id": ingress_network_id,
+            "Name": "txnmem-ingress",
+            "Driver": "bridge",
+            "Scope": "local",
+            "Internal": False,
+            "Attachable": False,
+            "Ingress": False,
+            "ConfigOnly": False,
+            "EnableIPv4": True,
+            "EnableIPv6": False,
+            "Options": {},
+            "IPAM": {
+                "Driver": "default",
+                "Options": None,
+                "Config": [
+                    {
+                        "Subnet": "172.20.0.0/16",
+                        "IPRange": "",
+                        "Gateway": "172.20.0.1",
+                    }
+                ],
+            },
+            "Containers": {containers["toxiproxy"]["Id"]: {}},
+        }
 
         attested = collector_module._normalize_docker_backend_isolation(
-            containers, network
+            containers, backend_network, ingress_network
         )
 
         self.assertTrue(attested["backend_network_internal"])
+        self.assertTrue(attested["ingress_network_external"])
+        self.assertTrue(attested["ingress_proxy_only"])
+        self.assertEqual(attested["backend_network_driver"], "bridge")
+        self.assertEqual(attested["ingress_network_driver"], "bridge")
+        self.assertEqual(attested["backend_network_scope"], "local")
+        self.assertEqual(attested["ingress_network_scope"], "local")
+        self.assertTrue(attested["network_driver_options_empty"])
+        self.assertTrue(attested["docker_default_ipam_driver_verified"])
+        self.assertTrue(
+            attested["private_non_overlapping_ipv4_subnets_verified"]
+        )
+        self.assertEqual(
+            attested["backend_ipv4_subnet_sha256"],
+            hashlib.sha256(b"172.19.0.0/16").hexdigest(),
+        )
+        self.assertEqual(
+            attested["ingress_ipv4_subnet_sha256"],
+            hashlib.sha256(b"172.20.0.0/16").hexdigest(),
+        )
+        self.assertEqual(
+            attested["backend_bridge_interface_sha256"],
+            hashlib.sha256(b"br-aaaaaaaaaaaa").hexdigest(),
+        )
+        self.assertEqual(
+            attested["ingress_bridge_interface_sha256"],
+            hashlib.sha256(b"br-999999999999").hexdigest(),
+        )
+        self.assertTrue(attested["networks_non_attachable"])
+        self.assertTrue(attested["networks_non_swarm_ingress"])
+        self.assertTrue(attested["networks_non_config_only"])
         self.assertTrue(attested["direct_backend_ports_unpublished"])
         self.assertTrue(attested["proxy_ports_loopback_only"])
         self.assertEqual(attested["published_proxy_ports"], [8474, 19000, 19001])
 
-        containers["qdrant"]["NetworkSettings"]["Ports"]["6333/tcp"] = [
+        published_backend = copy.deepcopy(containers)
+        published_backend["qdrant"]["NetworkSettings"]["Ports"]["6333/tcp"] = [
             {"HostIp": "0.0.0.0", "HostPort": "6333"}
         ]
         with self.assertRaisesRegex(CollectorError, "direct backend"):
             collector_module._normalize_docker_backend_isolation(
-                containers, network
+                published_backend, backend_network, ingress_network
+            )
+
+        for name, mutation in (
+            (
+                "backend_on_ingress",
+                lambda values: values["qdrant"]["NetworkSettings"][
+                    "Networks"
+                ].update(
+                    {"txnmem-ingress": {"NetworkID": ingress_network_id}}
+                ),
+            ),
+            (
+                "proxy_missing_ingress",
+                lambda values: values["toxiproxy"]["NetworkSettings"][
+                    "Networks"
+                ].pop("txnmem-ingress"),
+            ),
+        ):
+            with self.subTest(name=name):
+                drifted = copy.deepcopy(containers)
+                mutation(drifted)
+                with self.assertRaisesRegex(CollectorError, "network"):
+                    collector_module._normalize_docker_backend_isolation(
+                        drifted, backend_network, ingress_network
+                    )
+
+        extra_ingress_member = copy.deepcopy(ingress_network)
+        extra_ingress_member["Containers"][containers["qdrant"]["Id"]] = {}
+        with self.assertRaisesRegex(CollectorError, "ingress"):
+            collector_module._normalize_docker_backend_isolation(
+                containers, backend_network, extra_ingress_member
+            )
+
+        internal_ingress = copy.deepcopy(ingress_network)
+        internal_ingress["Internal"] = True
+        with self.assertRaisesRegex(CollectorError, "ingress"):
+            collector_module._normalize_docker_backend_isolation(
+                containers, backend_network, internal_ingress
+            )
+
+        for name, target, field, unsafe_value in (
+            ("backend_macvlan", "backend", "Driver", "macvlan"),
+            ("ingress_overlay", "ingress", "Driver", "overlay"),
+            ("backend_global_scope", "backend", "Scope", "global"),
+            ("ingress_attachable", "ingress", "Attachable", True),
+            ("backend_swarm_ingress", "backend", "Ingress", True),
+            ("ingress_config_only", "ingress", "ConfigOnly", True),
+            ("backend_ipv4_disabled", "backend", "EnableIPv4", False),
+            ("ingress_ipv6_enabled", "ingress", "EnableIPv6", True),
+        ):
+            with self.subTest(name=name):
+                drifted_backend = copy.deepcopy(backend_network)
+                drifted_ingress = copy.deepcopy(ingress_network)
+                target_network = (
+                    drifted_backend if target == "backend" else drifted_ingress
+                )
+                target_network[field] = unsafe_value
+                with self.assertRaisesRegex(CollectorError, "network"):
+                    collector_module._normalize_docker_backend_isolation(
+                        containers, drifted_backend, drifted_ingress
+                    )
+
+        routed_ingress = copy.deepcopy(ingress_network)
+        routed_ingress["Options"] = {
+            "com.docker.network.bridge.gateway_mode_ipv4": "routed"
+        }
+        with self.assertRaisesRegex(CollectorError, "network"):
+            collector_module._normalize_docker_backend_isolation(
+                containers, backend_network, routed_ingress
+            )
+
+        custom_ipam = copy.deepcopy(backend_network)
+        custom_ipam["IPAM"]["Driver"] = "custom"
+        with self.assertRaisesRegex(CollectorError, "IPAM"):
+            collector_module._normalize_docker_backend_isolation(
+                containers, custom_ipam, ingress_network
+            )
+
+        for name, subnet, gateway in (
+            ("public", "8.8.8.0/24", "8.8.8.1"),
+            ("loopback", "127.10.0.0/16", "127.10.0.1"),
+            ("link_local", "169.254.0.0/16", "169.254.0.1"),
+            ("multicast", "224.0.0.0/24", "224.0.0.1"),
+        ):
+            with self.subTest(name=name):
+                unsafe_ipam = copy.deepcopy(backend_network)
+                unsafe_ipam["IPAM"]["Config"][0]["Subnet"] = subnet
+                unsafe_ipam["IPAM"]["Config"][0]["Gateway"] = gateway
+                with self.assertRaisesRegex(CollectorError, "private"):
+                    collector_module._normalize_docker_backend_isolation(
+                        containers, unsafe_ipam, ingress_network
+                    )
+
+        overlapping_ingress = copy.deepcopy(ingress_network)
+        overlapping_ingress["IPAM"]["Config"][0]["Subnet"] = "172.19.0.0/16"
+        overlapping_ingress["IPAM"]["Config"][0]["Gateway"] = "172.19.0.2"
+        with self.assertRaisesRegex(CollectorError, "overlap"):
+            collector_module._normalize_docker_backend_isolation(
+                containers, backend_network, overlapping_ingress
+            )
+
+        with TemporaryDirectory() as tmp:
+            sys_class_net = Path(tmp).resolve()
+            for interface_name in ("br-aaaaaaaaaaaa", "br-999999999999"):
+                (sys_class_net / interface_name / "bridge").mkdir(parents=True)
+            profile = collector_module._normalize_docker_network_guard_profile(
+                backend_network,
+                ingress_network,
+                sys_class_net=sys_class_net,
+            )
+            self.assertEqual(
+                profile,
+                {
+                    "backend_ipv4_subnet": "172.19.0.0/16",
+                    "ingress_ipv4_subnet": "172.20.0.0/16",
+                    "backend_bridge_interface": "br-aaaaaaaaaaaa",
+                    "ingress_bridge_interface": "br-999999999999",
+                },
+            )
+            (sys_class_net / "br-999999999999" / "bridge").rmdir()
+            with self.assertRaisesRegex(CollectorError, "bridge interface"):
+                collector_module._normalize_docker_network_guard_profile(
+                    backend_network,
+                    ingress_network,
+                    sys_class_net=sys_class_net,
+                )
+
+        unpublished_proxy = copy.deepcopy(containers)
+        unpublished_proxy["toxiproxy"]["NetworkSettings"]["Ports"] = {
+            "8474/tcp": None,
+            "19000/tcp": None,
+            "19001/tcp": None,
+        }
+        with self.assertRaisesRegex(CollectorError, "proxy port"):
+            collector_module._normalize_docker_backend_isolation(
+                unpublished_proxy, backend_network, ingress_network
             )
 
     def test_docker_backend_collector_uses_typed_container_and_network_inspection(self):
         containers = [{"container": index} for index in range(3)]
-        networks = [{"network": True}]
+        backend_network = {"Name": "txnmem-backend"}
+        ingress_network = {"Name": "txnmem-ingress"}
+        networks = [ingress_network, backend_network]
         normalized = {"schema": "normalized"}
         with patch.object(
             collector_module.subprocess,
@@ -938,7 +1219,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             collector_module,
             "_normalize_docker_backend_isolation",
             return_value=normalized,
-        ):
+        ) as normalize:
             observed = collector_module._collect_docker_backend_isolation(
                 qdrant_container="txnmem-qdrant",
                 neo4j_container="txnmem-neo4j",
@@ -949,6 +1230,14 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertEqual(run.call_count, 2)
         self.assertEqual(run.call_args_list[0].args[0][1], "inspect")
         self.assertEqual(run.call_args_list[1].args[0][1:3], ["network", "inspect"])
+        self.assertEqual(
+            run.call_args_list[1].args[0][-2:],
+            ["txnmem-backend", "txnmem-ingress"],
+        )
+        self.assertEqual(
+            normalize.call_args.args[1:],
+            (backend_network, ingress_network),
+        )
 
     def test_formal_candidate_root_is_derived_from_run_and_nonce(self):
         with TemporaryDirectory() as tmp:

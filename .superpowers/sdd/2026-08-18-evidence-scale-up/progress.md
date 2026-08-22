@@ -391,3 +391,59 @@ afterward; 82/82 focused tests and 849/849 full-suite tests passed with four
 optional skips, claim audit passed 15/15, artifact audit found zero issues, and
 diff check passed. The nonce bytes remain remote-private and are not part of
 the repository or sanitized evidence.
+
+Ruling: on the observed Docker 29 runtime, a container attached only to an
+`internal` bridge retains requested port bindings but exposes null effective
+bindings and no host listeners. Preserve the three-service internal
+`txnmem-backend` network, add a separate non-internal `txnmem-ingress` network
+whose sole member is Toxiproxy, keep Qdrant/Neo4j on the internal network only,
+and require every proxy publication to bind exactly to loopback — cost if
+wrong: the formal isolation schema advances to v2 and older v1 topology
+fixtures remain diagnostic rather than production-eligible.
+
+Task 10 Docker-29 ingress correction: the three new boundary tests were
+observed RED against the internal-only topology, including the exact null-port
+mapping symptom. The dual-homed proxy implementation is GREEN on 89 focused
+tests and 849 full-suite tests with four optional skips; claim audit passed
+15/15, artifact audit found zero issues, Python compilation, shell syntax and
+diff checks passed. Independent review and exact-commit remote replay remain
+pending, so the installed pre-correction controller cannot produce formal
+evidence and no performance claim is active.
+
+Task 10 Docker-29 ingress review correction: the first independent review
+identified three evidence-contract gaps: network names and internal flags did
+not prove the Docker driver/scope/IPAM boundary, the nested isolation schema
+advanced without advancing its three parent schemas, and the Compose test did
+not bind `internal: true` to the backend block alone. RED tests reproduced all
+three gaps. The corrected collector now requires both networks to be local
+non-attachable, non-Swarm, non-config-only bridge networks with empty driver
+options and default IPv4-only IPAM; the backend remains internal, the ingress
+remains external and proxy-only, and only exact loopback proxy publications are
+eligible. Raw launch, raw completion and sanitized parent schemas advance to
+v3, v4 and v5 respectively. Post-correction verification passed 89 focused and
+849 full-suite tests with four optional skips, claim audit 15/15, artifact
+audit 0, Python compilation and diff integrity. Scoped independent re-review
+and exact-commit remote replay remain pending; no formal performance claim is
+active.
+
+Task 10 Docker-29 guard correction: a second review rejected network-object
+proof alone because host bridge-IP access and forwarded direct routing could
+bypass loopback publication, IPAM accepted non-RFC1918 subnets, and the
+sanitized-v5 direct validation path did not re-check guard/backend identity
+binding. New RED tests reproduced public/special/overlapping IPAM acceptance,
+snapshot-v1 reuse, missing host/forward guard rules, and a re-hashed,
+re-registered sanitized attestation with mismatched guard identity. The
+corrected network-guard-v2 binds the exact backend/ingress subnet and derived
+bridge-interface hashes, permits only the formal runner's two loopback data
+ports and the root controller's management port, rejects host bridge-subnet
+access, and rejects forwarded bridge-subnet access from non-formal bridge
+interfaces. The server's actual nft binary accepted the generated rules under
+`--check`; no rule was applied during that syntax check. Snapshot advances to
+v2, IPAM is RFC1918 and non-overlapping, and both raw and sanitized validators
+enforce the four-field binding. The final scoped independent review reports no
+Critical or Important code findings and authorizes an exact-commit deployment
+gate only. Post-correction verification passed 92 focused tests with one local
+Docker-CLI skip and 852 full-suite tests with five optional skips; claim audit
+passed 15/15, artifact audit found zero issues, Python compilation and diff
+integrity passed. Formal evidence remains blocked until a live Docker-29 guard
+smoke proves all permitted data paths work and all direct paths fail.
