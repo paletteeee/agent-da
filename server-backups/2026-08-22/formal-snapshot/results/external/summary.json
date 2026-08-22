@@ -1,0 +1,4240 @@
+{
+  "adapter_counts": {
+    "AppendOnly": {
+      "attempted": 80,
+      "capability_absent_observed": 10,
+      "correctness_included": 80,
+      "excluded": 0,
+      "exclusions_by_category": {},
+      "successful": 80
+    },
+    "LangGraphStore": {
+      "attempted": 80,
+      "capability_absent_observed": 0,
+      "correctness_included": 50,
+      "excluded": 30,
+      "exclusions_by_category": {
+        "unsupported_mapping": 30
+      },
+      "successful": 50
+    },
+    "LastWriteWins": {
+      "attempted": 80,
+      "capability_absent_observed": 0,
+      "correctness_included": 80,
+      "excluded": 0,
+      "exclusions_by_category": {},
+      "successful": 80
+    },
+    "Mem0": {
+      "attempted": 80,
+      "capability_absent_observed": 0,
+      "correctness_included": 80,
+      "excluded": 0,
+      "exclusions_by_category": {},
+      "successful": 80
+    },
+    "MetadataFiltered": {
+      "attempted": 80,
+      "capability_absent_observed": 10,
+      "correctness_included": 80,
+      "excluded": 0,
+      "exclusions_by_category": {},
+      "successful": 80
+    }
+  },
+  "count_semantics": {
+    "successful": "run_status=success; capability-absent observations remain successful and included"
+  },
+  "counts": {
+    "attempted": 400,
+    "capability_absent_observed": 20,
+    "correctness_included": 370,
+    "excluded": 30,
+    "successful": 370
+  },
+  "exclusions_by_category": {
+    "unsupported_mapping": 30
+  },
+  "group_keys": [
+    "workload",
+    "variant"
+  ],
+  "groups": {
+    "atomic_multi_write/AppendOnly": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "AppendOnly",
+      "workload": "atomic_multi_write"
+    },
+    "atomic_multi_write/LangGraphStore": {
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "correctness_included": 0,
+      "excluded": 10,
+      "variant": "LangGraphStore",
+      "workload": "atomic_multi_write"
+    },
+    "atomic_multi_write/LastWriteWins": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "LastWriteWins",
+      "workload": "atomic_multi_write"
+    },
+    "atomic_multi_write/Mem0": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Mem0",
+      "workload": "atomic_multi_write"
+    },
+    "atomic_multi_write/MetadataFiltered": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "MetadataFiltered",
+      "workload": "atomic_multi_write"
+    },
+    "crash_during_commit/AppendOnly": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "AppendOnly",
+      "workload": "crash_during_commit"
+    },
+    "crash_during_commit/LangGraphStore": {
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "correctness_included": 0,
+      "excluded": 10,
+      "variant": "LangGraphStore",
+      "workload": "crash_during_commit"
+    },
+    "crash_during_commit/LastWriteWins": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "LastWriteWins",
+      "workload": "crash_during_commit"
+    },
+    "crash_during_commit/Mem0": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Mem0",
+      "workload": "crash_during_commit"
+    },
+    "crash_during_commit/MetadataFiltered": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "MetadataFiltered",
+      "workload": "crash_during_commit"
+    },
+    "mixed_stress/AppendOnly": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "AppendOnly",
+      "workload": "mixed_stress"
+    },
+    "mixed_stress/LangGraphStore": {
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "correctness_included": 0,
+      "excluded": 10,
+      "variant": "LangGraphStore",
+      "workload": "mixed_stress"
+    },
+    "mixed_stress/LastWriteWins": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "LastWriteWins",
+      "workload": "mixed_stress"
+    },
+    "mixed_stress/Mem0": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Mem0",
+      "workload": "mixed_stress"
+    },
+    "mixed_stress/MetadataFiltered": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "MetadataFiltered",
+      "workload": "mixed_stress"
+    },
+    "provenance_branch_repair/AppendOnly": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "AppendOnly",
+      "workload": "provenance_branch_repair"
+    },
+    "provenance_branch_repair/LangGraphStore": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "LangGraphStore",
+      "workload": "provenance_branch_repair"
+    },
+    "provenance_branch_repair/LastWriteWins": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "LastWriteWins",
+      "workload": "provenance_branch_repair"
+    },
+    "provenance_branch_repair/Mem0": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Mem0",
+      "workload": "provenance_branch_repair"
+    },
+    "provenance_branch_repair/MetadataFiltered": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "MetadataFiltered",
+      "workload": "provenance_branch_repair"
+    },
+    "provenance_chain_repair/AppendOnly": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "AppendOnly",
+      "workload": "provenance_chain_repair"
+    },
+    "provenance_chain_repair/LangGraphStore": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "LangGraphStore",
+      "workload": "provenance_chain_repair"
+    },
+    "provenance_chain_repair/LastWriteWins": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "LastWriteWins",
+      "workload": "provenance_chain_repair"
+    },
+    "provenance_chain_repair/Mem0": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Mem0",
+      "workload": "provenance_chain_repair"
+    },
+    "provenance_chain_repair/MetadataFiltered": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "MetadataFiltered",
+      "workload": "provenance_chain_repair"
+    },
+    "revoke_before_commit/AppendOnly": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "AppendOnly",
+      "workload": "revoke_before_commit"
+    },
+    "revoke_before_commit/LangGraphStore": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "LangGraphStore",
+      "workload": "revoke_before_commit"
+    },
+    "revoke_before_commit/LastWriteWins": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "LastWriteWins",
+      "workload": "revoke_before_commit"
+    },
+    "revoke_before_commit/Mem0": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Mem0",
+      "workload": "revoke_before_commit"
+    },
+    "revoke_before_commit/MetadataFiltered": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "MetadataFiltered",
+      "workload": "revoke_before_commit"
+    },
+    "scope_bypass/AppendOnly": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "AppendOnly",
+      "workload": "scope_bypass"
+    },
+    "scope_bypass/LangGraphStore": {
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "LangGraphStore",
+      "workload": "scope_bypass"
+    },
+    "scope_bypass/LastWriteWins": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "LastWriteWins",
+      "workload": "scope_bypass"
+    },
+    "scope_bypass/Mem0": {
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Mem0",
+      "workload": "scope_bypass"
+    },
+    "scope_bypass/MetadataFiltered": {
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "MetadataFiltered",
+      "workload": "scope_bypass"
+    },
+    "supersession_consistency/AppendOnly": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 10,
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "AppendOnly",
+      "workload": "supersession_consistency"
+    },
+    "supersession_consistency/LangGraphStore": {
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 5.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 5.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "variant": "LangGraphStore",
+      "workload": "supersession_consistency"
+    },
+    "supersession_consistency/LastWriteWins": {
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "variant": "LastWriteWins",
+      "workload": "supersession_consistency"
+    },
+    "supersession_consistency/Mem0": {
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 0,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 5.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 5.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "variant": "Mem0",
+      "workload": "supersession_consistency"
+    },
+    "supersession_consistency/MetadataFiltered": {
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "attempted": 10,
+      "capability_absent_observed": 10,
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "correctness_included": 10,
+      "count": 10,
+      "excluded": 0,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 5.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 5.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "MetadataFiltered",
+      "workload": "supersession_consistency"
+    }
+  },
+  "oracle": {
+    "group_keys": [
+      "workload",
+      "variant"
+    ],
+    "groups": {
+      "atomic_multi_write/AppendOnly": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 3.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 3.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "AppendOnly",
+        "workload": "atomic_multi_write"
+      },
+      "atomic_multi_write/LastWriteWins": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 3.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 3.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "LastWriteWins",
+        "workload": "atomic_multi_write"
+      },
+      "atomic_multi_write/Mem0": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 3.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 3.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "Mem0",
+        "workload": "atomic_multi_write"
+      },
+      "atomic_multi_write/MetadataFiltered": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 3.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 3.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "MetadataFiltered",
+        "workload": "atomic_multi_write"
+      },
+      "crash_during_commit/AppendOnly": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "AppendOnly",
+        "workload": "crash_during_commit"
+      },
+      "crash_during_commit/LastWriteWins": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "LastWriteWins",
+        "workload": "crash_during_commit"
+      },
+      "crash_during_commit/Mem0": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "Mem0",
+        "workload": "crash_during_commit"
+      },
+      "crash_during_commit/MetadataFiltered": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "MetadataFiltered",
+        "workload": "crash_during_commit"
+      },
+      "mixed_stress/AppendOnly": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 2.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 6.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 6.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "AppendOnly",
+        "workload": "mixed_stress"
+      },
+      "mixed_stress/LastWriteWins": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 2.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 6.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 6.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "LastWriteWins",
+        "workload": "mixed_stress"
+      },
+      "mixed_stress/Mem0": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 2.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 6.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 6.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "Mem0",
+        "workload": "mixed_stress"
+      },
+      "mixed_stress/MetadataFiltered": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 2.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 6.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 6.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "MetadataFiltered",
+        "workload": "mixed_stress"
+      },
+      "provenance_branch_repair/AppendOnly": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "AppendOnly",
+        "workload": "provenance_branch_repair"
+      },
+      "provenance_branch_repair/LangGraphStore": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "LangGraphStore",
+        "workload": "provenance_branch_repair"
+      },
+      "provenance_branch_repair/LastWriteWins": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "LastWriteWins",
+        "workload": "provenance_branch_repair"
+      },
+      "provenance_branch_repair/Mem0": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "Mem0",
+        "workload": "provenance_branch_repair"
+      },
+      "provenance_branch_repair/MetadataFiltered": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "MetadataFiltered",
+        "workload": "provenance_branch_repair"
+      },
+      "provenance_chain_repair/AppendOnly": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "AppendOnly",
+        "workload": "provenance_chain_repair"
+      },
+      "provenance_chain_repair/LangGraphStore": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "LangGraphStore",
+        "workload": "provenance_chain_repair"
+      },
+      "provenance_chain_repair/LastWriteWins": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "LastWriteWins",
+        "workload": "provenance_chain_repair"
+      },
+      "provenance_chain_repair/Mem0": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "Mem0",
+        "workload": "provenance_chain_repair"
+      },
+      "provenance_chain_repair/MetadataFiltered": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "MetadataFiltered",
+        "workload": "provenance_chain_repair"
+      },
+      "revoke_before_commit/AppendOnly": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "AppendOnly",
+        "workload": "revoke_before_commit"
+      },
+      "revoke_before_commit/LangGraphStore": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "LangGraphStore",
+        "workload": "revoke_before_commit"
+      },
+      "revoke_before_commit/LastWriteWins": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "LastWriteWins",
+        "workload": "revoke_before_commit"
+      },
+      "revoke_before_commit/Mem0": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "Mem0",
+        "workload": "revoke_before_commit"
+      },
+      "revoke_before_commit/MetadataFiltered": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "MetadataFiltered",
+        "workload": "revoke_before_commit"
+      },
+      "scope_bypass/AppendOnly": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "AppendOnly",
+        "workload": "scope_bypass"
+      },
+      "scope_bypass/LangGraphStore": {
+        "any_violation": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "LangGraphStore",
+        "workload": "scope_bypass"
+      },
+      "scope_bypass/LastWriteWins": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "LastWriteWins",
+        "workload": "scope_bypass"
+      },
+      "scope_bypass/Mem0": {
+        "any_violation": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "Mem0",
+        "workload": "scope_bypass"
+      },
+      "scope_bypass/MetadataFiltered": {
+        "any_violation": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "MetadataFiltered",
+        "workload": "scope_bypass"
+      },
+      "supersession_consistency/AppendOnly": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 6.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 6.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "AppendOnly",
+        "workload": "supersession_consistency"
+      },
+      "supersession_consistency/LangGraphStore": {
+        "any_violation": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 5.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 5.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "variant": "LangGraphStore",
+        "workload": "supersession_consistency"
+      },
+      "supersession_consistency/LastWriteWins": {
+        "any_violation": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 4.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "variant": "LastWriteWins",
+        "workload": "supersession_consistency"
+      },
+      "supersession_consistency/Mem0": {
+        "any_violation": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 5.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 5.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "variant": "Mem0",
+        "workload": "supersession_consistency"
+      },
+      "supersession_consistency/MetadataFiltered": {
+        "any_violation": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "committed_count": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "count": 10,
+        "invalid_commit_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "latency": {
+          "mean": 5.0,
+          "std": 0.0
+        },
+        "leak_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "operation_count": {
+          "mean": 5.0,
+          "std": 0.0
+        },
+        "partial_update_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_count": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "repair_recall": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "scope_bypass_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "stale_write_rate": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "supersession_consistency": {
+          "mean": 0.0,
+          "std": 0.0
+        },
+        "variant": "MetadataFiltered",
+        "workload": "supersession_consistency"
+      }
+    }
+  },
+  "schema_version": "txnmem-external-runner-v1",
+  "workload_counts": {
+    "atomic_multi_write": {
+      "attempted": 50,
+      "capability_absent_observed": 0,
+      "correctness_included": 40,
+      "excluded": 10,
+      "exclusions_by_category": {
+        "unsupported_mapping": 10
+      },
+      "successful": 40
+    },
+    "crash_during_commit": {
+      "attempted": 50,
+      "capability_absent_observed": 0,
+      "correctness_included": 40,
+      "excluded": 10,
+      "exclusions_by_category": {
+        "unsupported_mapping": 10
+      },
+      "successful": 40
+    },
+    "mixed_stress": {
+      "attempted": 50,
+      "capability_absent_observed": 0,
+      "correctness_included": 40,
+      "excluded": 10,
+      "exclusions_by_category": {
+        "unsupported_mapping": 10
+      },
+      "successful": 40
+    },
+    "provenance_branch_repair": {
+      "attempted": 50,
+      "capability_absent_observed": 0,
+      "correctness_included": 50,
+      "excluded": 0,
+      "exclusions_by_category": {},
+      "successful": 50
+    },
+    "provenance_chain_repair": {
+      "attempted": 50,
+      "capability_absent_observed": 0,
+      "correctness_included": 50,
+      "excluded": 0,
+      "exclusions_by_category": {},
+      "successful": 50
+    },
+    "revoke_before_commit": {
+      "attempted": 50,
+      "capability_absent_observed": 0,
+      "correctness_included": 50,
+      "excluded": 0,
+      "exclusions_by_category": {},
+      "successful": 50
+    },
+    "scope_bypass": {
+      "attempted": 50,
+      "capability_absent_observed": 0,
+      "correctness_included": 50,
+      "excluded": 0,
+      "exclusions_by_category": {},
+      "successful": 50
+    },
+    "supersession_consistency": {
+      "attempted": 50,
+      "capability_absent_observed": 20,
+      "correctness_included": 50,
+      "excluded": 0,
+      "exclusions_by_category": {},
+      "successful": 50
+    }
+  }
+}

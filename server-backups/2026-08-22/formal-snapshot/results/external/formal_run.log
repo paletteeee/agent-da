@@ -1,0 +1,213 @@
+test_pilot_contract_stays_available (test_baseline_contract.BaselineContractTests.test_pilot_contract_stays_available) ... ok
+test_experiment_command_writes_all_artifacts (test_cli_outputs.TxnMemCliOutputTests.test_experiment_command_writes_all_artifacts) ... ok
+test_markers_and_invalidation_do_not_credit_missing_backend_semantics (test_external_baseline_protocol.ExternalBaselineProtocolTests.test_markers_and_invalidation_do_not_credit_missing_backend_semantics) ... ok
+test_runtime_failure_is_distinct_from_capability_absent (test_external_baseline_protocol.ExternalBaselineProtocolTests.test_runtime_failure_is_distinct_from_capability_absent) ... ok
+test_langgraph_exposes_postgres_store_adapter_import (test_external_dependencies.ExternalDependencyContractTests.test_langgraph_exposes_postgres_store_adapter_import) ... ok
+test_mem0_exposes_memory_adapter_import (test_external_dependencies.ExternalDependencyContractTests.test_mem0_exposes_memory_adapter_import) ... ok
+test_python_version_is_supported (test_external_dependencies.ExternalDependencyContractTests.test_python_version_is_supported) ... ok
+test_crash_outcome_can_retain_unobserved_committed_id (test_txnmem_adapter_contract.AdapterContractTests.test_crash_outcome_can_retain_unobserved_committed_id) ... ok
+test_error_categories_remain_distinct_and_stable (test_txnmem_adapter_contract.AdapterContractTests.test_error_categories_remain_distinct_and_stable) ... ok
+test_normalize_result_delegates_to_the_oracle_shape (test_txnmem_adapter_contract.AdapterContractTests.test_normalize_result_delegates_to_the_oracle_shape) ... ok
+test_oracle_result_has_the_required_normalized_shape (test_txnmem_adapter_contract.AdapterContractTests.test_oracle_result_has_the_required_normalized_shape) ... ok
+test_rejects_adapter_native_values_from_oracle_result (test_txnmem_adapter_contract.AdapterContractTests.test_rejects_adapter_native_values_from_oracle_result) ... ok
+test_rejects_committed_memory_not_in_final_memories_without_crash (test_txnmem_adapter_contract.AdapterContractTests.test_rejects_committed_memory_not_in_final_memories_without_crash) ... ok
+test_rejects_duplicate_normalized_memory_ids (test_txnmem_adapter_contract.AdapterContractTests.test_rejects_duplicate_normalized_memory_ids) ... ok
+test_rejects_memory_without_status (test_txnmem_adapter_contract.AdapterContractTests.test_rejects_memory_without_status) ... ok
+test_rejects_non_list_trace (test_txnmem_adapter_contract.AdapterContractTests.test_rejects_non_list_trace) ... ok
+test_adapters_do_not_revalidate_revocation_at_commit (test_txnmem_controlled_baselines.ControlledBaselineTests.test_adapters_do_not_revalidate_revocation_at_commit) ... ok
+test_adapters_implement_the_shared_memory_contract (test_txnmem_controlled_baselines.ControlledBaselineTests.test_adapters_implement_the_shared_memory_contract) ... ok
+test_adapters_invalidate_only_the_named_source_without_provenance_repair (test_txnmem_controlled_baselines.ControlledBaselineTests.test_adapters_invalidate_only_the_named_source_without_provenance_repair) ... ok
+test_append_only_preserves_the_first_object_on_a_memory_id_collision (test_txnmem_controlled_baselines.ControlledBaselineTests.test_append_only_preserves_the_first_object_on_a_memory_id_collision) ... ok
+test_crash_after_first_write_leaves_a_partial_immediate_update (test_txnmem_controlled_baselines.ControlledBaselineTests.test_crash_after_first_write_leaves_a_partial_immediate_update) ... ok
+test_last_write_wins_searches_the_latest_logical_record (test_txnmem_controlled_baselines.ControlledBaselineTests.test_last_write_wins_searches_the_latest_logical_record) ... ok
+test_metadata_filtered_blocks_a_different_agent_in_the_same_scope (test_txnmem_controlled_baselines.ControlledBaselineTests.test_metadata_filtered_blocks_a_different_agent_in_the_same_scope) ... ok
+test_only_last_write_wins_repairs_the_w5_supersession_pointer (test_txnmem_controlled_baselines.ControlledBaselineTests.test_only_last_write_wins_repairs_the_w5_supersession_pointer) ... ok
+test_only_metadata_filtered_blocks_search_and_direct_id_scope_bypass (test_txnmem_controlled_baselines.ControlledBaselineTests.test_only_metadata_filtered_blocks_search_and_direct_id_scope_bypass) ... ok
+test_writes_are_visible_before_commit_for_every_adapter (test_txnmem_controlled_baselines.ControlledBaselineTests.test_writes_are_visible_before_commit_for_every_adapter) ... ok
+test_atomic_multi_write_naive_is_partial_but_txnmem_aborts (test_txnmem_experiment.TxnMemExperimentTests.test_atomic_multi_write_naive_is_partial_but_txnmem_aborts) ... ok
+test_generation_is_deterministic_and_has_required_schema (test_txnmem_experiment.TxnMemExperimentTests.test_generation_is_deterministic_and_has_required_schema) ... ok
+test_no_policy_commit_ablation_allows_stale_authorization (test_txnmem_experiment.TxnMemExperimentTests.test_no_policy_commit_ablation_allows_stale_authorization) ... ok
+test_no_repair_ablation_leaves_invalid_descendant_active (test_txnmem_experiment.TxnMemExperimentTests.test_no_repair_ablation_leaves_invalid_descendant_active) ... ok
+test_no_transaction_ablation_exposes_partial_write (test_txnmem_experiment.TxnMemExperimentTests.test_no_transaction_ablation_exposes_partial_write) ... ok
+test_provenance_repair_invalidates_all_descendants (test_txnmem_experiment.TxnMemExperimentTests.test_provenance_repair_invalidates_all_descendants) ... ok
+test_revoke_before_commit_requires_commit_time_revalidation (test_txnmem_experiment.TxnMemExperimentTests.test_revoke_before_commit_requires_commit_time_revalidation) ... ok
+test_artifacts_have_fixed_headers_and_hash_bound_manifest (test_txnmem_external_experiment.ExternalExperimentTests.test_artifacts_have_fixed_headers_and_hash_bound_manifest)
+Would fail if reproducibility metadata omits an artifact, input identity, or fixed schema. ... ok
+test_capabilities_json_has_schema_and_distinguishes_controlled_baselines (test_txnmem_external_experiment.ExternalExperimentTests.test_capabilities_json_has_schema_and_distinguishes_controlled_baselines)
+Would fail if JSON diverged from CSV or flattened the three controlled baseline semantics. ... ok
+test_cli_binds_exact_input_bytes_and_publishes_required_artifacts (test_txnmem_external_experiment.ExternalExperimentTests.test_cli_binds_exact_input_bytes_and_publishes_required_artifacts)
+Would fail if the public CLI skipped validation, selected extra adapters, or omitted artifacts. ... ok
+test_controlled_only_run_does_not_import_optional_backends (test_txnmem_external_experiment.ExternalExperimentTests.test_controlled_only_run_does_not_import_optional_backends)
+Would fail if merely selecting a controlled baseline imported Mem0 or LangGraph. ... ok
+test_duplicate_instance_ids_are_rejected_before_artifacts_are_published (test_txnmem_external_experiment.ExternalExperimentTests.test_duplicate_instance_ids_are_rejected_before_artifacts_are_published)
+Would fail if invalid input emitted a partial manifest or duplicate replay rows. ... ok
+test_in_memory_fallback_excludes_crash_without_calling_adapter (test_txnmem_external_experiment.ExternalExperimentTests.test_in_memory_fallback_excludes_crash_without_calling_adapter)
+Would fail if an ephemeral recovery row reached the correctness oracle. ... ok
+test_mem0_base_root_and_run_id_are_safe_and_manifested (test_txnmem_external_experiment.ExternalExperimentTests.test_mem0_base_root_and_run_id_are_safe_and_manifested)
+Would fail if a user root was ignored or a run ID could escape the state base directory. ... Failed to load spaCy lemma model: spaCy is not installed. Install it with: pip install mem0ai[nlp]
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+ok
+test_mem0_state_root_is_unique_for_a_run_id (test_txnmem_external_experiment.ExternalExperimentTests.test_mem0_state_root_is_unique_for_a_run_id)
+Would fail if a repeat run silently reused persistent Mem0 state. ... fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+ok
+test_mutating_adapter_is_excluded_without_changing_canonical_input_or_hash (test_txnmem_external_experiment.ExternalExperimentTests.test_mutating_adapter_is_excluded_without_changing_canonical_input_or_hash)
+Would fail if adapters can taint later attempts, rows, or the bound input digest. ... ok
+test_production_registry_uses_one_ordered_capability_matrix_for_all_formal_adapters (test_txnmem_external_experiment.ExternalExperimentTests.test_production_registry_uses_one_ordered_capability_matrix_for_all_formal_adapters)
+Would fail if a formal adapter exposes sparse or incomparable capability dimensions. ... ok
+test_runner_keeps_registry_order_and_writes_one_success_per_pair (test_txnmem_external_experiment.ExternalExperimentTests.test_runner_keeps_registry_order_and_writes_one_success_per_pair)
+Would fail if requested ordering controls output or attempts are skipped/duplicated. ... ok
+test_runner_records_exclusions_without_oracle_metrics_or_error_secrets (test_txnmem_external_experiment.ExternalExperimentTests.test_runner_records_exclusions_without_oracle_metrics_or_error_secrets)
+Would fail if failures are scored, not categorized, or error payloads leak messages. ... ok
+test_summary_uses_variant_groups_and_retains_excluded_only_groups (test_txnmem_external_experiment.ExternalExperimentTests.test_summary_uses_variant_groups_and_retains_excluded_only_groups)
+Would fail if grouped oracle stats use adapter names or omit a workload/variant with only exclusions. ... ok
+test_unavailable_langgraph_is_registered_and_emits_one_redacted_row_per_instance (test_txnmem_external_experiment.ExternalExperimentTests.test_unavailable_langgraph_is_registered_and_emits_one_redacted_row_per_instance)
+Would fail if an optional LangGraph import failure aborted registry setup instead of replay accounting. ... ok
+test_provenance_closure_is_reported_for_no_repair (test_txnmem_invariants.TxnMemInvariantTests.test_provenance_closure_is_reported_for_no_repair) ... ok
+test_scope_leak_is_reported_for_naive (test_txnmem_invariants.TxnMemInvariantTests.test_scope_leak_is_reported_for_naive) ... ok
+test_supersession_violation_is_reported_when_old_memory_remains_active (test_txnmem_invariants.TxnMemInvariantTests.test_supersession_violation_is_reported_when_old_memory_remains_active) ... ok
+test_txnmem_has_no_scope_violation (test_txnmem_invariants.TxnMemInvariantTests.test_txnmem_has_no_scope_violation) ... ok
+test_txnmem_satisfies_atomicity_and_commit_authorization (test_txnmem_invariants.TxnMemInvariantTests.test_txnmem_satisfies_atomicity_and_commit_authorization) ... ok
+test_capability_rows_are_deterministic_and_describe_missing_semantics (test_txnmem_langgraph_adapter.LangGraphCapabilityTests.test_capability_rows_are_deterministic_and_describe_missing_semantics) ... ok
+test_adapter_uses_the_shared_memory_contract (test_txnmem_langgraph_adapter.LangGraphStoreAdapterTests.test_adapter_uses_the_shared_memory_contract) ... ok
+test_in_memory_crash_recovery_is_recorded_as_capability_absent (test_txnmem_langgraph_adapter.LangGraphStoreAdapterTests.test_in_memory_crash_recovery_is_recorded_as_capability_absent) ... ok
+test_instance_namespaces_are_isolated_in_one_native_store (test_txnmem_langgraph_adapter.LangGraphStoreAdapterTests.test_instance_namespaces_are_isolated_in_one_native_store) ... ok
+test_invalidation_updates_only_the_named_native_record (test_txnmem_langgraph_adapter.LangGraphStoreAdapterTests.test_invalidation_updates_only_the_named_native_record) ... ok
+test_native_delete_removes_one_store_record (test_txnmem_langgraph_adapter.LangGraphStoreAdapterTests.test_native_delete_removes_one_store_record) ... ok
+test_same_key_is_a_native_last_write_and_normalizes_item_values (test_txnmem_langgraph_adapter.LangGraphStoreAdapterTests.test_same_key_is_a_native_last_write_and_normalizes_item_values) ... ok
+test_search_uses_native_namespace_and_metadata_filter (test_txnmem_langgraph_adapter.LangGraphStoreAdapterTests.test_search_uses_native_namespace_and_metadata_filter) ... ok
+test_write_uses_native_put_and_direct_id_read_uses_native_get (test_txnmem_langgraph_adapter.LangGraphStoreAdapterTests.test_write_uses_native_put_and_direct_id_read_uses_native_get) ... ok
+test_wrong_shared_scope_cannot_expose_a_direct_id_record (test_txnmem_langgraph_adapter.LangGraphStoreAdapterTests.test_wrong_shared_scope_cannot_expose_a_direct_id_record) ... ok
+test_context_manager_enter_failure_is_a_runtime_adapter_error (test_txnmem_langgraph_adapter.LangGraphStoreLifecycleTests.test_context_manager_enter_failure_is_a_runtime_adapter_error) ... ok
+test_context_manager_factory_is_entered_and_closed_once_per_run (test_txnmem_langgraph_adapter.LangGraphStoreLifecycleTests.test_context_manager_factory_is_entered_and_closed_once_per_run) ... ok
+test_context_manager_is_closed_when_a_native_call_fails (test_txnmem_langgraph_adapter.LangGraphStoreLifecycleTests.test_context_manager_is_closed_when_a_native_call_fails) ... ok
+test_invalid_store_factory_result_is_a_clear_type_error_not_runtime_failure (test_txnmem_langgraph_adapter.LangGraphStoreLifecycleTests.test_invalid_store_factory_result_is_a_clear_type_error_not_runtime_failure) ... ok
+test_persistent_crash_claim_raises_unsupported_mapping_without_observation (test_txnmem_langgraph_adapter.LangGraphStoreLifecycleTests.test_persistent_crash_claim_raises_unsupported_mapping_without_observation) ... ok
+test_search_uses_a_native_non_invalid_status_filter (test_txnmem_langgraph_adapter.LangGraphStoreLifecycleTests.test_search_uses_a_native_non_invalid_status_filter) ... ok
+test_adapter_uses_shared_contract_and_raw_add_inference_is_disabled (test_txnmem_mem0_adapter.Mem0AdapterFakeSdkTests.test_adapter_uses_shared_contract_and_raw_add_inference_is_disabled) ... ok
+test_add_metadata_contains_benchmark_identity_and_sdk_uuid_mapping (test_txnmem_mem0_adapter.Mem0AdapterFakeSdkTests.test_add_metadata_contains_benchmark_identity_and_sdk_uuid_mapping) ... ok
+test_close_calls_memory_and_embedded_qdrant_client (test_txnmem_mem0_adapter.Mem0AdapterFakeSdkTests.test_close_calls_memory_and_embedded_qdrant_client) ... ok
+test_crash_stops_immediately_and_records_capability_absent_without_reopen_claim (test_txnmem_mem0_adapter.Mem0AdapterFakeSdkTests.test_crash_stops_immediately_and_records_capability_absent_without_reopen_claim) ... ok
+test_explicit_persistent_reopen_replaces_the_backend_for_final_snapshot (test_txnmem_mem0_adapter.Mem0AdapterFakeSdkTests.test_explicit_persistent_reopen_replaces_the_backend_for_final_snapshot) ... ok
+test_fake_sdk_delete_has_its_pinned_success_envelope_and_removes_one_uuid (test_txnmem_mem0_adapter.Mem0AdapterFakeSdkTests.test_fake_sdk_delete_has_its_pinned_success_envelope_and_removes_one_uuid) ... ok
+test_initial_write_supersede_and_invalidate_are_ordered_single_record_updates (test_txnmem_mem0_adapter.Mem0AdapterFakeSdkTests.test_initial_write_supersede_and_invalidate_are_ordered_single_record_updates) ... ok
+test_instances_are_isolated_when_factory_returns_the_same_sdk_object (test_txnmem_mem0_adapter.Mem0AdapterFakeSdkTests.test_instances_are_isolated_when_factory_returns_the_same_sdk_object) ... ok
+test_native_call_failure_is_runtime_error_and_unconfigured_recovery_is_capability_absent (test_txnmem_mem0_adapter.Mem0AdapterFakeSdkTests.test_native_call_failure_is_runtime_error_and_unconfigured_recovery_is_capability_absent) ... ok
+test_repeated_benchmark_id_uses_native_update_and_retains_one_normalized_record (test_txnmem_mem0_adapter.Mem0AdapterFakeSdkTests.test_repeated_benchmark_id_uses_native_update_and_retains_one_normalized_record) ... ok
+test_scope_and_agent_checks_deny_search_and_direct_id_after_native_retrieval (test_txnmem_mem0_adapter.Mem0AdapterFakeSdkTests.test_scope_and_agent_checks_deny_search_and_direct_id_after_native_retrieval) ... ok
+test_unknown_sdk_envelopes_and_conflicting_metadata_are_runtime_errors_without_content (test_txnmem_mem0_adapter.Mem0AdapterFakeSdkTests.test_unknown_sdk_envelopes_and_conflicting_metadata_are_runtime_errors_without_content) ... ok
+test_adapter_replay_reaches_final_state_and_controls_identity (test_txnmem_mem0_adapter.Mem0AdapterNativeTests.test_adapter_replay_reaches_final_state_and_controls_identity) ... fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+Failed to load spaCy full model: spaCy is not installed. Install it with: pip install mem0ai[nlp]
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+ok
+test_deterministic_embedded_qdrant_factory_exercises_raw_crud_without_network (test_txnmem_mem0_adapter.Mem0AdapterNativeTests.test_deterministic_embedded_qdrant_factory_exercises_raw_crud_without_network) ... fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+ok
+test_deterministic_factory_reopens_persistent_qdrant_before_final_snapshot (test_txnmem_mem0_adapter.Mem0AdapterNativeTests.test_deterministic_factory_reopens_persistent_qdrant_before_final_snapshot) ... fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+ok
+test_capability_rows_state_native_record_operations_and_absent_semantics (test_txnmem_mem0_adapter.Mem0CapabilityTests.test_capability_rows_state_native_record_operations_and_absent_semantics) ... ok
+test_result_row_contains_scope_and_violation_metrics (test_txnmem_metrics.TxnMemMetricsTests.test_result_row_contains_scope_and_violation_metrics) ... ok
+test_summary_and_svg_outputs_are_valid (test_txnmem_metrics.TxnMemMetricsTests.test_summary_and_svg_outputs_are_valid) ... ok
+test_summary_contains_mean_and_population_std (test_txnmem_metrics.TxnMemMetricsTests.test_summary_contains_mean_and_population_std) ... ok
+test_load_workload_config_returns_w1_to_w8_definitions (test_txnmem_schema.TxnMemSchemaTests.test_load_workload_config_returns_w1_to_w8_definitions) ... ok
+test_validate_instance_rejects_missing_top_level_key (test_txnmem_schema.TxnMemSchemaTests.test_validate_instance_rejects_missing_top_level_key) ... ok
+test_validate_instance_rejects_unknown_provenance_reference (test_txnmem_schema.TxnMemSchemaTests.test_validate_instance_rejects_unknown_provenance_reference) ... ok
+test_branch_repair_invalidates_every_descendant (test_txnmem_simulator.TxnMemSimulatorTests.test_branch_repair_invalidates_every_descendant) ... ok
+test_crash_during_commit_is_atomic_for_txnmem (test_txnmem_simulator.TxnMemSimulatorTests.test_crash_during_commit_is_atomic_for_txnmem) ... ok
+test_naive_scope_bypass_exposes_private_memory (test_txnmem_simulator.TxnMemSimulatorTests.test_naive_scope_bypass_exposes_private_memory) ... ok
+test_scope_bypass_denies_direct_id_read_in_txnmem (test_txnmem_simulator.TxnMemSimulatorTests.test_scope_bypass_denies_direct_id_read_in_txnmem) ... ok
+test_supersession_updates_old_and_new_records (test_txnmem_simulator.TxnMemSimulatorTests.test_supersession_updates_old_and_new_records) ... ok
+test_all_workloads_are_deterministic_and_schema_valid (test_txnmem_workloads.TxnMemWorkloadTests.test_all_workloads_are_deterministic_and_schema_valid) ... ok
+test_branch_repair_has_all_branch_edges (test_txnmem_workloads.TxnMemWorkloadTests.test_branch_repair_has_all_branch_edges) ... ok
+test_generate_suite_returns_workload_seed_cartesian_product (test_txnmem_workloads.TxnMemWorkloadTests.test_generate_suite_returns_workload_seed_cartesian_product) ... ok
+test_scope_bypass_contains_search_and_direct_id_read (test_txnmem_workloads.TxnMemWorkloadTests.test_scope_bypass_contains_search_and_direct_id_read) ... ok
+
+----------------------------------------------------------------------
+Ran 99 tests in 5.878s
+
+OK
+Failed to load spaCy lemma model: spaCy is not installed. Install it with: pip install mem0ai[nlp]
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+Failed to load spaCy full model: spaCy is not installed. Install it with: pip install mem0ai[nlp]
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+wrote 400 attempts to results/external
+generated 80 instances -> /data/agent-da-results/core-rerun-1db4f09/data/generated_instances.jsonl
+wrote 400 result rows -> /data/agent-da-results/core-rerun-1db4f09/results/experiment_results.csv
+wrote summary and figures -> /data/agent-da-results/core-rerun-1db4f09/results

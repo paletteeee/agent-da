@@ -1,0 +1,360 @@
+{
+  "adapters": [
+    {
+      "adapter": "AppendOnly",
+      "adapter_version": "controlled-v1",
+      "backend_mode": "controlled",
+      "capabilities": [
+        {
+          "adapter": "AppendOnly",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "single_record_read_write",
+          "detail": "AppendOnly performs deterministic immediate single-record replay.",
+          "supported": true
+        },
+        {
+          "adapter": "AppendOnly",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "atomic_multi_record_commit",
+          "detail": "Controlled baseline writes are immediate.",
+          "supported": false
+        },
+        {
+          "adapter": "AppendOnly",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "commit_policy_revalidation",
+          "detail": "Controlled baseline does not revalidate policy at commit.",
+          "supported": false
+        },
+        {
+          "adapter": "AppendOnly",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "shared_scope_isolation",
+          "detail": "Only MetadataFiltered checks agent and scope metadata on reads/search; this is controlled filtering.",
+          "supported": false
+        },
+        {
+          "adapter": "AppendOnly",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "version_supersession",
+          "detail": "Only LastWriteWins applies ordered old/new replacement updates; it is not atomic.",
+          "supported": false
+        },
+        {
+          "adapter": "AppendOnly",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "provenance_propagation",
+          "detail": "Controlled baseline has no native provenance propagation.",
+          "supported": false
+        },
+        {
+          "adapter": "AppendOnly",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "recursive_provenance_invalidation",
+          "detail": "Controlled baseline does not traverse provenance.",
+          "supported": false
+        },
+        {
+          "adapter": "AppendOnly",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "crash_recovery",
+          "detail": "Controlled baseline has no durable crash recovery.",
+          "supported": false
+        }
+      ]
+    },
+    {
+      "adapter": "LastWriteWins",
+      "adapter_version": "controlled-v1",
+      "backend_mode": "controlled",
+      "capabilities": [
+        {
+          "adapter": "LastWriteWins",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "single_record_read_write",
+          "detail": "LastWriteWins performs deterministic immediate single-record replay.",
+          "supported": true
+        },
+        {
+          "adapter": "LastWriteWins",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "atomic_multi_record_commit",
+          "detail": "Controlled baseline writes are immediate.",
+          "supported": false
+        },
+        {
+          "adapter": "LastWriteWins",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "commit_policy_revalidation",
+          "detail": "Controlled baseline does not revalidate policy at commit.",
+          "supported": false
+        },
+        {
+          "adapter": "LastWriteWins",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "shared_scope_isolation",
+          "detail": "Only MetadataFiltered checks agent and scope metadata on reads/search; this is controlled filtering.",
+          "supported": false
+        },
+        {
+          "adapter": "LastWriteWins",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "version_supersession",
+          "detail": "Only LastWriteWins applies ordered old/new replacement updates; it is not atomic.",
+          "supported": true
+        },
+        {
+          "adapter": "LastWriteWins",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "provenance_propagation",
+          "detail": "Controlled baseline has no native provenance propagation.",
+          "supported": false
+        },
+        {
+          "adapter": "LastWriteWins",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "recursive_provenance_invalidation",
+          "detail": "Controlled baseline does not traverse provenance.",
+          "supported": false
+        },
+        {
+          "adapter": "LastWriteWins",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "crash_recovery",
+          "detail": "Controlled baseline has no durable crash recovery.",
+          "supported": false
+        }
+      ]
+    },
+    {
+      "adapter": "MetadataFiltered",
+      "adapter_version": "controlled-v1",
+      "backend_mode": "controlled",
+      "capabilities": [
+        {
+          "adapter": "MetadataFiltered",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "single_record_read_write",
+          "detail": "MetadataFiltered performs deterministic immediate single-record replay.",
+          "supported": true
+        },
+        {
+          "adapter": "MetadataFiltered",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "atomic_multi_record_commit",
+          "detail": "Controlled baseline writes are immediate.",
+          "supported": false
+        },
+        {
+          "adapter": "MetadataFiltered",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "commit_policy_revalidation",
+          "detail": "Controlled baseline does not revalidate policy at commit.",
+          "supported": false
+        },
+        {
+          "adapter": "MetadataFiltered",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "shared_scope_isolation",
+          "detail": "Only MetadataFiltered checks agent and scope metadata on reads/search; this is controlled filtering.",
+          "supported": true
+        },
+        {
+          "adapter": "MetadataFiltered",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "version_supersession",
+          "detail": "Only LastWriteWins applies ordered old/new replacement updates; it is not atomic.",
+          "supported": false
+        },
+        {
+          "adapter": "MetadataFiltered",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "provenance_propagation",
+          "detail": "Controlled baseline has no native provenance propagation.",
+          "supported": false
+        },
+        {
+          "adapter": "MetadataFiltered",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "recursive_provenance_invalidation",
+          "detail": "Controlled baseline does not traverse provenance.",
+          "supported": false
+        },
+        {
+          "adapter": "MetadataFiltered",
+          "adapter_version": "controlled-v1",
+          "backend_mode": "controlled",
+          "capability": "crash_recovery",
+          "detail": "Controlled baseline has no durable crash recovery.",
+          "supported": false
+        }
+      ]
+    },
+    {
+      "adapter": "Mem0",
+      "adapter_version": "mem0-oss-2.0.18",
+      "backend_mode": "embedded_qdrant",
+      "capabilities": [
+        {
+          "adapter": "Mem0",
+          "adapter_version": "mem0-oss-2.0.18",
+          "backend_mode": "embedded_qdrant",
+          "capability": "single_record_read_write",
+          "detail": "Uses native Mem0 add, get, search, and update calls.",
+          "supported": true
+        },
+        {
+          "adapter": "Mem0",
+          "adapter_version": "mem0-oss-2.0.18",
+          "backend_mode": "embedded_qdrant",
+          "capability": "atomic_multi_record_commit",
+          "detail": "Mem0 writes are individual records.",
+          "supported": false
+        },
+        {
+          "adapter": "Mem0",
+          "adapter_version": "mem0-oss-2.0.18",
+          "backend_mode": "embedded_qdrant",
+          "capability": "commit_policy_revalidation",
+          "detail": "Commit is only a trace marker.",
+          "supported": false
+        },
+        {
+          "adapter": "Mem0",
+          "adapter_version": "mem0-oss-2.0.18",
+          "backend_mode": "embedded_qdrant",
+          "capability": "shared_scope_isolation",
+          "detail": "Mapping-layer agent_id and scope metadata checks gate reads; this is not a TxnMem claim.",
+          "supported": true
+        },
+        {
+          "adapter": "Mem0",
+          "adapter_version": "mem0-oss-2.0.18",
+          "backend_mode": "embedded_qdrant",
+          "capability": "version_supersession",
+          "detail": "Supersession is two ordered native updates, not an atomic operation.",
+          "supported": true
+        },
+        {
+          "adapter": "Mem0",
+          "adapter_version": "mem0-oss-2.0.18",
+          "backend_mode": "embedded_qdrant",
+          "capability": "provenance_propagation",
+          "detail": "Mem0 has no native provenance propagation operation.",
+          "supported": false
+        },
+        {
+          "adapter": "Mem0",
+          "adapter_version": "mem0-oss-2.0.18",
+          "backend_mode": "embedded_qdrant",
+          "capability": "recursive_provenance_invalidation",
+          "detail": "Invalidation updates only the named record; descendants are not traversed.",
+          "supported": false
+        },
+        {
+          "adapter": "Mem0",
+          "adapter_version": "mem0-oss-2.0.18",
+          "backend_mode": "embedded_qdrant",
+          "capability": "crash_recovery",
+          "detail": "Backend close/reopen observes persistent state only; it does not guarantee atomic transaction recovery and correctness remains oracle-determined.",
+          "supported": true
+        }
+      ]
+    },
+    {
+      "adapter": "LangGraphStore",
+      "adapter_version": "langgraph-store-v1",
+      "backend_mode": "in_memory_fallback",
+      "capabilities": [
+        {
+          "adapter": "LangGraphStore",
+          "adapter_version": "langgraph-store-v1",
+          "backend_mode": "in_memory_fallback",
+          "capability": "single_record_read_write",
+          "detail": "Uses native Store.put, get, and search operations.",
+          "supported": true
+        },
+        {
+          "adapter": "LangGraphStore",
+          "adapter_version": "langgraph-store-v1",
+          "backend_mode": "in_memory_fallback",
+          "capability": "atomic_multi_record_commit",
+          "detail": "Individual Store.put calls have no shared transaction boundary.",
+          "supported": false
+        },
+        {
+          "adapter": "LangGraphStore",
+          "adapter_version": "langgraph-store-v1",
+          "backend_mode": "in_memory_fallback",
+          "capability": "commit_policy_revalidation",
+          "detail": "Commit is only a trace marker; the adapter does not revalidate policy.",
+          "supported": false
+        },
+        {
+          "adapter": "LangGraphStore",
+          "adapter_version": "langgraph-store-v1",
+          "backend_mode": "in_memory_fallback",
+          "capability": "shared_scope_isolation",
+          "detail": "Run, instance, agent, and shared scope form the native namespace.",
+          "supported": true
+        },
+        {
+          "adapter": "LangGraphStore",
+          "adapter_version": "langgraph-store-v1",
+          "backend_mode": "in_memory_fallback",
+          "capability": "version_supersession",
+          "detail": "Supersession uses two ordered Store.put updates; it is not atomic.",
+          "supported": true
+        },
+        {
+          "adapter": "LangGraphStore",
+          "adapter_version": "langgraph-store-v1",
+          "backend_mode": "in_memory_fallback",
+          "capability": "provenance_propagation",
+          "detail": "LangGraph Store has no native provenance-propagation operation.",
+          "supported": false
+        },
+        {
+          "adapter": "LangGraphStore",
+          "adapter_version": "langgraph-store-v1",
+          "backend_mode": "in_memory_fallback",
+          "capability": "recursive_provenance_invalidation",
+          "detail": "Invalidation changes only the named record; descendants are not traversed.",
+          "supported": false
+        },
+        {
+          "adapter": "LangGraphStore",
+          "adapter_version": "langgraph-store-v1",
+          "backend_mode": "in_memory_fallback",
+          "capability": "crash_recovery",
+          "detail": "In-memory fallback excludes crash workloads; persistent mapping also does not claim recovery semantics.",
+          "supported": false
+        }
+      ]
+    }
+  ],
+  "schema_version": "txnmem-external-runner-v1"
+}

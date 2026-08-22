@@ -1,0 +1,41 @@
+adapter,adapter_version,backend_mode,capability,supported,detail
+AppendOnly,controlled-v1,controlled,single_record_read_write,true,AppendOnly performs deterministic immediate single-record replay.
+AppendOnly,controlled-v1,controlled,atomic_multi_record_commit,false,Controlled baseline writes are immediate.
+AppendOnly,controlled-v1,controlled,commit_policy_revalidation,false,Controlled baseline does not revalidate policy at commit.
+AppendOnly,controlled-v1,controlled,shared_scope_isolation,false,Only MetadataFiltered checks agent and scope metadata on reads/search; this is controlled filtering.
+AppendOnly,controlled-v1,controlled,version_supersession,false,Only LastWriteWins applies ordered old/new replacement updates; it is not atomic.
+AppendOnly,controlled-v1,controlled,provenance_propagation,false,Controlled baseline has no native provenance propagation.
+AppendOnly,controlled-v1,controlled,recursive_provenance_invalidation,false,Controlled baseline does not traverse provenance.
+AppendOnly,controlled-v1,controlled,crash_recovery,false,Controlled baseline has no durable crash recovery.
+LastWriteWins,controlled-v1,controlled,single_record_read_write,true,LastWriteWins performs deterministic immediate single-record replay.
+LastWriteWins,controlled-v1,controlled,atomic_multi_record_commit,false,Controlled baseline writes are immediate.
+LastWriteWins,controlled-v1,controlled,commit_policy_revalidation,false,Controlled baseline does not revalidate policy at commit.
+LastWriteWins,controlled-v1,controlled,shared_scope_isolation,false,Only MetadataFiltered checks agent and scope metadata on reads/search; this is controlled filtering.
+LastWriteWins,controlled-v1,controlled,version_supersession,true,Only LastWriteWins applies ordered old/new replacement updates; it is not atomic.
+LastWriteWins,controlled-v1,controlled,provenance_propagation,false,Controlled baseline has no native provenance propagation.
+LastWriteWins,controlled-v1,controlled,recursive_provenance_invalidation,false,Controlled baseline does not traverse provenance.
+LastWriteWins,controlled-v1,controlled,crash_recovery,false,Controlled baseline has no durable crash recovery.
+MetadataFiltered,controlled-v1,controlled,single_record_read_write,true,MetadataFiltered performs deterministic immediate single-record replay.
+MetadataFiltered,controlled-v1,controlled,atomic_multi_record_commit,false,Controlled baseline writes are immediate.
+MetadataFiltered,controlled-v1,controlled,commit_policy_revalidation,false,Controlled baseline does not revalidate policy at commit.
+MetadataFiltered,controlled-v1,controlled,shared_scope_isolation,true,Only MetadataFiltered checks agent and scope metadata on reads/search; this is controlled filtering.
+MetadataFiltered,controlled-v1,controlled,version_supersession,false,Only LastWriteWins applies ordered old/new replacement updates; it is not atomic.
+MetadataFiltered,controlled-v1,controlled,provenance_propagation,false,Controlled baseline has no native provenance propagation.
+MetadataFiltered,controlled-v1,controlled,recursive_provenance_invalidation,false,Controlled baseline does not traverse provenance.
+MetadataFiltered,controlled-v1,controlled,crash_recovery,false,Controlled baseline has no durable crash recovery.
+Mem0,mem0-oss-2.0.18,embedded_qdrant,single_record_read_write,true,"Uses native Mem0 add, get, search, and update calls."
+Mem0,mem0-oss-2.0.18,embedded_qdrant,atomic_multi_record_commit,false,Mem0 writes are individual records.
+Mem0,mem0-oss-2.0.18,embedded_qdrant,commit_policy_revalidation,false,Commit is only a trace marker.
+Mem0,mem0-oss-2.0.18,embedded_qdrant,shared_scope_isolation,true,Mapping-layer agent_id and scope metadata checks gate reads; this is not a TxnMem claim.
+Mem0,mem0-oss-2.0.18,embedded_qdrant,version_supersession,true,"Supersession is two ordered native updates, not an atomic operation."
+Mem0,mem0-oss-2.0.18,embedded_qdrant,provenance_propagation,false,Mem0 has no native provenance propagation operation.
+Mem0,mem0-oss-2.0.18,embedded_qdrant,recursive_provenance_invalidation,false,Invalidation updates only the named record; descendants are not traversed.
+Mem0,mem0-oss-2.0.18,embedded_qdrant,crash_recovery,true,Backend close/reopen observes persistent state only; it does not guarantee atomic transaction recovery and correctness remains oracle-determined.
+LangGraphStore,langgraph-store-v1,in_memory_fallback,single_record_read_write,true,"Uses native Store.put, get, and search operations."
+LangGraphStore,langgraph-store-v1,in_memory_fallback,atomic_multi_record_commit,false,Individual Store.put calls have no shared transaction boundary.
+LangGraphStore,langgraph-store-v1,in_memory_fallback,commit_policy_revalidation,false,Commit is only a trace marker; the adapter does not revalidate policy.
+LangGraphStore,langgraph-store-v1,in_memory_fallback,shared_scope_isolation,true,"Run, instance, agent, and shared scope form the native namespace."
+LangGraphStore,langgraph-store-v1,in_memory_fallback,version_supersession,true,Supersession uses two ordered Store.put updates; it is not atomic.
+LangGraphStore,langgraph-store-v1,in_memory_fallback,provenance_propagation,false,LangGraph Store has no native provenance-propagation operation.
+LangGraphStore,langgraph-store-v1,in_memory_fallback,recursive_provenance_invalidation,false,Invalidation changes only the named record; descendants are not traversed.
+LangGraphStore,langgraph-store-v1,in_memory_fallback,crash_recovery,false,In-memory fallback excludes crash workloads; persistent mapping also does not claim recovery semantics.

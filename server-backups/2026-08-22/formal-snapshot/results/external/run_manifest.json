@@ -1,0 +1,120 @@
+{
+  "argv": [
+    "run",
+    "--instances",
+    "data/generated_instances.jsonl",
+    "--out-dir",
+    "results/external",
+    "--adapters",
+    "AppendOnly",
+    "LastWriteWins",
+    "MetadataFiltered",
+    "Mem0",
+    "LangGraphStore",
+    "--run-id",
+    "formal-1db4f09-20260821",
+    "--mem0-state-root",
+    "/data/agent-da-results/mem0-formal"
+  ],
+  "artifacts": {
+    "capabilities.csv": {
+      "bytes": 5579,
+      "sha256": "bca65e60eff4fdedc46d96f64bbc67ebcbfd22d71a3b6f8a6a18feeaa2f96e7b"
+    },
+    "capabilities.json": {
+      "bytes": 13530,
+      "sha256": "2ad558da050df0cafec241560c3c1215ea82a9a03a83bd3f1bda730581483bb6"
+    },
+    "environment.json": {
+      "bytes": 5930,
+      "sha256": "2007af43c4d56ccd9226e9a9492a61283aa4843863d9c252f1608069f84189bc"
+    },
+    "errors.jsonl": {
+      "bytes": 9795,
+      "sha256": "fc7a2d3210b77751da189c703d42384083a2e23c53aec2673b1807961021bfaf"
+    },
+    "results.csv": {
+      "bytes": 83607,
+      "sha256": "b41aa74e1fb6ee25d7990f07c4bd901477cc9b25359a29bc3b0c9dbec47f70f7"
+    },
+    "summary.json": {
+      "bytes": 90241,
+      "sha256": "0e269ba97ccfd90a46198e1ec0563dc5bbc78c1806a8094689d323e54ac2d60a"
+    }
+  },
+  "backend_state": {
+    "langgraph_store": {
+      "mode": "in_memory_fallback",
+      "reason": "postgres_dsn_not_configured"
+    },
+    "mem0": {
+      "base_root": "/data/agent-da-results/mem0-formal",
+      "mode": "embedded_qdrant",
+      "root": "/data/agent-da-results/mem0-formal/formal-1db4f09-20260821"
+    }
+  },
+  "counts": {
+    "attempted": 400,
+    "capability_absent_observed": 20,
+    "correctness_included": 370,
+    "excluded": 30,
+    "successful": 370
+  },
+  "duration_ms": 4038.262761,
+  "ended_at_utc": "2026-08-21T08:45:48Z",
+  "environment": {
+    "artifact": "environment.json",
+    "package_versions": {
+      "langgraph": "1.2.11",
+      "langgraph-checkpoint-postgres": "3.1.2",
+      "mem0ai": "2.0.18",
+      "psycopg-binary": "3.3.4"
+    },
+    "platform": "Linux-5.4.0-100-generic-x86_64-with-glibc2.39",
+    "python": {
+      "executable": "/data/agent-da-baselines-worktree/.venv-baselines/bin/python",
+      "implementation": "CPython",
+      "version": "3.12.3"
+    }
+  },
+  "git": {
+    "dirty": false,
+    "head": "1db4f092769f3a7cf60c472a0ad97176eca6268f"
+  },
+  "input": {
+    "bytes": 118230,
+    "count": 80,
+    "path": "/data/agent-da-formal-1db4f09/data/generated_instances.jsonl",
+    "sha256": "144f806e8eed0d2be9a2c83a3f0389a540e338b2446e806ed029c4d340804fc7"
+  },
+  "run_id": "formal-1db4f09-20260821",
+  "schema_version": "txnmem-external-runner-v1",
+  "selected_adapters": [
+    {
+      "adapter_version": "controlled-v1",
+      "backend_mode": "controlled",
+      "name": "AppendOnly"
+    },
+    {
+      "adapter_version": "controlled-v1",
+      "backend_mode": "controlled",
+      "name": "LastWriteWins"
+    },
+    {
+      "adapter_version": "controlled-v1",
+      "backend_mode": "controlled",
+      "name": "MetadataFiltered"
+    },
+    {
+      "adapter_version": "mem0-oss-2.0.18",
+      "backend_mode": "embedded_qdrant",
+      "name": "Mem0"
+    },
+    {
+      "adapter_version": "langgraph-store-v1",
+      "backend_mode": "in_memory_fallback",
+      "name": "LangGraphStore"
+    }
+  ],
+  "started_at_utc": "2026-08-21T08:45:44Z"
+}
