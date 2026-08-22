@@ -1033,9 +1033,21 @@ def _validate_network_guard_attestation(value: Any) -> dict[str, Any]:
         not isinstance(value, Mapping)
         or set(value) != _NETWORK_GUARD_FIELDS
         or value.get("schema") != "txnmem-provenance-network-guard-v3"
+        or type(value.get("runner_uid")) is not int
         or value.get("runner_uid") != FORMAL_RUNNER_UID
+        or type(value.get("controller_uid")) is not int
         or value.get("controller_uid") != 0
+        or type(value.get("allowed_ipv4_loopback_ports")) is not list
+        or any(
+            type(port) is not int
+            for port in value["allowed_ipv4_loopback_ports"]
+        )
         or value.get("allowed_ipv4_loopback_ports") != [19000, 19001]
+        or type(value.get("allowed_root_ingress_ports")) is not list
+        or any(
+            type(port) is not int
+            for port in value["allowed_root_ingress_ports"]
+        )
         or value.get("allowed_root_ingress_ports") != [8474, 19000, 19001]
         or value.get("root_ingress_destination_exact") is not True
         or value.get("management_port_root_only") is not True

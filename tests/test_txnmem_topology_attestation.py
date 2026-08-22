@@ -72,6 +72,49 @@ class TopologyAttestationTests(unittest.TestCase):
                 ):
                     _validate_network_guard_attestation(drifted)
 
+    def test_network_guard_v3_rejects_bool_and_float_uids_and_ports(self):
+        launch, _completion = self._documents()
+        guard = launch["network_guard"]
+
+        for name, field, replacement in (
+            ("runner_uid_bool", "runner_uid", False),
+            ("runner_uid_float", "runner_uid", 65532.0),
+            ("controller_uid_bool", "controller_uid", False),
+            ("controller_uid_float", "controller_uid", 0.0),
+            (
+                "loopback_first_float",
+                "allowed_ipv4_loopback_ports",
+                [19000.0, 19001],
+            ),
+            (
+                "loopback_second_float",
+                "allowed_ipv4_loopback_ports",
+                [19000, 19001.0],
+            ),
+            (
+                "root_ingress_first_float",
+                "allowed_root_ingress_ports",
+                [8474.0, 19000, 19001],
+            ),
+            (
+                "root_ingress_second_float",
+                "allowed_root_ingress_ports",
+                [8474, 19000.0, 19001],
+            ),
+            (
+                "root_ingress_third_float",
+                "allowed_root_ingress_ports",
+                [8474, 19000, 19001.0],
+            ),
+        ):
+            with self.subTest(name=name):
+                drifted = copy.deepcopy(guard)
+                drifted[field] = replacement
+                with self.assertRaisesRegex(
+                    TopologyAttestationError, "formal network guard"
+                ):
+                    _validate_network_guard_attestation(drifted)
+
     @staticmethod
     def _file_bytes(value):
         return (
