@@ -1043,7 +1043,8 @@ On the authorized server, derive `approved_commit` from the pushed branch, clone
 ```bash
 approved_commit=$(git ls-remote https://github.com/paletteeee/agent-da.git \
   refs/heads/codex/evidence-scale-up | awk '{print $1}')
-remote_clone=/data/txnmem/evidence-scale-up-${approved_commit:0:7}
+remote_run_root="${TXNMEM_REMOTE_RUN_ROOT:?set to the approved remote run root}"
+remote_clone="${remote_run_root}/evidence-scale-up-${approved_commit:0:7}"
 git clone --branch codex/evidence-scale-up --single-branch \
   https://github.com/paletteeee/agent-da.git "$remote_clone"
 cd "$remote_clone"
