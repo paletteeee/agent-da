@@ -166,6 +166,25 @@ class ToxiproxyMetricsTests(unittest.TestCase):
         with self.assertRaises(ToxiproxyMetricsError):
             validate_proxy_counter_snapshot(baseline, expected_phase="final")
 
+    def test_validates_derived_totals_above_the_per_sample_exact_limit(self):
+        maximum_sample = 9_007_199_254_740_991
+        maximum_metrics = METRICS
+        for sample in ("1.1e1", "13", "17", "19", "23", "29", "31", "37"):
+            maximum_metrics = maximum_metrics.replace(
+                f" {sample}\n", f" {maximum_sample}\n"
+            )
+
+        snapshot = parse_toxiproxy_byte_counters(
+            maximum_metrics, phase="baseline_a", proxy_routes=ROUTES
+        )
+
+        self.assertEqual(
+            [row["total_bytes"] for row in snapshot["routes"]],
+            [36_028_797_018_963_964, 36_028_797_018_963_964],
+        )
+        self.assertEqual(snapshot["toxiproxy_total_bytes"], 72_057_594_037_927_928)
+        self.assertEqual(validate_proxy_counter_snapshot(snapshot), snapshot)
+
 
 if __name__ == "__main__":
     unittest.main()

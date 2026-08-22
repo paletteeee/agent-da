@@ -63,6 +63,10 @@ def _is_counter(value: Any) -> bool:
     return type(value) is int and 0 <= value <= _MAX_EXACT_COUNTER
 
 
+def _is_derived_total(value: Any) -> bool:
+    return type(value) is int and value >= 0
+
+
 def _parse_wildcard_listener(value: Any) -> tuple[str, int]:
     if not isinstance(value, str):
         _fail("Toxiproxy listener is invalid")
@@ -294,14 +298,18 @@ def validate_proxy_counter_snapshot(
             _fail("Toxiproxy counter component is invalid")
         normalized.update({component: row[component] for component in _COUNTER_COMPONENTS})
         expected_total = sum(normalized[component] for component in _COUNTER_COMPONENTS)
-        if row["total_bytes"] != expected_total or not _is_counter(row["total_bytes"]):
+        if row["total_bytes"] != expected_total or not _is_derived_total(
+            row["total_bytes"]
+        ):
             _fail("Toxiproxy counter route total is invalid")
         normalized["total_bytes"] = row["total_bytes"]
         normalized_routes.append(normalized)
     if len({route["proxy_name"] for route in normalized_routes}) != len(normalized_routes):
         _fail("Toxiproxy counter proxy names are duplicated")
     expected_global_total = sum(row["total_bytes"] for row in normalized_routes)
-    if value["toxiproxy_total_bytes"] != expected_global_total or not _is_counter(value["toxiproxy_total_bytes"]):
+    if value["toxiproxy_total_bytes"] != expected_global_total or not _is_derived_total(
+        value["toxiproxy_total_bytes"]
+    ):
         _fail("Toxiproxy counter total is invalid")
     document = {
         "schema": value["schema"],

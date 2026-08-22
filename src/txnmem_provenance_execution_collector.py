@@ -3953,26 +3953,29 @@ def collect_docker_topology_snapshot(
             neo4j_proxy=neo4j_proxy,
         )
 
-    def metrics() -> dict[str, int]:
+    def metrics(proxy_routes: Sequence[Mapping[str, Any]]) -> dict[str, int]:
         body, _rtt = _http_read(toxiproxy_url.rstrip("/") + "/metrics")
         try:
             text = body.decode("utf-8")
         except UnicodeError as exc:
             raise CollectorError("Toxiproxy metrics are not UTF-8") from exc
-        return parse_toxiproxy_byte_counters(
-            text, qdrant_proxy=qdrant_proxy, neo4j_proxy=neo4j_proxy
+        snapshot = _parse_formal_toxiproxy_counter_snapshot(
+            text,
+            phase="baseline_a" if phase == "before" else "final",
+            proxy_routes=proxy_routes,
         )
+        return _proxy_counter_totals(snapshot)
 
     counters_before_health = None
     routes_before_health = None
     if phase == "after":
         if frozen_proxy_state is None:
-            counters_before_health = metrics()
             routes_before_health = observe_formal_toxiproxy_routes(
                 toxiproxy_url,
                 qdrant_proxy=qdrant_proxy,
                 neo4j_proxy=neo4j_proxy,
             )
+            counters_before_health = metrics(routes_before_health)
         else:
             counters_value = frozen_proxy_state.get("counters")
             routes_value = frozen_proxy_state.get("routes")
@@ -4034,7 +4037,7 @@ def collect_docker_topology_snapshot(
             qdrant_proxy=qdrant_proxy,
             neo4j_proxy=neo4j_proxy,
         )
-        counters = metrics()
+        counters = metrics(routes)
         if any(counters[role] != 0 for role in ("qdrant", "neo4j", "toxiproxy")):
             raise CollectorError("formal Toxiproxy counters did not reset to zero")
     else:
@@ -4079,27 +4082,54 @@ def collect_docker_topology_snapshot(
     }
 
 
+def _proxy_counter_totals(snapshot: Mapping[str, Any]) -> dict[str, int]:
+    totals = {
+        row["role"]: row["total_bytes"]
+        for row in snapshot["routes"]
+    }
+    return {
+        "qdrant": totals["qdrant"],
+        "neo4j": totals["neo4j"],
+        "toxiproxy": snapshot["toxiproxy_total_bytes"],
+    }
+
+
+def _parse_formal_toxiproxy_counter_snapshot(
+    text: str,
+    *,
+    phase: str,
+    proxy_routes: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    try:
+        return parse_toxiproxy_byte_counters(
+            text, phase=phase, proxy_routes=proxy_routes
+        )
+    except ToxiproxyMetricsError as exc:
+        raise CollectorError("formal Toxiproxy metrics are invalid") from exc
+
+
 def _capture_toxiproxy_completion_state(
     toxiproxy_url: str,
     *,
+    phase: str,
     qdrant_proxy: str,
     neo4j_proxy: str,
 ) -> dict[str, Any]:
-    body, _rtt = _http_read(toxiproxy_url.rstrip("/") + "/metrics")
-    try:
-        counters = parse_toxiproxy_byte_counters(
-            body.decode("utf-8"),
-            qdrant_proxy=qdrant_proxy,
-            neo4j_proxy=neo4j_proxy,
-        )
-    except UnicodeError as exc:
-        raise CollectorError("Toxiproxy metrics are not UTF-8") from exc
     routes = observe_formal_toxiproxy_routes(
         toxiproxy_url,
         qdrant_proxy=qdrant_proxy,
         neo4j_proxy=neo4j_proxy,
     )
-    return {"counters": counters, "routes": routes}
+    body, _rtt = _http_read(toxiproxy_url.rstrip("/") + "/metrics")
+    try:
+        snapshot = _parse_formal_toxiproxy_counter_snapshot(
+            body.decode("utf-8"),
+            phase=phase,
+            proxy_routes=routes,
+        )
+    except UnicodeError as exc:
+        raise CollectorError("Toxiproxy metrics are not UTF-8") from exc
+    return {"counters": _proxy_counter_totals(snapshot), "routes": routes}
 
 
 def _require_zero_toxiproxy_attribution_baseline(
@@ -4480,6 +4510,7 @@ def collect_formal_execution(
             _require_zero_toxiproxy_attribution_baseline(
                 _capture_toxiproxy_completion_state(
                     toxiproxy_url,
+                    phase="baseline_a",
                     qdrant_proxy=_FORMAL_QDRANT_PROXY,
                     neo4j_proxy=_FORMAL_NEO4J_PROXY,
                 )
@@ -4492,6 +4523,7 @@ def collect_formal_execution(
             snapshot = network_guard.verify()
             frozen_proxy_state = _capture_toxiproxy_completion_state(
                 toxiproxy_url,
+                phase="final",
                 qdrant_proxy=_FORMAL_QDRANT_PROXY,
                 neo4j_proxy=_FORMAL_NEO4J_PROXY,
             )

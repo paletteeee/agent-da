@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import time
+from contextlib import nullcontext
 from types import SimpleNamespace
 from types import ModuleType
 import unittest
@@ -2021,6 +2022,133 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     collector_module._normalize_toxiproxy_proxy(
                         document, role="qdrant"
                     )
+
+    def test_topology_metrics_call_uses_strict_snapshot_parser(self):
+        routes = [
+            {
+                "role": "qdrant",
+                "proxy_name": "txnmem-qdrant",
+                "listen": "0.0.0.0:19000",
+                "upstream": "qdrant:6333",
+                "enabled": True,
+                "toxics_count": 0,
+            },
+            {
+                "role": "neo4j",
+                "proxy_name": "txnmem-neo4j",
+                "listen": "0.0.0.0:19001",
+                "upstream": "neo4j:7687",
+                "enabled": True,
+                "toxics_count": 0,
+            },
+        ]
+        metrics = "\n".join(
+            (
+                'toxiproxy_proxy_received_bytes_total{direction="upstream",proxy="txnmem-qdrant",listener="[::]:19000",upstream="qdrant:6333"} 0',
+                'toxiproxy_proxy_sent_bytes_total{direction="upstream",proxy="txnmem-qdrant",listener="[::]:19000",upstream="qdrant:6333"} 0',
+                'toxiproxy_proxy_received_bytes_total{direction="downstream",proxy="txnmem-qdrant",listener="[::]:19000",upstream="qdrant:6333"} 0',
+                'toxiproxy_proxy_sent_bytes_total{direction="downstream",proxy="txnmem-qdrant",listener="[::]:19000",upstream="qdrant:6333"} 0',
+                'toxiproxy_proxy_received_bytes_total{direction="upstream",proxy="txnmem-neo4j",listener="[::]:19001",upstream="neo4j:7687"} 0',
+                'toxiproxy_proxy_sent_bytes_total{direction="upstream",proxy="txnmem-neo4j",listener="[::]:19001",upstream="neo4j:7687"} 0',
+                'toxiproxy_proxy_received_bytes_total{direction="downstream",proxy="txnmem-neo4j",listener="[::]:19001",upstream="neo4j:7687"} 0',
+                'toxiproxy_proxy_sent_bytes_total{direction="downstream",proxy="txnmem-neo4j",listener="[::]:19001",upstream="neo4j:7687"} 0',
+            )
+        )
+
+        class Driver:
+            def get_server_info(self):
+                return SimpleNamespace(agent="Neo4j/5.26.0")
+
+            def close(self):
+                pass
+
+        class GraphDatabase:
+            @staticmethod
+            def driver(_uri, auth):
+                self.assertEqual(auth, ("neo4j", "password"))
+                return Driver()
+
+        def http_read(url):
+            if url.endswith("/metrics"):
+                return metrics.encode("utf-8"), 0.0
+            if url.endswith("/version"):
+                return b'"2.5.0"', 0.0
+            self.assertTrue(url.endswith("/"))
+            return b'{"version":"1.15.4"}', 0.0
+
+        with patch.object(
+            collector_module, "prepare_isolated_toxiproxy_routes", return_value=routes
+        ), patch.object(
+            collector_module, "_http_read", side_effect=http_read
+        ), patch.object(
+            collector_module,
+            "_locked_neo4j_graph_database",
+            return_value=nullcontext(GraphDatabase),
+        ), patch.object(
+            collector_module, "_host_identity", return_value="host"
+        ), patch.object(
+            collector_module, "_docker_owner", return_value="0:0"
+        ), patch.object(
+            collector_module, "_collect_docker_backend_isolation", return_value={}
+        ):
+            snapshot = collector_module.collect_docker_topology_snapshot(
+                "before",
+                qdrant_url="http://qdrant",
+                neo4j_uri="bolt://neo4j",
+                toxiproxy_url="http://toxiproxy",
+                neo4j_auth=("neo4j", "password"),
+                qdrant_proxy="txnmem-qdrant",
+                neo4j_proxy="txnmem-neo4j",
+                qdrant_container="txnmem-qdrant",
+                neo4j_container="txnmem-neo4j",
+                toxiproxy_container="txnmem-toxiproxy",
+                client_owner="0:0",
+                client_python_version="3.11.9",
+                runtime_snapshot=Path("/unused"),
+            )
+
+        self.assertEqual(
+            [row["proxy_counter_bytes"] for row in snapshot["roles"]],
+            [0, 0, 0, 0],
+        )
+
+    def test_completion_metrics_translate_strict_parser_errors_without_payload(self):
+        routes = [
+            {
+                "role": "qdrant",
+                "proxy_name": "txnmem-qdrant",
+                "listen": "0.0.0.0:19000",
+                "upstream": "qdrant:6333",
+                "enabled": True,
+                "toxics_count": 0,
+            },
+            {
+                "role": "neo4j",
+                "proxy_name": "txnmem-neo4j",
+                "listen": "0.0.0.0:19001",
+                "upstream": "neo4j:7687",
+                "enabled": True,
+                "toxics_count": 0,
+            },
+        ]
+        payload = "not-a-toxiproxy-metric"
+
+        with patch.object(
+            collector_module, "_http_read", return_value=(payload.encode("utf-8"), 0.0)
+        ), patch.object(
+            collector_module, "observe_formal_toxiproxy_routes", return_value=routes
+        ):
+            with self.assertRaisesRegex(
+                CollectorError, "^formal Toxiproxy metrics are invalid$"
+            ) as raised:
+                collector_module._capture_toxiproxy_completion_state(
+                    "http://toxiproxy",
+                    phase="final",
+                    qdrant_proxy="txnmem-qdrant",
+                    neo4j_proxy="txnmem-neo4j",
+                )
+
+        self.assertNotIn(payload, str(raised.exception))
 
     def test_toxiproxy_attribution_baseline_requires_zero_and_exact_routes(self):
         routes = [
