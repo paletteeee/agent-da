@@ -124,10 +124,12 @@ auxiliary = {
     "infra/real_backend/docker-compose.yml",
     "scripts/install_formal_provenance_runtime.sh",
     "scripts/run_cross_host_provenance_performance.sh",
+    "scripts/run_formal_provenance_smoke.sh",
     "scripts/run_provenance_performance.sh",
 }
 required = auxiliary | {
     "src/txnmem_formal_controller.py",
+    "src/txnmem_formal_smoke.py",
     "src/txnmem_provenance_execution_collector.py",
     "src/txnmem_provenance_runner.py",
 }

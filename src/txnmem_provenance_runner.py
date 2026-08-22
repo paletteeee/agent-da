@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
+from pathlib import Path
 import sys
+import urllib.request
 
 
 def _argument_value(arguments: list[str], name: str) -> str:
@@ -45,6 +48,85 @@ def _write_all(descriptor: int, payload: bytes) -> None:
         view = view[written:]
 
 
+def _completion_payload(material: dict) -> bytes:
+    return json.dumps(
+        material,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _load_smoke_graph_database(runtime_site: Path):
+    root = runtime_site.expanduser().absolute().resolve(strict=True)
+    module = importlib.import_module("neo4j")
+    module_file = Path(str(getattr(module, "__file__", ""))).resolve(strict=True)
+    try:
+        module_file.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError("smoke Neo4j driver escaped locked runtime") from exc
+    graph_database = getattr(module, "GraphDatabase", None)
+    if graph_database is None:
+        raise RuntimeError("smoke Neo4j driver is unavailable")
+    return graph_database
+
+
+def _probe_smoke_qdrant(url: str) -> bool:
+    if url != "http://127.0.0.1:19000/readyz":
+        raise ValueError("smoke Qdrant endpoint is not exact loopback")
+    with urllib.request.urlopen(url, timeout=10.0) as response:
+        status = int(response.status)
+        body = response.read(4097)
+    return 200 <= status < 300 and len(body) <= 4096
+
+
+def _probe_smoke_neo4j(
+    *,
+    runtime_site: Path,
+    neo4j_uri: str,
+    neo4j_user: str,
+    neo4j_password: str,
+) -> bool:
+    if (
+        neo4j_uri != "bolt://127.0.0.1:19001"
+        or neo4j_user != "neo4j"
+        or not isinstance(neo4j_password, str)
+        or not neo4j_password
+    ):
+        raise ValueError("smoke Neo4j endpoint or credential is invalid")
+    GraphDatabase = _load_smoke_graph_database(runtime_site)
+    with GraphDatabase.driver(
+        neo4j_uri, auth=(neo4j_user, neo4j_password)
+    ) as driver:
+        with driver.session() as session:
+            with session.begin_transaction() as transaction:
+                record = transaction.run("RETURN 1 AS value").single(strict=True)
+                if record is None or record["value"] != 1:
+                    return False
+                transaction.commit()
+    return True
+
+
+def _provenance_smoke_receipt(
+    runtime_site: Path, neo4j_password: str
+) -> dict:
+    qdrant_ok = _probe_smoke_qdrant("http://127.0.0.1:19000/readyz")
+    neo4j_ok = _probe_smoke_neo4j(
+        runtime_site=runtime_site,
+        neo4j_uri="bolt://127.0.0.1:19001",
+        neo4j_user="neo4j",
+        neo4j_password=neo4j_password,
+    )
+    if qdrant_ok is not True or neo4j_ok is not True:
+        raise RuntimeError("formal smoke backend probe failed")
+    return {
+        "schema": "txnmem-provenance-smoke-child-receipt-v1",
+        "qdrant_proxy_ok": True,
+        "neo4j_proxy_ok": True,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     gate_value = os.environ.pop("TXNMEM_PROVENANCE_START_GATE_FD", None)
     ready_value = os.environ.pop("TXNMEM_PROVENANCE_READY_FD", None)
@@ -81,16 +163,35 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         arguments = list(sys.argv[1:] if argv is None else argv)
+        if not arguments or arguments[0] not in {
+            "provenance-performance",
+            "provenance-smoke",
+        }:
+            return 72
+        runtime_path = Path(runtime_site).expanduser().absolute().resolve(strict=True)
+        sys.path.insert(0, runtime_site)
+        sys.path.insert(0, str(os.path.dirname(os.path.abspath(__file__))))
+        if arguments[0] == "provenance-smoke":
+            if arguments != ["provenance-smoke"]:
+                return 72
+            neo4j_password = os.environ.pop("TXNMEM_NEO4J_PASSWORD", None)
+            if not neo4j_password:
+                return 72
+            material = _provenance_smoke_receipt(
+                runtime_path, neo4j_password
+            )
+            payload = _completion_payload(material)
+            if not payload or len(payload) > 65536:
+                return 74
+            _write_all(completion_fd, payload)
+            return 0
         if (
-            not arguments
-            or arguments[0] != "provenance-performance"
-            or "--formal" in arguments
-            or "--backend" not in arguments
+            "--formal" in arguments
+            or arguments.count("--backend") != 1
+            or arguments.index("--backend") + 1 >= len(arguments)
             or arguments[arguments.index("--backend") + 1] != "vector-graph"
         ):
             return 72
-        sys.path.insert(0, runtime_site)
-        sys.path.insert(0, str(os.path.dirname(os.path.abspath(__file__))))
         from txnmem_experiment import main as experiment_main
 
         result = experiment_main(arguments)
@@ -98,13 +199,7 @@ def main(argv: list[str] | None = None) -> int:
             return 73
         if result == 0:
             material = _candidate_completion_material(arguments)
-            payload = json.dumps(
-                material,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-            ).encode("utf-8")
+            payload = _completion_payload(material)
             if not payload or len(payload) > 65536:
                 return 74
             _write_all(completion_fd, payload)

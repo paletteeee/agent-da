@@ -132,6 +132,16 @@ class FormalControllerCleanupTests(unittest.TestCase):
                 finally:
                     controller._remove_export(exported)
 
+    def test_approved_source_closure_includes_smoke_module_and_wrapper(self):
+        self.assertIn(
+            "scripts/run_formal_provenance_smoke.sh",
+            controller._FORMAL_AUXILIARY_PATHS,
+        )
+        self.assertIn(
+            "src/txnmem_formal_smoke.py",
+            controller._REQUIRED_APPROVED_PATHS,
+        )
+
     def test_export_rejects_head_change_from_root_approved_commit(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -203,6 +213,57 @@ class FormalControllerCleanupTests(unittest.TestCase):
             try:
                 self.assertEqual(
                     controller._dispatch("measure", [], export, approved), 0
+                )
+            finally:
+                sys.modules.pop(module_name, None)
+                if previous is not None:
+                    sys.modules[module_name] = previous
+
+    def test_dispatch_runs_smoke_with_the_controller_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            export = Path(tmp).resolve() / "export"
+            (export / "src").mkdir(parents=True)
+            (export / "src" / "txnmem_formal_smoke.py").write_text(
+                "\n".join(
+                    (
+                        "def main(argv, *, _controller_context=None):",
+                        "    return 0 if argv == ['--out', '/external/smoke.json'] and _controller_context.get('source_commit') else 91",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            rows = tuple(
+                (path, hashlib.sha256(path.encode()).hexdigest())
+                for path in sorted(controller._REQUIRED_APPROVED_PATHS)
+            )
+            manifest = {
+                "schema": controller._APPROVAL_SCHEMA,
+                "source_commit": "a" * 40,
+                "files": [
+                    {"path": path, "blob_sha256": digest}
+                    for path, digest in rows
+                ],
+            }
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=rows,
+                manifest=manifest,
+                manifest_sha256=hashlib.sha256(
+                    controller._canonical_json_bytes(manifest)
+                ).hexdigest(),
+            )
+            module_name = "txnmem_formal_smoke"
+            previous = sys.modules.pop(module_name, None)
+            try:
+                self.assertEqual(
+                    controller._dispatch(
+                        "smoke",
+                        ["--out", "/external/smoke.json"],
+                        export,
+                        approved,
+                    ),
+                    0,
                 )
             finally:
                 sys.modules.pop(module_name, None)
@@ -288,6 +349,8 @@ class FormalControllerCleanupTests(unittest.TestCase):
         self.assertIn("approved_source_manifest.json", text)
         self.assertIn("running installer differs from the approved Git blob", text)
         self.assertIn("/usr/bin/mv -f", text)
+        self.assertIn('"scripts/run_formal_provenance_smoke.sh"', text)
+        self.assertIn('"src/txnmem_formal_smoke.py"', text)
         self.assertNotIn("sshpass", text)
         self.assertNotIn("StrictHostKeyChecking=no", text)
 

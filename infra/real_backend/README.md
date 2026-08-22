@@ -14,3 +14,9 @@ docker compose -f infra/real_backend/docker-compose.yml up -d
 The backend runner must record the image tags/digests, health checks, proxy
 configuration, and `production_latency_claim: false`. Raw database volumes and
 service logs stay on the remote host and are never committed.
+
+`scripts/run_real_backend_smoke.sh` remains an ordinary diagnostic check. Only
+`scripts/run_formal_provenance_smoke.sh`, through the installed protected
+controller, proves the formal same-path ingress and proxy-attribution gate. The
+formal smoke emits no candidate output or claim-bearing artifact. Neither smoke
+is a production latency result.

@@ -95,6 +95,39 @@ class RealBackendScriptTests(unittest.TestCase):
         self.assertIn("if ! command -v curl", script)
         self.assertIn('write_blocked "curl_not_installed"', script)
 
+    def test_formal_smoke_wrapper_is_external_credential_safe_and_candidate_free(self):
+        script = (ROOT / "scripts" / "run_formal_provenance_smoke.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("[[ $# -ne 1 ]]", script)
+        self.assertIn("smoke_out", script)
+        self.assertIn("TXNMEM_NEO4J_PASSWORD", script)
+        self.assertIn("exec /usr/bin/env -i", script)
+        self.assertIn("/opt/txnmem-formal-controller/txnmem_formal_controller.py", script)
+        self.assertIn('--project-root "$PWD" smoke --out "$smoke_out"', script)
+        self.assertNotIn("candidate-root", script)
+        self.assertNotIn("authorization-nonce", script)
+
+        relative = subprocess.run(
+            ["/bin/bash", str(ROOT / "scripts" / "run_formal_provenance_smoke.sh"), "relative.json"],
+            cwd=ROOT,
+            env={"TXNMEM_NEO4J_PASSWORD": "test-only-placeholder"},
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(relative.returncode, 0)
+
+    def test_cross_host_wrapper_adds_smoke_without_removing_existing_actions(self):
+        script = (
+            ROOT / "scripts" / "run_cross_host_provenance_performance.sh"
+        ).read_text(encoding="utf-8")
+
+        for action in ("measure", "material", "attest", "promote", "smoke"):
+            self.assertIn(f"  {action})", script)
+        self.assertIn('scripts/run_formal_provenance_smoke.sh "$1"', script)
+
     def test_compose_does_not_publish_direct_qdrant_or_neo4j_data_ports(self):
         compose = (ROOT / "infra" / "real_backend" / "docker-compose.yml").read_text(
             encoding="utf-8"

@@ -39,12 +39,14 @@ _FORMAL_AUXILIARY_PATHS = (
     "infra/real_backend/docker-compose.yml",
     "scripts/install_formal_provenance_runtime.sh",
     "scripts/run_cross_host_provenance_performance.sh",
+    "scripts/run_formal_provenance_smoke.sh",
     "scripts/run_provenance_performance.sh",
 )
 _REQUIRED_APPROVED_PATHS = frozenset(
     {
         *_FORMAL_AUXILIARY_PATHS,
         "src/txnmem_formal_controller.py",
+        "src/txnmem_formal_smoke.py",
         "src/txnmem_provenance_execution_collector.py",
         "src/txnmem_provenance_runner.py",
     }
@@ -412,6 +414,7 @@ def _dispatch(
 ) -> int:
     module_name = {
         "measure": "txnmem_provenance_execution_collector",
+        "smoke": "txnmem_formal_smoke",
         "material": "txnmem_experiment",
         "attest": "txnmem_topology_attestation",
         "promote": "txnmem_experiment",
@@ -433,7 +436,7 @@ def _dispatch(
         entry = getattr(module, "main", None)
         if not callable(entry):
             raise FormalControllerError("formal controller target has no entry point")
-        if action == "measure":
+        if action in {"measure", "smoke"}:
             result = entry(
                 forwarded,
                 _controller_context={

@@ -8,6 +8,7 @@ usage:
   run_cross_host_provenance_performance.sh material CANDIDATE_ROOT CANDIDATE_BUNDLE_ID MATERIAL_JSON
   run_cross_host_provenance_performance.sh attest LAUNCH_JSON COMPLETION_JSON AUTHORIZATION_NONCE SANITIZED_TOPOLOGY_JSON
   run_cross_host_provenance_performance.sh promote CANDIDATE_ROOT CANDIDATE_BUNDLE_ID SANITIZED_TOPOLOGY_JSON FORMAL_OUT_DIR
+  run_cross_host_provenance_performance.sh smoke OUT_JSON
 
 Required order: generate an out-of-tree 0600 nonce -> pre-register its SHA-256
 for the run-id hash in source and commit -> measure -> material -> attest -> independently register the
@@ -60,6 +61,10 @@ case "$action" in
       --bundle-id "$2" \
       --topology-attestation "$3" \
       --out-dir "$4"
+    ;;
+  smoke)
+    [[ $# -eq 1 ]] || usage
+    scripts/run_formal_provenance_smoke.sh "$1"
     ;;
   *)
     usage
