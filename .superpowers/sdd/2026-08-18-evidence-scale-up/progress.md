@@ -372,3 +372,13 @@ Critical/Important breakage or out-of-scope observations. Controller
 verification after the reviewed fix passed 10/10 focused service-fault tests,
 848 full-suite tests with four optional skips, claim audit 15/15, artifact
 audit 0 and diff check. Exact-commit remote CPython 3.10.12 replay is next.
+
+Task 10 exact-commit remote replay: the complete-history Git bundle was
+verified by SHA-256 and cloned into a fresh persistent remote directory at
+exact commit `7b1a48e`. Under the protected `/usr/bin/python3` 3.10.12 runtime,
+12/12 focused compatibility/topology tests passed and the full remote test
+suite exited 0. The remote worktree remained clean at the exact commit after
+the run. This closes source/runtime compatibility validation only; no formal
+controller, measurement candidate, or production performance claim is active
+until the nonce registration, protected installation, same-path smoke,
+attestation registration, and promotion sequence completes.
