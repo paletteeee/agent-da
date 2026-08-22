@@ -133,3 +133,13 @@ does not succeed, normal workloads use official `InMemoryStore` fallback and
 crash-scheduled workloads are emitted as excluded `unsupported_mapping` rows,
 not recovery scores. If LangGraph is not installed at all, it remains selected
 and produces one redacted excluded `runtime_error` row per attempted instance.
+
+The capability artifacts use one ordered eight-column semantic matrix for all
+five formal adapters: `single_record_read_write`,
+`atomic_multi_record_commit`, `commit_policy_revalidation`,
+`shared_scope_isolation`, `version_supersession`,
+`provenance_propagation`, `recursive_provenance_invalidation`, and
+`crash_recovery`. Backend-specific API details remain in the capability
+`detail` field; a positive capability does not replace oracle-based correctness
+judgment. In particular, Mem0's formal deterministic factory can be closed and
+reopened to observe persistent state, but this does not claim atomic recovery.

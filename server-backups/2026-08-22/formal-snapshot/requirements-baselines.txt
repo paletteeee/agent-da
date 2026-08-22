@@ -1,0 +1,6 @@
+# Direct external-memory baseline dependencies resolved on the formal remote host.
+mem0ai==2.0.18
+langgraph==1.2.11
+langgraph-checkpoint-postgres==3.1.2
+# Provides libpq for langgraph.store.postgres imports on the formal host.
+psycopg-binary==3.3.4

@@ -1,0 +1,6 @@
+instance_id,workload,seed,adapter,variant,adapter_version,backend_mode,run_status,error_category,capability_absent_observed,correctness_included,transaction_state,partial_update_rate,invalid_commit_rate,stale_write_rate,repair_recall,leak_rate,supersession_consistency,scope_bypass_rate,latency,latency_ms,any_violation,violations,committed_count,operation_count,repair_count
+atomic_multi_write_seed_0,atomic_multi_write,0,AppendOnly,AppendOnly,controlled-v1,controlled,success,,false,true,partial_commit,1.0,0.0,0.0,0.0,0.0,0.0,0.0,3.0,0.117665,1,atomicity_violation,1,3,0
+atomic_multi_write_seed_0,atomic_multi_write,0,LastWriteWins,LastWriteWins,controlled-v1,controlled,success,,false,true,partial_commit,1.0,0.0,0.0,0.0,0.0,0.0,0.0,3.0,0.057505,1,atomicity_violation,1,3,0
+atomic_multi_write_seed_0,atomic_multi_write,0,MetadataFiltered,MetadataFiltered,controlled-v1,controlled,success,,false,true,partial_commit,1.0,0.0,0.0,0.0,0.0,0.0,0.0,3.0,0.040718,1,atomicity_violation,1,3,0
+atomic_multi_write_seed_0,atomic_multi_write,0,Mem0,Mem0,mem0-oss-2.0.18,embedded_qdrant,success,,false,true,partial_commit,1.0,0.0,0.0,0.0,0.0,0.0,0.0,3.0,1434.945794,1,atomicity_violation,1,3,0
+atomic_multi_write_seed_0,atomic_multi_write,0,LangGraphStore,LangGraphStore,langgraph-store-v1,in_memory_fallback,excluded,unsupported_mapping,false,false,,,,,,,,,,0.006895,,,,,

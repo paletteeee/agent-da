@@ -1,0 +1,108 @@
+{
+  "argv": [
+    "run",
+    "--instances",
+    "/dev/fd/63",
+    "--out-dir",
+    "/data/agent-da-results/task6-smoke-a6e514b",
+    "--adapters",
+    "AppendOnly",
+    "LastWriteWins",
+    "MetadataFiltered",
+    "Mem0",
+    "LangGraphStore",
+    "--run-id",
+    "task6-smoke-a6e514b"
+  ],
+  "artifacts": {
+    "capabilities.csv": {
+      "bytes": 3363,
+      "sha256": "bd1e02c0624b2f7a87e3b72cdc37f030ece8bb6d28e8396f10ee90b625238066"
+    },
+    "capabilities.json": {
+      "bytes": 6566,
+      "sha256": "51a1ca4629c0090cf58726e4248047bb610a0c77ec3e8d2740fddebeca265001"
+    },
+    "environment.json": {
+      "bytes": 5773,
+      "sha256": "e35ed3f925de927f3f0cd75c6694596433864ce94a6bba5e992fa41f051062ef"
+    },
+    "errors.jsonl": {
+      "bytes": 156,
+      "sha256": "0723226939c62dc051b575dd9ce660cf8d470a52c4279137add67d6db27d5522"
+    },
+    "results.csv": {
+      "bytes": 1363,
+      "sha256": "a5906d4df77bfba432f190c1d53efedcad2c52173179f0837071892ad62fd77a"
+    },
+    "summary.json": {
+      "bytes": 10899,
+      "sha256": "210f390f10ec1c9d4ba97003e829c29edb92157d531182f9af5fdeeed400c4ce"
+    }
+  },
+  "backend_state": {
+    "langgraph_store": {
+      "mode": "in_memory_fallback",
+      "reason": "postgres_dsn_not_configured"
+    },
+    "mem0": {
+      "mode": "embedded_qdrant",
+      "root": "/data/agent-da-results/task6-smoke-a6e514b/backend_state/mem0/task6-smoke-a6e514b"
+    }
+  },
+  "counts": {
+    "attempted": 5,
+    "capability_absent_observed": 0,
+    "correctness_included": 4,
+    "excluded": 1
+  },
+  "duration_ms": 1961.400859,
+  "ended_at_utc": "2026-08-21T08:11:49Z",
+  "environment": {
+    "platform": "Linux-5.4.0-100-generic-x86_64-with-glibc2.39",
+    "python": {
+      "executable": "/data/agent-da-baselines-worktree/.venv-baselines/bin/python",
+      "implementation": "CPython",
+      "version": "3.12.3"
+    }
+  },
+  "git": {
+    "dirty": true,
+    "head": "11ee817533e70c728618590368b0a7e1ed162a93"
+  },
+  "input": {
+    "bytes": 1286,
+    "count": 1,
+    "sha256": "2256843ce66c7bfed2ef3fd8ac15564930e0c81d4431eedeb6a90a0b731b9c81"
+  },
+  "run_id": "task6-smoke-a6e514b",
+  "schema_version": "txnmem-external-runner-v1",
+  "selected_adapters": [
+    {
+      "adapter_version": "controlled-v1",
+      "backend_mode": "controlled",
+      "name": "AppendOnly"
+    },
+    {
+      "adapter_version": "controlled-v1",
+      "backend_mode": "controlled",
+      "name": "LastWriteWins"
+    },
+    {
+      "adapter_version": "controlled-v1",
+      "backend_mode": "controlled",
+      "name": "MetadataFiltered"
+    },
+    {
+      "adapter_version": "mem0-oss-2.0.18",
+      "backend_mode": "embedded_qdrant",
+      "name": "Mem0"
+    },
+    {
+      "adapter_version": "langgraph-store-v1",
+      "backend_mode": "in_memory_fallback",
+      "name": "LangGraphStore"
+    }
+  ],
+  "started_at_utc": "2026-08-21T08:11:47Z"
+}

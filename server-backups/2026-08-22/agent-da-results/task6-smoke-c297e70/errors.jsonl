@@ -1,0 +1,1 @@
+{"adapter": "LangGraphStore", "adapter_version": "langgraph-store-v1", "backend_mode": "in_memory_fallback", "error_category": "unsupported_mapping", "error_type": "UnsupportedMappingError", "instance_id": "atomic_multi_write_seed_0", "latency_ms": 0.08042, "run_status": "excluded", "seed": 0, "workload": "atomic_multi_write"}

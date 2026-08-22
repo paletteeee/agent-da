@@ -1,0 +1,9 @@
+TxnMem remote-server snapshot
+Snapshot date: 2026-08-22 (Asia/Shanghai)
+Remote host: e520f190e0a7
+Backup branch: backup/server-20260822
+Root base commit: 11ee817533e70c728618590368b0a7e1ed162a93
+Formal source commit: 1db4f092769f3a7cf60c472a0ad97176eca6268f
+Included: baseline source/docs/tests, /data/agent-da-results, formal source and formal results.
+Excluded: .venv-baselines, generated __pycache__ directories, modified *.pyc files, and Git metadata.
+Verification: full remote suite ran 99 tests with 1 Mem0/Qdrant lock error; the affected test passed when rerun alone.
