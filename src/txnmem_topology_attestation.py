@@ -226,6 +226,8 @@ _NETWORK_GUARD_FIELDS = frozenset(
         "runner_uid",
         "controller_uid",
         "allowed_ipv4_loopback_ports",
+        "allowed_root_ingress_ports",
+        "root_ingress_destination_exact",
         "management_port_root_only",
         "non_runner_proxy_traffic_blocked",
         "host_bridge_access_blocked",
@@ -234,6 +236,7 @@ _NETWORK_GUARD_FIELDS = frozenset(
         "ingress_ipv4_subnet_sha256",
         "backend_bridge_interface_sha256",
         "ingress_bridge_interface_sha256",
+        "toxiproxy_ingress_ipv4_sha256",
         "policy_sha256",
         "ruleset_sha256",
     }
@@ -1029,10 +1032,12 @@ def _validate_network_guard_attestation(value: Any) -> dict[str, Any]:
     if (
         not isinstance(value, Mapping)
         or set(value) != _NETWORK_GUARD_FIELDS
-        or value.get("schema") != "txnmem-provenance-network-guard-v2"
+        or value.get("schema") != "txnmem-provenance-network-guard-v3"
         or value.get("runner_uid") != FORMAL_RUNNER_UID
         or value.get("controller_uid") != 0
         or value.get("allowed_ipv4_loopback_ports") != [19000, 19001]
+        or value.get("allowed_root_ingress_ports") != [8474, 19000, 19001]
+        or value.get("root_ingress_destination_exact") is not True
         or value.get("management_port_root_only") is not True
         or value.get("non_runner_proxy_traffic_blocked") is not True
         or value.get("host_bridge_access_blocked") is not True
@@ -1040,13 +1045,15 @@ def _validate_network_guard_attestation(value: Any) -> dict[str, Any]:
     ):
         raise TopologyAttestationError("formal network guard is invalid")
     return {
-        "schema": "txnmem-provenance-network-guard-v2",
+        "schema": "txnmem-provenance-network-guard-v3",
         "table_name_sha256": _exact_hash(
             value.get("table_name_sha256"), "network guard table"
         ),
         "runner_uid": FORMAL_RUNNER_UID,
         "controller_uid": 0,
         "allowed_ipv4_loopback_ports": [19000, 19001],
+        "allowed_root_ingress_ports": [8474, 19000, 19001],
+        "root_ingress_destination_exact": True,
         "management_port_root_only": True,
         "non_runner_proxy_traffic_blocked": True,
         "host_bridge_access_blocked": True,
@@ -1066,6 +1073,10 @@ def _validate_network_guard_attestation(value: Any) -> dict[str, Any]:
         "ingress_bridge_interface_sha256": _exact_hash(
             value.get("ingress_bridge_interface_sha256"),
             "network guard ingress bridge interface",
+        ),
+        "toxiproxy_ingress_ipv4_sha256": _exact_hash(
+            value.get("toxiproxy_ingress_ipv4_sha256"),
+            "network guard proxy ingress IPv4",
         ),
         "policy_sha256": _exact_hash(
             value.get("policy_sha256"), "network guard policy"
@@ -1250,6 +1261,7 @@ def _validate_network_guard_backend_binding(
         "ingress_ipv4_subnet_sha256",
         "backend_bridge_interface_sha256",
         "ingress_bridge_interface_sha256",
+        "toxiproxy_ingress_ipv4_sha256",
     ):
         if network_guard.get(field) != backend_isolation.get(field):
             raise TopologyAttestationError(

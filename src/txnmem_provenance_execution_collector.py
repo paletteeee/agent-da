@@ -1502,6 +1502,7 @@ def _nft_guard_batch(
     ingress_ipv4_subnet: str,
     backend_bridge_interface: str,
     ingress_bridge_interface: str,
+    toxiproxy_ingress_ipv4: str,
 ) -> str:
     if (
         not isinstance(table_name, str)
@@ -1532,6 +1533,25 @@ def _nft_guard_batch(
         )
     ):
         raise CollectorError("formal nftables bridge subnets overlap")
+    backend_subnet = ipaddress.ip_network(normalized_subnets[0])
+    ingress_subnet = ipaddress.ip_network(normalized_subnets[1])
+    try:
+        ingress_address = ipaddress.IPv4Address(toxiproxy_ingress_ipv4)
+    except (TypeError, ValueError) as exc:
+        raise CollectorError("formal nftables ingress address is invalid") from exc
+    if (
+        str(ingress_address) != toxiproxy_ingress_ipv4
+        or ingress_address not in ingress_subnet
+        or ingress_address in backend_subnet
+        or ingress_address
+        in {
+            ingress_subnet.network_address,
+            ingress_subnet.network_address + 1,
+            ingress_subnet.broadcast_address,
+        }
+        or ingress_address.is_loopback
+    ):
+        raise CollectorError("formal nftables ingress address is invalid")
     bridge_interfaces = (
         backend_bridge_interface,
         ingress_bridge_interface,
@@ -1555,6 +1575,9 @@ def _nft_guard_batch(
         "tcp dport { 19000, 19001 } accept comment \"txnmem-proxy-allow\"\n"
         "    meta skuid 0 ip daddr 127.0.0.1 tcp dport 8474 "
         "accept comment \"txnmem-management-allow\"\n"
+        f"    meta skuid 0 ip daddr {ingress_address} "
+        "tcp dport { 8474, 19000, 19001 } accept "
+        "comment \"txnmem-docker-proxy-ingress-allow\"\n"
         f"    meta skuid {runner_uid} reject comment \"txnmem-runner-deny\"\n"
         "    ip daddr 127.0.0.1 tcp dport 8474 "
         "reject comment \"txnmem-management-deny\"\n"
@@ -1647,6 +1670,7 @@ def _normalize_nft_snapshot(document: Any, *, table_name: str) -> dict[str, Any]
         normalized.append({kind: value})
     if not table_seen or chains_seen != {"output", "forward"} or sorted(comments) != [
         "txnmem-attribution-deny",
+        "txnmem-docker-proxy-ingress-allow",
         "txnmem-forward-bridge-deny",
         "txnmem-host-bridge-deny",
         "txnmem-management-allow",
@@ -1665,6 +1689,7 @@ class _NftNetworkGuard:
     ingress_ipv4_subnet: str
     backend_bridge_interface: str
     ingress_bridge_interface: str
+    toxiproxy_ingress_ipv4: str
     runner_uid: int = FORMAL_RUNNER_UID
     executable: Path = Path(_FORMAL_NFT_EXECUTABLE)
     active: bool = False
@@ -1729,13 +1754,15 @@ class _NftNetworkGuard:
             table_name=self.table_name,
         )
         return {
-            "schema": "txnmem-provenance-network-guard-v2",
+            "schema": "txnmem-provenance-network-guard-v3",
             "table_name_sha256": hashlib.sha256(
                 self.table_name.encode("utf-8")
             ).hexdigest(),
             "runner_uid": self.runner_uid,
             "controller_uid": 0,
             "allowed_ipv4_loopback_ports": [19000, 19001],
+            "allowed_root_ingress_ports": [8474, 19000, 19001],
+            "root_ingress_destination_exact": True,
             "management_port_root_only": True,
             "non_runner_proxy_traffic_blocked": True,
             "host_bridge_access_blocked": True,
@@ -1752,6 +1779,9 @@ class _NftNetworkGuard:
             "ingress_bridge_interface_sha256": hashlib.sha256(
                 self.ingress_bridge_interface.encode("utf-8")
             ).hexdigest(),
+            "toxiproxy_ingress_ipv4_sha256": hashlib.sha256(
+                self.toxiproxy_ingress_ipv4.encode("utf-8")
+            ).hexdigest(),
             "policy_sha256": hashlib.sha256(
                 _nft_guard_batch(
                     self.table_name,
@@ -1760,6 +1790,7 @@ class _NftNetworkGuard:
                     ingress_ipv4_subnet=self.ingress_ipv4_subnet,
                     backend_bridge_interface=self.backend_bridge_interface,
                     ingress_bridge_interface=self.ingress_bridge_interface,
+                    toxiproxy_ingress_ipv4=self.toxiproxy_ingress_ipv4,
                 ).encode("utf-8")
             ).hexdigest(),
             "ruleset_sha256": hashlib.sha256(
@@ -1777,6 +1808,7 @@ class _NftNetworkGuard:
             ingress_ipv4_subnet=self.ingress_ipv4_subnet,
             backend_bridge_interface=self.backend_bridge_interface,
             ingress_bridge_interface=self.ingress_bridge_interface,
+            toxiproxy_ingress_ipv4=self.toxiproxy_ingress_ipv4,
         )
         self._run(("--check", "-f", "-"), stdin=batch)
         try:
@@ -4561,6 +4593,9 @@ def collect_formal_execution(
             ],
             ingress_bridge_interface=network_guard_profile[
                 "ingress_bridge_interface"
+            ],
+            toxiproxy_ingress_ipv4=network_guard_profile[
+                "toxiproxy_ingress_ipv4"
             ],
         )
         child_start_ticks = child_start_identity.rsplit(":", 1)[-1]

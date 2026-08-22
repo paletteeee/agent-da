@@ -112,11 +112,13 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
     @staticmethod
     def _network_guard():
         return {
-            "schema": "txnmem-provenance-network-guard-v2",
+            "schema": "txnmem-provenance-network-guard-v3",
             "table_name_sha256": "a" * 64,
             "runner_uid": 65532,
             "controller_uid": 0,
             "allowed_ipv4_loopback_ports": [19000, 19001],
+            "allowed_root_ingress_ports": [8474, 19000, 19001],
+            "root_ingress_destination_exact": True,
             "management_port_root_only": True,
             "non_runner_proxy_traffic_blocked": True,
             "host_bridge_access_blocked": True,
@@ -125,8 +127,55 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             "ingress_ipv4_subnet_sha256": "9" * 64,
             "backend_bridge_interface_sha256": "0" * 64,
             "ingress_bridge_interface_sha256": "1" * 64,
+            "toxiproxy_ingress_ipv4_sha256": hashlib.sha256(
+                b"172.20.0.2"
+            ).hexdigest(),
             "policy_sha256": "b" * 64,
             "ruleset_sha256": "c" * 64,
+        }
+
+    @staticmethod
+    def _nft_snapshot_document(table_name):
+        return {
+            "nftables": [
+                {"metainfo": {"json_schema_version": 1}},
+                {"table": {"family": "inet", "name": table_name}},
+            ]
+            + [
+                {
+                    "chain": {
+                        "family": "inet",
+                        "table": table_name,
+                        "name": name,
+                        "type": "filter",
+                        "hook": name,
+                        "policy": "accept",
+                    }
+                }
+                for name in ("output", "forward")
+            ]
+            + [
+                {
+                    "rule": {
+                        "family": "inet",
+                        "table": table_name,
+                        "chain": "forward"
+                        if comment == "txnmem-forward-bridge-deny"
+                        else "output",
+                        "comment": comment,
+                    }
+                }
+                for comment in (
+                    "txnmem-proxy-allow",
+                    "txnmem-management-allow",
+                    "txnmem-docker-proxy-ingress-allow",
+                    "txnmem-runner-deny",
+                    "txnmem-management-deny",
+                    "txnmem-attribution-deny",
+                    "txnmem-host-bridge-deny",
+                    "txnmem-forward-bridge-deny",
+                )
+            ]
         }
 
     @staticmethod
@@ -878,6 +927,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             ingress_ipv4_subnet="172.20.0.0/16",
             backend_bridge_interface="br-aaaaaaaaaaaa",
             ingress_bridge_interface="br-bbbbbbbbbbbb",
+            toxiproxy_ingress_ipv4="172.20.0.2",
         )
 
         self.assertEqual(table_name, "txnmem_" + run_hash[:16])
@@ -885,6 +935,26 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertIn("tcp dport { 19000, 19001 } accept", batch)
         self.assertIn(
             "meta skuid 0 ip daddr 127.0.0.1 tcp dport 8474 accept",
+            batch,
+        )
+        root_management = "txnmem-management-allow"
+        root_ingress = (
+            "meta skuid 0 ip daddr 172.20.0.2 "
+            "tcp dport { 8474, 19000, 19001 } accept "
+            'comment "txnmem-docker-proxy-ingress-allow"'
+        )
+        self.assertIn(root_ingress, batch)
+        self.assertLess(batch.index(root_management), batch.index(root_ingress))
+        self.assertLess(batch.index(root_ingress), batch.index("txnmem-runner-deny"))
+        self.assertLess(
+            batch.index(root_ingress), batch.index("txnmem-host-bridge-deny")
+        )
+        self.assertNotIn(
+            "meta skuid 0 ip daddr 172.20.0.0/16",
+            batch,
+        )
+        self.assertNotIn(
+            "meta skuid 0 ip daddr { 172.19.0.0/16, 172.20.0.0/16 } accept",
             batch,
         )
         self.assertIn("meta skuid 65532 reject", batch)
@@ -903,8 +973,127 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             batch,
         )
         self.assertIn('comment "txnmem-forward-bridge-deny"', batch)
-        self.assertEqual(batch.count(" accept comment"), 2)
+        self.assertEqual(batch.count(" accept comment"), 3)
         self.assertEqual(batch.count(" reject comment"), 5)
+
+    def test_nft_network_guard_rejects_nonexclusive_ingress_addresses(self):
+        for name, address in (
+            ("ipv6", "fd00::2"),
+            ("loopback", "127.0.0.2"),
+            ("network", "172.20.0.0"),
+            ("gateway", "172.20.0.1"),
+            ("broadcast", "172.20.255.255"),
+            ("outside_ingress", "172.21.0.2"),
+            ("inside_backend", "172.19.0.2"),
+        ):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(CollectorError, "ingress address"):
+                    collector_module._nft_guard_batch(
+                        "txnmem_" + "5" * 16,
+                        runner_uid=65532,
+                        backend_ipv4_subnet="172.19.0.0/16",
+                        ingress_ipv4_subnet="172.20.0.0/16",
+                        backend_bridge_interface="br-aaaaaaaaaaaa",
+                        ingress_bridge_interface="br-bbbbbbbbbbbb",
+                        toxiproxy_ingress_ipv4=address,
+                    )
+
+    def test_nft_network_guard_v3_requires_exact_rule_closure(self):
+        table_name = "txnmem_" + "5" * 16
+        document = self._nft_snapshot_document(table_name)
+
+        normalized = collector_module._normalize_nft_snapshot(
+            document, table_name=table_name
+        )
+        self.assertEqual(len(normalized["nftables"]), 11)
+
+        missing = copy.deepcopy(document)
+        missing["nftables"] = [
+            item
+            for item in missing["nftables"]
+            if item.get("rule", {}).get("comment")
+            != "txnmem-docker-proxy-ingress-allow"
+        ]
+        with self.assertRaisesRegex(CollectorError, "closure"):
+            collector_module._normalize_nft_snapshot(
+                missing, table_name=table_name
+            )
+
+        extra = copy.deepcopy(document)
+        extra["nftables"].append(
+            {
+                "rule": {
+                    "family": "inet",
+                    "table": table_name,
+                    "chain": "output",
+                    "comment": "txnmem-extra-allow",
+                }
+            }
+        )
+        with self.assertRaisesRegex(CollectorError, "closure"):
+            collector_module._normalize_nft_snapshot(extra, table_name=table_name)
+
+    def test_nft_network_guard_v3_hashes_exact_ingress_without_disclosing_it(self):
+        table_name = "txnmem_" + "5" * 16
+        document = self._nft_snapshot_document(table_name)
+
+        snapshots = []
+        for address in ("172.20.0.2", "172.20.0.3"):
+            guard = collector_module._NftNetworkGuard(
+                table_name,
+                backend_ipv4_subnet="172.19.0.0/16",
+                ingress_ipv4_subnet="172.20.0.0/16",
+                backend_bridge_interface="br-aaaaaaaaaaaa",
+                ingress_bridge_interface="br-bbbbbbbbbbbb",
+                toxiproxy_ingress_ipv4=address,
+                active=True,
+            )
+            with patch.object(
+                guard,
+                "_run",
+                return_value=SimpleNamespace(stdout=json.dumps(document)),
+            ):
+                snapshots.append(guard.snapshot())
+
+        snapshot = snapshots[0]
+        self.assertEqual(
+            set(snapshot),
+            {
+                "schema",
+                "table_name_sha256",
+                "runner_uid",
+                "controller_uid",
+                "allowed_ipv4_loopback_ports",
+                "allowed_root_ingress_ports",
+                "root_ingress_destination_exact",
+                "management_port_root_only",
+                "non_runner_proxy_traffic_blocked",
+                "host_bridge_access_blocked",
+                "forwarded_bridge_access_blocked",
+                "backend_ipv4_subnet_sha256",
+                "ingress_ipv4_subnet_sha256",
+                "backend_bridge_interface_sha256",
+                "ingress_bridge_interface_sha256",
+                "toxiproxy_ingress_ipv4_sha256",
+                "policy_sha256",
+                "ruleset_sha256",
+            },
+        )
+        self.assertEqual(snapshot["schema"], "txnmem-provenance-network-guard-v3")
+        self.assertEqual(snapshot["allowed_root_ingress_ports"], [8474, 19000, 19001])
+        self.assertIs(snapshot["root_ingress_destination_exact"], True)
+        self.assertEqual(
+            snapshot["toxiproxy_ingress_ipv4_sha256"],
+            hashlib.sha256(b"172.20.0.2").hexdigest(),
+        )
+        self.assertNotIn("172.20.0.2", json.dumps(snapshot, sort_keys=True))
+        self.assertNotEqual(
+            snapshots[0]["toxiproxy_ingress_ipv4_sha256"],
+            snapshots[1]["toxiproxy_ingress_ipv4_sha256"],
+        )
+        self.assertNotEqual(
+            snapshots[0]["policy_sha256"], snapshots[1]["policy_sha256"]
+        )
 
     def test_topology_snapshot_v2_binds_backend_isolation_v3(self):
         roles, routes, isolation = collector_module._snapshot_components(
