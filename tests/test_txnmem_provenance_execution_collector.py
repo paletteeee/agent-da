@@ -1189,6 +1189,24 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         drifted_containers, backend_network, drifted_ingress
                     )
 
+        in_subnet_address_disagreement = copy.deepcopy(containers)
+        in_subnet_address_disagreement["toxiproxy"]["NetworkSettings"][
+            "Networks"
+        ]["txnmem-ingress"]["IPAddress"] = "172.20.0.3"
+        with self.assertRaisesRegex(CollectorError, "ingress"):
+            collector_module._normalize_docker_backend_isolation(
+                in_subnet_address_disagreement, backend_network, ingress_network
+            )
+
+        container_prefix_disagreement = copy.deepcopy(containers)
+        container_prefix_disagreement["toxiproxy"]["NetworkSettings"][
+            "Networks"
+        ]["txnmem-ingress"]["IPPrefixLen"] = 24
+        with self.assertRaisesRegex(CollectorError, "ingress"):
+            collector_module._normalize_docker_backend_isolation(
+                container_prefix_disagreement, backend_network, ingress_network
+            )
+
         endpoint_mismatch = copy.deepcopy(containers)
         endpoint_mismatch["toxiproxy"]["NetworkSettings"]["Networks"][
             "txnmem-ingress"
@@ -1414,6 +1432,41 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             networks["txnmem-backend"],
             networks["txnmem-ingress"],
         )
+
+    def test_docker_network_guard_profile_rejects_raw_ingress_hash_mismatch(self):
+        networks = {
+            "txnmem-backend": {"Name": "txnmem-backend"},
+            "txnmem-ingress": {"Name": "txnmem-ingress"},
+        }
+        with patch.object(
+            collector_module,
+            "_inspect_docker_backend_isolation_documents",
+            return_value=(
+                {"qdrant": {}, "neo4j": {}, "toxiproxy": {}},
+                networks["txnmem-backend"],
+                networks["txnmem-ingress"],
+            ),
+        ), patch.object(
+            collector_module,
+            "_normalize_docker_backend_isolation",
+            return_value={
+                "toxiproxy_ingress_ipv4": "172.20.0.2",
+                "toxiproxy_ingress_ipv4_sha256": "0" * 64,
+            },
+        ), patch.object(
+            collector_module,
+            "_normalize_docker_network_guard_profile",
+            return_value={
+                "backend_ipv4_subnet": "172.19.0.0/16",
+                "ingress_ipv4_subnet": "172.20.0.0/16",
+                "backend_bridge_interface": "br-aaaaaaaaaaaa",
+                "ingress_bridge_interface": "br-999999999999",
+            },
+        ):
+            with self.assertRaisesRegex(CollectorError, "identity hash"):
+                collector_module._collect_docker_network_guard_profile(
+                    toxiproxy_container="txnmem-toxiproxy"
+                )
 
     def test_formal_candidate_root_is_derived_from_run_and_nonce(self):
         with TemporaryDirectory() as tmp:
