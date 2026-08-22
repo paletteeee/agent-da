@@ -463,3 +463,20 @@ scoped review found no
 Critical or Important issue and independently passed all 37 collector tests;
 the new exact-commit deployment and live production-path smoke remain, so no
 formal candidate or performance claim is active.
+
+Task 10 Toxiproxy-2.5 response-extension correction: the first exact-commit
+replay proved the wildcard-listen correction but exposed a second live API
+characteristic: the v2.5 response carries an additional empty `Logger` object.
+A characterization test was observed RED before the correction and GREEN
+afterward. The strict normalizer accepts this extension only when the key name
+is exact, its value is an empty JSON object, and every registered route field
+also matches; a non-empty object, wrong type or any other extra key remains
+ineligible. Local verification passed the 37-test collector module and all 852
+repository tests with five optional environment skips; claim audit passed
+15/15, artifact audit found zero issues, Python compilation and diff integrity
+passed. The first replay produced no formal candidate and installed no network
+guard. The subsequent independent scoped review found no Critical or Important
+issue,
+confirmed that only the exact empty extension is accepted and that it is
+excluded from canonical evidence, and independently passed all 37 collector
+tests. The second exact-commit replay remains pending.

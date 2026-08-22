@@ -2009,6 +2009,7 @@ toxiproxy_proxy_transmitted_bytes_total{proxy=\"txnmem-neo4j\",direction=\"upstr
                 "upstream": "qdrant:6333",
                 "enabled": True,
                 "toxics": [],
+                "Logger": {},
             },
             role="qdrant",
         )
@@ -2019,6 +2020,8 @@ toxiproxy_proxy_transmitted_bytes_total{proxy=\"txnmem-neo4j\",direction=\"upstr
             {"listen": "0.0.0.0:6333"},
             {"listen": "[::1]:19000"},
             {"listen": "[2001:db8::1]:19000"},
+            {"Logger": {"level": "debug"}},
+            {"Logger": []},
             {"upstream": "unrelated:6333"},
             {"enabled": False},
             {"toxics": [{"name": "latency"}]},

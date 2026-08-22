@@ -2882,9 +2882,16 @@ def _normalize_toxiproxy_proxy(value: Any, *, role: str) -> dict[str, Any]:
     expected_port = expected_listen.rsplit(":", 1)[1]
     observed_listen = value.get("listen") if isinstance(value, Mapping) else None
     accepted_listens = {expected_listen, f"[::]:{expected_port}"}
+    required_keys = {"name", "listen", "upstream", "enabled", "toxics"}
+    observed_keys = set(value) if isinstance(value, Mapping) else set()
+    logger_extension_valid = observed_keys == required_keys or (
+        observed_keys == required_keys | {"Logger"}
+        and isinstance(value.get("Logger"), dict)
+        and not value["Logger"]
+    )
     if (
         not isinstance(value, Mapping)
-        or set(value) != {"name", "listen", "upstream", "enabled", "toxics"}
+        or not logger_extension_valid
         or value.get("name") != spec["name"]
         or not isinstance(observed_listen, str)
         or observed_listen not in accepted_listens
