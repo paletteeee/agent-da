@@ -136,11 +136,20 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         )
 
         return {
-            "schema": "txnmem-provenance-backend-isolation-v2",
+            "schema": "txnmem-provenance-backend-isolation-v3",
             "network_name_sha256": "d" * 64,
             "network_id_sha256": "e" * 64,
             "ingress_network_name_sha256": "6" * 64,
             "ingress_network_id_sha256": "7" * 64,
+            "toxiproxy_ingress_ipv4": "172.20.0.2",
+            "toxiproxy_ingress_ipv4_sha256": hashlib.sha256(
+                b"172.20.0.2"
+            ).hexdigest(),
+            "toxiproxy_ingress_endpoint_id_sha256": hashlib.sha256(
+                ("4" * 64).encode("utf-8")
+            ).hexdigest(),
+            "toxiproxy_ingress_membership_verified": True,
+            "ingress_unique_workload_container_verified": True,
             "backend_network_internal": True,
             "ingress_network_external": True,
             "ingress_proxy_only": True,
@@ -897,7 +906,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertEqual(batch.count(" accept comment"), 2)
         self.assertEqual(batch.count(" reject comment"), 5)
 
-    def test_topology_snapshot_v2_binds_backend_isolation_v2(self):
+    def test_topology_snapshot_v2_binds_backend_isolation_v3(self):
         roles, routes, isolation = collector_module._snapshot_components(
             self._snapshot()
         )
@@ -905,7 +914,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertEqual(len(roles), 4)
         self.assertEqual(len(routes), 2)
         self.assertEqual(
-            isolation["schema"], "txnmem-provenance-backend-isolation-v2"
+            isolation["schema"], "txnmem-provenance-backend-isolation-v3"
         )
 
         legacy = self._snapshot()
@@ -933,7 +942,10 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             }
             if role == "toxiproxy":
                 networks["txnmem-ingress"] = {
-                    "NetworkID": ingress_network_id
+                    "NetworkID": ingress_network_id,
+                    "EndpointID": "4" * 64,
+                    "IPAddress": "172.20.0.2",
+                    "IPPrefixLen": 16,
                 }
             return {
                 "Id": {
@@ -1012,7 +1024,15 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     }
                 ],
             },
-            "Containers": {containers["toxiproxy"]["Id"]: {}},
+            "Containers": {
+                containers["toxiproxy"]["Id"]: {
+                    "Name": "txnmem-toxiproxy",
+                    "EndpointID": "4" * 64,
+                    "MacAddress": "02:42:ac:14:00:02",
+                    "IPv4Address": "172.20.0.2/16",
+                    "IPv6Address": "",
+                }
+            },
         }
 
         attested = collector_module._normalize_docker_backend_isolation(
@@ -1053,6 +1073,53 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertTrue(attested["direct_backend_ports_unpublished"])
         self.assertTrue(attested["proxy_ports_loopback_only"])
         self.assertEqual(attested["published_proxy_ports"], [8474, 19000, 19001])
+        self.assertEqual(
+            attested["schema"], "txnmem-provenance-backend-isolation-v3"
+        )
+        self.assertEqual(attested["toxiproxy_ingress_ipv4"], "172.20.0.2")
+        self.assertEqual(
+            attested["toxiproxy_ingress_ipv4_sha256"],
+            hashlib.sha256(b"172.20.0.2").hexdigest(),
+        )
+        self.assertEqual(
+            attested["toxiproxy_ingress_endpoint_id_sha256"],
+            hashlib.sha256(("4" * 64).encode("utf-8")).hexdigest(),
+        )
+        self.assertTrue(attested["toxiproxy_ingress_membership_verified"])
+        self.assertTrue(attested["ingress_unique_workload_container_verified"])
+
+        addressed_containers = copy.deepcopy(containers)
+        addressed_backend = copy.deepcopy(backend_network)
+        for role, address in (("qdrant", "172.19.0.2"), ("neo4j", "172.19.0.3")):
+            addressed_containers[role]["NetworkSettings"]["Networks"][
+                "txnmem-backend"
+            ].update({"IPAddress": address, "IPPrefixLen": 16})
+            addressed_backend["Containers"][containers[role]["Id"]] = {
+                "IPv4Address": address + "/16"
+            }
+        self.assertEqual(
+            collector_module._validated_backend_ipv4_by_role(
+                addressed_containers, addressed_backend, ingress_network
+            ),
+            {
+                "qdrant": "172.19.0.2",
+                "neo4j": "172.19.0.3",
+                "toxiproxy_ingress": "172.20.0.2",
+            },
+        )
+
+        unsafe_backend_addresses = copy.deepcopy(addressed_containers)
+        unsafe_backend_network = copy.deepcopy(addressed_backend)
+        unsafe_backend_addresses["qdrant"]["NetworkSettings"]["Networks"][
+            "txnmem-backend"
+        ]["IPAddress"] = "169.254.0.2"
+        unsafe_backend_network["Containers"][containers["qdrant"]["Id"]][
+            "IPv4Address"
+        ] = "169.254.0.2/16"
+        with self.assertRaisesRegex(CollectorError, "address"):
+            collector_module._validated_backend_ipv4_by_role(
+                unsafe_backend_addresses, unsafe_backend_network, ingress_network
+            )
 
         published_backend = copy.deepcopy(containers)
         published_backend["qdrant"]["NetworkSettings"]["Ports"]["6333/tcp"] = [
@@ -1067,6 +1134,14 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             (
                 "backend_on_ingress",
                 lambda values: values["qdrant"]["NetworkSettings"][
+                    "Networks"
+                ].update(
+                    {"txnmem-ingress": {"NetworkID": ingress_network_id}}
+                ),
+            ),
+            (
+                "neo4j_on_ingress",
+                lambda values: values["neo4j"]["NetworkSettings"][
                     "Networks"
                 ].update(
                     {"txnmem-ingress": {"NetworkID": ingress_network_id}}
@@ -1092,6 +1167,53 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         with self.assertRaisesRegex(CollectorError, "ingress"):
             collector_module._normalize_docker_backend_isolation(
                 containers, backend_network, extra_ingress_member
+            )
+
+        for name, container_address, network_address in (
+            ("outside_subnet", "172.19.0.2", "172.19.0.2/16"),
+            ("gateway", "172.20.0.1", "172.20.0.1/16"),
+            ("network", "172.20.0.0", "172.20.0.0/16"),
+            ("broadcast", "172.20.255.255", "172.20.255.255/16"),
+        ):
+            with self.subTest(name=name):
+                drifted_containers = copy.deepcopy(containers)
+                drifted_ingress = copy.deepcopy(ingress_network)
+                drifted_containers["toxiproxy"]["NetworkSettings"]["Networks"][
+                    "txnmem-ingress"
+                ]["IPAddress"] = container_address
+                drifted_ingress["Containers"][containers["toxiproxy"]["Id"]][
+                    "IPv4Address"
+                ] = network_address
+                with self.assertRaisesRegex(CollectorError, "ingress"):
+                    collector_module._normalize_docker_backend_isolation(
+                        drifted_containers, backend_network, drifted_ingress
+                    )
+
+        endpoint_mismatch = copy.deepcopy(containers)
+        endpoint_mismatch["toxiproxy"]["NetworkSettings"]["Networks"][
+            "txnmem-ingress"
+        ]["EndpointID"] = "5" * 64
+        with self.assertRaisesRegex(CollectorError, "ingress"):
+            collector_module._normalize_docker_backend_isolation(
+                endpoint_mismatch, backend_network, ingress_network
+            )
+
+        prefix_mismatch = copy.deepcopy(ingress_network)
+        prefix_mismatch["Containers"][containers["toxiproxy"]["Id"]][
+            "IPv4Address"
+        ] = "172.20.0.2/24"
+        with self.assertRaisesRegex(CollectorError, "ingress"):
+            collector_module._normalize_docker_backend_isolation(
+                containers, backend_network, prefix_mismatch
+            )
+
+        missing_address = copy.deepcopy(containers)
+        missing_address["toxiproxy"]["NetworkSettings"]["Networks"][
+            "txnmem-ingress"
+        ].pop("IPAddress")
+        with self.assertRaisesRegex(CollectorError, "ingress"):
+            collector_module._normalize_docker_backend_isolation(
+                missing_address, backend_network, ingress_network
             )
 
         internal_ingress = copy.deepcopy(ingress_network)
@@ -1238,6 +1360,59 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertEqual(
             normalize.call_args.args[1:],
             (backend_network, ingress_network),
+        )
+
+    def test_docker_network_guard_profile_binds_same_raw_ingress_address(self):
+        networks = {
+            "txnmem-backend": {"Name": "txnmem-backend"},
+            "txnmem-ingress": {"Name": "txnmem-ingress"},
+        }
+        raw_isolation = {
+            "toxiproxy_ingress_ipv4": "172.20.0.2",
+            "toxiproxy_ingress_ipv4_sha256": hashlib.sha256(
+                b"172.20.0.2"
+            ).hexdigest(),
+        }
+        with patch.object(
+            collector_module,
+            "_inspect_docker_backend_isolation_documents",
+            return_value=(
+                {"qdrant": {}, "neo4j": {}, "toxiproxy": {}},
+                networks["txnmem-backend"],
+                networks["txnmem-ingress"],
+            ),
+        ), patch.object(
+            collector_module,
+            "_normalize_docker_network_guard_profile",
+            return_value={
+                "backend_ipv4_subnet": "172.19.0.0/16",
+                "ingress_ipv4_subnet": "172.20.0.0/16",
+                "backend_bridge_interface": "br-aaaaaaaaaaaa",
+                "ingress_bridge_interface": "br-999999999999",
+            },
+        ), patch.object(
+            collector_module,
+            "_normalize_docker_backend_isolation",
+            return_value=raw_isolation,
+        ) as normalize:
+            profile = collector_module._collect_docker_network_guard_profile(
+                toxiproxy_container="txnmem-toxiproxy"
+            )
+
+        self.assertEqual(
+            profile,
+            {
+                "backend_ipv4_subnet": "172.19.0.0/16",
+                "ingress_ipv4_subnet": "172.20.0.0/16",
+                "backend_bridge_interface": "br-aaaaaaaaaaaa",
+                "ingress_bridge_interface": "br-999999999999",
+                "toxiproxy_ingress_ipv4": "172.20.0.2",
+            },
+        )
+        normalize.assert_called_once_with(
+            {"qdrant": {}, "neo4j": {}, "toxiproxy": {}},
+            networks["txnmem-backend"],
+            networks["txnmem-ingress"],
         )
 
     def test_formal_candidate_root_is_derived_from_run_and_nonce(self):

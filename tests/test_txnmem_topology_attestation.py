@@ -12,6 +12,7 @@ from txnmem_topology_attestation import (
     FORMAL_PROVENANCE_TOPOLOGY_ATTESTATION_SHA256_BY_RUN,
     TopologyAttestationError,
     _read_private_authorization_nonce,
+    _validate_sanitized_backend_isolation,
     execution_authorization_proof,
     sanitize_topology_attestation,
     _validate_runtime_manifest,
@@ -251,11 +252,20 @@ class TopologyAttestationTests(unittest.TestCase):
                 "ruleset_sha256": "d" * 64,
             },
             "backend_isolation": {
-                "schema": "txnmem-provenance-backend-isolation-v2",
+                "schema": "txnmem-provenance-backend-isolation-v3",
                 "network_name_sha256": "e" * 64,
                 "network_id_sha256": "f" * 64,
                 "ingress_network_name_sha256": "6" * 64,
                 "ingress_network_id_sha256": "7" * 64,
+                "toxiproxy_ingress_ipv4": "172.20.0.2",
+                "toxiproxy_ingress_ipv4_sha256": hashlib.sha256(
+                    b"172.20.0.2"
+                ).hexdigest(),
+                "toxiproxy_ingress_endpoint_id_sha256": hashlib.sha256(
+                    ("4" * 64).encode("utf-8")
+                ).hexdigest(),
+                "toxiproxy_ingress_membership_verified": True,
+                "ingress_unique_workload_container_verified": True,
                 "backend_network_internal": True,
                 "ingress_network_external": True,
                 "ingress_proxy_only": True,
@@ -525,6 +535,26 @@ class TopologyAttestationTests(unittest.TestCase):
             sanitized["backend_isolation"]["ingress_proxy_only"]
         )
         self.assertEqual(
+            sanitized["backend_isolation"]["schema"],
+            "txnmem-provenance-backend-isolation-sanitized-v3",
+        )
+        self.assertNotIn(
+            "toxiproxy_ingress_ipv4", sanitized["backend_isolation"]
+        )
+        self.assertNotIn("172.20.0.2", encoded)
+        self.assertEqual(
+            sanitized["backend_isolation"]["toxiproxy_ingress_ipv4_sha256"],
+            hashlib.sha256(b"172.20.0.2").hexdigest(),
+        )
+        self.assertTrue(
+            sanitized["backend_isolation"]["toxiproxy_ingress_membership_verified"]
+        )
+        self.assertTrue(
+            sanitized["backend_isolation"][
+                "ingress_unique_workload_container_verified"
+            ]
+        )
+        self.assertEqual(
             [
                 row["role"]
                 for row in sanitized["backend_isolation"]["containers"]
@@ -597,6 +627,15 @@ class TopologyAttestationTests(unittest.TestCase):
             TopologyAttestationError, "formal backend isolation"
         ):
             self._sanitize(launch, completion)
+
+        sanitized = self._sanitize()
+        sanitized["backend_isolation"]["toxiproxy_ingress_ipv4_sha256"] = (
+            "not-a-sha256"
+        )
+        with self.assertRaisesRegex(
+            TopologyAttestationError, "proxy ingress IPv4"
+        ):
+            _validate_sanitized_backend_isolation(sanitized["backend_isolation"])
 
         launch, completion = self._documents()
         launch["network_guard"]["backend_ipv4_subnet_sha256"] = "2" * 64

@@ -66,7 +66,7 @@ from txnmem_topology_attestation import (
     RAW_COMPLETION_SCHEMA,
     RAW_LAUNCH_SCHEMA,
     _read_private_authorization_nonce as _read_private_nonce_file,
-    _validate_backend_isolation,
+    _validate_raw_backend_isolation,
     _validate_candidate_seal,
     _validate_child_process,
     _validate_command_manifest,
@@ -298,7 +298,7 @@ def _normalize_execution_monitor_probe(value: Any) -> dict[str, Any]:
         raise CollectorError("execution integrity monitor probe is malformed")
     try:
         guard = _validate_network_guard_attestation(value.get("network_guard"))
-        backend = _validate_backend_isolation(value.get("backend_isolation"))
+        backend = _validate_raw_backend_isolation(value.get("backend_isolation"))
     except ValueError as exc:
         raise CollectorError("execution integrity monitor probe is invalid") from exc
     routes = value.get("toxiproxy_routes")
@@ -3561,6 +3561,7 @@ def _normalize_docker_backend_isolation(
     normalized_containers: list[dict[str, Any]] = []
     container_ids: set[str] = set()
     toxiproxy_container_id: str | None = None
+    toxiproxy_ingress_attachment: Mapping[str, Any] | None = None
     for role in roles:
         row = containers[role]
         if not isinstance(row, Mapping):
@@ -3605,6 +3606,9 @@ def _normalize_docker_backend_isolation(
         container_ids.add(container_id)
         if role == "toxiproxy":
             toxiproxy_container_id = container_id
+            toxiproxy_ingress_attachment = settings["Networks"][
+                "txnmem-ingress"
+            ]
         normalized_containers.append(
             {
                 "role": role,
@@ -3628,8 +3632,48 @@ def _normalize_docker_backend_isolation(
     if (
         toxiproxy_container_id is None
         or ingress_network_container_ids != {toxiproxy_container_id}
+        or toxiproxy_ingress_attachment is None
     ):
         raise CollectorError("formal ingress network is not proxy-only")
+    ingress_membership = ingress_network["Containers"].get(toxiproxy_container_id)
+    if not isinstance(ingress_membership, Mapping):
+        raise CollectorError("formal proxy ingress membership is invalid")
+    endpoint_id = toxiproxy_ingress_attachment.get("EndpointID")
+    container_address_text = toxiproxy_ingress_attachment.get("IPAddress")
+    container_prefix = toxiproxy_ingress_attachment.get("IPPrefixLen")
+    network_endpoint_id = ingress_membership.get("EndpointID")
+    network_address_text = ingress_membership.get("IPv4Address")
+    if (
+        not isinstance(endpoint_id, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", endpoint_id)
+        or network_endpoint_id != endpoint_id
+        or not isinstance(container_address_text, str)
+        or type(container_prefix) is not int
+        or not 0 <= container_prefix <= 32
+        or not isinstance(network_address_text, str)
+    ):
+        raise CollectorError("formal proxy ingress membership is invalid")
+    try:
+        ingress_address = ipaddress.IPv4Address(container_address_text)
+        ingress_interface = ipaddress.IPv4Interface(network_address_text)
+    except ValueError as exc:
+        raise CollectorError("formal proxy ingress membership is invalid") from exc
+    ingress_gateway = ipaddress.IPv4Address(
+        ingress_network["IPAM"]["Config"][0]["Gateway"]
+    )
+    if (
+        ingress_interface.ip != ingress_address
+        or ingress_interface.network != ingress_ipv4_subnet
+        or ingress_interface.network.prefixlen != container_prefix
+        or ingress_address not in ingress_ipv4_subnet
+        or ingress_address
+        in {
+            ingress_ipv4_subnet.network_address,
+            ingress_ipv4_subnet.broadcast_address,
+            ingress_gateway,
+        }
+    ):
+        raise CollectorError("formal proxy ingress membership is invalid")
 
     for role in ("qdrant", "neo4j"):
         ports = containers[role]["NetworkSettings"]["Ports"]
@@ -3658,7 +3702,7 @@ def _normalize_docker_backend_isolation(
     if observed_proxy_ports != expected_proxy_ports:
         raise CollectorError("formal proxy port closure is incomplete")
     return {
-        "schema": "txnmem-provenance-backend-isolation-v2",
+        "schema": "txnmem-provenance-backend-isolation-v3",
         "network_name_sha256": hashlib.sha256(
             b"txnmem-backend"
         ).hexdigest(),
@@ -3671,6 +3715,15 @@ def _normalize_docker_backend_isolation(
         "ingress_network_id_sha256": hashlib.sha256(
             ingress_network_id.encode("utf-8")
         ).hexdigest(),
+        "toxiproxy_ingress_ipv4": str(ingress_address),
+        "toxiproxy_ingress_ipv4_sha256": hashlib.sha256(
+            str(ingress_address).encode("utf-8")
+        ).hexdigest(),
+        "toxiproxy_ingress_endpoint_id_sha256": hashlib.sha256(
+            endpoint_id.encode("utf-8")
+        ).hexdigest(),
+        "toxiproxy_ingress_membership_verified": True,
+        "ingress_unique_workload_container_verified": True,
         "backend_network_internal": True,
         "ingress_network_external": True,
         "ingress_proxy_only": True,
@@ -3703,9 +3756,84 @@ def _normalize_docker_backend_isolation(
     }
 
 
-def _collect_docker_backend_isolation(
+def _validated_backend_ipv4_by_role(
+    containers: Mapping[str, Any],
+    backend_network: Mapping[str, Any],
+    ingress_network: Mapping[str, Any],
+) -> dict[str, str]:
+    _normalize_docker_backend_isolation(
+        containers, backend_network, ingress_network
+    )
+    (
+        _backend_network_id,
+        backend_subnet,
+        _backend_bridge_interface,
+    ) = _validate_formal_docker_network(
+        backend_network,
+        expected_name="txnmem-backend",
+        expected_internal=True,
+        role="backend",
+    )
+    (
+        _ingress_network_id,
+        ingress_subnet,
+        _ingress_bridge_interface,
+    ) = _validate_formal_docker_network(
+        ingress_network,
+        expected_name="txnmem-ingress",
+        expected_internal=False,
+        role="ingress",
+    )
+    addresses: dict[str, str] = {}
+    for role, network_name, output_role, subnet, network in (
+        ("qdrant", "txnmem-backend", "qdrant", backend_subnet, backend_network),
+        ("neo4j", "txnmem-backend", "neo4j", backend_subnet, backend_network),
+        (
+            "toxiproxy",
+            "txnmem-ingress",
+            "toxiproxy_ingress",
+            ingress_subnet,
+            ingress_network,
+        ),
+    ):
+        attachment = containers[role]["NetworkSettings"]["Networks"][network_name]
+        membership = network["Containers"].get(containers[role]["Id"])
+        if (
+            not isinstance(attachment, Mapping)
+            or not isinstance(membership, Mapping)
+            or not isinstance(attachment.get("IPAddress"), str)
+            or type(attachment.get("IPPrefixLen")) is not int
+            or not isinstance(membership.get("IPv4Address"), str)
+        ):
+            raise CollectorError("formal backend address attachment is invalid")
+        try:
+            address = ipaddress.IPv4Address(attachment["IPAddress"])
+            membership_interface = ipaddress.IPv4Interface(
+                membership["IPv4Address"]
+            )
+            gateway = ipaddress.IPv4Address(network["IPAM"]["Config"][0]["Gateway"])
+        except ValueError as exc:
+            raise CollectorError("formal backend address attachment is invalid") from exc
+        if (
+            not 0 <= attachment["IPPrefixLen"] <= 32
+            or membership_interface.ip != address
+            or membership_interface.network != subnet
+            or membership_interface.network.prefixlen != attachment["IPPrefixLen"]
+            or address not in subnet
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_multicast
+            or address
+            in {subnet.network_address, subnet.broadcast_address, gateway}
+        ):
+            raise CollectorError("formal backend address attachment is invalid")
+        addresses[output_role] = str(address)
+    return addresses
+
+
+def _inspect_docker_backend_isolation_documents(
     *, qdrant_container: str, neo4j_container: str, toxiproxy_container: str
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], Mapping[str, Any], Mapping[str, Any]]:
     names = {
         "qdrant": qdrant_container,
         "neo4j": neo4j_container,
@@ -3733,10 +3861,25 @@ def _collect_docker_backend_isolation(
     if not isinstance(documents, list) or len(documents) != 3:
         raise CollectorError("formal Docker isolation output is incomplete")
     networks_by_name = _inspect_formal_docker_networks()
-    return _normalize_docker_backend_isolation(
+    return (
         {role: documents[index] for index, role in enumerate(names)},
         networks_by_name["txnmem-backend"],
         networks_by_name["txnmem-ingress"],
+    )
+
+
+def _collect_docker_backend_isolation(
+    *, qdrant_container: str, neo4j_container: str, toxiproxy_container: str
+) -> dict[str, Any]:
+    containers, backend_network, ingress_network = (
+        _inspect_docker_backend_isolation_documents(
+            qdrant_container=qdrant_container,
+            neo4j_container=neo4j_container,
+            toxiproxy_container=toxiproxy_container,
+        )
+    )
+    return _normalize_docker_backend_isolation(
+        containers, backend_network, ingress_network
     )
 
 
@@ -3775,12 +3918,28 @@ def _inspect_formal_docker_networks() -> dict[str, Mapping[str, Any]]:
     return networks_by_name
 
 
-def _collect_docker_network_guard_profile() -> dict[str, str]:
-    networks = _inspect_formal_docker_networks()
-    return _normalize_docker_network_guard_profile(
-        networks["txnmem-backend"],
-        networks["txnmem-ingress"],
+def _collect_docker_network_guard_profile(
+    *, toxiproxy_container: str
+) -> dict[str, str]:
+    containers, backend_network, ingress_network = (
+        _inspect_docker_backend_isolation_documents(
+            qdrant_container=_FORMAL_QDRANT_CONTAINER,
+            neo4j_container=_FORMAL_NEO4J_CONTAINER,
+            toxiproxy_container=toxiproxy_container,
+        )
     )
+    raw_isolation = _normalize_docker_backend_isolation(
+        containers, backend_network, ingress_network
+    )
+    ingress_address = raw_isolation["toxiproxy_ingress_ipv4"]
+    if raw_isolation.get("toxiproxy_ingress_ipv4_sha256") != hashlib.sha256(
+        ingress_address.encode("utf-8")
+    ).hexdigest():
+        raise CollectorError("formal proxy ingress identity hash is invalid")
+    profile = _normalize_docker_network_guard_profile(
+        backend_network, ingress_network
+    )
+    return {**profile, "toxiproxy_ingress_ipv4": ingress_address}
 
 
 def _host_identity() -> str:
@@ -4390,9 +4549,19 @@ def collect_formal_execution(
                 child.process.pid: child_start_identity.rsplit(":", 1)[-1]
             },
         )
+        network_guard_profile = _collect_docker_network_guard_profile(
+            toxiproxy_container=_FORMAL_TOXIPROXY_CONTAINER
+        )
         network_guard = _NftNetworkGuard(
             _formal_network_table_name(run_hash),
-            **_collect_docker_network_guard_profile(),
+            backend_ipv4_subnet=network_guard_profile["backend_ipv4_subnet"],
+            ingress_ipv4_subnet=network_guard_profile["ingress_ipv4_subnet"],
+            backend_bridge_interface=network_guard_profile[
+                "backend_bridge_interface"
+            ],
+            ingress_bridge_interface=network_guard_profile[
+                "ingress_bridge_interface"
+            ],
         )
         child_start_ticks = child_start_identity.rsplit(":", 1)[-1]
 

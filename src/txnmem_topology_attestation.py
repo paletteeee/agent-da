@@ -6,6 +6,7 @@ import argparse
 import copy
 import hashlib
 import hmac
+import ipaddress
 import json
 import math
 import os
@@ -244,6 +245,11 @@ _BACKEND_ISOLATION_FIELDS = frozenset(
         "network_id_sha256",
         "ingress_network_name_sha256",
         "ingress_network_id_sha256",
+        "toxiproxy_ingress_ipv4",
+        "toxiproxy_ingress_ipv4_sha256",
+        "toxiproxy_ingress_endpoint_id_sha256",
+        "toxiproxy_ingress_membership_verified",
+        "ingress_unique_workload_container_verified",
         "backend_network_internal",
         "ingress_network_external",
         "ingress_proxy_only",
@@ -266,6 +272,9 @@ _BACKEND_ISOLATION_FIELDS = frozenset(
         "published_proxy_ports",
         "containers",
     }
+)
+_SANITIZED_BACKEND_ISOLATION_FIELDS = _BACKEND_ISOLATION_FIELDS - frozenset(
+    {"toxiproxy_ingress_ipv4"}
 )
 _BACKEND_CONTAINER_FIELDS = frozenset(
     {
@@ -1067,11 +1076,15 @@ def _validate_network_guard_attestation(value: Any) -> dict[str, Any]:
     }
 
 
-def _validate_backend_isolation(value: Any) -> dict[str, Any]:
+def _normalize_backend_isolation_pair(
+    value: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     if (
         not isinstance(value, Mapping)
         or set(value) != _BACKEND_ISOLATION_FIELDS
-        or value.get("schema") != "txnmem-provenance-backend-isolation-v2"
+        or value.get("schema") != "txnmem-provenance-backend-isolation-v3"
+        or value.get("toxiproxy_ingress_membership_verified") is not True
+        or value.get("ingress_unique_workload_container_verified") is not True
         or value.get("backend_network_internal") is not True
         or value.get("ingress_network_external") is not True
         or value.get("ingress_proxy_only") is not True
@@ -1118,8 +1131,24 @@ def _validate_backend_isolation(value: Any) -> dict[str, Any]:
                 "manifest_digest": FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS[role],
             }
         )
-    return {
-        "schema": "txnmem-provenance-backend-isolation-v2",
+    ingress_address_text = value.get("toxiproxy_ingress_ipv4")
+    if not isinstance(ingress_address_text, str):
+        raise TopologyAttestationError("formal proxy ingress identity is invalid")
+    try:
+        ingress_address = ipaddress.IPv4Address(ingress_address_text)
+    except ValueError as exc:
+        raise TopologyAttestationError(
+            "formal proxy ingress identity is invalid"
+        ) from exc
+    if str(ingress_address) != ingress_address_text:
+        raise TopologyAttestationError("formal proxy ingress identity is invalid")
+    ingress_address_hash = _exact_hash(
+        value.get("toxiproxy_ingress_ipv4_sha256"), "proxy ingress IPv4"
+    )
+    if ingress_address_hash != _hash_text(ingress_address_text):
+        raise TopologyAttestationError("formal proxy ingress identity is invalid")
+    raw = {
+        "schema": "txnmem-provenance-backend-isolation-v3",
         "network_name_sha256": _exact_hash(
             value.get("network_name_sha256"), "backend network name"
         ),
@@ -1134,6 +1163,14 @@ def _validate_backend_isolation(value: Any) -> dict[str, Any]:
             value.get("ingress_network_id_sha256"),
             "ingress network identity",
         ),
+        "toxiproxy_ingress_ipv4": ingress_address_text,
+        "toxiproxy_ingress_ipv4_sha256": ingress_address_hash,
+        "toxiproxy_ingress_endpoint_id_sha256": _exact_hash(
+            value.get("toxiproxy_ingress_endpoint_id_sha256"),
+            "proxy ingress endpoint identity",
+        ),
+        "toxiproxy_ingress_membership_verified": True,
+        "ingress_unique_workload_container_verified": True,
         "backend_network_internal": True,
         "ingress_network_external": True,
         "ingress_proxy_only": True,
@@ -1168,6 +1205,40 @@ def _validate_backend_isolation(value: Any) -> dict[str, Any]:
         "published_proxy_ports": [8474, 19000, 19001],
         "containers": normalized_containers,
     }
+    sanitized = dict(raw)
+    sanitized.pop("toxiproxy_ingress_ipv4")
+    sanitized["schema"] = "txnmem-provenance-backend-isolation-sanitized-v3"
+    return raw, sanitized
+
+
+def _validate_raw_backend_isolation(value: Any) -> dict[str, Any]:
+    raw, _sanitized = _normalize_backend_isolation_pair(value)
+    return raw
+
+
+def _sanitize_backend_isolation(value: Any) -> dict[str, Any]:
+    _raw, sanitized = _normalize_backend_isolation_pair(value)
+    return sanitized
+
+
+def _validate_sanitized_backend_isolation(value: Any) -> dict[str, Any]:
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != _SANITIZED_BACKEND_ISOLATION_FIELDS
+        or value.get("schema")
+        != "txnmem-provenance-backend-isolation-sanitized-v3"
+    ):
+        raise TopologyAttestationError("sanitized backend isolation is invalid")
+    ingress_address_hash = _exact_hash(
+        value.get("toxiproxy_ingress_ipv4_sha256"), "proxy ingress IPv4"
+    )
+    raw = dict(value)
+    raw["schema"] = "txnmem-provenance-backend-isolation-v3"
+    raw["toxiproxy_ingress_ipv4"] = "0.0.0.0"
+    raw["toxiproxy_ingress_ipv4_sha256"] = _hash_text("0.0.0.0")
+    _raw, sanitized = _normalize_backend_isolation_pair(raw)
+    sanitized["toxiproxy_ingress_ipv4_sha256"] = ingress_address_hash
+    return sanitized
 
 
 def _validate_network_guard_backend_binding(
@@ -1371,7 +1442,7 @@ def _validate_shared(document: Mapping[str, Any], *, expected_schema: str) -> No
     network_guard = _validate_network_guard_attestation(
         document.get("network_guard")
     )
-    backend_isolation = _validate_backend_isolation(
+    backend_isolation = _validate_raw_backend_isolation(
         document.get("backend_isolation")
     )
     _validate_network_guard_backend_binding(network_guard, backend_isolation)
@@ -1631,7 +1702,7 @@ def sanitize_topology_attestation(
         "network_guard": _validate_network_guard_attestation(
             launch.get("network_guard")
         ),
-        "backend_isolation": _validate_backend_isolation(
+        "backend_isolation": _sanitize_backend_isolation(
             launch.get("backend_isolation")
         ),
         "proxy_routes": sanitized_proxy_routes,
@@ -1736,7 +1807,7 @@ def _validate_sanitized_shape(attestation: Mapping[str, Any]) -> None:
     network_guard = _validate_network_guard_attestation(
         attestation.get("network_guard")
     )
-    backend_isolation = _validate_backend_isolation(
+    backend_isolation = _validate_sanitized_backend_isolation(
         attestation.get("backend_isolation")
     )
     _validate_network_guard_backend_binding(network_guard, backend_isolation)
