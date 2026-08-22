@@ -363,3 +363,12 @@ the strict normalized host/port verifier is GREEN on 10 focused tests, the full
 local suite exits 0, claim audit reports 15 claims/0 findings, artifact audit
 reports 0 findings, and diff check passes. No public result, paper claim,
 remote file, or deployment was changed.
+
+Task 10 compatibility correction: fix round 1/5 addressed both Important
+fail-closed findings from the first independent review (malformed/invalid
+endpoint acceptance and incomplete proxy-state acceptance; commits
+`320f85e..67c03b7`). Scoped re-review found both addressed with no new
+Critical/Important breakage or out-of-scope observations. Controller
+verification after the reviewed fix passed 10/10 focused service-fault tests,
+848 full-suite tests with four optional skips, claim audit 15/15, artifact
+audit 0 and diff check. Exact-commit remote CPython 3.10.12 replay is next.
