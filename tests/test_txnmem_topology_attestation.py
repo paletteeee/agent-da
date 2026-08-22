@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import txnmem_topology_attestation as topology_module
+
 from txnmem_topology_attestation import (
     FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
     FORMAL_PROVENANCE_TOPOLOGY_ATTESTATION_SHA256_BY_RUN,
@@ -20,6 +22,38 @@ from txnmem_topology_attestation import (
     validate_registered_topology_attestation,
 )
 from txnmem_provenance_contract import FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS
+
+
+def proxy_snapshot(phase, *, qdrant, neo4j):
+    identities = (
+        ("qdrant", "txnmem-qdrant", "0.0.0.0:19000", "qdrant:6333"),
+        ("neo4j", "txnmem-neo4j", "0.0.0.0:19001", "neo4j:7687"),
+    )
+    routes = []
+    for identity, values in zip(identities, (qdrant, neo4j)):
+        routes.append(
+            {
+                "role": identity[0],
+                "proxy_name": identity[1],
+                "listener": identity[2],
+                "upstream": identity[3],
+                "received_upstream_bytes": values[0],
+                "sent_upstream_bytes": values[1],
+                "received_downstream_bytes": values[2],
+                "sent_downstream_bytes": values[3],
+                "total_bytes": sum(values),
+            }
+        )
+    document = {
+        "schema": "txnmem-provenance-proxy-counters-v1",
+        "phase": phase,
+        "routes": routes,
+        "toxiproxy_total_bytes": sum(row["total_bytes"] for row in routes),
+    }
+    document["snapshot_sha256"] = hashlib.sha256(
+        json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return document
 
 
 class TopologyAttestationTests(unittest.TestCase):
@@ -114,6 +148,137 @@ class TopologyAttestationTests(unittest.TestCase):
                     TopologyAttestationError, "formal network guard"
                 ):
                     _validate_network_guard_attestation(drifted)
+
+    def test_raw_launch_v4_and_completion_v5_require_exact_counter_fields(self):
+        launch, completion = self._documents()
+        baseline_a = proxy_snapshot(
+            "baseline_a",
+            qdrant=(11, 13, 17, 19),
+            neo4j=(23, 29, 31, 37),
+        )
+        baseline_b = proxy_snapshot(
+            "baseline_b",
+            qdrant=(11, 13, 17, 19),
+            neo4j=(23, 29, 31, 37),
+        )
+        final = proxy_snapshot(
+            "final",
+            qdrant=(21, 33, 47, 69),
+            neo4j=(73, 89, 101, 127),
+        )
+        for document in (launch, completion):
+            for row in document["roles"]:
+                row.pop("proxy_counter_bytes")
+        launch["schema"] = "txnmem-provenance-execution-launch-raw-v4"
+        launch["proxy_counter_baseline_a"] = baseline_a
+        launch["proxy_counter_baseline_b"] = baseline_b
+        launch["proxy_route_rearm_verified"] = True
+        completion["schema"] = "txnmem-provenance-execution-completion-raw-v5"
+        completion["proxy_counter_baseline_b_sha256"] = hashlib.sha256(
+            json.dumps(
+                {
+                    "routes": baseline_b["routes"],
+                    "toxiproxy_total_bytes": baseline_b["toxiproxy_total_bytes"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        completion["proxy_counter_final"] = final
+        completion["proxy_counter_deltas"] = {
+            "schema": "txnmem-provenance-proxy-counter-deltas-v1",
+            "routes": [
+                {
+                    "role": "qdrant",
+                    "proxy_name": "txnmem-qdrant",
+                    "listener": "0.0.0.0:19000",
+                    "upstream": "qdrant:6333",
+                    "received_upstream_bytes": 10,
+                    "sent_upstream_bytes": 20,
+                    "received_downstream_bytes": 30,
+                    "sent_downstream_bytes": 50,
+                    "total_bytes": 110,
+                },
+                {
+                    "role": "neo4j",
+                    "proxy_name": "txnmem-neo4j",
+                    "listener": "0.0.0.0:19001",
+                    "upstream": "neo4j:7687",
+                    "received_upstream_bytes": 50,
+                    "sent_upstream_bytes": 60,
+                    "received_downstream_bytes": 70,
+                    "sent_downstream_bytes": 90,
+                    "total_bytes": 270,
+                },
+            ],
+            "toxiproxy_total_bytes": 380,
+        }
+
+        topology_module._validate_shared(
+            launch,
+            expected_schema="txnmem-provenance-execution-launch-raw-v4",
+        )
+        topology_module._validate_shared(
+            completion,
+            expected_schema="txnmem-provenance-execution-completion-raw-v5",
+        )
+        topology_module._validate_snapshot(launch["roles"])
+
+        legacy_launch = copy.deepcopy(launch)
+        legacy_launch["schema"] = "txnmem-provenance-execution-launch-raw-v3"
+        with self.assertRaises(TopologyAttestationError):
+            topology_module._validate_shared(
+                legacy_launch,
+                expected_schema="txnmem-provenance-execution-launch-raw-v4",
+            )
+        legacy_completion = copy.deepcopy(completion)
+        legacy_completion["schema"] = (
+            "txnmem-provenance-execution-completion-raw-v4"
+        )
+        with self.assertRaises(TopologyAttestationError):
+            topology_module._validate_shared(
+                legacy_completion,
+                expected_schema="txnmem-provenance-execution-completion-raw-v5",
+            )
+        role_with_legacy_counter = copy.deepcopy(launch["roles"])
+        role_with_legacy_counter[0]["proxy_counter_bytes"] = 0
+        with self.assertRaises(TopologyAttestationError):
+            topology_module._validate_snapshot(role_with_legacy_counter)
+
+        for document, schema, field in (
+            (
+                launch,
+                "txnmem-provenance-execution-launch-raw-v4",
+                "proxy_counter_baseline_a",
+            ),
+            (
+                completion,
+                "txnmem-provenance-execution-completion-raw-v5",
+                "proxy_counter_final",
+            ),
+        ):
+            missing = copy.deepcopy(document)
+            missing.pop(field)
+            with self.assertRaises(TopologyAttestationError):
+                topology_module._validate_shared(missing, expected_schema=schema)
+
+        for name, document, schema in (
+            (
+                "launch",
+                launch,
+                "txnmem-provenance-execution-launch-raw-v4",
+            ),
+            (
+                "completion",
+                completion,
+                "txnmem-provenance-execution-completion-raw-v5",
+            ),
+        ):
+            with self.subTest(name=name):
+                extra = copy.deepcopy(document)
+                extra["extra"] = True
+                with self.assertRaises(TopologyAttestationError):
+                    topology_module._validate_shared(extra, expected_schema=schema)
 
     @staticmethod
     def _file_bytes(value):

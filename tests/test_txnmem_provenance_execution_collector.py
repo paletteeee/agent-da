@@ -24,10 +24,66 @@ from txnmem_provenance_execution_collector import (
     create_immutable_source_export,
     parse_toxiproxy_byte_counters,
 )
-from txnmem_topology_attestation import sanitize_topology_attestation
 from txnmem_topology_attestation import (
     FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
 )
+
+
+PROXY_ROUTES = [
+    {
+        "role": "qdrant",
+        "proxy_name": "txnmem-qdrant",
+        "listen": "0.0.0.0:19000",
+        "upstream": "qdrant:6333",
+        "enabled": True,
+        "toxics_count": 0,
+    },
+    {
+        "role": "neo4j",
+        "proxy_name": "txnmem-neo4j",
+        "listen": "0.0.0.0:19001",
+        "upstream": "neo4j:7687",
+        "enabled": True,
+        "toxics_count": 0,
+    },
+]
+
+
+def proxy_snapshot(phase, *, qdrant, neo4j):
+    routes = []
+    for route, values in zip(PROXY_ROUTES, (qdrant, neo4j)):
+        row = {
+            "role": route["role"],
+            "proxy_name": route["proxy_name"],
+            "listener": route["listen"],
+            "upstream": route["upstream"],
+            "received_upstream_bytes": values[0],
+            "sent_upstream_bytes": values[1],
+            "received_downstream_bytes": values[2],
+            "sent_downstream_bytes": values[3],
+            "total_bytes": sum(values),
+        }
+        routes.append(row)
+    document = {
+        "schema": "txnmem-provenance-proxy-counters-v1",
+        "phase": phase,
+        "routes": routes,
+        "toxiproxy_total_bytes": sum(row["total_bytes"] for row in routes),
+    }
+    document["snapshot_sha256"] = hashlib.sha256(
+        json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return document
+
+
+def proxy_payload_sha256(snapshot):
+    payload = {
+        "routes": snapshot["routes"],
+        "toxiproxy_total_bytes": snapshot["toxiproxy_total_bytes"],
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 class ProvenanceExecutionCollectorTests(unittest.TestCase):
@@ -301,9 +357,15 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
 
     @staticmethod
     def _snapshot(
-        counter_offset=0,
+        proxy_counters=None,
         client_owner="candidate-process:4321:fixture-start",
     ):
+        if proxy_counters is None:
+            proxy_counters = proxy_snapshot(
+                "baseline_a",
+                qdrant=(11, 13, 17, 19),
+                neo4j=(23, 29, 31, 37),
+            )
         versions = {
             "client": "3.11.9",
             "qdrant": "1.15.4",
@@ -311,7 +373,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             "toxiproxy": "2.9.0",
         }
         return {
-            "schema": "txnmem-provenance-topology-snapshot-v2",
+            "schema": "txnmem-provenance-topology-snapshot-v3",
             "roles": [
                 {
                     "role": role,
@@ -323,30 +385,11 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     ),
                     "service_version": versions[role],
                     "rtt_ms": 0.1,
-                    "proxy_counter_bytes": (
-                        counter_offset if role in {"qdrant", "neo4j", "toxiproxy"} else 0
-                    ),
                 }
                 for role in ("client", "qdrant", "neo4j", "toxiproxy")
             ],
-            "proxy_routes": [
-                {
-                    "role": "qdrant",
-                    "proxy_name": "txnmem-qdrant",
-                    "listen": "0.0.0.0:19000",
-                    "upstream": "qdrant:6333",
-                    "enabled": True,
-                    "toxics_count": 0,
-                },
-                {
-                    "role": "neo4j",
-                    "proxy_name": "txnmem-neo4j",
-                    "listen": "0.0.0.0:19001",
-                    "upstream": "neo4j:7687",
-                    "enabled": True,
-                    "toxics_count": 0,
-                },
-            ],
+            "proxy_routes": copy.deepcopy(PROXY_ROUTES),
+            "proxy_counters": copy.deepcopy(proxy_counters),
             "backend_isolation": ProvenanceExecutionCollectorTests._backend_isolation(),
         }
 
@@ -455,10 +498,28 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             completion_path = root / "private" / "completion.json"
             launch_path.parent.mkdir(mode=0o700)
             events = []
+            candidate_events = []
             source_calls = iter(
                 [self._source_identity(), self._source_identity()]
             )
-            probe_calls = iter([self._snapshot(0), self._snapshot(10_000)])
+            baseline_a = proxy_snapshot(
+                "baseline_a",
+                qdrant=(11, 13, 17, 19),
+                neo4j=(23, 29, 31, 37),
+            )
+            baseline_b = proxy_snapshot(
+                "baseline_b",
+                qdrant=(11, 13, 17, 19),
+                neo4j=(23, 29, 31, 37),
+            )
+            final = proxy_snapshot(
+                "final",
+                qdrant=(21, 33, 47, 69),
+                neo4j=(73, 89, 101, 127),
+            )
+            probe_calls = iter(
+                [self._snapshot(baseline_a), self._snapshot(final)]
+            )
             config_hash = "1" * 64
             run_hash = hashlib.sha256(b"collector-fixture").hexdigest()
             candidate_id = (
@@ -515,58 +576,79 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             )
 
             def source_loader(_project):
-                events.append("source")
                 return next(source_calls)
 
             def probe_loader(phase):
-                events.append(f"probe-{phase}")
+                events.append(f"topology_{phase}")
                 return next(probe_calls)
 
             def runtime_loader():
-                events.append("runtime")
                 return next(runtime_calls)
 
             def external_tool_loader():
-                events.append("tools")
                 return copy.deepcopy(command_manifest["external_tools"])
 
             def runner():
-                events.append("run")
+                events.append("gate_release")
                 self.assertTrue(launch_path.is_file())
                 self.assertFalse(completion_path.exists())
+                events.append("child_exit")
                 return 0, material
 
             def candidate_sealer(candidate, receipt):
-                events.append("seal")
+                self.assertIn("launch_write", events)
+                candidate_events.append("seal")
                 self.assertEqual(candidate, candidate_root)
                 self.assertEqual(receipt, material)
                 return candidate_seal
 
             def guard_activate():
-                events.append("guard-activate")
-                return self._network_guard()
+                events.extend(["guard_activate", "route_rearm", "baseline_b"])
+                return {
+                    "network_guard": self._network_guard(),
+                    "proxy_routes": copy.deepcopy(PROXY_ROUTES),
+                    "proxy_counters": copy.deepcopy(baseline_b),
+                    "route_rearmed": True,
+                }
 
             def guard_finalize():
-                events.append("guard-finalize")
-                return self._network_guard()
+                events.extend(["final_counters", "guard_verify"])
+                return {
+                    "network_guard": self._network_guard(),
+                    "proxy_routes": copy.deepcopy(PROXY_ROUTES),
+                    "proxy_counters": copy.deepcopy(final),
+                }
 
             def guard_deactivate():
-                events.append("guard-deactivate")
+                events.append("guard_deactivate")
 
             def monitor_start():
-                events.append("monitor-start")
+                events.append("monitor_start")
 
             def monitor_finalize():
-                events.append("monitor-finalize")
+                events.append("monitor_finalize")
                 return self._execution_monitor()
 
             def material_loader(candidate, bundle_id):
-                events.append("material")
+                self.assertIn("launch_write", events)
+                candidate_events.append("material")
                 self.assertEqual(candidate, candidate_root)
                 self.assertEqual(bundle_id, candidate_id)
                 return material
 
-            from unittest.mock import patch
+            original_write = collector_module.FormalStore.write_json_exclusive
+
+            def recording_write(store, *parts, payload, sort_keys=True, mode=0o644):
+                events.append(
+                    "launch_write" if parts[-1] == launch_path.name else "completion_write"
+                )
+                return original_write(
+                    store,
+                    *parts,
+                    payload=payload,
+                    sort_keys=sort_keys,
+                    mode=mode,
+                )
 
             with patch.dict(
                 FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
@@ -576,6 +658,10 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     ).hexdigest()
                 },
                 clear=True,
+            ), patch.object(
+                collector_module.FormalStore,
+                "write_json_exclusive",
+                new=recording_write,
             ):
                 result = _collect_execution_evidence(
                     project_root=project,
@@ -609,6 +695,164 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             completion_raw = completion_path.read_bytes()
             launch = json.loads(launch_raw)
             completion = json.loads(completion_raw)
+            launch_mode = launch_path.stat().st_mode & 0o777
+            completion_mode = completion_path.stat().st_mode & 0o777
+
+        self.assertEqual(
+            events,
+            [
+                "topology_before",
+                "guard_activate",
+                "route_rearm",
+                "baseline_b",
+                "launch_write",
+                "monitor_start",
+                "gate_release",
+                "child_exit",
+                "monitor_finalize",
+                "final_counters",
+                "guard_verify",
+                "guard_deactivate",
+                "topology_after",
+                "completion_write",
+            ],
+        )
+        self.assertEqual(candidate_events, ["seal", "material"])
+        self.assertEqual(result, (launch_path, completion_path))
+        self.assertEqual(
+            set(launch),
+            {
+                "schema",
+                "collector_id",
+                "formal_execution_requested",
+                "run_id_sha256",
+                "config_sha256",
+                "config_file_sha256",
+                "workload_sha256",
+                "environment_attestation_sha256",
+                "source_commit",
+                "source_manifest",
+                "source_manifest_sha256",
+                "collector_sha256",
+                "runner_sha256",
+                "command_manifest",
+                "command_sha256",
+                "child_process",
+                "network_guard",
+                "backend_isolation",
+                "transport",
+                "matrix_cell_count",
+                "repetition_count",
+                "operation_sample_count",
+                "roles",
+                "proxy_routes",
+                "proxy_counter_baseline_a",
+                "proxy_counter_baseline_b",
+                "proxy_route_rearm_verified",
+                "authorization_nonce_sha256",
+                "authorization_proof_sha256",
+            },
+        )
+        self.assertEqual(
+            set(completion),
+            {
+                "schema",
+                "collector_id",
+                "formal_execution_requested",
+                "run_id_sha256",
+                "config_sha256",
+                "config_file_sha256",
+                "workload_sha256",
+                "environment_attestation_sha256",
+                "source_commit",
+                "source_manifest",
+                "source_manifest_sha256",
+                "collector_sha256",
+                "runner_sha256",
+                "command_manifest",
+                "command_sha256",
+                "child_process",
+                "network_guard",
+                "backend_isolation",
+                "transport",
+                "matrix_cell_count",
+                "repetition_count",
+                "operation_sample_count",
+                "launch_file_sha256",
+                "exit_code",
+                "candidate_bundle_id",
+                "evidence_manifest_sha256",
+                "candidate_operation_samples_sha256",
+                "candidate_repetitions_sha256",
+                "candidate_seal",
+                "execution_monitor",
+                "roles",
+                "proxy_routes",
+                "proxy_counter_baseline_b_sha256",
+                "proxy_counter_final",
+                "proxy_counter_deltas",
+                "authorization_nonce_sha256",
+                "authorization_proof_sha256",
+            },
+        )
+        self.assertEqual(launch["schema"], "txnmem-provenance-execution-launch-raw-v4")
+        self.assertEqual(
+            completion["schema"],
+            "txnmem-provenance-execution-completion-raw-v5",
+        )
+        self.assertEqual(launch["proxy_counter_baseline_a"], baseline_a)
+        self.assertEqual(launch["proxy_counter_baseline_b"], baseline_b)
+        self.assertIs(launch["proxy_route_rearm_verified"], True)
+        self.assertEqual(
+            completion["proxy_counter_baseline_b_sha256"],
+            proxy_payload_sha256(baseline_b),
+        )
+        self.assertEqual(completion["proxy_counter_final"], final)
+        self.assertEqual(
+            [row["total_bytes"] for row in completion["proxy_counter_deltas"]["routes"]],
+            [110, 270],
+        )
+        self.assertEqual(
+            completion["proxy_counter_deltas"]["toxiproxy_total_bytes"], 380
+        )
+        self.assertEqual(completion["exit_code"], 0)
+        self.assertEqual(completion["candidate_bundle_id"], candidate_id)
+        self.assertEqual(completion["execution_monitor"]["violation_count"], 0)
+        self.assertEqual(launch_mode, 0o600)
+        self.assertEqual(completion_mode, 0o600)
+
+    def test_attribution_boundary_failure_deactivates_guard_before_launch(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            project = root / "project"
+            project.mkdir()
+            candidate = root / "candidate"
+            candidate.mkdir()
+            private = root / "private"
+            private.mkdir(mode=0o700)
+            launch = private / "launch.json"
+            completion = private / "completion.json"
+            run_id = "boundary-cleanup-fixture"
+            run_hash = hashlib.sha256(run_id.encode("utf-8")).hexdigest()
+            source_identity = self._source_identity()
+            command_manifest = self._command_manifest(
+                run_hash=run_hash,
+                config_file_hash="2" * 64,
+                environment_hash="4" * 64,
+                source_identity=source_identity,
+            )
+            baseline_a = proxy_snapshot(
+                "baseline_a",
+                qdrant=(11, 13, 17, 19),
+                neo4j=(23, 29, 31, 37),
+            )
+            drifted_b = proxy_snapshot(
+                "baseline_b",
+                qdrant=(12, 13, 17, 19),
+                neo4j=(23, 29, 31, 37),
+            )
+            events = []
+
             with patch.dict(
                 FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
                 {
@@ -618,47 +862,61 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 },
                 clear=True,
             ):
-                sanitized = sanitize_topology_attestation(
-                    launch,
-                    completion,
-                    launch_file_sha256=hashlib.sha256(launch_raw).hexdigest(),
-                    completion_file_sha256=hashlib.sha256(
-                        completion_raw
-                    ).hexdigest(),
-                    authorization_nonce=self.AUTHORIZATION_NONCE,
-                )
-            launch_mode = launch_path.stat().st_mode & 0o777
-            completion_mode = completion_path.stat().st_mode & 0o777
+                with self.assertRaisesRegex(CollectorError, "not quiescent"):
+                    _collect_execution_evidence(
+                        project_root=project,
+                        candidate_root=candidate,
+                        launch_path=launch,
+                        completion_path=completion,
+                        run_id=run_id,
+                        transport="local_loopback",
+                        config_sha256="1" * 64,
+                        config_file_sha256="2" * 64,
+                        workload_sha256="3" * 64,
+                        environment_attestation_sha256="4" * 64,
+                        command_manifest=command_manifest,
+                        child_process=self._child_process(command_manifest),
+                        authorization_nonce=self.AUTHORIZATION_NONCE,
+                        network_guard_activate=lambda: {
+                            "network_guard": self._network_guard(),
+                            "proxy_routes": copy.deepcopy(PROXY_ROUTES),
+                            "proxy_counters": drifted_b,
+                            "route_rearmed": True,
+                        },
+                        network_guard_finalize=lambda: self.fail(
+                            "finalization must not run"
+                        ),
+                        network_guard_deactivate=lambda: events.append(
+                            "guard_deactivate"
+                        ),
+                        execution_monitor_start=lambda: self.fail(
+                            "monitor must not start"
+                        ),
+                        execution_monitor_finalize=lambda: self.fail(
+                            "monitor must not finalize"
+                        ),
+                        run_candidate=lambda: self.fail(
+                            "candidate must remain gated"
+                        ),
+                        candidate_sealer=lambda *_args: self.fail(
+                            "candidate must not be sealed"
+                        ),
+                        topology_probe=lambda _phase: self._snapshot(baseline_a),
+                        source_identity_loader=lambda _root: source_identity,
+                        external_tool_identity_loader=lambda: copy.deepcopy(
+                            command_manifest["external_tools"]
+                        ),
+                        runtime_identity_loader=lambda: copy.deepcopy(
+                            command_manifest["runtime_manifest"]
+                        ),
+                        candidate_material_loader=lambda *_args: self.fail(
+                            "candidate material must not be loaded"
+                        ),
+                    )
 
-        self.assertEqual(
-            events,
-            [
-                "source",
-                "tools",
-                "runtime",
-                "probe-before",
-                "guard-activate",
-                "monitor-start",
-                "run",
-                "monitor-finalize",
-                "guard-finalize",
-                "guard-deactivate",
-                "seal",
-                "source",
-                "tools",
-                "runtime",
-                "probe-after",
-                "material",
-            ],
-        )
-        self.assertEqual(result, (launch_path, completion_path))
-        self.assertEqual(completion["exit_code"], 0)
-        self.assertEqual(completion["candidate_bundle_id"], candidate_id)
-        self.assertEqual(completion["execution_monitor"]["violation_count"], 0)
-        self.assertTrue(sanitized["source_continuity_verified"])
-        self.assertTrue(sanitized["toxiproxy_route_observed"])
-        self.assertEqual(launch_mode, 0o600)
-        self.assertEqual(completion_mode, 0o600)
+        self.assertEqual(events, ["guard_deactivate"])
+        self.assertFalse(launch.exists())
+        self.assertFalse(completion.exists())
 
     def test_gated_child_cannot_execute_before_launch_release_or_inherit_parent_secrets(self):
         with TemporaryDirectory() as tmp:
@@ -1095,13 +1353,14 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             snapshots[0]["policy_sha256"], snapshots[1]["policy_sha256"]
         )
 
-    def test_topology_snapshot_v2_binds_backend_isolation_v3(self):
-        roles, routes, isolation = collector_module._snapshot_components(
+    def test_topology_snapshot_v3_binds_structured_counters_and_backend_isolation_v3(self):
+        roles, routes, counters, isolation = collector_module._snapshot_components(
             self._snapshot()
         )
 
         self.assertEqual(len(roles), 4)
         self.assertEqual(len(routes), 2)
+        self.assertEqual(counters["phase"], "baseline_a")
         self.assertEqual(
             isolation["schema"], "txnmem-provenance-backend-isolation-v3"
         )
@@ -2461,16 +2720,17 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         ]
         metrics = "\n".join(
             (
-                'toxiproxy_proxy_received_bytes_total{direction="upstream",proxy="txnmem-qdrant",listener="[::]:19000",upstream="qdrant:6333"} 0',
-                'toxiproxy_proxy_sent_bytes_total{direction="upstream",proxy="txnmem-qdrant",listener="[::]:19000",upstream="qdrant:6333"} 0',
-                'toxiproxy_proxy_received_bytes_total{direction="downstream",proxy="txnmem-qdrant",listener="[::]:19000",upstream="qdrant:6333"} 0',
-                'toxiproxy_proxy_sent_bytes_total{direction="downstream",proxy="txnmem-qdrant",listener="[::]:19000",upstream="qdrant:6333"} 0',
-                'toxiproxy_proxy_received_bytes_total{direction="upstream",proxy="txnmem-neo4j",listener="[::]:19001",upstream="neo4j:7687"} 0',
-                'toxiproxy_proxy_sent_bytes_total{direction="upstream",proxy="txnmem-neo4j",listener="[::]:19001",upstream="neo4j:7687"} 0',
-                'toxiproxy_proxy_received_bytes_total{direction="downstream",proxy="txnmem-neo4j",listener="[::]:19001",upstream="neo4j:7687"} 0',
-                'toxiproxy_proxy_sent_bytes_total{direction="downstream",proxy="txnmem-neo4j",listener="[::]:19001",upstream="neo4j:7687"} 0',
+                'toxiproxy_proxy_received_bytes_total{direction="upstream",proxy="txnmem-qdrant",listener="[::]:19000",upstream="qdrant:6333"} 11',
+                'toxiproxy_proxy_sent_bytes_total{direction="upstream",proxy="txnmem-qdrant",listener="[::]:19000",upstream="qdrant:6333"} 13',
+                'toxiproxy_proxy_received_bytes_total{direction="downstream",proxy="txnmem-qdrant",listener="[::]:19000",upstream="qdrant:6333"} 17',
+                'toxiproxy_proxy_sent_bytes_total{direction="downstream",proxy="txnmem-qdrant",listener="[::]:19000",upstream="qdrant:6333"} 19',
+                'toxiproxy_proxy_received_bytes_total{direction="upstream",proxy="txnmem-neo4j",listener="[::]:19001",upstream="neo4j:7687"} 23',
+                'toxiproxy_proxy_sent_bytes_total{direction="upstream",proxy="txnmem-neo4j",listener="[::]:19001",upstream="neo4j:7687"} 29',
+                'toxiproxy_proxy_received_bytes_total{direction="downstream",proxy="txnmem-neo4j",listener="[::]:19001",upstream="neo4j:7687"} 31',
+                'toxiproxy_proxy_sent_bytes_total{direction="downstream",proxy="txnmem-neo4j",listener="[::]:19001",upstream="neo4j:7687"} 37',
             )
         )
+        events = []
 
         class Driver:
             def get_server_info(self):
@@ -2483,18 +2743,28 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             @staticmethod
             def driver(_uri, auth):
                 self.assertEqual(auth, ("neo4j", "password"))
+                events.append("neo4j_health")
                 return Driver()
 
         def http_read(url):
             if url.endswith("/metrics"):
+                events.append("baseline_a")
                 return metrics.encode("utf-8"), 0.0
             if url.endswith("/version"):
+                events.append("toxiproxy_health")
                 return b'"2.5.0"', 0.0
             self.assertTrue(url.endswith("/"))
+            events.append("qdrant_health")
             return b'{"version":"1.15.4"}', 0.0
 
+        def prepare_routes(*_args, **_kwargs):
+            events.append("routes")
+            return copy.deepcopy(routes)
+
         with patch.object(
-            collector_module, "prepare_isolated_toxiproxy_routes", return_value=routes
+            collector_module,
+            "prepare_isolated_toxiproxy_routes",
+            side_effect=prepare_routes,
         ), patch.object(
             collector_module, "_http_read", side_effect=http_read
         ), patch.object(
@@ -2524,9 +2794,22 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 runtime_snapshot=Path("/unused"),
             )
 
+        self.assertEqual(events, ["routes", "qdrant_health", "neo4j_health", "toxiproxy_health", "baseline_a"])
+        self.assertEqual(snapshot["schema"], "txnmem-provenance-topology-snapshot-v3")
         self.assertEqual(
-            [row["proxy_counter_bytes"] for row in snapshot["roles"]],
-            [0, 0, 0, 0],
+            set(snapshot),
+            {"schema", "roles", "proxy_routes", "proxy_counters", "backend_isolation"},
+        )
+        self.assertTrue(
+            all("proxy_counter_bytes" not in row for row in snapshot["roles"])
+        )
+        self.assertEqual(
+            snapshot["proxy_counters"],
+            proxy_snapshot(
+                "baseline_a",
+                qdrant=(11, 13, 17, 19),
+                neo4j=(23, 29, 31, 37),
+            ),
         )
 
     def test_completion_metrics_translate_strict_parser_errors_without_payload(self):
@@ -2558,60 +2841,95 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 CollectorError, "^formal Toxiproxy metrics are invalid$"
             ) as raised:
-                collector_module._capture_toxiproxy_completion_state(
+                collector_module.capture_toxiproxy_counter_snapshot(
                     "http://toxiproxy",
                     phase="final",
-                    qdrant_proxy="txnmem-qdrant",
-                    neo4j_proxy="txnmem-neo4j",
+                    proxy_routes=routes,
                 )
 
         self.assertNotIn(payload, str(raised.exception))
 
     def test_toxiproxy_attribution_baseline_requires_zero_and_exact_routes(self):
-        routes = [
-            {
-                "role": role,
-                "proxy_name": spec["name"],
-                "listen": spec["listen"],
-                "upstream": spec["upstream"],
-                "enabled": True,
-                "toxics_count": 0,
-            }
-            for role, spec in collector_module._FORMAL_PROXY_SPECS.items()
-        ]
-        baseline = {
-            "counters": {"qdrant": 0, "neo4j": 0, "toxiproxy": 0},
-            "routes": routes,
-        }
-        self.assertEqual(
-            collector_module._require_zero_toxiproxy_attribution_baseline(
-                baseline
-            ),
-            baseline,
+        baseline_a = proxy_snapshot(
+            "baseline_a",
+            qdrant=(11, 13, 17, 19),
+            neo4j=(23, 29, 31, 37),
+        )
+        baseline_b = proxy_snapshot(
+            "baseline_b",
+            qdrant=(11, 13, 17, 19),
+            neo4j=(23, 29, 31, 37),
         )
 
-        for mutation in (
-            {
-                "counters": {
-                    "qdrant": 1,
-                    "neo4j": 0,
-                    "toxiproxy": 1,
-                },
-                "routes": routes,
-            },
-            {
-                "counters": {
-                    "qdrant": 0,
-                    "neo4j": 0,
-                    "toxiproxy": 0,
-                },
-                "routes": list(reversed(routes)),
-            },
-        ):
-            with self.subTest(mutation=mutation):
+        self.assertIsNone(
+            collector_module._validate_toxiproxy_attribution_boundary(
+                baseline_a,
+                baseline_b,
+                PROXY_ROUTES,
+                PROXY_ROUTES,
+            )
+        )
+
+        drifted = proxy_snapshot(
+            "baseline_b",
+            qdrant=(12, 13, 17, 19),
+            neo4j=(23, 29, 31, 37),
+        )
+        with self.assertRaisesRegex(CollectorError, "not quiescent"):
+            collector_module._validate_toxiproxy_attribution_boundary(
+                baseline_a,
+                drifted,
+                PROXY_ROUTES,
+                PROXY_ROUTES,
+            )
+        with self.assertRaisesRegex(CollectorError, "routes changed"):
+            collector_module._validate_toxiproxy_attribution_boundary(
+                baseline_a,
+                baseline_b,
+                PROXY_ROUTES,
+                list(reversed(PROXY_ROUTES)),
+            )
+
+    def test_toxiproxy_attribution_rejects_final_regression_and_zero_backend_delta(self):
+        baseline_b = proxy_snapshot(
+            "baseline_b",
+            qdrant=(11, 13, 17, 19),
+            neo4j=(23, 29, 31, 37),
+        )
+        final = proxy_snapshot(
+            "final",
+            qdrant=(21, 33, 47, 69),
+            neo4j=(73, 89, 101, 127),
+        )
+
+        deltas = collector_module._derive_toxiproxy_attribution_deltas(
+            baseline_b, final
+        )
+        self.assertEqual([row["total_bytes"] for row in deltas["routes"]], [110, 270])
+        self.assertEqual(deltas["toxiproxy_total_bytes"], 380)
+
+        cases = {
+            "regression": proxy_snapshot(
+                "final",
+                qdrant=(10, 33, 47, 69),
+                neo4j=(73, 89, 101, 127),
+            ),
+            "qdrant_zero": proxy_snapshot(
+                "final",
+                qdrant=(11, 13, 17, 19),
+                neo4j=(73, 89, 101, 127),
+            ),
+            "neo4j_zero": proxy_snapshot(
+                "final",
+                qdrant=(21, 33, 47, 69),
+                neo4j=(23, 29, 31, 37),
+            ),
+        }
+        for name, candidate in cases.items():
+            with self.subTest(name=name):
                 with self.assertRaises(CollectorError):
-                    collector_module._require_zero_toxiproxy_attribution_baseline(
-                        mutation
+                    collector_module._derive_toxiproxy_attribution_deltas(
+                        baseline_b, candidate
                     )
 
     def test_source_attestation_rejects_a_dirty_formal_runner_blob(self):

@@ -42,7 +42,11 @@ from typing import Any, Callable, Mapping, Sequence
 from txnmem_formal_io import FormalStore, canonical_json_bytes
 from txnmem_toxiproxy_metrics import (
     ToxiproxyMetricsError,
+    derive_proxy_counter_deltas,
     parse_toxiproxy_byte_counters,
+    proxy_counter_payload_sha256,
+    proxy_counter_values,
+    validate_proxy_counter_snapshot,
 )
 from txnmem_provenance_contract import (
     FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS,
@@ -78,7 +82,7 @@ from txnmem_topology_attestation import (
 )
 
 
-SNAPSHOT_SCHEMA = "txnmem-provenance-topology-snapshot-v2"
+SNAPSHOT_SCHEMA = "txnmem-provenance-topology-snapshot-v3"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_CONTAINER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _RFC1918_IPV4_NETWORKS = tuple(
@@ -2428,20 +2432,41 @@ def _validate_formal_controller_context(value: Any) -> dict[str, Any]:
 
 def _snapshot_components(
     snapshot: Any,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    dict[str, Any],
+    dict[str, Any],
+]:
     if (
         not isinstance(snapshot, Mapping)
         or set(snapshot)
-        != {"schema", "roles", "proxy_routes", "backend_isolation"}
+        != {
+            "schema",
+            "roles",
+            "proxy_routes",
+            "proxy_counters",
+            "backend_isolation",
+        }
         or snapshot.get("schema") != SNAPSHOT_SCHEMA
         or not isinstance(snapshot.get("roles"), list)
         or not isinstance(snapshot.get("proxy_routes"), list)
+        or not isinstance(snapshot.get("proxy_counters"), Mapping)
         or not isinstance(snapshot.get("backend_isolation"), Mapping)
     ):
         raise CollectorError("topology probe returned an invalid snapshot")
+    try:
+        proxy_counters = validate_proxy_counter_snapshot(
+            snapshot["proxy_counters"]
+        )
+    except ToxiproxyMetricsError as exc:
+        raise CollectorError(
+            "topology probe returned invalid proxy counters"
+        ) from exc
     return (
         [dict(row) for row in snapshot["roles"]],
         [dict(row) for row in snapshot["proxy_routes"]],
+        proxy_counters,
         dict(snapshot["backend_isolation"]),
     )
 
@@ -2626,61 +2651,116 @@ def _collect_execution_evidence(
     command_hash = hashlib.sha256(
         canonical_json_bytes(validated_command)
     ).hexdigest()
-    roles_before, proxy_routes_before, backend_isolation_before = _snapshot_components(
-        topology_probe("before")
-    )
+    (
+        roles_before,
+        proxy_routes_before,
+        baseline_a,
+        backend_isolation_before,
+    ) = _snapshot_components(topology_probe("before"))
     try:
-        network_guard_before = _validate_network_guard_attestation(
-            network_guard_activate()
+        baseline_a = validate_proxy_counter_snapshot(
+            baseline_a, expected_phase="baseline_a"
         )
-    except ValueError as exc:
-        raise CollectorError("formal network guard activation is invalid") from exc
-    for field in (
-        "backend_ipv4_subnet_sha256",
-        "ingress_ipv4_subnet_sha256",
-        "backend_bridge_interface_sha256",
-        "ingress_bridge_interface_sha256",
-    ):
-        if network_guard_before.get(field) != backend_isolation_before.get(field):
-            raise CollectorError(
-                "formal network guard is not bound to backend isolation"
+    except ToxiproxyMetricsError as exc:
+        raise CollectorError("formal baseline A proxy counters are invalid") from exc
+    try:
+        raw_activation = network_guard_activate()
+        if (
+            not isinstance(raw_activation, Mapping)
+            or set(raw_activation)
+            != {
+                "network_guard",
+                "proxy_routes",
+                "proxy_counters",
+                "route_rearmed",
+            }
+            or not isinstance(raw_activation.get("proxy_routes"), list)
+            or not isinstance(raw_activation.get("proxy_counters"), Mapping)
+            or raw_activation.get("route_rearmed") is not True
+        ):
+            raise CollectorError("formal network guard activation is invalid")
+        try:
+            network_guard_before = _validate_network_guard_attestation(
+                raw_activation["network_guard"]
             )
-    shared_before = {
-        "collector_id": COLLECTOR_ID,
-        "formal_execution_requested": True,
-        "run_id_sha256": run_hash,
-        "config_sha256": config_hash,
-        "config_file_sha256": config_file_hash,
-        "workload_sha256": workload_hash,
-        "environment_attestation_sha256": environment_hash,
-        **source_before,
-        "command_manifest": validated_command,
-        "command_sha256": command_hash,
-        "child_process": validated_child,
-        "network_guard": network_guard_before,
-        "backend_isolation": backend_isolation_before,
-        "transport": transport,
-        "matrix_cell_count": 15,
-        "repetition_count": 450,
-        "operation_sample_count": 14_400,
-    }
-    launch = {
-        "schema": RAW_LAUNCH_SCHEMA,
-        **shared_before,
-        "roles": roles_before,
-        "proxy_routes": proxy_routes_before,
-        "authorization_nonce_sha256": nonce_hash,
-    }
-    launch["authorization_proof_sha256"] = execution_authorization_proof(
-        authorization_nonce, launch
-    )
-    launch_store.write_json_exclusive(launch_name, payload=launch, mode=0o600)
-    launch_raw = launch_store.load_bytes(launch_name)
-    launch_hash = hashlib.sha256(launch_raw).hexdigest()
+            baseline_b = validate_proxy_counter_snapshot(
+                raw_activation["proxy_counters"], expected_phase="baseline_b"
+            )
+        except ValueError as exc:
+            raise CollectorError("formal network guard activation is invalid") from exc
+        proxy_routes_boundary = [
+            dict(row) for row in raw_activation["proxy_routes"]
+        ]
+        _validate_toxiproxy_attribution_boundary(
+            baseline_a,
+            baseline_b,
+            proxy_routes_before,
+            proxy_routes_boundary,
+        )
+        for field in (
+            "backend_ipv4_subnet_sha256",
+            "ingress_ipv4_subnet_sha256",
+            "backend_bridge_interface_sha256",
+            "ingress_bridge_interface_sha256",
+        ):
+            if network_guard_before.get(field) != backend_isolation_before.get(
+                field
+            ):
+                raise CollectorError(
+                    "formal network guard is not bound to backend isolation"
+                )
+        shared_before = {
+            "collector_id": COLLECTOR_ID,
+            "formal_execution_requested": True,
+            "run_id_sha256": run_hash,
+            "config_sha256": config_hash,
+            "config_file_sha256": config_file_hash,
+            "workload_sha256": workload_hash,
+            "environment_attestation_sha256": environment_hash,
+            **source_before,
+            "command_manifest": validated_command,
+            "command_sha256": command_hash,
+            "child_process": validated_child,
+            "network_guard": network_guard_before,
+            "backend_isolation": backend_isolation_before,
+            "transport": transport,
+            "matrix_cell_count": 15,
+            "repetition_count": 450,
+            "operation_sample_count": 14_400,
+        }
+        launch = {
+            "schema": RAW_LAUNCH_SCHEMA,
+            **shared_before,
+            "roles": roles_before,
+            "proxy_routes": proxy_routes_boundary,
+            "proxy_counter_baseline_a": baseline_a,
+            "proxy_counter_baseline_b": baseline_b,
+            "proxy_route_rearm_verified": True,
+            "authorization_nonce_sha256": nonce_hash,
+        }
+        launch["authorization_proof_sha256"] = execution_authorization_proof(
+            authorization_nonce, launch
+        )
+        launch_store.write_json_exclusive(
+            launch_name, payload=launch, mode=0o600
+        )
+        launch_raw = launch_store.load_bytes(launch_name)
+        launch_hash = hashlib.sha256(launch_raw).hexdigest()
+    except BaseException:
+        try:
+            network_guard_deactivate()
+        except BaseException as cleanup_exc:
+            raise CollectorError(
+                "formal network guard cleanup failed"
+            ) from cleanup_exc
+        raise
 
     run_failure: BaseException | None = None
     run_result: Any = None
     guard_after: dict[str, Any] | None = None
+    final_proxy_routes: list[dict[str, Any]] | None = None
+    final_counters: dict[str, Any] | None = None
+    proxy_deltas: dict[str, Any] | None = None
     monitor_after: dict[str, Any] | None = None
     monitor_started = False
     monitor_failure: BaseException | None = None
@@ -2704,8 +2784,30 @@ def _collect_execution_evidence(
         except BaseException as exc:
             monitor_failure = exc
     try:
+        raw_finalization = network_guard_finalize()
+        if (
+            not isinstance(raw_finalization, Mapping)
+            or set(raw_finalization)
+            != {"network_guard", "proxy_routes", "proxy_counters"}
+            or not isinstance(raw_finalization.get("proxy_routes"), list)
+            or not isinstance(raw_finalization.get("proxy_counters"), Mapping)
+        ):
+            raise CollectorError("formal network guard finalization is invalid")
+        final_proxy_routes = [
+            dict(row) for row in raw_finalization["proxy_routes"]
+        ]
+        if final_proxy_routes != proxy_routes_boundary:
+            raise CollectorError(
+                "formal Toxiproxy routes changed during the attribution window"
+            )
+        final_counters = validate_proxy_counter_snapshot(
+            raw_finalization["proxy_counters"], expected_phase="final"
+        )
+        proxy_deltas = _derive_toxiproxy_attribution_deltas(
+            baseline_b, final_counters
+        )
         guard_after = _validate_network_guard_attestation(
-            network_guard_finalize()
+            raw_finalization["network_guard"]
         )
     except BaseException as exc:
         guard_failure = exc
@@ -2723,6 +2825,12 @@ def _collect_execution_evidence(
         raise CollectorError("formal network guard cleanup failed") from cleanup_failure
     if guard_after != network_guard_before:
         raise CollectorError("formal network guard changed during execution")
+    if (
+        final_proxy_routes is None
+        or final_counters is None
+        or proxy_deltas is None
+    ):
+        raise CollectorError("formal Toxiproxy final evidence is unavailable")
     if monitor_after is None:
         raise CollectorError("formal execution integrity monitor is unavailable")
     if (
@@ -2778,11 +2886,18 @@ def _collect_execution_evidence(
         raise CollectorError("formal runtime snapshot changed during execution")
     if external_tools_after != external_tools_before:
         raise CollectorError("formal external tool closure changed during execution")
-    roles_after, proxy_routes_after, backend_isolation_after = _snapshot_components(
-        topology_probe("after")
-    )
+    (
+        roles_after,
+        proxy_routes_after,
+        topology_final_counters,
+        backend_isolation_after,
+    ) = _snapshot_components(topology_probe("after"))
     if backend_isolation_after != backend_isolation_before:
         raise CollectorError("formal backend isolation changed during execution")
+    if proxy_routes_after != final_proxy_routes:
+        raise CollectorError("formal final proxy routes changed after guard cleanup")
+    if topology_final_counters != final_counters:
+        raise CollectorError("formal final proxy counters changed after capture")
     material: dict[str, Any]
     if exit_code == 0:
         material = _validate_candidate_material(
@@ -2839,7 +2954,12 @@ def _collect_execution_evidence(
         "candidate_seal": candidate_seal,
         "execution_monitor": monitor_after,
         "roles": roles_after,
-        "proxy_routes": proxy_routes_after,
+        "proxy_routes": final_proxy_routes,
+        "proxy_counter_baseline_b_sha256": proxy_counter_payload_sha256(
+            baseline_b
+        ),
+        "proxy_counter_final": final_counters,
+        "proxy_counter_deltas": proxy_deltas,
         "authorization_nonce_sha256": nonce_hash,
     }
     completion["authorization_proof_sha256"] = execution_authorization_proof(
@@ -4137,52 +4257,40 @@ def collect_docker_topology_snapshot(
     if phase not in {"before", "after"}:
         raise CollectorError("topology probe phase is invalid")
 
+    routes: list[dict[str, Any]]
+    proxy_counters: dict[str, Any] | None = None
     if phase == "before":
-        prepare_isolated_toxiproxy_routes(
+        routes = prepare_isolated_toxiproxy_routes(
             toxiproxy_url,
             qdrant_proxy=qdrant_proxy,
             neo4j_proxy=neo4j_proxy,
         )
-
-    def metrics(proxy_routes: Sequence[Mapping[str, Any]]) -> dict[str, int]:
-        body, _rtt = _http_read(toxiproxy_url.rstrip("/") + "/metrics")
-        try:
-            text = body.decode("utf-8")
-        except UnicodeError as exc:
-            raise CollectorError("Toxiproxy metrics are not UTF-8") from exc
-        snapshot = _parse_formal_toxiproxy_counter_snapshot(
-            text,
-            phase="baseline_a" if phase == "before" else "final",
-            proxy_routes=proxy_routes,
+    elif frozen_proxy_state is None:
+        routes = observe_formal_toxiproxy_routes(
+            toxiproxy_url,
+            qdrant_proxy=qdrant_proxy,
+            neo4j_proxy=neo4j_proxy,
         )
-        return _proxy_counter_totals(snapshot)
-
-    counters_before_health = None
-    routes_before_health = None
-    if phase == "after":
-        if frozen_proxy_state is None:
-            routes_before_health = observe_formal_toxiproxy_routes(
-                toxiproxy_url,
-                qdrant_proxy=qdrant_proxy,
-                neo4j_proxy=neo4j_proxy,
+        proxy_counters = capture_toxiproxy_counter_snapshot(
+            toxiproxy_url,
+            phase="final",
+            proxy_routes=routes,
+        )
+    else:
+        if (
+            not isinstance(frozen_proxy_state, Mapping)
+            or set(frozen_proxy_state) != {"proxy_routes", "proxy_counters"}
+            or not isinstance(frozen_proxy_state.get("proxy_routes"), list)
+            or not isinstance(frozen_proxy_state.get("proxy_counters"), Mapping)
+        ):
+            raise CollectorError("frozen Toxiproxy state is invalid")
+        routes = [dict(row) for row in frozen_proxy_state["proxy_routes"]]
+        try:
+            proxy_counters = validate_proxy_counter_snapshot(
+                frozen_proxy_state["proxy_counters"], expected_phase="final"
             )
-            counters_before_health = metrics(routes_before_health)
-        else:
-            counters_value = frozen_proxy_state.get("counters")
-            routes_value = frozen_proxy_state.get("routes")
-            if (
-                not isinstance(counters_value, Mapping)
-                or set(counters_value) != {"qdrant", "neo4j", "toxiproxy"}
-                or any(
-                    type(counters_value[role]) is not int
-                    or counters_value[role] < 0
-                    for role in counters_value
-                )
-                or not isinstance(routes_value, list)
-            ):
-                raise CollectorError("frozen Toxiproxy state is invalid")
-            counters_before_health = dict(counters_value)
-            routes_before_health = [dict(row) for row in routes_value]
+        except ToxiproxyMetricsError as exc:
+            raise CollectorError("frozen Toxiproxy state is invalid") from exc
     qdrant_body, qdrant_rtt = _http_read(qdrant_url.rstrip("/") + "/")
     qdrant_document = _strict_json_bytes(qdrant_body, "Qdrant version response")
     if not isinstance(qdrant_document, Mapping):
@@ -4223,19 +4331,12 @@ def collect_docker_topology_snapshot(
         if not is_registered_service_version(role, version):
             raise CollectorError("observed service version is not registered")
     if phase == "before":
-        routes = prepare_isolated_toxiproxy_routes(
+        proxy_counters = capture_toxiproxy_counter_snapshot(
             toxiproxy_url,
-            qdrant_proxy=qdrant_proxy,
-            neo4j_proxy=neo4j_proxy,
+            phase="baseline_a",
+            proxy_routes=routes,
         )
-        counters = metrics(routes)
-        if any(counters[role] != 0 for role in ("qdrant", "neo4j", "toxiproxy")):
-            raise CollectorError("formal Toxiproxy counters did not reset to zero")
-    else:
-        assert counters_before_health is not None
-        assert routes_before_health is not None
-        counters = counters_before_health
-        routes = routes_before_health
+    assert proxy_counters is not None
     host = _host_identity()
     owners = {
         "client": client_owner,
@@ -4258,30 +4359,16 @@ def collect_docker_topology_snapshot(
                 "listener_owner": owners[role],
                 "service_version": versions[role],
                 "rtt_ms": rtts[role],
-                "proxy_counter_bytes": (
-                    0 if role == "client" else counters[role]
-                ),
             }
             for role in ("client", "qdrant", "neo4j", "toxiproxy")
         ],
         "proxy_routes": routes,
+        "proxy_counters": proxy_counters,
         "backend_isolation": _collect_docker_backend_isolation(
             qdrant_container=qdrant_container,
             neo4j_container=neo4j_container,
             toxiproxy_container=toxiproxy_container,
         ),
-    }
-
-
-def _proxy_counter_totals(snapshot: Mapping[str, Any]) -> dict[str, int]:
-    totals = {
-        row["role"]: row["total_bytes"]
-        for row in snapshot["routes"]
-    }
-    return {
-        "qdrant": totals["qdrant"],
-        "neo4j": totals["neo4j"],
-        "toxiproxy": snapshot["toxiproxy_total_bytes"],
     }
 
 
@@ -4299,67 +4386,65 @@ def _parse_formal_toxiproxy_counter_snapshot(
         raise CollectorError("formal Toxiproxy metrics are invalid") from exc
 
 
-def _capture_toxiproxy_completion_state(
+def capture_toxiproxy_counter_snapshot(
     toxiproxy_url: str,
     *,
     phase: str,
-    qdrant_proxy: str,
-    neo4j_proxy: str,
+    proxy_routes: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    routes = observe_formal_toxiproxy_routes(
-        toxiproxy_url,
-        qdrant_proxy=qdrant_proxy,
-        neo4j_proxy=neo4j_proxy,
-    )
     body, _rtt = _http_read(toxiproxy_url.rstrip("/") + "/metrics")
     try:
-        snapshot = _parse_formal_toxiproxy_counter_snapshot(
+        return _parse_formal_toxiproxy_counter_snapshot(
             body.decode("utf-8"),
             phase=phase,
-            proxy_routes=routes,
+            proxy_routes=proxy_routes,
         )
     except UnicodeError as exc:
         raise CollectorError("Toxiproxy metrics are not UTF-8") from exc
-    return {"counters": _proxy_counter_totals(snapshot), "routes": routes}
 
 
-def _require_zero_toxiproxy_attribution_baseline(
-    value: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Close the reset-to-guard race with an exact post-activation snapshot."""
-
-    if not isinstance(value, Mapping) or set(value) != {"counters", "routes"}:
-        raise CollectorError("formal Toxiproxy attribution baseline is invalid")
-    counters = value.get("counters")
-    if (
-        not isinstance(counters, Mapping)
-        or set(counters) != {"qdrant", "neo4j", "toxiproxy"}
-        or any(type(counters[role]) is not int for role in counters)
-        or any(counters[role] != 0 for role in counters)
-    ):
-        raise CollectorError(
-            "formal Toxiproxy attribution baseline is not exactly zero"
+def _validate_toxiproxy_attribution_boundary(
+    baseline_a: Mapping[str, Any],
+    baseline_b: Mapping[str, Any],
+    routes_a: Sequence[Mapping[str, Any]],
+    routes_b: Sequence[Mapping[str, Any]],
+) -> None:
+    try:
+        first = validate_proxy_counter_snapshot(
+            baseline_a, expected_phase="baseline_a"
         )
-    expected_routes = [
-        {
-            "role": role,
-            "proxy_name": spec["name"],
-            "listen": spec["listen"],
-            "upstream": spec["upstream"],
-            "enabled": True,
-            "toxics_count": 0,
-        }
-        for role, spec in _FORMAL_PROXY_SPECS.items()
-    ]
-    routes = value.get("routes")
-    if not isinstance(routes, list) or routes != expected_routes:
+        second = validate_proxy_counter_snapshot(
+            baseline_b, expected_phase="baseline_b"
+        )
+    except ToxiproxyMetricsError as exc:
+        raise CollectorError(
+            "formal Toxiproxy attribution boundary is invalid"
+        ) from exc
+    if proxy_counter_values(first) != proxy_counter_values(second):
+        raise CollectorError(
+            "formal Toxiproxy attribution boundary was not quiescent"
+        )
+    if list(routes_a) != list(routes_b):
         raise CollectorError(
             "formal Toxiproxy routes changed at the attribution boundary"
         )
-    return {
-        "counters": dict(counters),
-        "routes": [dict(route) for route in routes],
-    }
+
+
+def _derive_toxiproxy_attribution_deltas(
+    baseline_b: Mapping[str, Any], final: Mapping[str, Any]
+) -> dict[str, Any]:
+    try:
+        deltas = derive_proxy_counter_deltas(baseline_b, final)
+    except ToxiproxyMetricsError as exc:
+        raise CollectorError("formal Toxiproxy counters were not monotonic") from exc
+    role_totals = [row["total_bytes"] for row in deltas["routes"]]
+    if any(total <= 0 for total in role_totals):
+        raise CollectorError(
+            "formal Toxiproxy attribution requires positive backend deltas"
+        )
+    if deltas["toxiproxy_total_bytes"] != sum(role_totals):
+        raise CollectorError("formal Toxiproxy attribution totals do not close")
+    return deltas
 
 
 def _environment_hash(document: Mapping[str, Any]) -> str:
@@ -4710,28 +4795,47 @@ def collect_formal_execution(
 
         def activate_network_guard() -> Mapping[str, Any]:
             assert network_guard is not None
-            snapshot = network_guard.activate()
-            _require_zero_toxiproxy_attribution_baseline(
-                _capture_toxiproxy_completion_state(
-                    toxiproxy_url,
-                    phase="baseline_a",
-                    qdrant_proxy=_FORMAL_QDRANT_PROXY,
-                    neo4j_proxy=_FORMAL_NEO4J_PROXY,
-                )
+            guard_snapshot = network_guard.activate()
+            routes_b = prepare_isolated_toxiproxy_routes(
+                toxiproxy_url,
+                qdrant_proxy=_FORMAL_QDRANT_PROXY,
+                neo4j_proxy=_FORMAL_NEO4J_PROXY,
             )
-            return snapshot
+            baseline_b = capture_toxiproxy_counter_snapshot(
+                toxiproxy_url,
+                phase="baseline_b",
+                proxy_routes=routes_b,
+            )
+            return {
+                "network_guard": guard_snapshot,
+                "proxy_routes": routes_b,
+                "proxy_counters": baseline_b,
+                "route_rearmed": True,
+            }
 
         def finalize_network_guard() -> Mapping[str, Any]:
             nonlocal frozen_proxy_state
             assert network_guard is not None
-            snapshot = network_guard.verify()
-            frozen_proxy_state = _capture_toxiproxy_completion_state(
+            final_routes = observe_formal_toxiproxy_routes(
                 toxiproxy_url,
-                phase="final",
                 qdrant_proxy=_FORMAL_QDRANT_PROXY,
                 neo4j_proxy=_FORMAL_NEO4J_PROXY,
             )
-            return snapshot
+            final_counters = capture_toxiproxy_counter_snapshot(
+                toxiproxy_url,
+                phase="final",
+                proxy_routes=final_routes,
+            )
+            frozen_proxy_state = {
+                "proxy_routes": final_routes,
+                "proxy_counters": final_counters,
+            }
+            guard_snapshot = network_guard.verify()
+            return {
+                "network_guard": guard_snapshot,
+                "proxy_routes": final_routes,
+                "proxy_counters": final_counters,
+            }
 
         def deactivate_network_guard() -> None:
             assert network_guard is not None

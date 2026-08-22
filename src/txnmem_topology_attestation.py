@@ -20,10 +20,15 @@ from txnmem_provenance_contract import (
     FORMAL_RUNNER_UID,
     is_registered_service_version,
 )
+from txnmem_toxiproxy_metrics import (
+    PROXY_COUNTER_DELTA_SCHEMA,
+    ToxiproxyMetricsError,
+    validate_proxy_counter_snapshot,
+)
 
 
-RAW_LAUNCH_SCHEMA = "txnmem-provenance-execution-launch-raw-v3"
-RAW_COMPLETION_SCHEMA = "txnmem-provenance-execution-completion-raw-v4"
+RAW_LAUNCH_SCHEMA = "txnmem-provenance-execution-launch-raw-v4"
+RAW_COMPLETION_SCHEMA = "txnmem-provenance-execution-completion-raw-v5"
 SANITIZED_SCHEMA = "txnmem-topology-attestation-v5"
 COLLECTOR_ID = "txnmem-provenance-execution-collector-v1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -65,7 +70,14 @@ _SHARED_FIELDS = frozenset(
         "operation_sample_count",
     }
 )
-_LAUNCH_FIELDS = _SHARED_FIELDS | {"schema", "roles", "proxy_routes"}
+_LAUNCH_FIELDS = _SHARED_FIELDS | {
+    "schema",
+    "roles",
+    "proxy_routes",
+    "proxy_counter_baseline_a",
+    "proxy_counter_baseline_b",
+    "proxy_route_rearm_verified",
+}
 _LAUNCH_FIELDS = _LAUNCH_FIELDS | {
     "authorization_nonce_sha256",
     "authorization_proof_sha256",
@@ -82,6 +94,9 @@ _COMPLETION_FIELDS = _SHARED_FIELDS | {
     "execution_monitor",
     "roles",
     "proxy_routes",
+    "proxy_counter_baseline_b_sha256",
+    "proxy_counter_final",
+    "proxy_counter_deltas",
     "authorization_nonce_sha256",
     "authorization_proof_sha256",
 }
@@ -92,7 +107,6 @@ _ROLE_FIELDS = frozenset(
         "listener_owner",
         "service_version",
         "rtt_ms",
-        "proxy_counter_bytes",
     }
 )
 _SANITIZED_ROLE_FIELDS = frozenset(
@@ -1421,6 +1435,64 @@ def _validate_sanitized_execution_monitor(value: Any) -> None:
         _exact_hash(value.get(field), f"sanitized monitor {field}")
 
 
+def _validate_proxy_counter_deltas(value: Any) -> None:
+    route_fields = {
+        "role",
+        "proxy_name",
+        "listener",
+        "upstream",
+        "received_upstream_bytes",
+        "sent_upstream_bytes",
+        "received_downstream_bytes",
+        "sent_downstream_bytes",
+        "total_bytes",
+    }
+    expected_identities = (
+        ("qdrant", "txnmem-qdrant", "0.0.0.0:19000", "qdrant:6333"),
+        ("neo4j", "txnmem-neo4j", "0.0.0.0:19001", "neo4j:7687"),
+    )
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != {"schema", "routes", "toxiproxy_total_bytes"}
+        or value.get("schema") != PROXY_COUNTER_DELTA_SCHEMA
+        or not isinstance(value.get("routes"), list)
+        or len(value["routes"]) != len(expected_identities)
+    ):
+        raise TopologyAttestationError("proxy counter deltas are invalid")
+    role_totals = []
+    for row, identity in zip(value["routes"], expected_identities):
+        if (
+            not isinstance(row, Mapping)
+            or set(row) != route_fields
+            or tuple(
+                row.get(field)
+                for field in ("role", "proxy_name", "listener", "upstream")
+            )
+            != identity
+        ):
+            raise TopologyAttestationError("proxy counter delta route is invalid")
+        components = [
+            _exact_nonnegative_int(row.get(field), f"proxy delta {field}")
+            for field in (
+                "received_upstream_bytes",
+                "sent_upstream_bytes",
+                "received_downstream_bytes",
+                "sent_downstream_bytes",
+            )
+        ]
+        total = _exact_positive_int(
+            row.get("total_bytes"), "proxy delta route total"
+        )
+        if total != sum(components):
+            raise TopologyAttestationError("proxy counter delta route does not close")
+        role_totals.append(total)
+    total = _exact_positive_int(
+        value.get("toxiproxy_total_bytes"), "proxy delta total"
+    )
+    if total != sum(role_totals):
+        raise TopologyAttestationError("proxy counter delta total does not close")
+
+
 def _validate_shared(document: Mapping[str, Any], *, expected_schema: str) -> None:
     expected_fields = (
         _LAUNCH_FIELDS if expected_schema == RAW_LAUNCH_SCHEMA else _COMPLETION_FIELDS
@@ -1470,6 +1542,31 @@ def _validate_shared(document: Mapping[str, Any], *, expected_schema: str) -> No
         document.get("backend_isolation")
     )
     _validate_network_guard_backend_binding(network_guard, backend_isolation)
+    try:
+        if expected_schema == RAW_LAUNCH_SCHEMA:
+            validate_proxy_counter_snapshot(
+                document.get("proxy_counter_baseline_a"),
+                expected_phase="baseline_a",
+            )
+            validate_proxy_counter_snapshot(
+                document.get("proxy_counter_baseline_b"),
+                expected_phase="baseline_b",
+            )
+            if document.get("proxy_route_rearm_verified") is not True:
+                raise TopologyAttestationError(
+                    "proxy route re-arm was not verified"
+                )
+        else:
+            _exact_hash(
+                document.get("proxy_counter_baseline_b_sha256"),
+                "proxy counter baseline B payload",
+            )
+            validate_proxy_counter_snapshot(
+                document.get("proxy_counter_final"), expected_phase="final"
+            )
+            _validate_proxy_counter_deltas(document.get("proxy_counter_deltas"))
+    except ToxiproxyMetricsError as exc:
+        raise TopologyAttestationError("proxy counter evidence is invalid") from exc
     if expected_schema == RAW_COMPLETION_SCHEMA:
         _validate_execution_monitor_attestation(document.get("execution_monitor"))
     if document.get("transport") not in _TRANSPORTS:
@@ -1507,9 +1604,6 @@ def _validate_snapshot(
             "listener_owner_sha256": _hash_text(owner),
             "service_version": version,
             "rtt_ms": _safe_rtt(row.get("rtt_ms")),
-            "proxy_counter_bytes": _exact_nonnegative_int(
-                row.get("proxy_counter_bytes"), "proxy_counter_bytes"
-            ),
         }
     if set(raw_by_role) != set(_ROLES):
         raise TopologyAttestationError("execution topology roles mismatch")
