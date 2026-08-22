@@ -22,6 +22,10 @@ from txnmem_topology_attestation import (
     validate_registered_topology_attestation,
 )
 from txnmem_provenance_contract import FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS
+from txnmem_toxiproxy_metrics import (
+    derive_proxy_counter_deltas,
+    proxy_counter_payload_sha256,
+)
 
 
 def proxy_snapshot(phase, *, qdrant, neo4j):
@@ -54,6 +58,17 @@ def proxy_snapshot(phase, *, qdrant, neo4j):
         json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return document
+
+
+def rehash_proxy_snapshot(document):
+    payload = {
+        key: copy.deepcopy(value)
+        for key, value in document.items()
+        if key != "snapshot_sha256"
+    }
+    document["snapshot_sha256"] = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 class TopologyAttestationTests(unittest.TestCase):
@@ -166,9 +181,6 @@ class TopologyAttestationTests(unittest.TestCase):
             qdrant=(21, 33, 47, 69),
             neo4j=(73, 89, 101, 127),
         )
-        for document in (launch, completion):
-            for row in document["roles"]:
-                row.pop("proxy_counter_bytes")
         launch["schema"] = "txnmem-provenance-execution-launch-raw-v4"
         launch["proxy_counter_baseline_a"] = baseline_a
         launch["proxy_counter_baseline_b"] = baseline_b
@@ -559,11 +571,10 @@ class TopologyAttestationTests(unittest.TestCase):
                 "private-client-host",
                 child_process["start_identity"],
                 "3.11.9",
-                0,
             ),
-            "qdrant": ("private-backend-host", "qdrant-process-222", "1.15.4", 0),
-            "neo4j": ("private-backend-host", "neo4j-process-333", "5.26.0", 0),
-            "toxiproxy": ("private-client-host", "toxiproxy-process-444", "2.9.0", 0),
+            "qdrant": ("private-backend-host", "qdrant-process-222", "1.15.4"),
+            "neo4j": ("private-backend-host", "neo4j-process-333", "5.26.0"),
+            "toxiproxy": ("private-client-host", "toxiproxy-process-444", "2.9.0"),
         }
         launch_roles = [
             {
@@ -572,18 +583,26 @@ class TopologyAttestationTests(unittest.TestCase):
                 "listener_owner": values[1],
                 "service_version": values[2],
                 "rtt_ms": 0.1 + index,
-                "proxy_counter_bytes": values[3],
             }
             for index, (role, values) in enumerate(role_data.items())
         ]
         completion_roles = copy.deepcopy(launch_roles)
-        for row in completion_roles:
-            if row["role"] == "qdrant":
-                row["proxy_counter_bytes"] += 10_000
-            elif row["role"] == "neo4j":
-                row["proxy_counter_bytes"] += 20_000
-            elif row["role"] == "toxiproxy":
-                row["proxy_counter_bytes"] += 30_000
+        baseline_a = proxy_snapshot(
+            "baseline_a",
+            qdrant=(11, 13, 17, 19),
+            neo4j=(23, 29, 31, 37),
+        )
+        baseline_b = proxy_snapshot(
+            "baseline_b",
+            qdrant=(11, 13, 17, 19),
+            neo4j=(23, 29, 31, 37),
+        )
+        final = proxy_snapshot(
+            "final",
+            qdrant=(21, 33, 47, 69),
+            neo4j=(73, 89, 101, 127),
+        )
+        proxy_deltas = derive_proxy_counter_deltas(baseline_b, final)
         candidate_id = (
             "diagnostic-vector_graph-" + "2" * 16 + "-" + "1" * 16
         )
@@ -626,10 +645,13 @@ class TopologyAttestationTests(unittest.TestCase):
             ).hexdigest(),
         }
         launch = {
-            "schema": "txnmem-provenance-execution-launch-raw-v3",
+            "schema": "txnmem-provenance-execution-launch-raw-v4",
             **shared,
             "roles": launch_roles,
             "proxy_routes": copy.deepcopy(proxy_routes),
+            "proxy_counter_baseline_a": baseline_a,
+            "proxy_counter_baseline_b": baseline_b,
+            "proxy_route_rearm_verified": True,
             "authorization_nonce_sha256": hashlib.sha256(
                 self.AUTHORIZATION_NONCE
             ).hexdigest(),
@@ -639,7 +661,7 @@ class TopologyAttestationTests(unittest.TestCase):
         )
         launch_hash = hashlib.sha256(self._file_bytes(launch)).hexdigest()
         completion = {
-            "schema": "txnmem-provenance-execution-completion-raw-v4",
+            "schema": "txnmem-provenance-execution-completion-raw-v5",
             **shared,
             "launch_file_sha256": launch_hash,
             "exit_code": 0,
@@ -676,6 +698,11 @@ class TopologyAttestationTests(unittest.TestCase):
             },
             "roles": completion_roles,
             "proxy_routes": copy.deepcopy(proxy_routes),
+            "proxy_counter_baseline_b_sha256": proxy_counter_payload_sha256(
+                baseline_b
+            ),
+            "proxy_counter_final": final,
+            "proxy_counter_deltas": proxy_deltas,
             "authorization_nonce_sha256": hashlib.sha256(
                 self.AUTHORIZATION_NONCE
             ).hexdigest(),
@@ -740,12 +767,25 @@ class TopologyAttestationTests(unittest.TestCase):
             "expected_candidate_repetitions_sha256": "d" * 64,
         }
 
+    @staticmethod
+    def _rehash_sanitized(attestation):
+        without_hash = copy.deepcopy(attestation)
+        without_hash.pop("attestation_sha256", None)
+        attestation["attestation_sha256"] = hashlib.sha256(
+            json.dumps(
+                without_hash,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
     def test_sanitization_hashes_identity_and_binds_two_execution_phases(self):
         sanitized = self._sanitize()
         encoded = json.dumps(sanitized, sort_keys=True)
         roles = {row["role"]: row for row in sanitized["roles"]}
 
-        self.assertEqual(sanitized["schema"], "txnmem-topology-attestation-v5")
+        self.assertEqual(sanitized["schema"], "txnmem-topology-attestation-v6")
         self.assertNotIn("private-client-host", encoded)
         self.assertNotIn("private-backend-host", encoded)
         self.assertNotIn("process-", encoded)
@@ -835,6 +875,50 @@ class TopologyAttestationTests(unittest.TestCase):
                 },
             ],
         )
+        launch, completion = self._documents()
+        self.assertEqual(
+            sanitized["proxy_counter_attribution"],
+            {
+                "schema": "txnmem-provenance-proxy-attribution-v1",
+                "baseline_a_sha256": launch["proxy_counter_baseline_a"][
+                    "snapshot_sha256"
+                ],
+                "baseline_b_sha256": launch["proxy_counter_baseline_b"][
+                    "snapshot_sha256"
+                ],
+                "final_sha256": completion["proxy_counter_final"][
+                    "snapshot_sha256"
+                ],
+                "boundary_values_equal": True,
+                "route_rearmed": True,
+                "qdrant_delta_bytes": 110,
+                "neo4j_delta_bytes": 270,
+                "toxiproxy_delta_bytes": 380,
+                "component_deltas_sha256": hashlib.sha256(
+                    json.dumps(
+                        completion["proxy_counter_deltas"],
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest(),
+            },
+        )
+        self.assertEqual(
+            {
+                role: (
+                    row["proxy_counter_bytes_before"],
+                    row["proxy_counter_bytes_after"],
+                    row["proxy_counter_bytes_delta"],
+                )
+                for role, row in roles.items()
+            },
+            {
+                "client": (0, 0, 0),
+                "qdrant": (60, 170, 110),
+                "neo4j": (120, 390, 270),
+                "toxiproxy": (180, 560, 380),
+            },
+        )
         self.assertGreater(roles["qdrant"]["proxy_counter_bytes_delta"], 0)
         self.assertGreater(roles["neo4j"]["proxy_counter_bytes_delta"], 0)
         self.assertRegex(sanitized["attestation_sha256"], r"^[0-9a-f]{64}$")
@@ -843,6 +927,243 @@ class TopologyAttestationTests(unittest.TestCase):
         self.assertRegex(
             sanitized["candidate_seal"]["tree_sha256"], r"^[0-9a-f]{64}$"
         )
+
+    def test_sanitization_independently_recomputes_proxy_attribution_mutations(self):
+        cases = []
+
+        for field in (
+            "proxy_counter_baseline_a",
+            "proxy_counter_baseline_b",
+        ):
+            launch, completion = self._documents()
+            launch[field]["snapshot_sha256"] = "f" * 64
+            cases.append((f"{field}_hash", launch, completion))
+        launch, completion = self._documents()
+        completion["proxy_counter_final"]["snapshot_sha256"] = "f" * 64
+        cases.append(("proxy_counter_final_hash", launch, completion))
+
+        launch, completion = self._documents()
+        baseline_b_route = launch["proxy_counter_baseline_b"]["routes"][0]
+        baseline_b_route["received_upstream_bytes"] += 1
+        baseline_b_route["total_bytes"] += 1
+        launch["proxy_counter_baseline_b"]["toxiproxy_total_bytes"] += 1
+        rehash_proxy_snapshot(launch["proxy_counter_baseline_b"])
+        cases.append(("boundary_component", launch, completion))
+
+        launch, completion = self._documents()
+        final_route = completion["proxy_counter_final"]["routes"][0]
+        final_route["received_upstream_bytes"] += 1
+        final_route["total_bytes"] += 1
+        completion["proxy_counter_final"]["toxiproxy_total_bytes"] += 1
+        rehash_proxy_snapshot(completion["proxy_counter_final"])
+        cases.append(("final_component", launch, completion))
+
+        launch, completion = self._documents()
+        stored_delta = completion["proxy_counter_deltas"]["routes"][0]
+        stored_delta["received_upstream_bytes"] += 1
+        stored_delta["total_bytes"] += 1
+        completion["proxy_counter_deltas"]["toxiproxy_total_bytes"] += 1
+        cases.append(("stored_delta", launch, completion))
+
+        launch, completion = self._documents()
+        completion["proxy_counter_baseline_b_sha256"] = "f" * 64
+        cases.append(("completion_baseline_b_hash", launch, completion))
+
+        launch, completion = self._documents()
+        completion["proxy_routes"].reverse()
+        cases.append(("route_order", launch, completion))
+
+        launch, completion = self._documents()
+        launch["proxy_route_rearm_verified"] = False
+        cases.append(("stored_route_rearm_boolean", launch, completion))
+
+        launch, completion = self._documents()
+        for document in (launch, completion):
+            document["network_guard"]["toxiproxy_ingress_ipv4_sha256"] = "f" * 64
+        cases.append(("ingress_hash", launch, completion))
+
+        launch, completion = self._documents()
+        for document in (launch, completion):
+            document["backend_isolation"][
+                "toxiproxy_ingress_membership_verified"
+            ] = False
+        cases.append(("ingress_membership", launch, completion))
+
+        for name, launch, completion in cases:
+            with self.subTest(name=name):
+                with self.assertRaises(TopologyAttestationError):
+                    self._sanitize(launch, completion)
+
+        for field in ("boundary_values_equal", "route_rearmed"):
+            with self.subTest(name=f"sanitized_{field}"):
+                sanitized = self._sanitize()
+                sanitized["proxy_counter_attribution"][field] = False
+                self._rehash_sanitized(sanitized)
+                with self.assertRaises(TopologyAttestationError):
+                    topology_module._validate_sanitized_shape(sanitized)
+
+    def test_sanitization_rejects_negative_components_and_broken_delta_sums(self):
+        launch, completion = self._documents()
+        final_route = completion["proxy_counter_final"]["routes"][0]
+        final_route["received_upstream_bytes"] = 10
+        final_route["total_bytes"] = sum(
+            final_route[field]
+            for field in (
+                "received_upstream_bytes",
+                "sent_upstream_bytes",
+                "received_downstream_bytes",
+                "sent_downstream_bytes",
+            )
+        )
+        completion["proxy_counter_final"]["toxiproxy_total_bytes"] = sum(
+            row["total_bytes"]
+            for row in completion["proxy_counter_final"]["routes"]
+        )
+        rehash_proxy_snapshot(completion["proxy_counter_final"])
+        with self.assertRaises(TopologyAttestationError):
+            self._sanitize(launch, completion)
+
+        for name, mutate in (
+            (
+                "broken_role_sum",
+                lambda deltas: deltas["routes"][0].update(
+                    {"total_bytes": deltas["routes"][0]["total_bytes"] + 1}
+                ),
+            ),
+            (
+                "broken_global_sum",
+                lambda deltas: deltas.update(
+                    {
+                        "toxiproxy_total_bytes": deltas[
+                            "toxiproxy_total_bytes"
+                        ]
+                        + 1
+                    }
+                ),
+            ),
+        ):
+            with self.subTest(name=name):
+                launch, completion = self._documents()
+                mutate(completion["proxy_counter_deltas"])
+                with self.assertRaises(TopologyAttestationError):
+                    self._sanitize(launch, completion)
+
+    def test_task5_exact_key_closures_and_legacy_schemas_fail_closed(self):
+        raw_cases = []
+        for name, mutate in (
+            (
+                "launch_fields",
+                lambda launch, completion: launch.update({"extra": True}),
+            ),
+            (
+                "completion_fields",
+                lambda launch, completion: completion.update({"extra": True}),
+            ),
+            (
+                "snapshot_fields",
+                lambda launch, completion: launch[
+                    "proxy_counter_baseline_a"
+                ].update({"extra": True}),
+            ),
+            (
+                "snapshot_route_fields",
+                lambda launch, completion: launch["proxy_counter_baseline_a"][
+                    "routes"
+                ][0].update({"extra": True}),
+            ),
+            (
+                "delta_fields",
+                lambda launch, completion: completion[
+                    "proxy_counter_deltas"
+                ].update({"extra": True}),
+            ),
+            (
+                "delta_route_fields",
+                lambda launch, completion: completion["proxy_counter_deltas"][
+                    "routes"
+                ][0].update({"extra": True}),
+            ),
+            (
+                "legacy_launch_v3",
+                lambda launch, completion: launch.update(
+                    {"schema": "txnmem-provenance-execution-launch-raw-v3"}
+                ),
+            ),
+            (
+                "legacy_completion_v4",
+                lambda launch, completion: completion.update(
+                    {"schema": "txnmem-provenance-execution-completion-raw-v4"}
+                ),
+            ),
+            (
+                "legacy_backend_v2",
+                lambda launch, completion: (
+                    launch["backend_isolation"].update(
+                        {"schema": "txnmem-provenance-backend-isolation-v2"}
+                    ),
+                    completion["backend_isolation"].update(
+                        {"schema": "txnmem-provenance-backend-isolation-v2"}
+                    ),
+                ),
+            ),
+            (
+                "legacy_guard_v2",
+                lambda launch, completion: (
+                    launch["network_guard"].update(
+                        {"schema": "txnmem-provenance-network-guard-v2"}
+                    ),
+                    completion["network_guard"].update(
+                        {"schema": "txnmem-provenance-network-guard-v2"}
+                    ),
+                ),
+            ),
+        ):
+            launch, completion = self._documents()
+            mutate(launch, completion)
+            raw_cases.append((name, launch, completion))
+
+        for name, launch, completion in raw_cases:
+            with self.subTest(name=name):
+                with self.assertRaises(TopologyAttestationError):
+                    self._sanitize(launch, completion)
+
+        for name, mutate in (
+            (
+                "sanitized_top_level",
+                lambda value: value.update({"extra": True}),
+            ),
+            (
+                "proxy_attribution",
+                lambda value: value["proxy_counter_attribution"].update(
+                    {"extra": True}
+                ),
+            ),
+            (
+                "sanitized_backend",
+                lambda value: value["backend_isolation"].update({"extra": True}),
+            ),
+            (
+                "legacy_sanitized_v5",
+                lambda value: value.update(
+                    {"schema": "txnmem-topology-attestation-v5"}
+                ),
+            ),
+            (
+                "raw_backend_in_sanitized_document",
+                lambda value: value["backend_isolation"].update(
+                    {
+                        "schema": "txnmem-provenance-backend-isolation-v3",
+                        "toxiproxy_ingress_ipv4": "172.20.0.2",
+                    }
+                ),
+            ),
+        ):
+            with self.subTest(name=name):
+                sanitized = self._sanitize()
+                mutate(sanitized)
+                self._rehash_sanitized(sanitized)
+                with self.assertRaises(TopologyAttestationError):
+                    topology_module._validate_sanitized_shape(sanitized)
 
     def test_sanitization_rejects_candidate_seal_receipt_substitution(self):
         launch, completion = self._documents()
@@ -1078,9 +1399,7 @@ class TopologyAttestationTests(unittest.TestCase):
         completion["roles"][1]["listener_owner"] = "qdrant-process-other"
         cases.append((launch, completion, "listener"))
         launch, completion = self._documents()
-        completion["roles"][1]["proxy_counter_bytes"] = launch["roles"][1][
-            "proxy_counter_bytes"
-        ]
+        completion["proxy_counter_deltas"]["routes"][0]["total_bytes"] += 1
         cases.append((launch, completion, "proxy"))
         launch, completion = self._documents()
         completion["exit_code"] = 1
@@ -1099,7 +1418,11 @@ class TopologyAttestationTests(unittest.TestCase):
         completion["proxy_routes"][0]["upstream"] = "unrelated:6333"
         cases.append((launch, completion, "route"))
         launch, completion = self._documents()
-        launch["roles"][1]["proxy_counter_bytes"] = 1
+        baseline_b_route = launch["proxy_counter_baseline_b"]["routes"][0]
+        baseline_b_route["received_upstream_bytes"] += 1
+        baseline_b_route["total_bytes"] += 1
+        launch["proxy_counter_baseline_b"]["toxiproxy_total_bytes"] += 1
+        rehash_proxy_snapshot(launch["proxy_counter_baseline_b"])
         cases.append((launch, completion, "baseline"))
         launch, completion = self._documents()
         for document in (launch, completion):
@@ -1128,7 +1451,7 @@ class TopologyAttestationTests(unittest.TestCase):
 
         for launch, completion, name in cases:
             with self.subTest(name=name):
-                if name in {"listener", "proxy"}:
+                if name == "listener":
                     sanitized = self._sanitize(launch, completion)
                     with patch.dict(
                         FORMAL_PROVENANCE_TOPOLOGY_ATTESTATION_SHA256_BY_RUN,

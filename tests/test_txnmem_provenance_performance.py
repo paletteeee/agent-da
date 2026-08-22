@@ -33,6 +33,44 @@ from txnmem_topology_attestation import (
     execution_authorization_proof,
     sanitize_topology_attestation,
 )
+from txnmem_toxiproxy_metrics import (
+    derive_proxy_counter_deltas,
+    proxy_counter_payload_sha256,
+)
+
+
+def _proxy_snapshot(phase, *, qdrant, neo4j):
+    routes = []
+    for identity, values in zip(
+        (
+            ("qdrant", "txnmem-qdrant", "0.0.0.0:19000", "qdrant:6333"),
+            ("neo4j", "txnmem-neo4j", "0.0.0.0:19001", "neo4j:7687"),
+        ),
+        (qdrant, neo4j),
+    ):
+        routes.append(
+            {
+                "role": identity[0],
+                "proxy_name": identity[1],
+                "listener": identity[2],
+                "upstream": identity[3],
+                "received_upstream_bytes": values[0],
+                "sent_upstream_bytes": values[1],
+                "received_downstream_bytes": values[2],
+                "sent_downstream_bytes": values[3],
+                "total_bytes": sum(values),
+            }
+        )
+    document = {
+        "schema": "txnmem-provenance-proxy-counters-v1",
+        "phase": phase,
+        "routes": routes,
+        "toxiproxy_total_bytes": sum(row["total_bytes"] for row in routes),
+    }
+    document["snapshot_sha256"] = hashlib.sha256(
+        provenance_module._canonical_json_bytes(document)
+    ).hexdigest()
+    return document
 
 
 class _FixtureBackend(InstrumentedMemoryBackend):
@@ -771,14 +809,26 @@ class ProvenanceAggregationTests(unittest.TestCase):
                 ),
                 "service_version": versions[role],
                 "rtt_ms": 0.1,
-                "proxy_counter_bytes": 0,
             }
             for role in ("client", "qdrant", "neo4j", "toxiproxy")
         ]
         completion_roles = copy.deepcopy(launch_roles)
-        for row in completion_roles:
-            if row["role"] in {"qdrant", "neo4j", "toxiproxy"}:
-                row["proxy_counter_bytes"] = 100
+        baseline_a = _proxy_snapshot(
+            "baseline_a",
+            qdrant=(11, 13, 17, 19),
+            neo4j=(23, 29, 31, 37),
+        )
+        baseline_b = _proxy_snapshot(
+            "baseline_b",
+            qdrant=(11, 13, 17, 19),
+            neo4j=(23, 29, 31, 37),
+        )
+        final = _proxy_snapshot(
+            "final",
+            qdrant=(21, 33, 47, 69),
+            neo4j=(73, 89, 101, 127),
+        )
+        proxy_deltas = derive_proxy_counter_deltas(baseline_b, final)
         proxy_routes = [
             {
                 "role": "qdrant",
@@ -798,10 +848,13 @@ class ProvenanceAggregationTests(unittest.TestCase):
             },
         ]
         launch = {
-            "schema": "txnmem-provenance-execution-launch-raw-v3",
+            "schema": "txnmem-provenance-execution-launch-raw-v4",
             **shared,
             "roles": launch_roles,
             "proxy_routes": copy.deepcopy(proxy_routes),
+            "proxy_counter_baseline_a": baseline_a,
+            "proxy_counter_baseline_b": baseline_b,
+            "proxy_route_rearm_verified": True,
             "authorization_nonce_sha256": hashlib.sha256(
                 self.AUTHORIZATION_NONCE
             ).hexdigest(),
@@ -813,7 +866,7 @@ class ProvenanceAggregationTests(unittest.TestCase):
             json.dumps(launch, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         ).encode("utf-8")
         completion = {
-            "schema": "txnmem-provenance-execution-completion-raw-v4",
+            "schema": "txnmem-provenance-execution-completion-raw-v5",
             **shared,
             "launch_file_sha256": hashlib.sha256(launch_raw).hexdigest(),
             "exit_code": 0,
@@ -865,6 +918,11 @@ class ProvenanceAggregationTests(unittest.TestCase):
             },
             "roles": completion_roles,
             "proxy_routes": copy.deepcopy(proxy_routes),
+            "proxy_counter_baseline_b_sha256": proxy_counter_payload_sha256(
+                baseline_b
+            ),
+            "proxy_counter_final": final,
+            "proxy_counter_deltas": proxy_deltas,
             "authorization_nonce_sha256": hashlib.sha256(
                 self.AUTHORIZATION_NONCE
             ).hexdigest(),

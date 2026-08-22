@@ -23,13 +23,16 @@ from txnmem_provenance_contract import (
 from txnmem_toxiproxy_metrics import (
     PROXY_COUNTER_DELTA_SCHEMA,
     ToxiproxyMetricsError,
+    derive_proxy_counter_deltas,
+    proxy_counter_payload_sha256,
+    proxy_counter_values,
     validate_proxy_counter_snapshot,
 )
 
 
 RAW_LAUNCH_SCHEMA = "txnmem-provenance-execution-launch-raw-v4"
 RAW_COMPLETION_SCHEMA = "txnmem-provenance-execution-completion-raw-v5"
-SANITIZED_SCHEMA = "txnmem-topology-attestation-v5"
+SANITIZED_SCHEMA = "txnmem-topology-attestation-v6"
 COLLECTOR_ID = "txnmem-provenance-execution-collector-v1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _GIT_COMMIT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
@@ -364,6 +367,20 @@ _SANITIZED_PROXY_ROUTE_FIELDS = frozenset(
         "toxics_count",
     }
 )
+_PROXY_COUNTER_ATTRIBUTION_FIELDS = frozenset(
+    {
+        "schema",
+        "baseline_a_sha256",
+        "baseline_b_sha256",
+        "final_sha256",
+        "boundary_values_equal",
+        "route_rearmed",
+        "qdrant_delta_bytes",
+        "neo4j_delta_bytes",
+        "toxiproxy_delta_bytes",
+        "component_deltas_sha256",
+    }
+)
 _RUNTIME_FIELDS = frozenset({"schema", "python", "distributions"})
 _RUNTIME_PYTHON_FIELDS = frozenset(
     {
@@ -407,6 +424,7 @@ _SANITIZED_FIELDS = frozenset(
         "network_guard",
         "backend_isolation",
         "proxy_routes",
+        "proxy_counter_attribution",
         "authorization_nonce_sha256",
         "launch_authorization_proof_sha256",
         "completion_authorization_proof_sha256",
@@ -1493,6 +1511,76 @@ def _validate_proxy_counter_deltas(value: Any) -> None:
         raise TopologyAttestationError("proxy counter delta total does not close")
 
 
+def _validate_proxy_counter_attribution(value: Any) -> dict[str, Any]:
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != _PROXY_COUNTER_ATTRIBUTION_FIELDS
+        or value.get("schema") != "txnmem-provenance-proxy-attribution-v1"
+        or value.get("boundary_values_equal") is not True
+        or value.get("route_rearmed") is not True
+    ):
+        raise TopologyAttestationError("proxy counter attribution is invalid")
+    qdrant_delta = _exact_positive_int(
+        value.get("qdrant_delta_bytes"), "Qdrant proxy delta"
+    )
+    neo4j_delta = _exact_positive_int(
+        value.get("neo4j_delta_bytes"), "Neo4j proxy delta"
+    )
+    toxiproxy_delta = _exact_positive_int(
+        value.get("toxiproxy_delta_bytes"), "Toxiproxy proxy delta"
+    )
+    if toxiproxy_delta != qdrant_delta + neo4j_delta:
+        raise TopologyAttestationError("proxy counter attribution total does not close")
+    return {
+        "schema": "txnmem-provenance-proxy-attribution-v1",
+        "baseline_a_sha256": _exact_hash(
+            value.get("baseline_a_sha256"), "proxy baseline A snapshot"
+        ),
+        "baseline_b_sha256": _exact_hash(
+            value.get("baseline_b_sha256"), "proxy baseline B snapshot"
+        ),
+        "final_sha256": _exact_hash(
+            value.get("final_sha256"), "proxy final snapshot"
+        ),
+        "boundary_values_equal": True,
+        "route_rearmed": True,
+        "qdrant_delta_bytes": qdrant_delta,
+        "neo4j_delta_bytes": neo4j_delta,
+        "toxiproxy_delta_bytes": toxiproxy_delta,
+        "component_deltas_sha256": _exact_hash(
+            value.get("component_deltas_sha256"), "proxy component deltas"
+        ),
+    }
+
+
+def _proxy_counter_route_identities(
+    snapshot: Mapping[str, Any],
+) -> list[tuple[Any, Any, Any, Any]]:
+    return [
+        (
+            row.get("role"),
+            row.get("proxy_name"),
+            row.get("listener"),
+            row.get("upstream"),
+        )
+        for row in snapshot["routes"]
+    ]
+
+
+def _raw_proxy_route_identities(
+    routes: list[Mapping[str, Any]],
+) -> list[tuple[Any, Any, Any, Any]]:
+    return [
+        (
+            row.get("role"),
+            row.get("proxy_name"),
+            row.get("listen"),
+            row.get("upstream"),
+        )
+        for row in routes
+    ]
+
+
 def _validate_shared(document: Mapping[str, Any], *, expected_schema: str) -> None:
     expected_fields = (
         _LAUNCH_FIELDS if expected_schema == RAW_LAUNCH_SCHEMA else _COMPLETION_FIELDS
@@ -1737,27 +1825,95 @@ def sanitize_topology_attestation(
     )
     if raw_routes_before != raw_routes_after:
         raise TopologyAttestationError("formal proxy route changed during measurement")
-    if any(
-        int(before[role]["proxy_counter_bytes"]) != 0
-        for role in ("qdrant", "neo4j", "toxiproxy")
-    ):
-        raise TopologyAttestationError("formal proxy counters were not isolated at launch")
+    try:
+        baseline_a = validate_proxy_counter_snapshot(
+            launch["proxy_counter_baseline_a"], expected_phase="baseline_a"
+        )
+        baseline_b = validate_proxy_counter_snapshot(
+            launch["proxy_counter_baseline_b"], expected_phase="baseline_b"
+        )
+        final = validate_proxy_counter_snapshot(
+            completion["proxy_counter_final"], expected_phase="final"
+        )
+        if proxy_counter_values(baseline_a) != proxy_counter_values(baseline_b):
+            raise TopologyAttestationError("proxy attribution boundary changed")
+        expected_route_identities = _raw_proxy_route_identities(raw_routes_before)
+        if any(
+            _proxy_counter_route_identities(snapshot) != expected_route_identities
+            for snapshot in (baseline_a, baseline_b, final)
+        ):
+            raise TopologyAttestationError(
+                "proxy counter routes changed across attribution boundaries"
+            )
+        if completion["proxy_counter_baseline_b_sha256"] != (
+            proxy_counter_payload_sha256(baseline_b)
+        ):
+            raise TopologyAttestationError(
+                "completion proxy baseline B is not launch-bound"
+            )
+        derived_deltas = derive_proxy_counter_deltas(baseline_b, final)
+    except ToxiproxyMetricsError as exc:
+        raise TopologyAttestationError("proxy counter evidence is invalid") from exc
+    if derived_deltas != completion["proxy_counter_deltas"]:
+        raise TopologyAttestationError(
+            "proxy counter deltas were not independently derived"
+        )
+    delta_rows = {row["role"]: row for row in derived_deltas["routes"]}
+    qdrant_delta = _exact_positive_int(
+        delta_rows["qdrant"]["total_bytes"], "Qdrant proxy delta"
+    )
+    neo4j_delta = _exact_positive_int(
+        delta_rows["neo4j"]["total_bytes"], "Neo4j proxy delta"
+    )
+    toxiproxy_delta = _exact_positive_int(
+        derived_deltas["toxiproxy_total_bytes"], "Toxiproxy proxy delta"
+    )
+    if toxiproxy_delta != qdrant_delta + neo4j_delta:
+        raise TopologyAttestationError("proxy counter delta total does not close")
+    baseline_rows = {row["role"]: row for row in baseline_b["routes"]}
+    final_rows = {row["role"]: row for row in final["routes"]}
+    counters_by_role = {
+        "client": (0, 0, 0),
+        "qdrant": (
+            baseline_rows["qdrant"]["total_bytes"],
+            final_rows["qdrant"]["total_bytes"],
+            qdrant_delta,
+        ),
+        "neo4j": (
+            baseline_rows["neo4j"]["total_bytes"],
+            final_rows["neo4j"]["total_bytes"],
+            neo4j_delta,
+        ),
+        "toxiproxy": (
+            baseline_b["toxiproxy_total_bytes"],
+            final["toxiproxy_total_bytes"],
+            toxiproxy_delta,
+        ),
+    }
+    proxy_counter_attribution = {
+        "schema": "txnmem-provenance-proxy-attribution-v1",
+        "baseline_a_sha256": baseline_a["snapshot_sha256"],
+        "baseline_b_sha256": baseline_b["snapshot_sha256"],
+        "final_sha256": final["snapshot_sha256"],
+        "boundary_values_equal": True,
+        "route_rearmed": True,
+        "qdrant_delta_bytes": qdrant_delta,
+        "neo4j_delta_bytes": neo4j_delta,
+        "toxiproxy_delta_bytes": toxiproxy_delta,
+        "component_deltas_sha256": hashlib.sha256(
+            _canonical_bytes(derived_deltas)
+        ).hexdigest(),
+    }
     sanitized_roles: list[dict[str, Any]] = []
     host_hashes: set[str] = set()
     listener_continuity = True
     host_continuity = True
-    proxy_deltas: dict[str, int] = {}
     for role in _ROLES:
         first = before[role]
         last = after[role]
         if first["service_version"] != last["service_version"]:
             raise TopologyAttestationError("service version changed during measurement")
-        counter_before = int(first["proxy_counter_bytes"])
-        counter_after = int(last["proxy_counter_bytes"])
-        if counter_after < counter_before:
-            raise TopologyAttestationError("proxy byte counter moved backwards")
-        delta = counter_after - counter_before
-        proxy_deltas[role] = delta
+        counter_before, counter_after, delta = counters_by_role[role]
         host_hashes.add(str(first["host_identity_sha256"]))
         host_hashes.add(str(last["host_identity_sha256"]))
         listener_continuity = listener_continuity and (
@@ -1784,9 +1940,7 @@ def sanitize_topology_attestation(
                 "proxy_counter_bytes_delta": delta,
             }
         )
-    proxy_route_observed = bool(
-        proxy_deltas.get("qdrant", 0) > 0 and proxy_deltas.get("neo4j", 0) > 0
-    )
+    proxy_route_observed = True
     source_continuity = all(
         launch.get(field) == completion.get(field)
         for field in (
@@ -1824,6 +1978,7 @@ def sanitize_topology_attestation(
             launch.get("backend_isolation")
         ),
         "proxy_routes": sanitized_proxy_routes,
+        "proxy_counter_attribution": proxy_counter_attribution,
         "authorization_nonce_sha256": nonce_hash,
         "launch_authorization_proof_sha256": launch_proof,
         "completion_authorization_proof_sha256": completion_proof,
@@ -1950,6 +2105,9 @@ def _validate_sanitized_shape(attestation: Mapping[str, Any]) -> None:
         candidate_seal.get("file_count"), "sanitized candidate files"
     )
     _validate_sanitized_proxy_routes(attestation.get("proxy_routes"))
+    proxy_counter_attribution = _validate_proxy_counter_attribution(
+        attestation.get("proxy_counter_attribution")
+    )
     candidate_id = attestation.get("candidate_bundle_id")
     if not isinstance(candidate_id, str) or not _CANDIDATE_ID.fullmatch(candidate_id):
         raise TopologyAttestationError("sanitized candidate identity is invalid")
@@ -1978,6 +2136,7 @@ def _validate_sanitized_shape(attestation: Mapping[str, Any]) -> None:
         raise TopologyAttestationError("sanitized roles are incomplete")
     seen_roles: set[str] = set()
     host_hashes: set[str] = set()
+    counters_by_role: dict[str, tuple[int, int, int]] = {}
     for row in roles:
         if not isinstance(row, Mapping) or set(row) != _SANITIZED_ROLE_FIELDS:
             raise TopologyAttestationError("sanitized role fields do not match schema")
@@ -2004,8 +2163,31 @@ def _validate_sanitized_shape(attestation: Mapping[str, Any]) -> None:
         )
         if after - before != delta:
             raise TopologyAttestationError("sanitized proxy counter delta mismatch")
+        counters_by_role[role_name] = (before, after, delta)
     if seen_roles != set(_ROLES) or len(host_hashes) != attestation.get("host_count"):
         raise TopologyAttestationError("sanitized role/host inventory mismatch")
+    if counters_by_role["client"] != (0, 0, 0):
+        raise TopologyAttestationError("sanitized client proxy counters are invalid")
+    if (
+        counters_by_role["qdrant"][2]
+        != proxy_counter_attribution["qdrant_delta_bytes"]
+        or counters_by_role["neo4j"][2]
+        != proxy_counter_attribution["neo4j_delta_bytes"]
+        or counters_by_role["toxiproxy"][2]
+        != proxy_counter_attribution["toxiproxy_delta_bytes"]
+    ):
+        raise TopologyAttestationError(
+            "sanitized role counters do not match proxy attribution"
+        )
+    for index, label in enumerate(("baseline", "final", "delta")):
+        if (
+            counters_by_role["qdrant"][index]
+            + counters_by_role["neo4j"][index]
+            != counters_by_role["toxiproxy"][index]
+        ):
+            raise TopologyAttestationError(
+                f"sanitized {label} proxy counter total does not close"
+            )
     without_hash = dict(attestation)
     supplied_hash = without_hash.pop("attestation_sha256")
     if supplied_hash != hashlib.sha256(_canonical_bytes(without_hash)).hexdigest():
