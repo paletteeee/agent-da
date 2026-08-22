@@ -382,3 +382,12 @@ the run. This closes source/runtime compatibility validation only; no formal
 controller, measurement candidate, or production performance claim is active
 until the nonce registration, protected installation, same-path smoke,
 attestation registration, and promotion sequence completes.
+
+Task 10 launch pre-authorization: a fresh 64-byte nonce was generated in a
+root-owned out-of-tree directory with exact 0700/0600 directory/file modes.
+Only its SHA-256 was bound in source to the SHA-256 of the versioned formal run
+ID. The source-registry test was observed RED before registration and GREEN
+afterward; 82/82 focused tests and 849/849 full-suite tests passed with four
+optional skips, claim audit passed 15/15, artifact audit found zero issues, and
+diff check passed. The nonce bytes remain remote-private and are not part of
+the repository or sanitized evidence.

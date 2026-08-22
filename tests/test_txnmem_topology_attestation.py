@@ -23,6 +23,14 @@ from txnmem_provenance_contract import FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS
 class TopologyAttestationTests(unittest.TestCase):
     AUTHORIZATION_NONCE = b"topology-fixture-authorization-nonce-0001"
 
+    def test_formal_20260822_run_nonce_is_pre_registered(self):
+        self.assertEqual(
+            FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN.get(
+                "68632b903c7feff62c1996b0b36d238eadaee0bfcdf00b6e60c65ff4d021e5ee"
+            ),
+            "520e62eb73f9293fe539c2a227e0297eed67969453c0d4213656e8319b3f40cd",
+        )
+
     def test_runtime_manifest_accepts_registered_system_python_3_10_12(self):
         launch, _completion = self._documents()
         runtime_manifest = copy.deepcopy(

@@ -390,7 +390,11 @@ FORMAL_PROVENANCE_TOPOLOGY_ATTESTATION_SHA256_BY_RUN: dict[str, str] = {}
 # Pre-run authorization registry.  Values are SHA-256 digests of random
 # out-of-tree nonces generated and retained by an independent controller.  The
 # nonce itself is never passed to the benchmark child or committed.
-FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN: dict[str, str] = {}
+FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN: dict[str, str] = {
+    # txnmem-provenance-formal-20260822-v1
+    "68632b903c7feff62c1996b0b36d238eadaee0bfcdf00b6e60c65ff4d021e5ee":
+        "520e62eb73f9293fe539c2a227e0297eed67969453c0d4213656e8319b3f40cd",
+}
 
 
 class TopologyAttestationError(ValueError):
