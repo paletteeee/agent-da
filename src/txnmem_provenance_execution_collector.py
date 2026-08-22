@@ -2878,11 +2878,16 @@ def _normalize_toxiproxy_proxy(value: Any, *, role: str) -> dict[str, Any]:
     spec = _FORMAL_PROXY_SPECS.get(role)
     if spec is None:
         raise CollectorError("formal proxy role is unsupported")
+    expected_listen = str(spec["listen"])
+    expected_port = expected_listen.rsplit(":", 1)[1]
+    observed_listen = value.get("listen") if isinstance(value, Mapping) else None
+    accepted_listens = {expected_listen, f"[::]:{expected_port}"}
     if (
         not isinstance(value, Mapping)
         or set(value) != {"name", "listen", "upstream", "enabled", "toxics"}
         or value.get("name") != spec["name"]
-        or value.get("listen") != spec["listen"]
+        or not isinstance(observed_listen, str)
+        or observed_listen not in accepted_listens
         or value.get("upstream") != spec["upstream"]
         or value.get("enabled") is not True
         or not isinstance(value.get("toxics"), list)

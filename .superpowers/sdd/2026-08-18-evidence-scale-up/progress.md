@@ -447,3 +447,19 @@ Docker-CLI skip and 852 full-suite tests with five optional skips; claim audit
 passed 15/15, artifact audit found zero issues, Python compilation and diff
 integrity passed. Formal evidence remains blocked until a live Docker-29 guard
 smoke proves all permitted data paths work and all direct paths fail.
+
+Task 10 Toxiproxy-2.5 route compatibility correction: the exact-commit remote
+preflight reached the live management API, where Toxiproxy canonicalized the
+requested IPv4 wildcard listen address as the equivalent IPv6 wildcard form
+`[::]:19000`. A regression test was observed RED before the correction and
+GREEN afterward. The normalizer now accepts only the two wildcard spellings at
+the source-registered port, emits the existing canonical IPv4 evidence value,
+and continues to reject loopback, concrete IPv6 addresses, wrong ports,
+upstreams, names, enabled state and active toxics. Local verification passed
+the 37-test collector module and all 852 repository tests with five optional
+environment skips; claim audit passed 15/15, artifact audit found zero issues,
+Python compilation and diff integrity passed. The subsequent independent
+scoped review found no
+Critical or Important issue and independently passed all 37 collector tests;
+the new exact-commit deployment and live production-path smoke remain, so no
+formal candidate or performance claim is active.
