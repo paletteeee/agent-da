@@ -40,6 +40,10 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from txnmem_formal_io import FormalStore, canonical_json_bytes
+from txnmem_toxiproxy_metrics import (
+    ToxiproxyMetricsError,
+    parse_toxiproxy_byte_counters,
+)
 from txnmem_provenance_contract import (
     FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS,
     FORMAL_RUNNER_GID,
@@ -2815,49 +2819,6 @@ def _collect_execution_evidence(
     if exit_code != 0:
         raise CollectorError("candidate measurement process failed")
     return launch_store.path(launch_name), completion_store.path(completion_name)
-
-
-def parse_toxiproxy_byte_counters(
-    metrics: str, *, qdrant_proxy: str, neo4j_proxy: str
-) -> dict[str, int]:
-    """Sum received/transmitted byte counters for both required proxy routes."""
-
-    if not isinstance(metrics, str):
-        raise CollectorError("Toxiproxy metrics must be text")
-    names = {"qdrant": qdrant_proxy, "neo4j": neo4j_proxy}
-    if any(
-        not isinstance(name, str) or not _SAFE_CONTAINER.fullmatch(name)
-        for name in names.values()
-    ):
-        raise CollectorError("proxy name is unsafe")
-    totals = {"qdrant": 0, "neo4j": 0}
-    matches = {"qdrant": 0, "neo4j": 0}
-    metric_pattern = re.compile(
-        r"^toxiproxy_proxy_(?:received|transmitted)_bytes_total"
-        r"\{(?P<labels>[^}]*)\}\s+(?P<value>[0-9]+(?:\.[0-9]+)?)\s*$"
-    )
-    proxy_pattern = re.compile(r'(?:^|,)proxy="([^"]+)"(?:,|$)')
-    for line in metrics.splitlines():
-        matched = metric_pattern.fullmatch(line.strip())
-        if matched is None:
-            continue
-        proxy_match = proxy_pattern.search(matched.group("labels"))
-        if proxy_match is None:
-            continue
-        raw_value = float(matched.group("value"))
-        if not math.isfinite(raw_value) or not raw_value.is_integer():
-            raise CollectorError("Toxiproxy byte counter is not an exact integer")
-        for role, name in names.items():
-            if proxy_match.group(1) == name:
-                totals[role] += int(raw_value)
-                matches[role] += 1
-    if any(matches[role] == 0 for role in totals):
-        raise CollectorError("Toxiproxy metrics omit a required proxy route")
-    return {
-        "qdrant": totals["qdrant"],
-        "neo4j": totals["neo4j"],
-        "toxiproxy": totals["qdrant"] + totals["neo4j"],
-    }
 
 
 _FORMAL_PROXY_SPECS = {

@@ -121,6 +121,14 @@ class RealBackendScriptTests(unittest.TestCase):
         self.assertNotIn("internal: true", ingress_network)
         self.assertIn("driver: bridge", ingress_network)
 
+    def test_compose_explicitly_enables_only_toxiproxy_proxy_metrics(self):
+        compose = (ROOT / "infra" / "real_backend" / "docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(compose.count("-proxy-metrics"), 1)
+        self.assertNotIn("-runtime-metrics", compose)
+        self.assertIn("-host=0.0.0.0", compose)
+
     @unittest.skipUnless(shutil.which("docker"), "Docker Compose CLI is optional")
     def test_compose_resolves_to_proxy_only_external_ingress(self):
         compose_path = ROOT / "infra" / "real_backend" / "docker-compose.yml"
@@ -157,6 +165,10 @@ class RealBackendScriptTests(unittest.TestCase):
         self.assertEqual(set(services["neo4j"]["networks"]), {"backend"})
         self.assertEqual(
             set(services["toxiproxy"]["networks"]), {"backend", "ingress"}
+        )
+        self.assertEqual(
+            services["toxiproxy"]["command"],
+            ["-host=0.0.0.0", "-proxy-metrics"],
         )
         self.assertNotIn("ports", services["qdrant"])
         self.assertNotIn("ports", services["neo4j"])

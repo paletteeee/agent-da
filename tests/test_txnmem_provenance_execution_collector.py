@@ -1960,25 +1960,6 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             finally:
                 private.chmod(0o700)
 
-    def test_toxiproxy_metrics_parser_requires_both_named_proxy_counters(self):
-        metrics = """
-# HELP toxiproxy_proxy_received_bytes_total bytes
-toxiproxy_proxy_received_bytes_total{proxy=\"txnmem-qdrant\",direction=\"downstream\"} 12
-toxiproxy_proxy_transmitted_bytes_total{proxy=\"txnmem-qdrant\",direction=\"upstream\"} 8
-toxiproxy_proxy_received_bytes_total{proxy=\"txnmem-neo4j\",direction=\"downstream\"} 30
-toxiproxy_proxy_transmitted_bytes_total{proxy=\"txnmem-neo4j\",direction=\"upstream\"} 10
-"""
-        counters = parse_toxiproxy_byte_counters(
-            metrics, qdrant_proxy="txnmem-qdrant", neo4j_proxy="txnmem-neo4j"
-        )
-        self.assertEqual(counters, {"qdrant": 20, "neo4j": 40, "toxiproxy": 60})
-        with self.assertRaises(CollectorError):
-            parse_toxiproxy_byte_counters(
-                metrics.replace("txnmem-neo4j", "different"),
-                qdrant_proxy="txnmem-qdrant",
-                neo4j_proxy="txnmem-neo4j",
-            )
-
     def test_toxiproxy_route_normalization_rejects_drift_and_active_toxics(self):
         route = collector_module._normalize_toxiproxy_proxy(
             {
