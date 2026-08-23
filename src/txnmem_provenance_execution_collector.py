@@ -1584,14 +1584,19 @@ def _nft_guard_batch(
         "comment \"txnmem-docker-proxy-ingress-allow\"\n"
         f"    meta skuid {runner_uid} reject comment \"txnmem-runner-deny\"\n"
         "    ip daddr 127.0.0.1 tcp dport 8474 "
-        "reject comment \"txnmem-management-deny\"\n"
+        "reject with tcp reset comment \"txnmem-management-deny\"\n"
         "    ip daddr 127.0.0.1 tcp dport { 19000, 19001 } "
-        "reject comment \"txnmem-attribution-deny\"\n"
+        "reject with tcp reset comment \"txnmem-attribution-deny\"\n"
+        f"    meta l4proto tcp ip daddr {{ {subnet_set} }} "
+        "reject with tcp reset comment \"txnmem-host-bridge-tcp-deny\"\n"
         f"    ip daddr {{ {subnet_set} }} "
         "reject comment \"txnmem-host-bridge-deny\"\n"
         "  }\n"
         "  chain forward {\n"
         "    type filter hook forward priority -150; policy accept;\n"
+        f"    iifname != {{ {interface_set} }} meta l4proto tcp "
+        f"ip daddr {{ {subnet_set} }} "
+        "reject with tcp reset comment \"txnmem-forward-bridge-tcp-deny\"\n"
         f"    iifname != {{ {interface_set} }} "
         f"ip daddr {{ {subnet_set} }} "
         "reject comment \"txnmem-forward-bridge-deny\"\n"
@@ -1676,7 +1681,9 @@ def _normalize_nft_snapshot(document: Any, *, table_name: str) -> dict[str, Any]
         "txnmem-attribution-deny",
         "txnmem-docker-proxy-ingress-allow",
         "txnmem-forward-bridge-deny",
+        "txnmem-forward-bridge-tcp-deny",
         "txnmem-host-bridge-deny",
+        "txnmem-host-bridge-tcp-deny",
         "txnmem-management-allow",
         "txnmem-management-deny",
         "txnmem-proxy-allow",

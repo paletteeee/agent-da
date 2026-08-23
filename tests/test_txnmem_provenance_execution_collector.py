@@ -253,7 +253,11 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         "family": "inet",
                         "table": table_name,
                         "chain": "forward"
-                        if comment == "txnmem-forward-bridge-deny"
+                        if comment
+                        in {
+                            "txnmem-forward-bridge-tcp-deny",
+                            "txnmem-forward-bridge-deny",
+                        }
                         else "output",
                         "comment": comment,
                     }
@@ -265,7 +269,9 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     "txnmem-runner-deny",
                     "txnmem-management-deny",
                     "txnmem-attribution-deny",
+                    "txnmem-host-bridge-tcp-deny",
                     "txnmem-host-bridge-deny",
+                    "txnmem-forward-bridge-tcp-deny",
                     "txnmem-forward-bridge-deny",
                 )
             ]
@@ -1252,24 +1258,67 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             "meta skuid 0 ip daddr { 172.19.0.0/16, 172.20.0.0/16 } accept",
             batch,
         )
-        self.assertIn("meta skuid 65532 reject", batch)
-        self.assertIn("tcp dport 8474 reject", batch)
-        self.assertIn(
-            "ip daddr 127.0.0.1 tcp dport { 19000, 19001 } reject",
-            batch,
+        runner_deny = (
+            'meta skuid 65532 reject comment "txnmem-runner-deny"'
         )
-        self.assertIn(
-            "ip daddr { 172.19.0.0/16, 172.20.0.0/16 } reject",
-            batch,
+        management_deny = (
+            "ip daddr 127.0.0.1 tcp dport 8474 reject with tcp reset "
+            'comment "txnmem-management-deny"'
+        )
+        attribution_deny = (
+            "ip daddr 127.0.0.1 tcp dport { 19000, 19001 } "
+            "reject with tcp reset "
+            'comment "txnmem-attribution-deny"'
+        )
+        host_tcp_deny = (
+            "meta l4proto tcp "
+            "ip daddr { 172.19.0.0/16, 172.20.0.0/16 } "
+            "reject with tcp reset "
+            'comment "txnmem-host-bridge-tcp-deny"'
+        )
+        host_fallback_deny = (
+            "ip daddr { 172.19.0.0/16, 172.20.0.0/16 } "
+            'reject comment "txnmem-host-bridge-deny"'
+        )
+        forward_prefix = (
+            'iifname != { "br-aaaaaaaaaaaa", "br-bbbbbbbbbbbb" } '
+        )
+        forward_tcp_deny = (
+            forward_prefix
+            + "meta l4proto tcp "
+            + "ip daddr { 172.19.0.0/16, 172.20.0.0/16 } "
+            + "reject with tcp reset "
+            + 'comment "txnmem-forward-bridge-tcp-deny"'
+        )
+        forward_fallback_deny = (
+            forward_prefix
+            + "ip daddr { 172.19.0.0/16, 172.20.0.0/16 } "
+            + 'reject comment "txnmem-forward-bridge-deny"'
+        )
+        for rule in (
+            runner_deny,
+            management_deny,
+            attribution_deny,
+            host_tcp_deny,
+            host_fallback_deny,
+            forward_tcp_deny,
+            forward_fallback_deny,
+        ):
+            self.assertIn(rule, batch)
+        self.assertLess(
+            batch.index(host_tcp_deny), batch.index(host_fallback_deny)
+        )
+        self.assertLess(
+            batch.index(forward_tcp_deny), batch.index(forward_fallback_deny)
         )
         self.assertIn("chain forward", batch)
         self.assertIn(
             'iifname != { "br-aaaaaaaaaaaa", "br-bbbbbbbbbbbb" }',
             batch,
         )
-        self.assertIn('comment "txnmem-forward-bridge-deny"', batch)
         self.assertEqual(batch.count(" accept comment"), 3)
-        self.assertEqual(batch.count(" reject comment"), 5)
+        self.assertEqual(batch.count(" reject with tcp reset comment"), 4)
+        self.assertEqual(batch.count(" reject comment"), 3)
 
     def test_nft_network_guard_rejects_nonexclusive_ingress_addresses(self):
         for name, address in (
@@ -1297,21 +1346,42 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         table_name = "txnmem_" + "5" * 16
         document = self._nft_snapshot_document(table_name)
 
-        normalized = collector_module._normalize_nft_snapshot(
-            document, table_name=table_name
-        )
-        self.assertEqual(len(normalized["nftables"]), 11)
+        try:
+            normalized = collector_module._normalize_nft_snapshot(
+                document, table_name=table_name
+            )
+        except CollectorError as exc:
+            self.fail(f"expected exact nft rule closure to normalize: {exc}")
+        self.assertEqual(len(normalized["nftables"]), 13)
 
-        missing = copy.deepcopy(document)
-        missing["nftables"] = [
-            item
-            for item in missing["nftables"]
-            if item.get("rule", {}).get("comment")
-            != "txnmem-docker-proxy-ingress-allow"
-        ]
+        for missing_comment in (
+            "txnmem-host-bridge-tcp-deny",
+            "txnmem-forward-bridge-tcp-deny",
+        ):
+            with self.subTest(missing_comment=missing_comment):
+                missing = copy.deepcopy(document)
+                missing["nftables"] = [
+                    item
+                    for item in missing["nftables"]
+                    if item.get("rule", {}).get("comment") != missing_comment
+                ]
+                with self.assertRaisesRegex(CollectorError, "closure"):
+                    collector_module._normalize_nft_snapshot(
+                        missing, table_name=table_name
+                    )
+
+        duplicate = copy.deepcopy(document)
+        duplicate["nftables"].append(
+            next(
+                copy.deepcopy(item)
+                for item in document["nftables"]
+                if item.get("rule", {}).get("comment")
+                == "txnmem-host-bridge-tcp-deny"
+            )
+        )
         with self.assertRaisesRegex(CollectorError, "closure"):
             collector_module._normalize_nft_snapshot(
-                missing, table_name=table_name
+                duplicate, table_name=table_name
             )
 
         extra = copy.deepcopy(document)
