@@ -607,6 +607,14 @@ class FormalSmokeProbeTests(unittest.TestCase):
             stderr=f"Error response from daemon: No such object: {ref}\n",
         )
         self.assertIs(smoke._docker_inspect_is_not_found(exact, ref), True)
+        exact_modern_cli = SimpleNamespace(
+            returncode=1,
+            stdout="[]\n",
+            stderr=f"error: no such object: {ref}\n",
+        )
+        self.assertIs(
+            smoke._docker_inspect_is_not_found(exact_modern_cli, ref), True
+        )
 
         malformed = (
             SimpleNamespace(
@@ -633,6 +641,16 @@ class FormalSmokeProbeTests(unittest.TestCase):
                 returncode=1,
                 stdout="[]\n",
                 stderr=f"Error response from daemon: No such object: {ref}\n",
+            ),
+            SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr=f"error: no such object: {ref}\n",
+            ),
+            SimpleNamespace(
+                returncode=1,
+                stdout="[]\n",
+                stderr=f"error: no such object: {ref}\nextra\n",
             ),
             SimpleNamespace(
                 returncode=1,

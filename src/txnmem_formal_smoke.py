@@ -700,12 +700,17 @@ class _ProbeContainerIdentity:
 def _docker_inspect_is_not_found(result: Any, container_ref: str) -> bool:
     if getattr(result, "returncode", None) != 1:
         return False
-    if getattr(result, "stdout", None) != "":
-        return False
+    stdout = getattr(result, "stdout", None)
     stderr = getattr(result, "stderr", "")
-    if not isinstance(stderr, str):
+    if not isinstance(stdout, str) or not isinstance(stderr, str):
         return False
-    return stderr == f"Error response from daemon: No such object: {container_ref}\n"
+    return (stdout, stderr) in {
+        (
+            "",
+            f"Error response from daemon: No such object: {container_ref}\n",
+        ),
+        ("[]\n", f"error: no such object: {container_ref}\n"),
+    }
 
 
 def _inspect_probe_container_identity(
