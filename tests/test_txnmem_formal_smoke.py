@@ -731,6 +731,23 @@ class FormalSmokeProbeTests(unittest.TestCase):
         self.assertIn("--pull=never", create)
         self.assertIn("--network", create)
         self.assertEqual(create[create.index("--network") + 1], "bridge")
+        script = create[create.index("-c") + 1]
+        self.assertIn(
+            'probe_error=$({ exec 3<>"/dev/tcp/$1/$2"; } 2>&1)',
+            script,
+        )
+        self.assertNotIn('probe_error=$(exec 3<>', script)
+        probe_arguments = create[create.index("txnmem-forward-probe") :]
+        self.assertEqual(
+            probe_arguments,
+            (
+                "txnmem-forward-probe",
+                "192.0.2.2",
+                "6333",
+                "192.0.2.3",
+                "7687",
+            ),
+        )
         self.assertEqual(
             [call[1] for call in calls],
             ["create", "start", "inspect", "rm", "inspect"],

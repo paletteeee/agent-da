@@ -1598,9 +1598,6 @@ def _nft_guard_batch(
         "  chain forward {\n"
         "    type filter hook forward priority -150; policy accept;\n"
         f"    iifname != {{ {interface_set} }} "
-        f"ip daddr {{ {subnet_set} }} tcp flags & rst == rst "
-        "accept comment \"txnmem-forward-bridge-reset-allow\"\n"
-        f"    iifname != {{ {interface_set} }} "
         "tcp dport { 6333, 6334, 7474, 7687, 8474, 19000, 19001 } "
         f"ip daddr {{ {subnet_set} }} "
         "reject with tcp reset comment \"txnmem-forward-bridge-tcp-deny\"\n"
@@ -1688,7 +1685,6 @@ def _normalize_nft_snapshot(document: Any, *, table_name: str) -> dict[str, Any]
         "txnmem-attribution-deny",
         "txnmem-docker-proxy-ingress-allow",
         "txnmem-forward-bridge-deny",
-        "txnmem-forward-bridge-reset-allow",
         "txnmem-forward-bridge-tcp-deny",
         "txnmem-host-bridge-deny",
         "txnmem-host-bridge-reset-allow",

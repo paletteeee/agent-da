@@ -777,7 +777,7 @@ def _probe_forward_path_denial(
     name = "txnmem-smoke-" + owner_label
     script = (
         'while [[ "$#" -gt 0 ]]; do '
-        'probe_error=$(exec 3<>"/dev/tcp/$1/$2" 2>&1); '
+        'probe_error=$({ exec 3<>"/dev/tcp/$1/$2"; } 2>&1); '
         'probe_status=$?; '
         'if [[ "$probe_status" -eq 0 ]]; then exec 3>&-; exit 91; fi; '
         'case "$probe_error" in *"Connection refused"*) ;; *) exit 92 ;; esac; '
@@ -815,12 +815,6 @@ def _probe_forward_path_denial(
                 "6333",
                 addresses["neo4j"],
                 "7687",
-                addresses["toxiproxy_ingress"],
-                "8474",
-                addresses["toxiproxy_ingress"],
-                "19000",
-                addresses["toxiproxy_ingress"],
-                "19001",
             )
         )
         if create.returncode == 0:

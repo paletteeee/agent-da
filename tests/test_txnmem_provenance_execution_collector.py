@@ -290,7 +290,6 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         "chain": "forward"
                         if comment
                         in {
-                            "txnmem-forward-bridge-reset-allow",
                             "txnmem-forward-bridge-tcp-deny",
                             "txnmem-forward-bridge-deny",
                         }
@@ -308,7 +307,6 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     "txnmem-host-bridge-reset-allow",
                     "txnmem-host-bridge-tcp-deny",
                     "txnmem-host-bridge-deny",
-                    "txnmem-forward-bridge-reset-allow",
                     "txnmem-forward-bridge-tcp-deny",
                     "txnmem-forward-bridge-deny",
                 )
@@ -1344,11 +1342,11 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             'iifname != { "br-aaaaaaaaaaaa", "br-bbbbbbbbbbbb" }',
             batch,
         )
-        self.assertEqual(batch.count(" accept comment"), 5)
+        self.assertEqual(batch.count(" accept comment"), 4)
         self.assertEqual(batch.count(" reject with tcp reset comment"), 4)
         self.assertEqual(batch.count(" reject comment"), 3)
 
-    def test_nft_network_guard_preserves_only_reset_packets_before_bridge_fallback(self):
+    def test_nft_network_guard_preserves_host_reset_before_bridge_fallback(self):
         batch = collector_module._nft_guard_batch(
             "txnmem_" + "5" * 16,
             runner_uid=65532,
@@ -1364,10 +1362,6 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             f"{subnets} tcp flags & rst == rst accept "
             'comment "txnmem-host-bridge-reset-allow"'
         )
-        forward_reset_allow = (
-            f"{interfaces} {subnets} tcp flags & rst == rst accept "
-            'comment "txnmem-forward-bridge-reset-allow"'
-        )
         host_tcp_deny, forward_tcp_deny = (
             self._assert_exact_bridge_tcp_reset_policy(batch)
         )
@@ -1380,12 +1374,11 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         )
 
         self.assertIn(host_reset_allow, batch)
-        self.assertIn(forward_reset_allow, batch)
-        self.assertEqual(batch.count("tcp flags & rst == rst accept"), 2)
+        self.assertNotIn("txnmem-forward-bridge-reset-allow", batch)
+        self.assertEqual(batch.count("tcp flags & rst == rst accept"), 1)
         self.assertLess(batch.index("txnmem-runner-deny"), batch.index(host_reset_allow))
         self.assertLess(batch.index(host_reset_allow), batch.index(host_tcp_deny))
         self.assertLess(batch.index(host_tcp_deny), batch.index(host_fallback_deny))
-        self.assertLess(batch.index(forward_reset_allow), batch.index(forward_tcp_deny))
         self.assertLess(
             batch.index(forward_tcp_deny), batch.index(forward_fallback_deny)
         )
@@ -1453,12 +1446,11 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             )
         except CollectorError as exc:
             self.fail(f"expected exact nft rule closure to normalize: {exc}")
-        self.assertEqual(len(normalized["nftables"]), 15)
+        self.assertEqual(len(normalized["nftables"]), 14)
 
         for missing_comment in (
             "txnmem-host-bridge-reset-allow",
             "txnmem-host-bridge-tcp-deny",
-            "txnmem-forward-bridge-reset-allow",
             "txnmem-forward-bridge-tcp-deny",
         ):
             with self.subTest(missing_comment=missing_comment):
