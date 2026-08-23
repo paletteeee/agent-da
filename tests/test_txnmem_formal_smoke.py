@@ -540,6 +540,65 @@ class FormalSmokeOrchestrationTests(unittest.TestCase):
 
 
 class FormalSmokeProbeTests(unittest.TestCase):
+    def test_root_health_accepts_exact_plain_text_toxiproxy_version(self):
+        with patch.object(
+            smoke, "_http_read", return_value=(b"2.5.0", 0.0)
+        ), patch.object(
+            smoke, "_run_one_neo4j_transaction", return_value=True
+        ):
+            self.assertEqual(
+                smoke._probe_root_health(
+                    qdrant_url="http://127.0.0.1:19000",
+                    neo4j_uri="bolt://127.0.0.1:19001",
+                    toxiproxy_url="http://127.0.0.1:8474",
+                    neo4j_password="test-only-placeholder",
+                    runtime_snapshot=Path("/unused"),
+                ),
+                "2.5.0",
+            )
+
+    def test_root_health_rejects_registered_toxiproxy_version_drift(self):
+        with patch.object(
+            smoke, "_http_read", return_value=(b"2.9.0", 0.0)
+        ), patch.object(
+            smoke, "_run_one_neo4j_transaction", return_value=True
+        ):
+            with self.assertRaisesRegex(
+                smoke.FormalSmokeError, "version drifted"
+            ):
+                smoke._probe_root_health(
+                    qdrant_url="http://127.0.0.1:19000",
+                    neo4j_uri="bolt://127.0.0.1:19001",
+                    toxiproxy_url="http://127.0.0.1:8474",
+                    neo4j_password="test-only-placeholder",
+                    runtime_snapshot=Path("/unused"),
+                )
+
+    def test_root_health_sanitizes_collector_version_parse_failures(self):
+        payload = b"2.5.0\n"
+        with patch.object(
+            smoke, "_http_read", return_value=(payload, 0.0)
+        ), patch.object(
+            smoke, "_run_one_neo4j_transaction", return_value=True
+        ):
+            with self.assertRaisesRegex(
+                smoke.FormalSmokeError,
+                "formal smoke Toxiproxy version response is invalid",
+            ) as raised:
+                smoke._probe_root_health(
+                    qdrant_url="http://127.0.0.1:19000",
+                    neo4j_uri="bolt://127.0.0.1:19001",
+                    toxiproxy_url="http://127.0.0.1:8474",
+                    neo4j_password="test-only-placeholder",
+                    runtime_snapshot=Path("/unused"),
+                )
+
+        self.assertIsInstance(
+            raised.exception.__cause__, collector.CollectorError
+        )
+        self.assertNotIn(repr(payload), str(raised.exception))
+        self.assertNotIn(repr(payload), str(raised.exception.__cause__))
+
     def test_docker_not_found_requires_exact_status_stdout_and_stderr(self):
         ref = "a" * 64
         exact = SimpleNamespace(

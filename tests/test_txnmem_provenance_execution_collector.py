@@ -89,6 +89,43 @@ def proxy_payload_sha256(snapshot):
 class ProvenanceExecutionCollectorTests(unittest.TestCase):
     AUTHORIZATION_NONCE = b"collector-fixture-authorization-nonce-0001"
 
+    def test_toxiproxy_version_parser_accepts_exact_registered_forms(self):
+        cases = (
+            (b"2.5.0", "2.5.0"),
+            (b'"2.5.0"', "2.5.0"),
+            (b'{"version":"2.5.0"}', "2.5.0"),
+        )
+        for payload, expected in cases:
+            with self.subTest(payload=payload):
+                self.assertEqual(
+                    collector_module._parse_toxiproxy_version(payload), expected
+                )
+
+    def test_toxiproxy_version_parser_rejects_nonexact_or_unregistered_payloads(self):
+        cases = (
+            b"2.5.0\n",
+            b" 2.5.0",
+            b"2.5.0 ",
+            b"v2.5.0",
+            b"2.5.0-release",
+            b"\xff",
+            b'"2.5.0" trailing',
+            b'{"version":',
+            b"not-a-version",
+            b"null",
+            b"250",
+            b"true",
+            b"[]",
+            b'{"version":250}',
+            b'{"status":"ok"}',
+            b"9.9.9",
+        )
+        for payload in cases:
+            with self.subTest(payload=payload):
+                with self.assertRaises(CollectorError) as raised:
+                    collector_module._parse_toxiproxy_version(payload)
+                self.assertNotIn(repr(payload), str(raised.exception))
+
     def test_repository_runtime_lock_accepts_protected_python_3_10_12(self):
         runtime_lock = (
             Path(__file__).resolve().parents[1]
@@ -2985,7 +3022,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         document, role="qdrant"
                     )
 
-    def test_topology_metrics_call_uses_strict_snapshot_parser(self):
+    def test_topology_snapshot_accepts_exact_plain_text_version_and_strict_metrics(self):
         routes = [
             {
                 "role": "qdrant",
@@ -3038,7 +3075,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 return metrics.encode("utf-8"), 0.0
             if url.endswith("/version"):
                 events.append("toxiproxy_health")
-                return b'"2.5.0"', 0.0
+                return b"2.5.0", 0.0
             self.assertTrue(url.endswith("/"))
             events.append("qdrant_health")
             return b'{"version":"1.15.4"}', 0.0

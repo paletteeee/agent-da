@@ -3522,7 +3522,18 @@ def _linux_disk_medium(
 
 
 def _parse_toxiproxy_version(payload: bytes) -> str:
-    parsed = _strict_json_bytes(payload, "Toxiproxy version response")
+    try:
+        text = payload.decode("utf-8")
+    except (AttributeError, UnicodeError) as exc:
+        raise CollectorError("Toxiproxy version response is malformed") from exc
+    try:
+        parsed = _strict_json_bytes(payload, "Toxiproxy version response")
+    except CollectorError as exc:
+        if is_registered_service_version("toxiproxy", text):
+            return text
+        raise CollectorError(
+            "observed Toxiproxy version is not registered"
+        ) from exc
     if isinstance(parsed, Mapping):
         version = parsed.get("version")
     else:
@@ -4358,19 +4369,12 @@ def collect_docker_topology_snapshot(
     toxiproxy_body, toxiproxy_rtt = _http_read(
         toxiproxy_url.rstrip("/") + "/version"
     )
-    text_version = toxiproxy_body.decode("utf-8").strip().strip('"')
-    parsed_version = _strict_json_bytes(
-        toxiproxy_body, "Toxiproxy version response"
-    )
-    if isinstance(parsed_version, Mapping):
-        text_version = str(parsed_version.get("version", text_version))
-    elif isinstance(parsed_version, str):
-        text_version = parsed_version
+    toxiproxy_version = _parse_toxiproxy_version(toxiproxy_body)
     versions = {
         "client": client_python_version,
         "qdrant": qdrant_version,
         "neo4j": neo4j_version,
-        "toxiproxy": text_version,
+        "toxiproxy": toxiproxy_version,
     }
     for role, version in versions.items():
         if not is_registered_service_version(role, version):

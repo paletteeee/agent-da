@@ -53,10 +53,10 @@ from txnmem_provenance_execution_collector import (
     _normalize_docker_backend_isolation,
     _normalize_docker_network_guard_profile,
     _observe_formal_child_process,
+    _parse_toxiproxy_version,
     _publish_formal_input_tree,
     _require_formal_uid_processes,
     _start_gated_candidate,
-    _strict_json_bytes,
     _validate_formal_controller_context,
     _validated_backend_ipv4_by_role,
     attest_committed_source,
@@ -579,14 +579,15 @@ def _probe_root_health(
     ):
         raise FormalSmokeError("formal smoke Neo4j health probe failed")
     body, _elapsed = _http_read(toxiproxy_url.rstrip("/") + "/version")
-    document = _strict_json_bytes(body, "formal smoke Toxiproxy version")
-    if isinstance(document, Mapping):
-        version = document.get("version")
-    else:
-        version = document
+    try:
+        version = _parse_toxiproxy_version(body)
+    except CollectorError as exc:
+        raise FormalSmokeError(
+            "formal smoke Toxiproxy version response is invalid"
+        ) from exc
     if version != _TOXIPROXY_VERSION:
         raise FormalSmokeError("formal smoke Toxiproxy version drifted")
-    return str(version)
+    return version
 
 
 def _probe_root_management(
