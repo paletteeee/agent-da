@@ -540,6 +540,54 @@ class FormalSmokeOrchestrationTests(unittest.TestCase):
 
 
 class FormalSmokeProbeTests(unittest.TestCase):
+    def test_docker_not_found_requires_exact_status_stdout_and_stderr(self):
+        ref = "a" * 64
+        exact = SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr=f"Error response from daemon: No such object: {ref}\n",
+        )
+        self.assertIs(smoke._docker_inspect_is_not_found(exact, ref), True)
+
+        malformed = (
+            SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr=f"prefix Error response from daemon: No such object: {ref}\n",
+            ),
+            SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr=f"Error response from daemon: No such object: {ref}\nextra\n",
+            ),
+            SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr=f"Error response from daemon: No such object: {ref} suffix\n",
+            ),
+            SimpleNamespace(
+                returncode=2,
+                stdout="",
+                stderr=f"Error response from daemon: No such object: {ref}\n",
+            ),
+            SimpleNamespace(
+                returncode=1,
+                stdout="[]\n",
+                stderr=f"Error response from daemon: No such object: {ref}\n",
+            ),
+            SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr=(
+                    "permission denied while checking "
+                    f"No such object: {ref}\n"
+                ),
+            ),
+        )
+        for result in malformed:
+            with self.subTest(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr):
+                self.assertIs(smoke._docker_inspect_is_not_found(result, ref), False)
+
     def test_host_denial_probe_accepts_only_connection_refused(self):
         with patch.object(
             smoke.socket,
@@ -588,7 +636,14 @@ class FormalSmokeProbeTests(unittest.TestCase):
                     return SimpleNamespace(
                         returncode=0,
                         stdout=json.dumps(
-                            [{"Config": {"Labels": {owner_label: owner_value}}}]
+                            [
+                                {
+                                    "Id": container_id,
+                                    "Config": {
+                                        "Labels": {owner_label: owner_value}
+                                    },
+                                }
+                            ]
                         ),
                         stderr="",
                     )
@@ -639,7 +694,12 @@ class FormalSmokeProbeTests(unittest.TestCase):
                 return SimpleNamespace(
                     returncode=0,
                     stdout=json.dumps(
-                        [{"Config": {"Labels": {owner_label: owner_value}}}]
+                        [
+                            {
+                                "Id": container_id,
+                                "Config": {"Labels": {owner_label: owner_value}},
+                            }
+                        ]
                     ),
                     stderr="",
                 )
@@ -684,7 +744,14 @@ class FormalSmokeProbeTests(unittest.TestCase):
                     return SimpleNamespace(
                         returncode=0,
                         stdout=json.dumps(
-                            [{"Config": {"Labels": {owner_label: owner_value}}}]
+                            [
+                                {
+                                    "Id": container_id,
+                                    "Config": {
+                                        "Labels": {owner_label: owner_value}
+                                    },
+                                }
+                            ]
                         ),
                         stderr="",
                     )
@@ -715,6 +782,7 @@ class FormalSmokeProbeTests(unittest.TestCase):
     def test_forward_probe_malformed_create_output_still_removes_by_name(self):
         calls: list[tuple[str, ...]] = []
         owner_label = "txnmem.formal-smoke.owner"
+        owned_id = "1" * 64
         inspect_count = 0
 
         def run(command, **_kwargs):
@@ -731,7 +799,14 @@ class FormalSmokeProbeTests(unittest.TestCase):
                     return SimpleNamespace(
                         returncode=0,
                         stdout=json.dumps(
-                            [{"Config": {"Labels": {owner_label: "1" * 24}}}]
+                            [
+                                {
+                                    "Id": owned_id,
+                                    "Config": {
+                                        "Labels": {owner_label: "1" * 24}
+                                    },
+                                }
+                            ]
                         ),
                         stderr="",
                     )
@@ -759,13 +834,12 @@ class FormalSmokeProbeTests(unittest.TestCase):
         self.assertEqual(
             [call[1] for call in calls], ["create", "inspect", "rm", "inspect"]
         )
-        self.assertEqual(
-            calls[2][1:4], ("rm", "--force", "txnmem-smoke-" + "1" * 24)
-        )
+        self.assertEqual(calls[2][1:4], ("rm", "--force", owned_id))
 
     def test_forward_probe_create_timeout_still_removes_by_name(self):
         calls: list[tuple[str, ...]] = []
         owner_label = "txnmem.formal-smoke.owner"
+        owned_id = "2" * 64
         inspect_count = 0
 
         def run(command, **_kwargs):
@@ -782,7 +856,14 @@ class FormalSmokeProbeTests(unittest.TestCase):
                     return SimpleNamespace(
                         returncode=0,
                         stdout=json.dumps(
-                            [{"Config": {"Labels": {owner_label: "2" * 24}}}]
+                            [
+                                {
+                                    "Id": owned_id,
+                                    "Config": {
+                                        "Labels": {owner_label: "2" * 24}
+                                    },
+                                }
+                            ]
                         ),
                         stderr="",
                     )
@@ -810,7 +891,7 @@ class FormalSmokeProbeTests(unittest.TestCase):
         self.assertEqual(
             [call[1] for call in calls], ["create", "inspect", "rm", "inspect"]
         )
-        self.assertEqual(calls[2][1:4], ("rm", "--force", "txnmem-smoke-" + "2" * 24))
+        self.assertEqual(calls[2][1:4], ("rm", "--force", owned_id))
 
     def test_forward_probe_inspect_permission_failure_is_cleanup_failure(self):
         container_id = "c" * 64
@@ -863,7 +944,14 @@ class FormalSmokeProbeTests(unittest.TestCase):
                     if operation == "inspect":
                         return SimpleNamespace(
                             returncode=0,
-                            stdout=json.dumps([{"Config": {"Labels": labels}}]),
+                            stdout=json.dumps(
+                                [
+                                    {
+                                        "Id": "3" * 64,
+                                        "Config": {"Labels": labels},
+                                    }
+                                ]
+                            ),
                             stderr="",
                         )
                     if operation == "rm":
@@ -886,7 +974,7 @@ class FormalSmokeProbeTests(unittest.TestCase):
                             image_id="sha256:" + "b" * 64,
                         )
 
-                self.assertNotIn("rm", [call[1] for call in calls])
+                self.assertNotIn("rm", [call[0] for call in calls])
 
     def test_forward_probe_owned_partial_create_cleanup_proves_exact_absence(self):
         owner_label = "txnmem.formal-smoke.owner"
@@ -895,6 +983,7 @@ class FormalSmokeProbeTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 token = "4" * 24
                 name = "txnmem-smoke-" + token
+                owned_id = "4" * 64
                 calls: list[tuple[str, ...]] = []
                 inspect_count = 0
 
@@ -916,14 +1005,21 @@ class FormalSmokeProbeTests(unittest.TestCase):
                             return SimpleNamespace(
                                 returncode=0,
                                 stdout=json.dumps(
-                                    [{"Config": {"Labels": {owner_label: token}}}]
+                                    [
+                                        {
+                                            "Id": owned_id,
+                                            "Config": {
+                                                "Labels": {owner_label: token}
+                                            },
+                                        }
+                                    ]
                                 ),
                                 stderr="",
                             )
                         return SimpleNamespace(
                             returncode=1,
                             stdout="",
-                            stderr=f"Error response from daemon: No such object: {name}\n",
+                            stderr=f"Error response from daemon: No such object: {command[2]}\n",
                         )
                     if operation == "rm":
                         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -946,7 +1042,140 @@ class FormalSmokeProbeTests(unittest.TestCase):
                 self.assertEqual(operations, ["create", "inspect", "rm", "inspect"])
                 self.assertIn("--label", calls[0])
                 self.assertIn(f"{owner_label}={token}", calls[0])
-                self.assertEqual(calls[2][1:4], ("rm", "--force", name))
+                self.assertEqual(calls[2][1:4], ("rm", "--force", owned_id))
+
+    def test_probe_cleanup_removes_bound_full_id_not_rebound_name(self):
+        token = "5" * 24
+        name = "txnmem-smoke-" + token
+        owned_id = "a" * 64
+        calls: list[tuple[str, ...]] = []
+
+        def run(command, **_kwargs):
+            docker_args = tuple(command[1:])
+            calls.append(docker_args)
+            if docker_args == ("inspect", name):
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(
+                        [
+                            {
+                                "Id": owned_id,
+                                "Config": {
+                                    "Labels": {
+                                        "txnmem.formal-smoke.owner": token
+                                    }
+                                },
+                            }
+                        ]
+                    ),
+                    stderr="",
+                )
+            if docker_args[0:2] == ("rm", "--force"):
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if docker_args == ("inspect", owned_id):
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr=(
+                        "Error response from daemon: "
+                        f"No such object: {owned_id}\n"
+                    ),
+                )
+            if docker_args == ("inspect", name):
+                raise AssertionError("absence must be proven by full id")
+            raise AssertionError(docker_args)
+
+        with patch.object(smoke.subprocess, "run", side_effect=run):
+            smoke._remove_probe_container(name, owner_label=token)
+
+        self.assertIn(("rm", "--force", owned_id), calls)
+        self.assertNotIn(("rm", "--force", name), calls)
+        self.assertEqual(calls[-1], ("inspect", owned_id))
+
+    def test_probe_cleanup_rejects_malformed_or_ambiguous_inspect_identity(self):
+        token = "6" * 24
+        name = "txnmem-smoke-" + token
+
+        malformed_documents = (
+            [{"Config": {"Labels": {"txnmem.formal-smoke.owner": token}}}],
+            [
+                {
+                    "Id": "not-a-full-container-id",
+                    "Config": {"Labels": {"txnmem.formal-smoke.owner": token}},
+                }
+            ],
+            [
+                {
+                    "Id": "a" * 64,
+                    "Config": {"Labels": {"txnmem.formal-smoke.owner": token}},
+                },
+                {
+                    "Id": "b" * 64,
+                    "Config": {"Labels": {"txnmem.formal-smoke.owner": token}},
+                },
+            ],
+        )
+        for document in malformed_documents:
+            with self.subTest(document=document):
+                calls: list[tuple[str, ...]] = []
+
+                def run(command, **_kwargs):
+                    docker_args = tuple(command[1:])
+                    calls.append(docker_args)
+                    if docker_args == ("inspect", name):
+                        return SimpleNamespace(
+                            returncode=0,
+                            stdout=json.dumps(document),
+                            stderr="",
+                        )
+                    if docker_args[0:2] == ("rm", "--force"):
+                        return SimpleNamespace(returncode=0, stdout="", stderr="")
+                    raise AssertionError(docker_args)
+
+                with patch.object(smoke.subprocess, "run", side_effect=run):
+                    with self.assertRaisesRegex(
+                        smoke.FormalSmokeError, "inspect|identity"
+                    ):
+                        smoke._remove_probe_container(name, owner_label=token)
+
+                self.assertNotIn("rm", [call[1] for call in calls])
+
+    def test_probe_partial_create_name_absence_does_not_remove(self):
+        token = "7" * 24
+        name = "txnmem-smoke-" + token
+        calls: list[tuple[str, ...]] = []
+
+        def run(command, **_kwargs):
+            docker_args = tuple(command[1:])
+            calls.append(docker_args)
+            if docker_args[0] == "create":
+                raise subprocess.TimeoutExpired(command, 15.0)
+            if docker_args == ("inspect", name):
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr=f"Error response from daemon: No such object: {name}\n",
+                )
+            if docker_args[0:2] == ("rm", "--force"):
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            raise AssertionError(docker_args)
+
+        with patch.object(smoke.secrets, "token_hex", return_value=token), patch.object(
+            smoke.subprocess, "run", side_effect=run
+        ):
+            with self.assertRaisesRegex(
+                smoke.FormalSmokeError, "container probe"
+            ):
+                smoke._probe_forward_path_denial(
+                    backend_ipv4_by_role={
+                        "qdrant": "192.0.2.2",
+                        "neo4j": "192.0.2.3",
+                        "toxiproxy_ingress": "198.51.100.2",
+                    },
+                    image_id="sha256:" + "b" * 64,
+                )
+
+        self.assertEqual([call[0] for call in calls], ["create", "inspect"])
 
     def test_workspace_partial_creation_cleanup_failure_is_not_silent(self):
         with tempfile.TemporaryDirectory() as tmp:

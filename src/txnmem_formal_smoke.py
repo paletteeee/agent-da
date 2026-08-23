@@ -690,20 +690,26 @@ def _validate_probe_container_ref(container_ref: str) -> None:
         raise FormalSmokeError("formal smoke container cleanup identity is invalid")
 
 
+@dataclass(frozen=True)
+class _ProbeContainerIdentity:
+    container_id: str
+    labels: dict[str, str]
+
+
 def _docker_inspect_is_not_found(result: Any, container_ref: str) -> bool:
+    if getattr(result, "returncode", None) != 1:
+        return False
+    if getattr(result, "stdout", None) != "":
+        return False
     stderr = getattr(result, "stderr", "")
     if not isinstance(stderr, str):
         return False
-    return getattr(result, "returncode", 0) != 0 and any(
-        marker in stderr
-        for marker in (
-            f"No such object: {container_ref}",
-            f"No such container: {container_ref}",
-        )
-    )
+    return stderr == f"Error response from daemon: No such object: {container_ref}\n"
 
 
-def _inspect_probe_container_labels(container_ref: str) -> dict[str, str] | None:
+def _inspect_probe_container_identity(
+    container_ref: str,
+) -> _ProbeContainerIdentity | None:
     _validate_probe_container_ref(container_ref)
     inspected = _docker_run(("inspect", container_ref))
     if inspected.returncode != 0:
@@ -719,18 +725,25 @@ def _inspect_probe_container_labels(container_ref: str) -> dict[str, str] | None
     details = document[0]
     if not isinstance(details, Mapping):
         raise FormalSmokeError("formal smoke container inspect failed")
+    container_id = details.get("Id")
+    if not isinstance(container_id, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", container_id
+    ):
+        raise FormalSmokeError("formal smoke container inspect identity is invalid")
     config = details.get("Config")
     if not isinstance(config, Mapping):
         raise FormalSmokeError("formal smoke container inspect failed")
     labels = config.get("Labels")
     if labels is None:
-        return {}
-    if not isinstance(labels, Mapping) or any(
+        normalized_labels: dict[str, str] = {}
+    elif not isinstance(labels, Mapping) or any(
         not isinstance(key, str) or not isinstance(value, str)
         for key, value in labels.items()
     ):
         raise FormalSmokeError("formal smoke container inspect failed")
-    return dict(labels)
+    else:
+        normalized_labels = dict(labels)
+    return _ProbeContainerIdentity(container_id=container_id, labels=normalized_labels)
 
 
 def _remove_probe_container(container_ref: str, *, owner_label: str) -> None:
@@ -739,15 +752,15 @@ def _remove_probe_container(container_ref: str, *, owner_label: str) -> None:
         r"[0-9a-f]{24}", owner_label
     ):
         raise FormalSmokeError("formal smoke container cleanup identity is invalid")
-    labels = _inspect_probe_container_labels(container_ref)
-    if labels is None:
+    identity = _inspect_probe_container_identity(container_ref)
+    if identity is None:
         return
-    if labels.get(_SMOKE_PROBE_OWNER_LABEL) != owner_label:
+    if identity.labels.get(_SMOKE_PROBE_OWNER_LABEL) != owner_label:
         raise FormalSmokeError("formal smoke container cleanup ownership mismatch")
-    removed = _docker_run(("rm", "--force", container_ref))
+    removed = _docker_run(("rm", "--force", identity.container_id))
     if removed.returncode != 0:
         raise FormalSmokeError("formal smoke container cleanup failed")
-    if _inspect_probe_container_labels(container_ref) is not None:
+    if _inspect_probe_container_identity(identity.container_id) is not None:
         raise FormalSmokeError("formal smoke container cleanup failed")
 
 

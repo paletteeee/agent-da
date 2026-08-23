@@ -1429,6 +1429,78 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertFalse(guard.active)
         self.assertIn(("delete", "table", "inet", table_name), calls)
 
+    def test_nft_guard_deactivate_inventory_error_preserves_active_for_retry(self):
+        table_name = "txnmem_" + "7" * 16
+        guard = collector_module._NftNetworkGuard(
+            table_name,
+            backend_ipv4_subnet="172.19.0.0/16",
+            ingress_ipv4_subnet="172.20.0.0/16",
+            backend_bridge_interface="br-aaaaaaaaaaaa",
+            ingress_bridge_interface="br-bbbbbbbbbbbb",
+            toxiproxy_ingress_ipv4="172.20.0.2",
+        )
+        guard.active = True
+        calls: list[tuple[str, ...]] = []
+        table_queries = 0
+
+        def table_names():
+            nonlocal table_queries
+            table_queries += 1
+            if table_queries == 1:
+                raise CollectorError("post-delete inventory unavailable")
+            return set()
+
+        def run(arguments, *, stdin=None, check=True):
+            calls.append(tuple(arguments))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch.object(guard, "_table_names", side_effect=table_names), patch.object(
+            guard, "_run", side_effect=run
+        ):
+            with self.assertRaisesRegex(CollectorError, "cleanup"):
+                guard.deactivate()
+            self.assertTrue(guard.active)
+            guard.deactivate()
+
+        self.assertFalse(guard.active)
+        self.assertEqual(calls, [("delete", "table", "inet", table_name)] * 2)
+
+    def test_nft_guard_deactivate_residual_table_preserves_active_for_retry(self):
+        table_name = "txnmem_" + "8" * 16
+        guard = collector_module._NftNetworkGuard(
+            table_name,
+            backend_ipv4_subnet="172.19.0.0/16",
+            ingress_ipv4_subnet="172.20.0.0/16",
+            backend_bridge_interface="br-aaaaaaaaaaaa",
+            ingress_bridge_interface="br-bbbbbbbbbbbb",
+            toxiproxy_ingress_ipv4="172.20.0.2",
+        )
+        guard.active = True
+        calls: list[tuple[str, ...]] = []
+        table_queries = 0
+
+        def table_names():
+            nonlocal table_queries
+            table_queries += 1
+            if table_queries == 1:
+                return {table_name}
+            return set()
+
+        def run(arguments, *, stdin=None, check=True):
+            calls.append(tuple(arguments))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch.object(guard, "_table_names", side_effect=table_names), patch.object(
+            guard, "_run", side_effect=run
+        ):
+            with self.assertRaisesRegex(CollectorError, "cleanup"):
+                guard.deactivate()
+            self.assertTrue(guard.active)
+            guard.deactivate()
+
+        self.assertFalse(guard.active)
+        self.assertEqual(calls, [("delete", "table", "inet", table_name)] * 2)
+
     def test_topology_snapshot_v3_binds_structured_counters_and_backend_isolation_v3(self):
         roles, routes, counters, isolation = collector_module._snapshot_components(
             self._snapshot()

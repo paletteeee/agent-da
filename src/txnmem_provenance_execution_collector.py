@@ -1866,9 +1866,15 @@ class _NftNetworkGuard:
         if not self.active:
             return
         self._run(("delete", "table", "inet", self.table_name))
-        self.active = False
-        if self.table_name in self._table_names():
+        try:
+            table_present = self.table_name in self._table_names()
+        except BaseException as exc:
+            self.active = True
+            raise CollectorError("formal nftables guard cleanup failed") from exc
+        if table_present:
+            self.active = True
             raise CollectorError("formal nftables guard cleanup failed")
+        self.active = False
 
 
 def _require_derived_candidate_root(
