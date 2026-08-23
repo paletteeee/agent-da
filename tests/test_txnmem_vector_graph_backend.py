@@ -9,8 +9,10 @@ import hashlib
 import json
 import threading
 import tempfile
+import time
 from pathlib import Path
 from types import ModuleType
+from urllib.error import HTTPError
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +25,10 @@ from txnmem_vector_graph_backend import (
     _QdrantHTTPClient,
     _qdrant_point_id,
 )
+from txnmem_backend import InstrumentedMemoryBackend
 from txnmem_provenance_performance import (
+    ProvenancePerformanceError,
+    _preload_graph,
     build_layered_dag,
     canonical_graph_sha256,
     run_matrix_cell,
@@ -1532,6 +1537,16 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             if method == "PUT" and path == "/collections/txnmem_memory":
                 created = True
                 return {}
+            if method == "GET" and path == "/collections/txnmem_memory":
+                return {
+                    "result": {
+                        "config": {
+                            "params": {
+                                "vectors": {"size": 32, "distance": "Cosine"}
+                            }
+                        }
+                    }
+                }
             if path.endswith("/points/scroll"):
                 if not created:
                     raise RuntimeError("collection missing")
@@ -1545,6 +1560,124 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             {"read_ok": True, "rows": []},
         )
 
+    def test_qdrant_collection_readiness_is_cached_after_exact_conflict(self):
+        client = _QdrantHTTPClient("http://qdrant")
+        requests = []
+
+        def request(method, path, payload=None):
+            requests.append((method, path, payload))
+            if method == "PUT":
+                raise HTTPError(
+                    "http://qdrant/collections/txnmem_memory",
+                    409,
+                    "Conflict",
+                    None,
+                    None,
+                )
+            return {
+                "result": {
+                    "config": {
+                        "params": {
+                            "vectors": {"size": 32, "distance": "Cosine"}
+                        }
+                    }
+                }
+            }
+
+        client._request = request
+
+        client._ensure_collection()
+        client._ensure_collection()
+
+        self.assertEqual(
+            [(method, path) for method, path, _payload in requests],
+            [
+                ("PUT", "/collections/txnmem_memory"),
+                ("GET", "/collections/txnmem_memory"),
+            ],
+        )
+
+    def test_qdrant_collection_readiness_rejects_lookalike_409_text(self):
+        client = _QdrantHTTPClient("http://qdrant")
+        attempts = 0
+
+        def request(_method, _path, _payload=None):
+            nonlocal attempts
+            attempts += 1
+            raise RuntimeError("unrelated diagnostic token 409")
+
+        client._request = request
+
+        for _ in range(2):
+            with self.assertRaisesRegex(RuntimeError, "409"):
+                client._ensure_collection()
+
+        self.assertEqual(attempts, 2)
+
+    def test_qdrant_collection_readiness_rejects_wrong_existing_vector_config(self):
+        client = _QdrantHTTPClient("http://qdrant")
+        requests = []
+
+        def request(method, path, payload=None):
+            requests.append((method, path, payload))
+            if method == "PUT":
+                raise HTTPError(path, 409, "Conflict", None, None)
+            return {
+                "result": {
+                    "config": {
+                        "params": {
+                            "vectors": {"size": 64, "distance": "Dot"}
+                        }
+                    }
+                }
+            }
+
+        client._request = request
+
+        for _ in range(2):
+            with self.assertRaises(VectorGraphBackendError):
+                client._ensure_collection()
+
+        self.assertEqual(
+            [(method, path) for method, path, _payload in requests],
+            [
+                ("PUT", "/collections/txnmem_memory"),
+                ("GET", "/collections/txnmem_memory"),
+                ("PUT", "/collections/txnmem_memory"),
+                ("GET", "/collections/txnmem_memory"),
+            ],
+        )
+
+    def test_qdrant_collection_readiness_does_not_cache_unknown_failure(self):
+        client = _QdrantHTTPClient("http://qdrant")
+        attempts = 0
+
+        def request(_method, _path, _payload=None):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise TimeoutError("collection probe timed out")
+            if attempts == 2:
+                return {}
+            return {
+                "result": {
+                    "config": {
+                        "params": {
+                            "vectors": {"size": 32, "distance": "Cosine"}
+                        }
+                    }
+                }
+            }
+
+        client._request = request
+
+        with self.assertRaises(TimeoutError):
+            client._ensure_collection()
+        client._ensure_collection()
+        client._ensure_collection()
+
+        self.assertEqual(attempts, 3)
+
     def test_qdrant_namespace_scan_paginates_beyond_one_thousand_rows(self):
         client = _QdrantHTTPClient("http://qdrant")
         offsets = []
@@ -1552,6 +1685,16 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         def request(method, path, payload=None):
             if method == "PUT":
                 return {}
+            if method == "GET":
+                return {
+                    "result": {
+                        "config": {
+                            "params": {
+                                "vectors": {"size": 32, "distance": "Cosine"}
+                            }
+                        }
+                    }
+                }
             self.assertTrue(path.endswith("/points/scroll"))
             offset = payload.get("offset")
             offsets.append(offset)
@@ -1662,6 +1805,280 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertEqual(self.backend.memories["m0"]["status"], "superseded")
         self.assertTrue(any(edge[3] == "DERIVED_FROM" for edge in self.neo4j.edges))
         self.assertTrue(any(edge[3] == "SUPERSEDES" for edge in self.neo4j.edges))
+
+    def test_preload_record_repairs_one_verified_partial_projection(self):
+        class OneShotProjectionFailure(_FakeQdrant):
+            def __init__(self):
+                super().__init__()
+                self.fail_once = True
+
+            def upsert(self, namespace, point_id, vector, payload, idempotency_key):
+                if self.fail_once:
+                    self.fail_once = False
+                    self.upsert_count += 1
+                    raise ConnectionResetError("projection response boundary failed")
+                return super().upsert(
+                    namespace, point_id, vector, payload, idempotency_key
+                )
+
+        qdrant = OneShotProjectionFailure()
+        neo4j = _FakeNeo4j()
+        backend = VectorGraphMemoryBackend(
+            "preload-repair",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=qdrant,
+            neo4j_client=neo4j,
+            max_retries=0,
+        )
+
+        recovery_count = backend.preload_provenance_record(
+            "m0", [], value="provenance:m0"
+        )
+
+        self.assertEqual(recovery_count, 1)
+        self.assertEqual(qdrant.retrieve("preload-repair", "m0")["memory_id"], "m0")
+        self.assertEqual(
+            neo4j.retrieve_memory("preload-repair", "m0")["status"], "active"
+        )
+        self.assertEqual(backend.metrics()["retry_count"], 0)
+        self.assertEqual(backend.metrics()["rollback_count"], 1)
+
+    def test_preload_record_never_repairs_a_deterministic_conflict(self):
+        backend = VectorGraphMemoryBackend(
+            "preload-conflict",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=self.qdrant,
+            neo4j_client=self.neo4j,
+            max_retries=0,
+        )
+        backend.write("m0", value="first")
+        conflicting_backend = VectorGraphMemoryBackend(
+            "preload-conflict",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=self.qdrant,
+            neo4j_client=self.neo4j,
+            max_retries=0,
+        )
+
+        with self.assertRaises(VectorGraphBackendError):
+            conflicting_backend.preload_provenance_record(
+                "m0", [], value="different"
+            )
+
+        self.assertEqual(self.qdrant.upsert_count, 1)
+
+    def test_preload_record_fails_closed_when_partial_state_is_unreadable(self):
+        class UnreadableProjection(_FakeQdrant):
+            def __init__(self):
+                super().__init__()
+                self.upsert_attempts = 0
+
+            def upsert(self, namespace, point_id, vector, payload, idempotency_key):
+                self.upsert_attempts += 1
+                raise ConnectionResetError("projection boundary failed")
+
+            def retrieve(self, namespace, point_id):
+                raise TimeoutError("projection readback unavailable")
+
+        qdrant = UnreadableProjection()
+        neo4j = _FakeNeo4j()
+        backend = VectorGraphMemoryBackend(
+            "preload-unknown",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=qdrant,
+            neo4j_client=neo4j,
+            max_retries=0,
+        )
+
+        with self.assertRaises(VectorGraphBackendError):
+            backend.preload_provenance_record(
+                "m0", [], value="provenance:m0"
+            )
+
+        self.assertEqual(qdrant.upsert_attempts, 0)
+        self.assertIsNotNone(neo4j.retrieve_memory("preload-unknown", "m0"))
+
+    def test_preload_record_repairs_one_verified_lost_success_response(self):
+        class OneShotLostResponse(_FakeQdrant):
+            def __init__(self):
+                super().__init__()
+                self.lose_once = True
+
+            def upsert(self, namespace, point_id, vector, payload, idempotency_key):
+                super().upsert(
+                    namespace, point_id, vector, payload, idempotency_key
+                )
+                if self.lose_once:
+                    self.lose_once = False
+                    raise ConnectionResetError("projection success response lost")
+
+        qdrant = OneShotLostResponse()
+        backend = VectorGraphMemoryBackend(
+            "preload-lost-response",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=qdrant,
+            neo4j_client=_FakeNeo4j(),
+            max_retries=0,
+        )
+
+        recovered = backend.preload_provenance_record(
+            "m0", [], value="provenance:m0"
+        )
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(qdrant.upsert_count, 1)
+        self.assertEqual(backend.metrics()["retry_count"], 0)
+
+    def test_preload_record_repairs_one_verified_readback_boundary_failure(self):
+        class OneShotVerifyFailure(_FakeQdrant):
+            def __init__(self):
+                super().__init__()
+                self.retrieve_count = 0
+
+            def retrieve(self, namespace, point_id):
+                self.retrieve_count += 1
+                if self.retrieve_count == 2:
+                    raise TimeoutError("projection verification unavailable")
+                return super().retrieve(namespace, point_id)
+
+        qdrant = OneShotVerifyFailure()
+        backend = VectorGraphMemoryBackend(
+            "preload-verify-repair",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=qdrant,
+            neo4j_client=_FakeNeo4j(),
+            max_retries=0,
+        )
+
+        recovered = backend.preload_provenance_record(
+            "m0", [], value="provenance:m0"
+        )
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(qdrant.upsert_count, 1)
+        self.assertEqual(backend.metrics()["retry_count"], 0)
+
+    def test_preload_record_fails_closed_when_one_repair_is_exhausted(self):
+        class RepeatedProjectionFailure(_FakeQdrant):
+            def __init__(self):
+                super().__init__()
+                self.upsert_attempts = 0
+
+            def upsert(self, namespace, point_id, vector, payload, idempotency_key):
+                self.upsert_attempts += 1
+                raise ConnectionResetError("projection boundary remains unavailable")
+
+        qdrant = RepeatedProjectionFailure()
+        backend = VectorGraphMemoryBackend(
+            "preload-budget",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=qdrant,
+            neo4j_client=_FakeNeo4j(),
+            max_retries=0,
+        )
+
+        with self.assertRaises(VectorGraphBackendError):
+            backend.preload_provenance_record(
+                "m0", [], value="provenance:m0"
+            )
+
+        self.assertEqual(qdrant.upsert_attempts, 2)
+
+    def test_parallel_and_sequential_preload_close_the_same_canonical_graph(self):
+        graph = build_layered_dag(100, seed=17)
+        parallel = VectorGraphMemoryBackend(
+            "preload-parallel",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=_FakeQdrant(),
+            neo4j_client=_FakeNeo4j(),
+            max_retries=0,
+        )
+        sequential = VectorGraphMemoryBackend(
+            "preload-sequential",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=_FakeQdrant(),
+            neo4j_client=_FakeNeo4j(),
+            max_retries=0,
+        )
+        sequential.supports_parallel_provenance_preload = False
+
+        parallel_metadata = _preload_graph(parallel, graph)
+        sequential_metadata = _preload_graph(sequential, graph)
+
+        self.assertEqual(
+            parallel.provenance_inventory(limit=101),
+            sequential.provenance_inventory(limit=101),
+        )
+        self.assertEqual(parallel_metadata["setup_repair_count"], 0)
+        self.assertEqual(sequential_metadata["setup_repair_count"], 0)
+
+    def test_parallel_preload_serializes_local_event_and_state_bookkeeping(self):
+        graph = build_layered_dag(100, seed=17)
+        backend = VectorGraphMemoryBackend(
+            "preload-thread-state",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=_FakeQdrant(),
+            neo4j_client=_FakeNeo4j(),
+            max_retries=0,
+        )
+
+        def deliberately_racy_event(self, kind, **fields):
+            step = len(self.events) + 1
+            time.sleep(0.002)
+            event = {
+                "event_id": f"backend_event_{step:04d}",
+                "kind": kind,
+                "step": step,
+                "agent_id": fields.get("agent_id", "agent_1"),
+            }
+            event.update(
+                {key: value for key, value in fields.items() if value is not None}
+            )
+            self.events.append(event)
+            return event
+
+        with patch.object(
+            InstrumentedMemoryBackend,
+            "_event",
+            deliberately_racy_event,
+        ):
+            _preload_graph(backend, graph)
+
+        self.assertEqual(len(backend.memories), graph.node_count)
+        self.assertEqual(len(backend.events), graph.node_count)
+        self.assertEqual(
+            [event["step"] for event in backend.events],
+            list(range(1, graph.node_count + 1)),
+        )
+        self.assertEqual(
+            len({event["event_id"] for event in backend.events}),
+            graph.node_count,
+        )
+        metrics = backend.metrics()
+        self.assertEqual(
+            metrics["request_count"],
+            sum(metrics["operation_counts"].values()),
+        )
 
     def test_search_handles_structured_memory_values_without_hashing_them(self):
         self.backend.write("m-structured", value={"tool": "search", "result": [1, 2]})
@@ -1841,6 +2258,100 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertEqual(len(namespaces), 1)
         self.assertTrue(report["formal_eligible"])
         self.assertTrue(report["repetitions"][0]["state_closed"])
+
+    def test_preload_repair_is_accounted_without_changing_measured_retry_zero(self):
+        class OneShotProjectionFailure(_FakeQdrant):
+            def __init__(self):
+                super().__init__()
+                self.fail_once = True
+                self.failure_lock = threading.Lock()
+
+            def upsert(self, namespace, point_id, vector, payload, idempotency_key):
+                with self.failure_lock:
+                    if self.fail_once:
+                        self.fail_once = False
+                        raise ConnectionResetError("preload projection boundary failed")
+                return super().upsert(
+                    namespace, point_id, vector, payload, idempotency_key
+                )
+
+        def factory(namespace):
+            return VectorGraphMemoryBackend(
+                namespace,
+                "http://qdrant",
+                "bolt://neo4j",
+                ("neo4j", "fixture"),
+                qdrant_client=OneShotProjectionFailure(),
+                neo4j_client=_FakeNeo4j(),
+                max_retries=0,
+            )
+
+        report = run_matrix_cell(
+            factory,
+            build_layered_dag(10, seed=17),
+            concurrency=2,
+            repetitions=1,
+            operations_per_type=1,
+            run_id="preload-repair-accounting",
+            formal=True,
+            environment_attestation={
+                "schema": "txnmem-provenance-environment-v1",
+                "isolation_verified": True,
+                "co_tenant_load_detected": False,
+                "source": "host-observation-v1",
+                "cpu_logical_count": 8,
+                "memory_total_bytes": 16 * 1024**3,
+                "disk_medium": "ssd",
+                "toxiproxy_version": "2.9.0",
+            },
+        )
+
+        repetition = report["repetitions"][0]
+        self.assertEqual(repetition["setup_repair_count"], 1)
+        self.assertEqual(repetition["retry_count"], 0)
+        self.assertEqual(repetition["retry_scope"], "measured_operations_only")
+        self.assertTrue(repetition["eligible_for_formal"])
+
+    def test_measured_failure_is_never_absorbed_by_setup_repair(self):
+        class MeasuredProjectionFailure(_FakeQdrant):
+            def upsert(self, namespace, point_id, vector, payload, idempotency_key):
+                if str(payload.get("memory_id", "")).startswith("perf-derived-"):
+                    raise ConnectionResetError("measured projection boundary failed")
+                return super().upsert(
+                    namespace, point_id, vector, payload, idempotency_key
+                )
+
+        def factory(namespace):
+            return VectorGraphMemoryBackend(
+                namespace,
+                "http://qdrant",
+                "bolt://neo4j",
+                ("neo4j", "fixture"),
+                qdrant_client=MeasuredProjectionFailure(),
+                neo4j_client=_FakeNeo4j(),
+                max_retries=0,
+            )
+
+        with self.assertRaises(ProvenancePerformanceError):
+            run_matrix_cell(
+                factory,
+                build_layered_dag(10, seed=17),
+                concurrency=1,
+                repetitions=1,
+                operations_per_type=1,
+                run_id="measured-failure-no-setup-repair",
+                formal=True,
+                environment_attestation={
+                    "schema": "txnmem-provenance-environment-v1",
+                    "isolation_verified": True,
+                    "co_tenant_load_detected": False,
+                    "source": "host-observation-v1",
+                    "cpu_logical_count": 8,
+                    "memory_total_bytes": 16 * 1024**3,
+                    "disk_medium": "ssd",
+                    "toxiproxy_version": "2.9.0",
+                },
+            )
 
     def test_proxy_requester_observes_semantic_write_and_commit_boundaries(self):
         observed = []

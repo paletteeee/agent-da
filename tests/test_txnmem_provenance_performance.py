@@ -2,6 +2,8 @@ import copy
 import hashlib
 import json
 import math
+import threading
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -74,6 +76,8 @@ def _proxy_snapshot(phase, *, qdrant, neo4j):
 
 
 class _FixtureBackend(InstrumentedMemoryBackend):
+    supports_parallel_provenance_preload = True
+
     def __init__(
         self,
         namespace,
@@ -94,6 +98,16 @@ class _FixtureBackend(InstrumentedMemoryBackend):
         self.max_retries = 0
         self.neo4j_max_transaction_retry_time_seconds = 0.0
         self._retry_count = 0
+        self._preload_lock = threading.Lock()
+
+    def preload_provenance_record(self, memory_id, source_ids, *, value):
+        with self._preload_lock:
+            time.sleep(0.001)
+            if source_ids:
+                self.derive(memory_id, source_ids, value=value)
+            else:
+                self.write(memory_id, value=value)
+        return 0
 
     def healthcheck(self):
         return {
@@ -327,6 +341,186 @@ class ProvenanceMatrixTests(unittest.TestCase):
                 all(not forbidden.intersection(sample) for sample in report["samples"])
             )
 
+    def test_real_backend_preload_uses_fixed_layered_parallelism_and_accounts_repair(self):
+        class ParallelPreloadBackend:
+            supports_parallel_provenance_preload = True
+
+            def __init__(self):
+                self.completed = set()
+                self.lock = threading.Lock()
+                self.active = 0
+                self.peak = 0
+
+            def preload_provenance_record(self, memory_id, source_ids, *, value):
+                with self.lock:
+                    if not set(source_ids).issubset(self.completed):
+                        raise AssertionError("preload crossed a DAG layer boundary")
+                    self.active += 1
+                    self.peak = max(self.peak, self.active)
+                time.sleep(0.002)
+                with self.lock:
+                    self.completed.add(memory_id)
+                    self.active -= 1
+                return int(memory_id.endswith("000029"))
+
+        graph = build_layered_dag(100, seed=17)
+        backend = ParallelPreloadBackend()
+
+        metadata = provenance_module._preload_graph(backend, graph)
+
+        self.assertEqual(backend.completed, set(graph.nodes))
+        self.assertGreater(backend.peak, 1)
+        self.assertEqual(
+            metadata["preload_worker_limit"],
+            provenance_module.PROVENANCE_PRELOAD_WORKERS,
+        )
+        self.assertGreater(metadata["preload_observed_peak_concurrency"], 1)
+        self.assertLessEqual(
+            metadata["preload_observed_peak_concurrency"],
+            metadata["preload_worker_limit"],
+        )
+        self.assertEqual(metadata["setup_repair_limit_per_record"], 1)
+        self.assertEqual(metadata["setup_repair_count"], 1)
+
+    def test_vector_graph_factory_reuses_clients_and_closes_shared_driver_once(self):
+        class SharedNeo4j:
+            def __init__(self):
+                self.close_count = 0
+
+            def close(self):
+                self.close_count += 1
+
+        shared_qdrant = object()
+        shared_neo4j = SharedNeo4j()
+        constructed = []
+
+        class Backend:
+            def __init__(self, *args, **kwargs):
+                constructed.append((args, kwargs))
+
+        environment = _FixtureBackend("factory").performance_environment()
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient",
+            return_value=shared_qdrant,
+        ) as qdrant_constructor, patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient",
+            return_value=shared_neo4j,
+        ) as neo4j_constructor, patch(
+            "txnmem_vector_graph_backend.VectorGraphMemoryBackend", Backend
+        ):
+            factory = provenance_module.make_vector_graph_backend_factory(
+                qdrant_url="http://qdrant",
+                neo4j_uri="bolt://neo4j",
+                neo4j_auth=("neo4j", "password"),
+                environment_attestation=environment,
+                request_timeout_seconds=30.0,
+            )
+            factory("namespace-a")
+            factory("namespace-b")
+            factory.close()
+            factory.close()
+
+        qdrant_constructor.assert_called_once()
+        neo4j_constructor.assert_called_once()
+        self.assertEqual(len(constructed), 2)
+        self.assertTrue(
+            all(call[1]["qdrant_client"] is shared_qdrant for call in constructed)
+        )
+        self.assertTrue(
+            all(call[1]["neo4j_client"] is shared_neo4j for call in constructed)
+        )
+        self.assertTrue(all(call[1]["close_clients"] is False for call in constructed))
+        self.assertEqual(shared_neo4j.close_count, 1)
+
+    def test_vector_graph_factory_close_failure_remains_retryable(self):
+        class SharedNeo4j:
+            def __init__(self):
+                self.close_count = 0
+
+            def close(self):
+                self.close_count += 1
+                if self.close_count == 1:
+                    raise RuntimeError("close boundary failed")
+
+        shared_neo4j = SharedNeo4j()
+        environment = _FixtureBackend("factory-close").performance_environment()
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient",
+            return_value=object(),
+        ), patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient",
+            return_value=shared_neo4j,
+        ):
+            factory = provenance_module.make_vector_graph_backend_factory(
+                qdrant_url="http://qdrant",
+                neo4j_uri="bolt://neo4j",
+                neo4j_auth=("neo4j", "password"),
+                environment_attestation=environment,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "close boundary"):
+            factory.close()
+        factory.close()
+
+        self.assertEqual(shared_neo4j.close_count, 2)
+
+    def test_vector_graph_factory_does_not_close_during_backend_construction(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        class SharedNeo4j:
+            def __init__(self):
+                self.close_count = 0
+
+            def close(self):
+                self.close_count += 1
+
+        shared_neo4j = SharedNeo4j()
+
+        class BlockingBackend:
+            def __init__(self, *args, **kwargs):
+                entered.set()
+                if not release.wait(timeout=5):
+                    raise AssertionError("backend construction release timed out")
+
+        environment = _FixtureBackend("factory-race").performance_environment()
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient",
+            return_value=object(),
+        ), patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient",
+            return_value=shared_neo4j,
+        ), patch(
+            "txnmem_vector_graph_backend.VectorGraphMemoryBackend",
+            BlockingBackend,
+        ):
+            factory = provenance_module.make_vector_graph_backend_factory(
+                qdrant_url="http://qdrant",
+                neo4j_uri="bolt://neo4j",
+                neo4j_auth=("neo4j", "password"),
+                environment_attestation=environment,
+            )
+            created = []
+            creator = threading.Thread(
+                target=lambda: created.append(factory("namespace"))
+            )
+            closer = threading.Thread(target=factory.close)
+            creator.start()
+            self.assertTrue(entered.wait(timeout=5))
+            closer.start()
+            try:
+                time.sleep(0.02)
+                self.assertEqual(shared_neo4j.close_count, 0)
+            finally:
+                release.set()
+                creator.join(timeout=5)
+                closer.join(timeout=5)
+
+        self.assertFalse(creator.is_alive())
+        self.assertFalse(closer.is_alive())
+        self.assertEqual(len(created), 1)
+        self.assertEqual(shared_neo4j.close_count, 1)
+
     def test_formal_run_fails_closed_on_health_isolation_or_inventory(self):
         graph = build_layered_dag(10, seed=17)
         cases = {
@@ -484,7 +678,7 @@ class ProvenanceAggregationTests(unittest.TestCase):
     @staticmethod
     def _small_formal_config(concurrency_levels=None):
         return {
-            "schema": "txnmem-provenance-performance-v1",
+            "schema": "txnmem-provenance-performance-v2",
             "graph_node_counts": [10],
             "concurrency_levels": list(concurrency_levels or [1]),
             "repetitions": 2,
@@ -1041,6 +1235,13 @@ class ProvenanceAggregationTests(unittest.TestCase):
                 "eligible_for_formal": True,
                 "graph_node_count": 10,
                 "concurrency": 1,
+                "preload_method": "sequential-semantic-v1",
+                "preload_worker_limit": 1,
+                "preload_observed_peak_concurrency": 1,
+                "setup_repair_limit_per_record": 0,
+                "setup_repair_count": 0,
+                "setup_elapsed_ns": 1,
+                "retry_scope": "measured_operations_only",
             },
             {
                 "cell_id": "n10-c1",
@@ -1052,6 +1253,13 @@ class ProvenanceAggregationTests(unittest.TestCase):
                 "eligible_for_formal": True,
                 "graph_node_count": 10,
                 "concurrency": 1,
+                "preload_method": "sequential-semantic-v1",
+                "preload_worker_limit": 1,
+                "preload_observed_peak_concurrency": 1,
+                "setup_repair_limit_per_record": 0,
+                "setup_repair_count": 0,
+                "setup_elapsed_ns": 1,
+                "retry_scope": "measured_operations_only",
             },
         ]
         return {"samples": samples, "repetitions": repetitions}
@@ -1138,6 +1346,90 @@ class ProvenanceAggregationTests(unittest.TestCase):
 
         with self.assertRaises(ProvenancePerformanceError):
             self._aggregate_small_formal([report])
+
+    def test_formal_aggregate_rejects_invalid_preload_accounting(self):
+        mutations = (
+            ("preload_worker_limit", True),
+            ("preload_worker_limit", 0),
+            (
+                "preload_worker_limit",
+                provenance_module.PROVENANCE_PRELOAD_WORKERS + 1,
+            ),
+            ("preload_observed_peak_concurrency", 0),
+            ("setup_repair_limit_per_record", 2),
+            ("setup_repair_count", True),
+            ("setup_repair_count", -1),
+            ("setup_repair_count", 11),
+            ("setup_elapsed_ns", 0),
+            ("retry_scope", "all_operations"),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field, value=value):
+                report = self._valid_formal_report()
+                report["repetitions"][0][field] = value
+                with self.assertRaises(ProvenancePerformanceError):
+                    self._aggregate_small_formal([report])
+
+    def test_formal_aggregate_requires_exact_layered_preload_contract(self):
+        mutations = (
+            {
+                "preload_method": "sequential-semantic-v1",
+                "preload_worker_limit": 1,
+                "preload_observed_peak_concurrency": 1,
+                "setup_repair_limit_per_record": 0,
+                "setup_repair_count": 0,
+            },
+            {"setup_repair_limit_per_record": 0, "setup_repair_count": 0},
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                report = self._valid_formal_report()
+                report["repetitions"][0].update(mutation)
+                with self.assertRaises(ProvenancePerformanceError):
+                    self._aggregate_small_formal([report])
+
+        report = self._valid_formal_report()
+        current_limit = report["repetitions"][0]["preload_worker_limit"]
+        self.assertGreater(current_limit, 1)
+        report["repetitions"][0]["preload_worker_limit"] = current_limit - 1
+        report["repetitions"][0]["preload_observed_peak_concurrency"] = min(
+            report["repetitions"][0]["preload_observed_peak_concurrency"],
+            current_limit - 1,
+        )
+        with self.assertRaises(ProvenancePerformanceError):
+            self._aggregate_small_formal([report])
+
+    def test_diagnostic_aggregate_validates_v2_setup_accounting_exactly(self):
+        mutations = (
+            ("preload_method", "unregistered"),
+            ("preload_worker_limit", True),
+            ("preload_observed_peak_concurrency", -1),
+            ("setup_repair_limit_per_record", True),
+            ("setup_repair_count", -1),
+            ("setup_elapsed_ns", True),
+            ("retry_scope", "all_operations"),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field, value=value):
+                report = self._valid_formal_report()
+                report["repetitions"][0][field] = value
+                with self.assertRaises(ProvenancePerformanceError):
+                    aggregate_matrix(
+                        report,
+                        bootstrap_repetitions=100,
+                        seed=17,
+                        require_formal=False,
+                    )
+
+        report = self._valid_formal_report()
+        report["repetitions"][0].pop("setup_elapsed_ns")
+        with self.assertRaises(ProvenancePerformanceError):
+            aggregate_matrix(
+                report,
+                bootstrap_repetitions=100,
+                seed=17,
+                require_formal=False,
+            )
 
     def test_formal_aggregate_rejects_bool_integer_and_negative_accounting(self):
         report = {

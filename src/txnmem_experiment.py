@@ -1362,24 +1362,31 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
             cell_reports = []
-            for cell in cells:
-                graph = build_layered_dag(
-                    int(cell["graph_node_count"]), int(cell["graph_seed"])
-                )
-                cell_reports.append(
-                    run_matrix_cell(
-                        backend_factory,
-                        graph,
-                        concurrency=int(cell["concurrency"]),
-                        repetitions=int(cell["repetitions"]),
-                        operations_per_type=int(cell["operations_per_type"]),
-                        run_id=args.run_id,
-                        formal=args.formal,
-                        environment_attestation=(
-                            environment if args.backend == "vector-graph" else None
-                        ),
+            try:
+                for cell in cells:
+                    graph = build_layered_dag(
+                        int(cell["graph_node_count"]), int(cell["graph_seed"])
                     )
-                )
+                    cell_reports.append(
+                        run_matrix_cell(
+                            backend_factory,
+                            graph,
+                            concurrency=int(cell["concurrency"]),
+                            repetitions=int(cell["repetitions"]),
+                            operations_per_type=int(cell["operations_per_type"]),
+                            run_id=args.run_id,
+                            formal=args.formal,
+                            environment_attestation=(
+                                environment
+                                if args.backend == "vector-graph"
+                                else None
+                            ),
+                        )
+                    )
+            finally:
+                close_backend_factory = getattr(backend_factory, "close", None)
+                if callable(close_backend_factory):
+                    close_backend_factory()
             operation_samples = [
                 row for report in cell_reports for row in report["samples"]
             ]

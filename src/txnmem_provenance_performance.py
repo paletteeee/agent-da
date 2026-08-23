@@ -32,8 +32,11 @@ from txnmem_provenance_contract import is_registered_service_version
 
 
 GRAPH_SCHEMA = "txnmem-provenance-dag-v1"
-MATRIX_SCHEMA = "txnmem-provenance-performance-v1"
+MATRIX_SCHEMA = "txnmem-provenance-performance-v2"
 OPERATION_TYPES = ("read", "search", "derive", "invalidate_repair")
+PROVENANCE_PRELOAD_WORKERS = 8
+PROVENANCE_PRELOAD_REPAIR_LIMIT_PER_RECORD = 1
+PRELOAD_RETRY_SCOPE = "measured_operations_only"
 _SAFE_ERROR_CLASS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 ENVIRONMENT_SCHEMA = "txnmem-provenance-environment-v1"
@@ -637,10 +640,77 @@ def _namespace(run_id: str, graph: GraphSpec, concurrency: int, repetition: int)
     return f"txnmem-prov-{digest[:24]}"
 
 
-def _preload_graph(backend: Any, graph: GraphSpec) -> None:
+def _preload_graph(backend: Any, graph: GraphSpec) -> dict[str, int]:
     parents: dict[str, list[str]] = {node: [] for node in graph.nodes}
     for source, target in graph.edges:
         parents[target].append(source)
+    parallel_preload = getattr(
+        backend, "supports_parallel_provenance_preload", False
+    )
+    preload_record = getattr(backend, "preload_provenance_record", None)
+    if parallel_preload is True:
+        if not callable(preload_record):
+            raise ProvenancePerformanceError(
+                "parallel preload capability has no record loader"
+            )
+        nodes_by_layer: dict[int, list[str]] = {}
+        for node, layer in zip(graph.nodes, graph.layers):
+            nodes_by_layer.setdefault(int(layer), []).append(node)
+        worker_count = min(
+            PROVENANCE_PRELOAD_WORKERS,
+            max(len(nodes) for nodes in nodes_by_layer.values()),
+        )
+        recovery_count = 0
+        active_count = 0
+        observed_peak = 0
+        activity_lock = threading.Lock()
+
+        def load_record(node: str, source_ids: list[str]) -> int:
+            nonlocal active_count, observed_peak
+            with activity_lock:
+                active_count += 1
+                observed_peak = max(observed_peak, active_count)
+            try:
+                return preload_record(
+                    node,
+                    source_ids,
+                    value=f"provenance:{node}",
+                )
+            finally:
+                with activity_lock:
+                    active_count -= 1
+
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            for layer in sorted(nodes_by_layer):
+                futures = []
+                for node in nodes_by_layer[layer]:
+                    source_ids = sorted(parents[node])
+                    futures.append(
+                        executor.submit(
+                            load_record,
+                            node,
+                            source_ids,
+                        )
+                    )
+                for future in futures:
+                    recovered = future.result()
+                    if (
+                        type(recovered) is not int
+                        or recovered < 0
+                        or recovered > 1
+                    ):
+                        raise ProvenancePerformanceError(
+                            "preload recovery accounting is invalid"
+                        )
+                    recovery_count += recovered
+        return {
+            "preload_worker_limit": worker_count,
+            "preload_observed_peak_concurrency": observed_peak,
+            "setup_repair_limit_per_record": (
+                PROVENANCE_PRELOAD_REPAIR_LIMIT_PER_RECORD
+            ),
+            "setup_repair_count": recovery_count,
+        }
     for node in graph.nodes:
         source_ids = sorted(parents[node])
         value = f"provenance:{node}"
@@ -648,6 +718,12 @@ def _preload_graph(backend: Any, graph: GraphSpec) -> None:
             backend.derive(node, source_ids, value=value)
         else:
             backend.write(node, value=value)
+    return {
+        "preload_worker_limit": 1,
+        "preload_observed_peak_concurrency": 1,
+        "setup_repair_limit_per_record": 0,
+        "setup_repair_count": 0,
+    }
 
 
 def _operation_plan(
@@ -815,7 +891,11 @@ def run_matrix_cell(
                     "formal run requires a new empty namespace"
                 )
 
-            _preload_graph(backend, graph)
+            setup_started_ns = time.perf_counter_ns()
+            preload_metadata = _preload_graph(backend, graph)
+            setup_elapsed_ns = max(
+                1, time.perf_counter_ns() - setup_started_ns
+            )
             preload_inventory = _inventory(backend, limit=graph.node_count + 1)
             preload_closed = _inventory_matches(
                 preload_inventory,
@@ -982,6 +1062,30 @@ def run_matrix_cell(
                 "observed_peak_concurrency": observed_peak_concurrency,
                 "elapsed_ns": elapsed_ns,
                 "namespace_initially_empty": namespace_empty,
+                "preload_method": (
+                    "layered-canonical-write-v1"
+                    if getattr(
+                        backend,
+                        "supports_parallel_provenance_preload",
+                        False,
+                    )
+                    is True
+                    else "sequential-semantic-v1"
+                ),
+                "preload_worker_limit": preload_metadata[
+                    "preload_worker_limit"
+                ],
+                "preload_observed_peak_concurrency": preload_metadata[
+                    "preload_observed_peak_concurrency"
+                ],
+                "setup_repair_limit_per_record": preload_metadata[
+                    "setup_repair_limit_per_record"
+                ],
+                "setup_repair_count": preload_metadata[
+                    "setup_repair_count"
+                ],
+                "setup_elapsed_ns": setup_elapsed_ns,
+                "retry_scope": PRELOAD_RETRY_SCOPE,
                 "preload_closed": preload_closed,
                 "state_closed": state_closed,
                 "state_classification": final_inventory["classification"],
@@ -1073,6 +1177,88 @@ def _exact_int_field(
     if expected is not None and value != expected:
         raise ProvenancePerformanceError(f"{field} mismatch")
     return value
+
+
+def _validate_preload_accounting(
+    row: Mapping[str, Any],
+    *,
+    graph: GraphSpec | None = None,
+    require_layered: bool = False,
+) -> None:
+    method = row.get("preload_method")
+    if method not in {
+        "layered-canonical-write-v1",
+        "sequential-semantic-v1",
+    }:
+        raise ProvenancePerformanceError("preload method is not registered")
+    worker_limit = _exact_int_field(
+        row, "preload_worker_limit", minimum=1
+    )
+    if worker_limit > PROVENANCE_PRELOAD_WORKERS:
+        raise ProvenancePerformanceError(
+            "preload worker limit exceeds the registered maximum"
+        )
+    observed_peak = _exact_int_field(
+        row, "preload_observed_peak_concurrency", minimum=1
+    )
+    if observed_peak > worker_limit:
+        raise ProvenancePerformanceError(
+            "preload peak exceeds the worker limit"
+        )
+    repair_limit = _exact_int_field(
+        row, "setup_repair_limit_per_record", minimum=0
+    )
+    repair_count = _exact_int_field(
+        row, "setup_repair_count", minimum=0
+    )
+    node_count = (
+        graph.node_count
+        if graph is not None
+        else _exact_int_field(row, "graph_node_count", minimum=1)
+    )
+    if repair_count > node_count * repair_limit:
+        raise ProvenancePerformanceError(
+            "setup repair count exceeds the registered budget"
+        )
+    _exact_int_field(row, "setup_elapsed_ns", minimum=1)
+    if row.get("retry_scope") != PRELOAD_RETRY_SCOPE:
+        raise ProvenancePerformanceError("retry scope is invalid")
+
+    if method == "sequential-semantic-v1":
+        if require_layered:
+            raise ProvenancePerformanceError(
+                "formal preload must use the layered canonical method"
+            )
+        if (
+            worker_limit != 1
+            or observed_peak != 1
+            or repair_limit != 0
+            or repair_count != 0
+        ):
+            raise ProvenancePerformanceError(
+                "sequential preload accounting is inconsistent"
+            )
+        return
+
+    if repair_limit != PROVENANCE_PRELOAD_REPAIR_LIMIT_PER_RECORD:
+        raise ProvenancePerformanceError(
+            "layered preload repair limit is inconsistent"
+        )
+    if graph is None:
+        return
+    layer_widths = Counter(graph.layers)
+    expected_worker_limit = min(
+        PROVENANCE_PRELOAD_WORKERS,
+        max(layer_widths.values(), default=1),
+    )
+    if worker_limit != expected_worker_limit:
+        raise ProvenancePerformanceError(
+            "layered preload worker limit does not match the graph"
+        )
+    if expected_worker_limit > 1 and observed_peak < 2:
+        raise ProvenancePerformanceError(
+            "layered preload did not demonstrate parallel execution"
+        )
 
 
 def _formal_environment_valid(environment: Any) -> bool:
@@ -1181,6 +1367,13 @@ def _validate_formal_reports(
         "observed_peak_concurrency",
         "elapsed_ns",
         "namespace_initially_empty",
+        "preload_method",
+        "preload_worker_limit",
+        "preload_observed_peak_concurrency",
+        "setup_repair_limit_per_record",
+        "setup_repair_count",
+        "setup_elapsed_ns",
+        "retry_scope",
         "preload_closed",
         "state_closed",
         "state_classification",
@@ -1337,6 +1530,11 @@ def _validate_formal_reports(
                     "observed concurrency does not match the requested level"
                 )
             _exact_int_field(repetition_row, "elapsed_ns", minimum=1)
+            _validate_preload_accounting(
+                repetition_row,
+                graph=graph,
+                require_layered=True,
+            )
             for field in (
                 "namespace_initially_empty",
                 "preload_closed",
@@ -1579,6 +1777,7 @@ def aggregate_matrix(
             ("concurrency", 1),
         ):
             _exact_int_field(row, field, minimum=minimum)
+        _validate_preload_accounting(row)
         key = (cell_id, repetition)
         if key in seen_repetitions:
             raise ProvenancePerformanceError("duplicate repetition identity")
@@ -1686,6 +1885,10 @@ def aggregate_matrix(
             error = str(row.get("error_class", "BackendError"))
             error_counts[error] = error_counts.get(error, 0) + 1
         first = cell_repetitions[0]
+        retry_scopes = {
+            str(row.get("retry_scope", "unspecified"))
+            for row in cell_repetitions
+        }
         rows.append(
             {
                 "cell_id": cell_id,
@@ -1695,6 +1898,19 @@ def aggregate_matrix(
                 "successful_operation_count": len(successful),
                 "failed_operation_count": len(failed),
                 "retry_count": sum(int(row["retry_count"]) for row in cell_repetitions),
+                "retry_scope": (
+                    next(iter(retry_scopes))
+                    if len(retry_scopes) == 1
+                    else "mixed"
+                ),
+                "setup_repair_count": sum(
+                    int(row.get("setup_repair_count", 0))
+                    for row in cell_repetitions
+                ),
+                "setup_elapsed_ns": sum(
+                    int(row.get("setup_elapsed_ns", 0))
+                    for row in cell_repetitions
+                ),
                 "p50_latency_ns": _percentile(latencies, 0.50),
                 "p95_latency_ns": _percentile(latencies, 0.95),
                 "p99_latency_ns": _percentile(latencies, 0.99),
@@ -1728,6 +1944,66 @@ def aggregate_matrix(
     return result
 
 
+class _ReusableVectorGraphBackendFactory:
+    def __init__(
+        self,
+        *,
+        qdrant_url: str,
+        neo4j_uri: str,
+        neo4j_auth: Sequence[str],
+        environment_attestation: Mapping[str, Any],
+        request_timeout_seconds: float,
+    ):
+        from txnmem_vector_graph_backend import (
+            _Neo4jBoltClient,
+            _QdrantHTTPClient,
+        )
+
+        self.qdrant_url = str(qdrant_url)
+        self.neo4j_uri = str(neo4j_uri)
+        self.neo4j_auth = tuple(str(item) for item in neo4j_auth)
+        self.request_timeout_seconds = float(request_timeout_seconds)
+        self.attestation = copy.deepcopy(dict(environment_attestation))
+        self.qdrant = _QdrantHTTPClient(
+            self.qdrant_url,
+            timeout_seconds=self.request_timeout_seconds,
+        )
+        self.neo4j = _Neo4jBoltClient(self.neo4j_uri, self.neo4j_auth)
+        self._closed = False
+        self._close_lock = threading.Lock()
+
+    def __call__(self, namespace: str) -> Any:
+        from txnmem_vector_graph_backend import VectorGraphMemoryBackend
+
+        with self._close_lock:
+            if self._closed:
+                raise RuntimeError("vector graph backend factory is closed")
+            backend = VectorGraphMemoryBackend(
+                namespace,
+                self.qdrant_url,
+                self.neo4j_uri,
+                self.neo4j_auth,
+                qdrant_client=self.qdrant,
+                neo4j_client=self.neo4j,
+                max_retries=0,
+                request_timeout_seconds=self.request_timeout_seconds,
+                close_clients=False,
+            )
+            backend.performance_environment = lambda: copy.deepcopy(
+                self.attestation
+            )
+            return backend
+
+    def close(self) -> None:
+        with self._close_lock:
+            if self._closed:
+                return
+            close = getattr(self.neo4j, "close", None)
+            if callable(close):
+                close()
+            self._closed = True
+
+
 def make_vector_graph_backend_factory(
     *,
     qdrant_url: str,
@@ -1735,7 +2011,7 @@ def make_vector_graph_backend_factory(
     neo4j_auth: Sequence[str],
     environment_attestation: Mapping[str, Any],
     request_timeout_seconds: float = 30.0,
-) -> Callable[[str], Any]:
+) -> _ReusableVectorGraphBackendFactory:
     """Create a zero-retry real-backend factory for unbiased operation timing."""
 
     if (
@@ -1746,23 +2022,13 @@ def make_vector_graph_backend_factory(
     ):
         raise ValueError("request_timeout_seconds must be positive and finite")
     validate_environment_attestation(environment_attestation)
-    attestation = copy.deepcopy(dict(environment_attestation))
-
-    def factory(namespace: str) -> Any:
-        from txnmem_vector_graph_backend import VectorGraphMemoryBackend
-
-        backend = VectorGraphMemoryBackend(
-            namespace,
-            qdrant_url,
-            neo4j_uri,
-            neo4j_auth,
-            max_retries=0,
-            request_timeout_seconds=request_timeout_seconds,
-        )
-        backend.performance_environment = lambda: copy.deepcopy(attestation)
-        return backend
-
-    return factory
+    return _ReusableVectorGraphBackendFactory(
+        qdrant_url=qdrant_url,
+        neo4j_uri=neo4j_uri,
+        neo4j_auth=neo4j_auth,
+        environment_attestation=environment_attestation,
+        request_timeout_seconds=float(request_timeout_seconds),
+    )
 
 
 def provenance_bundle_id(

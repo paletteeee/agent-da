@@ -172,7 +172,7 @@ class TxnMemCliOutputTests(unittest.TestCase):
             config.write_text(
                 json.dumps(
                     {
-                        "schema": "txnmem-provenance-performance-v1",
+                        "schema": "txnmem-provenance-performance-v2",
                         "graph_node_counts": [10],
                         "concurrency_levels": [1],
                         "repetitions": 1,
@@ -351,7 +351,7 @@ class TxnMemCliOutputTests(unittest.TestCase):
         from txnmem_experiment import main
 
         config = {
-            "schema": "txnmem-provenance-performance-v1",
+            "schema": "txnmem-provenance-performance-v2",
             "graph_node_counts": [10, 20],
             "concurrency_levels": [1, 2],
             "repetitions": 2,

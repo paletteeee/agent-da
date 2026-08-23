@@ -11,11 +11,13 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import threading
 import time
 from uuid import NAMESPACE_URL, uuid5
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Callable
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from txnmem_backend import InstrumentedMemoryBackend
@@ -73,6 +75,8 @@ class _QdrantHTTPClient:
         self.dimension = int(dimension)
         self.timeout_seconds = float(timeout_seconds)
         self.collection = "txnmem_memory"
+        self._collection_ready = False
+        self._collection_lock = threading.Lock()
 
     def _request(self, method: str, path: str, payload: Mapping[str, Any] | None = None) -> Any:
         body = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -87,11 +91,42 @@ class _QdrantHTTPClient:
         return json.loads(raw.decode("utf-8")) if raw else {}
 
     def _ensure_collection(self) -> None:
-        try:
-            self._request("PUT", f"/collections/{self.collection}", {"vectors": {"size": self.dimension, "distance": "Cosine"}})
-        except Exception as exc:
-            if "409" not in str(exc):
-                raise
+        if self._collection_ready:
+            return
+        with self._collection_lock:
+            if self._collection_ready:
+                return
+            try:
+                self._request(
+                    "PUT",
+                    f"/collections/{self.collection}",
+                    {
+                        "vectors": {
+                            "size": self.dimension,
+                            "distance": "Cosine",
+                        }
+                    },
+                )
+            except HTTPError as exc:
+                if exc.code != 409:
+                    raise
+            configuration = self._request(
+                "GET", f"/collections/{self.collection}"
+            )
+            try:
+                vectors = configuration["result"]["config"]["params"]["vectors"]
+            except (KeyError, TypeError):
+                vectors = None
+            if (
+                not isinstance(vectors, Mapping)
+                or type(vectors.get("size")) is not int
+                or vectors.get("size") != self.dimension
+                or vectors.get("distance") != "Cosine"
+            ):
+                raise VectorGraphBackendError(
+                    "Qdrant collection configuration is incompatible"
+                )
+            self._collection_ready = True
 
     def upsert(self, namespace, point_id, vector, payload, idempotency_key):
         self._ensure_collection()
@@ -1213,6 +1248,8 @@ class _Neo4jBoltClient:
 class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
     """Instrumented memory backend backed by vector and graph services."""
 
+    supports_parallel_provenance_preload = True
+
     def __init__(
         self,
         db_namespace: str,
@@ -1227,8 +1264,13 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         max_retries: int = 1,
         request_timeout_seconds: float = 15.0,
         decision_resolver: Callable[[str], str | None] | None = None,
+        close_clients: bool = True,
     ):
         super().__init__()
+        self._state_lock = threading.RLock()
+        self._metrics_lock = threading.Lock()
+        self._event_lock = threading.RLock()
+        self._event_context = threading.local()
         self.db_namespace = str(db_namespace)
         self.qdrant_url = str(qdrant_url)
         self.neo4j_uri = str(neo4j_uri)
@@ -1244,6 +1286,9 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         self.embedder = embedder or _embedding
         self.max_retries = max(0, int(max_retries))
         self._decision_resolver = decision_resolver or (lambda txn_id: None)
+        if type(close_clients) is not bool:
+            raise ValueError("close_clients must be a boolean")
+        self._close_clients = close_clients
         self._committed_keys: dict[str, str] = {}
         self._metrics: dict[str, Any] = {
             "request_count": 0,
@@ -1253,6 +1298,27 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             "operation_counts": {},
             "timing_ms": {},
         }
+
+    def _event(self, kind: str, **fields: Any) -> dict[str, Any]:
+        with self._event_lock:
+            event = super()._event(kind, **fields)
+            self._event_context.last_write_event = event
+            return event
+
+    def _clear_thread_write_event(self) -> None:
+        self._event_context.last_write_event = None
+
+    def _rewrite_thread_write_event(
+        self, kind: str, **fields: Any
+    ) -> None:
+        with self._event_lock:
+            event = getattr(
+                self._event_context, "last_write_event", None
+            )
+            if event is None:
+                return
+            event["kind"] = str(kind)
+            event.update(copy.deepcopy(fields))
 
     def _key(self, operation: str, memory_id: str, source_ids: Iterable[str] = ()) -> str:
         encoded = json.dumps(
@@ -1697,8 +1763,12 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         started = time.perf_counter()
         while True:
             attempts += 1
-            self._metrics["request_count"] += 1
-            self._metrics["operation_counts"][f"{service}:{operation}"] = self._metrics["operation_counts"].get(f"{service}:{operation}", 0) + 1
+            metric_key = f"{service}:{operation}"
+            with self._metrics_lock:
+                self._metrics["request_count"] += 1
+                self._metrics["operation_counts"][metric_key] = (
+                    self._metrics["operation_counts"].get(metric_key, 0) + 1
+                )
             try:
                 if self.proxy_requester is not None:
                     result = self.proxy_requester(service, operation, function, key)
@@ -1711,7 +1781,8 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 ):
                     raise
                 if attempts > self.max_retries:
-                    self._metrics["error_count"] += 1
+                    with self._metrics_lock:
+                        self._metrics["error_count"] += 1
                     try:
                         setattr(exc, "_txnmem_service", str(service))
                         setattr(exc, "_txnmem_operation", str(operation))
@@ -1720,9 +1791,11 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                             service, operation, exc
                         ) from exc
                     raise
-                self._metrics["retry_count"] += 1
+                with self._metrics_lock:
+                    self._metrics["retry_count"] += 1
         elapsed = (time.perf_counter() - started) * 1000.0
-        self._metrics["timing_ms"].setdefault(operation, []).append(elapsed)
+        with self._metrics_lock:
+            self._metrics["timing_ms"].setdefault(operation, []).append(elapsed)
         return result
 
     def _decision(self, txn_id: str) -> str | None:
@@ -2709,12 +2782,14 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             raise VectorGraphBackendError(detail)
 
     def write(self, memory_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
+        self._clear_thread_write_event()
         memory_id = str(memory_id)
         source_ids = sorted({str(item) for item in fields.get("source_ids", [])})
         supersedes_id = fields.get("supersedes_id")
         key = self._key("write", memory_id, source_ids)
-        if key in self._committed_keys and memory_id in self.memories:
-            return copy.deepcopy(self.memories[memory_id])
+        with self._state_lock:
+            if key in self._committed_keys and memory_id in self.memories:
+                return copy.deepcopy(self.memories[memory_id])
         memory = {
             "memory_id": memory_id,
             "value": value if value is not None else memory_id,
@@ -2737,18 +2812,116 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                     f"canonical version advanced during write for {memory_id}"
                 )
         except Exception:
-            self._metrics["rollback_count"] += 1
+            with self._metrics_lock:
+                self._metrics["rollback_count"] += 1
             raise
-        self.memories[memory_id] = copy.deepcopy(memory)
-        self._committed_keys[key] = memory_id
-        self._event(
-            "memory_write",
-            memory_id=memory_id,
-            value=memory["value"],
-            source_ids=source_ids or None,
-            **{key: value for key, value in fields.items() if key not in {"source_ids", "supersedes_id"}},
-        )
-        return copy.deepcopy(memory)
+        with self._state_lock:
+            if key in self._committed_keys and memory_id in self.memories:
+                return copy.deepcopy(self.memories[memory_id])
+            self.memories[memory_id] = copy.deepcopy(memory)
+            self._committed_keys[key] = memory_id
+            self._event(
+                "memory_write",
+                memory_id=memory_id,
+                value=memory["value"],
+                source_ids=source_ids or None,
+                **{
+                    field: field_value
+                    for field, field_value in fields.items()
+                    if field not in {"source_ids", "supersedes_id"}
+                },
+            )
+            return copy.deepcopy(memory)
+
+    def preload_provenance_record(
+        self,
+        memory_id: str,
+        source_ids: Iterable[str],
+        *,
+        value: Any,
+    ) -> int:
+        """Load one setup record and explicitly reconcile one safe projection gap.
+
+        The formal benchmark never times preload work.  A recovery is allowed
+        only when persistent readback proves that every present store fragment
+        matches the exact desired canonical record.  The caller records the
+        returned count separately from measured-operation retries.
+        """
+
+        memory_id = str(memory_id)
+        canonical_sources = sorted({str(source_id) for source_id in source_ids})
+        desired = {
+            "memory_id": memory_id,
+            "value": value,
+            "status": "active",
+            "agent_id": "agent_1",
+            "scope": "tenant:user_001",
+            "derived_from": canonical_sources,
+            "version": 1,
+        }
+        key = self._key("write", memory_id, canonical_sources)
+        canonical = self._canonical_payload(desired, key)
+        try:
+            self.write(
+                memory_id,
+                value=value,
+                source_ids=canonical_sources,
+            )
+            return 0
+        except VectorGraphCommitConflict:
+            raise
+        except VectorGraphBackendError as initial_failure:
+            evidence = self._raw_canonical_state(
+                memory_id,
+                key=key,
+                operation="preload_recovery",
+            )
+            if evidence.get("status") not in {"partial", "complete"}:
+                raise initial_failure
+            qdrant = evidence.get("qdrant")
+            neo4j = evidence.get("neo4j")
+            if qdrant is not None and (
+                not isinstance(qdrant, Mapping)
+                or not self._qdrant_canonical_matches(qdrant, canonical)
+            ):
+                raise initial_failure
+            if neo4j is not None and (
+                not isinstance(neo4j, Mapping)
+                or not self._neo4j_canonical_matches(neo4j, canonical)
+            ):
+                raise initial_failure
+            if qdrant is None and neo4j is None:
+                raise initial_failure
+            try:
+                self.write(
+                    memory_id,
+                    value=value,
+                    source_ids=canonical_sources,
+                )
+            except Exception as recovery_failure:
+                raise VectorGraphBackendError(
+                    "preload projection reconciliation failed"
+                ) from recovery_failure
+            verified = self._raw_canonical_state(
+                memory_id,
+                key=key,
+                operation="preload_recovery_verify",
+            )
+            if (
+                verified.get("status") != "complete"
+                or not isinstance(verified.get("qdrant"), Mapping)
+                or not isinstance(verified.get("neo4j"), Mapping)
+                or not self._qdrant_canonical_matches(
+                    verified["qdrant"], canonical
+                )
+                or not self._neo4j_canonical_matches(
+                    verified["neo4j"], canonical
+                )
+            ):
+                raise VectorGraphBackendError(
+                    "preload projection reconciliation is unverified"
+                )
+            return 1
 
     def read(self, memory_id: str | None = None, **fields: Any) -> dict[str, Any] | None:
         memory = self.read_committed(str(memory_id)) if memory_id is not None else None
@@ -2764,26 +2937,32 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
 
     def derive(self, memory_id: str, source_ids: Iterable[str], value: Any = None, **fields: Any) -> dict[str, Any]:
         source_ids = list(source_ids)
-        if any(source_id not in self.memories for source_id in source_ids):
-            raise KeyError("derive source is missing")
+        with self._state_lock:
+            if any(source_id not in self.memories for source_id in source_ids):
+                raise KeyError("derive source is missing")
         memory = self.write(memory_id, value=value, source_ids=source_ids, **fields)
-        self.events[-1]["kind"] = "memory_derive"
-        self.events[-1]["source_ids"] = source_ids
+        self._rewrite_thread_write_event(
+            "memory_derive", source_ids=source_ids
+        )
         return memory
 
     def propagate(self, memory_id: str, source_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
         memory = self.write(memory_id, value=value, source_ids=[source_id], **fields)
-        self.events[-1]["kind"] = "memory_propagate"
-        self.events[-1]["source_id"] = source_id
-        self.events[-1]["source_ids"] = [source_id]
+        self._rewrite_thread_write_event(
+            "memory_propagate",
+            source_id=source_id,
+            source_ids=[source_id],
+        )
         return memory
 
     def supersede(self, old_memory_id: str, new_memory_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
-        if old_memory_id not in self.memories:
-            raise KeyError(old_memory_id)
+        with self._state_lock:
+            if old_memory_id not in self.memories:
+                raise KeyError(old_memory_id)
         memory = self.write(new_memory_id, value=value, supersedes_id=old_memory_id, **fields)
-        old = self.memories[old_memory_id]
-        old["status"] = "superseded"
+        with self._state_lock:
+            old = self.memories[old_memory_id]
+            old["status"] = "superseded"
         key = self._key("supersede", old_memory_id, [new_memory_id])
         if hasattr(self.neo4j, "update_status"):
             self._call("neo4j", "update_status", lambda: self.neo4j.update_status(self.db_namespace, old_memory_id, "superseded", key), key)
@@ -2799,7 +2978,9 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             lambda: self.qdrant.retrieve(self.db_namespace, memory_id),
             key,
         )
-        if existing is not None or memory_id in self.memories:
+        with self._state_lock:
+            locally_present = memory_id in self.memories
+        if existing is not None or locally_present:
             self.invalidate_committed(memory_id)
         self._event("invalidate", memory_id=memory_id, **fields)
 
@@ -2859,7 +3040,8 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 )
             ):
                 result = self._public_record(qdrant_before, "invalid")
-                self.memories[memory_id] = copy.deepcopy(result)
+                with self._state_lock:
+                    self.memories[memory_id] = copy.deepcopy(result)
                 return result
             if int(neo4j_before.get("version", 1)) > int(
                 qdrant_before.get("version", 1)
@@ -2942,7 +3124,8 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 f"canonical version advanced during invalidate for {memory_id}"
             )
         record = self._public_record(record, "invalid")
-        self.memories[memory_id] = copy.deepcopy(record)
+        with self._state_lock:
+            self.memories[memory_id] = copy.deepcopy(record)
         return copy.deepcopy(record)
 
     def _expected_transaction_state(
@@ -3392,9 +3575,10 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 )
                 if transition == "skipped":
                     return {"status": "conflict", "txn_id": txn_id}
-                self.memories[str(committed["memory_id"])] = copy.deepcopy(
-                    committed
-                )
+                with self._state_lock:
+                    self.memories[str(committed["memory_id"])] = copy.deepcopy(
+                        committed
+                    )
 
         staged_ids = {
             str(row["memory_id"])
@@ -3433,7 +3617,8 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
             )
             if transition == "skipped":
                 return {"status": "conflict", "txn_id": txn_id}
-            self.memories[memory_id] = copy.deepcopy(committed)
+            with self._state_lock:
+                self.memories[memory_id] = copy.deepcopy(committed)
         return {"status": "complete", "txn_id": txn_id}
 
     def cleanup_transaction(
@@ -3523,7 +3708,8 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         }
 
     def snapshot(self) -> dict[str, dict[str, Any]]:
-        return copy.deepcopy(self.memories)
+        with self._state_lock:
+            return copy.deepcopy(self.memories)
 
     def verify_persistent_state(
         self, actions: Iterable[Mapping[str, Any]]
@@ -3762,13 +3948,16 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         }
 
     def metrics(self) -> dict[str, Any]:
-        return copy.deepcopy(self._metrics)
+        with self._metrics_lock:
+            return copy.deepcopy(self._metrics)
 
     def fault_evidence(self) -> dict[str, Any] | None:
         provider = getattr(self.proxy_requester, "evidence", None)
         return copy.deepcopy(provider()) if callable(provider) else None
 
     def close(self) -> None:
+        if not self._close_clients:
+            return
         close = getattr(self.neo4j, "close", None)
         if callable(close):
             close()

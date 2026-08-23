@@ -1138,6 +1138,22 @@ The commit message and report must contain no remote address, username, password
 - Produces: 15 cells, 450 repetitions, 14,400 operation samples, sanitized topology v6, promoted formal aggregate and curve inputs.
 - Gate: no aggregate includes partial/unknown repetition or failed state/readback validation.
 
+**Failure-handling addendum (2026-08-23):** The first registered measurement
+identity was consumed by a fail-closed candidate during serial preload after
+Neo4j authority committed one record whose Qdrant projection did not complete.
+That identity and its remote-private evidence are retained and must never be
+reused or promoted. Before registering a fresh identity, freeze performance
+schema v2, use the same canonical write/CAS path with fixed DAG-layer
+parallelism, share the real service clients across repetitions, cache the exact
+Qdrant collection readiness result only after verifying vector size/distance,
+synchronize backend-local preload bookkeeping, and permit one setup-only
+reconciliation only after matching cross-store readback. Formal validation must
+bind the layered worker limit to the frozen graph. Repetition evidence must
+separately record preload method/parallelism, setup repair budget/count and
+elapsed time, while measured backend and driver retries remain exactly zero.
+Run real-service 100/1,000/10,000-node preload pilots before the next protected
+measurement.
+
 - [ ] **Step 1: Freeze the formal measurement source commit**
 
 Use the clean post-smoke branch commit, reinstall the controller against that exact object, and rerun source/runtime/compose/GPU-independent preflight. Confirm the pre-registered run identity and nonce hash without printing nonce bytes.

@@ -1,5 +1,5 @@
 {
-  "schema": "txnmem-provenance-performance-v1",
+  "schema": "txnmem-provenance-performance-v2",
   "graph_node_counts": [100, 1000, 10000],
   "concurrency_levels": [1, 2, 4, 8, 16],
   "repetitions": 30,
