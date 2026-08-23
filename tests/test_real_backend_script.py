@@ -162,6 +162,20 @@ class RealBackendScriptTests(unittest.TestCase):
         self.assertNotIn("-runtime-metrics", compose)
         self.assertIn("-host=0.0.0.0", compose)
 
+    def test_compose_sets_qdrant_nofile_limit_for_formal_scale(self):
+        compose = (ROOT / "infra" / "real_backend" / "docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
+        qdrant_block = compose.split("  neo4j:\n", 1)[0]
+
+        self.assertIn(
+            "    ulimits:\n"
+            "      nofile:\n"
+            "        soft: 65536\n"
+            "        hard: 65536\n",
+            qdrant_block,
+        )
+
     @unittest.skipUnless(shutil.which("docker"), "Docker Compose CLI is optional")
     def test_compose_resolves_to_proxy_only_external_ingress(self):
         compose_path = ROOT / "infra" / "real_backend" / "docker-compose.yml"
@@ -205,6 +219,10 @@ class RealBackendScriptTests(unittest.TestCase):
         )
         self.assertNotIn("ports", services["qdrant"])
         self.assertNotIn("ports", services["neo4j"])
+        self.assertEqual(
+            services["qdrant"]["ulimits"]["nofile"],
+            {"soft": 65536, "hard": 65536},
+        )
         self.assertEqual(
             {
                 (row["host_ip"], int(row["published"]), int(row["target"]))

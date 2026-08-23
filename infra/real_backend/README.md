@@ -15,6 +15,11 @@ The backend runner must record the image tags/digests, health checks, proxy
 configuration, and `production_latency_claim: false`. Raw database volumes and
 service logs stay on the remote host and are never committed.
 
+The Qdrant service fixes its container `nofile` soft and hard limits at 65,536.
+This prevents RocksDB segment growth in the registered 10,000-node provenance
+cell from inheriting Docker's 1,024-descriptor default. Deployment preflight
+must attest the effective limits before a scale result is eligible.
+
 `scripts/run_real_backend_smoke.sh` remains an ordinary diagnostic check. Only
 `scripts/run_formal_provenance_smoke.sh`, through the installed protected
 controller, proves the formal same-path ingress and proxy-attribution gate. The

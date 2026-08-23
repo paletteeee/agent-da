@@ -9,6 +9,10 @@ services:
       - txnmem_qdrant:/qdrant/storage
     networks:
       - backend
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     healthcheck:
       test:
         - CMD-SHELL
