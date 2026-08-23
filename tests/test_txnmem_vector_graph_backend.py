@@ -798,10 +798,26 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         with patch.dict(sys.modules, {"neo4j": module}), patch.object(
             _Neo4jBoltClient, "_initialize_schema"
         ):
-            client = _Neo4jBoltClient("bolt://proxy", ("neo4j", "secret"))
+            client = _Neo4jBoltClient(
+                "bolt://proxy",
+                ("neo4j", "secret"),
+                notifications_min_severity="OFF",
+            )
 
         self.assertEqual(observed["max_transaction_retry_time"], 0.0)
+        self.assertEqual(observed["notifications_min_severity"], "OFF")
         self.assertEqual(client.max_transaction_retry_time_seconds, 0.0)
+        self.assertEqual(client.notifications_min_severity, "OFF")
+
+        observed.clear()
+        with patch.dict(sys.modules, {"neo4j": module}), patch.object(
+            _Neo4jBoltClient, "_initialize_schema"
+        ):
+            default_client = _Neo4jBoltClient(
+                "bolt://proxy", ("neo4j", "secret")
+            )
+        self.assertNotIn("notifications_min_severity", observed)
+        self.assertIsNone(default_client.notifications_min_severity)
 
         events = []
 

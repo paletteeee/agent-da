@@ -245,7 +245,13 @@ class _QdrantHTTPClient:
 
 
 class _Neo4jBoltClient:
-    def __init__(self, uri: str, auth: Sequence[str]):
+    def __init__(
+        self,
+        uri: str,
+        auth: Sequence[str],
+        *,
+        notifications_min_severity: str | None = None,
+    ):
         try:
             from neo4j import GraphDatabase
         except ImportError as exc:  # pragma: no cover - exercised on remote host
@@ -253,11 +259,18 @@ class _Neo4jBoltClient:
         # Managed transactions retry callbacks implicitly.  Formal latency and
         # retry accounting require one driver attempt per explicit transaction.
         self.max_transaction_retry_time_seconds = 0.0
-        self.driver = GraphDatabase.driver(
-            str(uri),
-            auth=tuple(auth),
-            max_transaction_retry_time=self.max_transaction_retry_time_seconds,
-        )
+        if notifications_min_severity not in {None, "OFF"}:
+            raise ValueError("unsupported Neo4j notification severity policy")
+        self.notifications_min_severity = notifications_min_severity
+        driver_config: dict[str, Any] = {
+            "auth": tuple(auth),
+            "max_transaction_retry_time": self.max_transaction_retry_time_seconds,
+        }
+        if self.notifications_min_severity is not None:
+            driver_config["notifications_min_severity"] = (
+                self.notifications_min_severity
+            )
+        self.driver = GraphDatabase.driver(str(uri), **driver_config)
         self._initialize_schema()
 
     def _execute_write_once(self, work: Callable[[Any], Any]) -> Any:

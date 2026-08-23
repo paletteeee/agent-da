@@ -1146,7 +1146,10 @@ reused or promoted. Before registering a fresh identity, freeze performance
 schema v2, use the same canonical write/CAS path with fixed DAG-layer
 parallelism, share the real service clients across repetitions, cache the exact
 Qdrant collection readiness result only after verifying vector size/distance,
-synchronize backend-local preload bookkeeping, and permit one setup-only
+synchronize backend-local preload bookkeeping, configure only the shared
+Neo4j performance client with `notifications_min_severity=OFF` so server
+notification logging cannot contaminate timed operations while ordinary
+clients retain the driver default, and permit one setup-only
 reconciliation only after matching cross-store readback. Formal validation must
 bind the layered worker limit to the frozen graph. Repetition evidence must
 separately record preload method/parallelism, setup repair budget/count and

@@ -1968,7 +1968,13 @@ class _ReusableVectorGraphBackendFactory:
             self.qdrant_url,
             timeout_seconds=self.request_timeout_seconds,
         )
-        self.neo4j = _Neo4jBoltClient(self.neo4j_uri, self.neo4j_auth)
+        # Benign schema-token notices must not add logging I/O to measured
+        # operation latency.  Non-performance clients keep the driver default.
+        self.neo4j = _Neo4jBoltClient(
+            self.neo4j_uri,
+            self.neo4j_auth,
+            notifications_min_severity="OFF",
+        )
         self._closed = False
         self._close_lock = threading.Lock()
 

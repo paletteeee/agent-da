@@ -421,7 +421,11 @@ class ProvenanceMatrixTests(unittest.TestCase):
             factory.close()
 
         qdrant_constructor.assert_called_once()
-        neo4j_constructor.assert_called_once()
+        neo4j_constructor.assert_called_once_with(
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            notifications_min_severity="OFF",
+        )
         self.assertEqual(len(constructed), 2)
         self.assertTrue(
             all(call[1]["qdrant_client"] is shared_qdrant for call in constructed)
