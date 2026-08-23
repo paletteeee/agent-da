@@ -1138,7 +1138,7 @@ class FormalSmokeProbeTests(unittest.TestCase):
                     ):
                         smoke._remove_probe_container(name, owner_label=token)
 
-                self.assertNotIn("rm", [call[1] for call in calls])
+                self.assertNotIn("rm", [call[0] for call in calls])
 
     def test_probe_partial_create_name_absence_does_not_remove(self):
         token = "7" * 24

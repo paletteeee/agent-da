@@ -1865,7 +1865,19 @@ class _NftNetworkGuard:
     def deactivate(self) -> None:
         if not self.active:
             return
-        self._run(("delete", "table", "inet", self.table_name))
+        try:
+            table_present = self.table_name in self._table_names()
+        except BaseException as exc:
+            self.active = True
+            raise CollectorError("formal nftables guard cleanup failed") from exc
+        if not table_present:
+            self.active = False
+            return
+        try:
+            self._run(("delete", "table", "inet", self.table_name))
+        except BaseException as exc:
+            self.active = True
+            raise CollectorError("formal nftables guard cleanup failed") from exc
         try:
             table_present = self.table_name in self._table_names()
         except BaseException as exc:
