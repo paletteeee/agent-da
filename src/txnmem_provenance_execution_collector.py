@@ -1821,11 +1821,31 @@ class _NftNetworkGuard:
             self._expected_snapshot = self.snapshot()
             return dict(self._expected_snapshot)
         except BaseException:
+            rollback_failure: BaseException | None = None
             if self.table_name in self._table_names():
-                self._run(
-                    ("delete", "table", "inet", self.table_name),
-                    check=False,
-                )
+                try:
+                    result = self._run(
+                        ("delete", "table", "inet", self.table_name),
+                        check=False,
+                    )
+                    if getattr(result, "returncode", 0) != 0:
+                        rollback_failure = CollectorError(
+                            "formal nftables guard rollback failed"
+                        )
+                except BaseException as exc:
+                    rollback_failure = exc
+                try:
+                    if self.table_name in self._table_names():
+                        rollback_failure = CollectorError(
+                            "formal nftables guard rollback failed"
+                        )
+                except BaseException as exc:
+                    rollback_failure = exc
+            if rollback_failure is not None:
+                self.active = True
+                raise CollectorError(
+                    "formal nftables guard rollback failed"
+                ) from rollback_failure
             self.active = False
             raise
 

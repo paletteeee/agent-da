@@ -473,6 +473,55 @@ def _dispatch(
     return result
 
 
+def _smoke_output_path(arguments: Sequence[str], project_root: Path) -> Path:
+    forwarded = list(arguments)
+    if forwarded.count("--out") != 1:
+        raise FormalControllerError("formal smoke output path is ambiguous")
+    index = forwarded.index("--out")
+    if index + 1 >= len(forwarded):
+        raise FormalControllerError("formal smoke output path is missing")
+    raw_target = Path(forwarded[index + 1]).expanduser()
+    if not raw_target.is_absolute() or raw_target.name in {"", ".", ".."}:
+        raise FormalControllerError("formal smoke output path is invalid")
+    target = raw_target.absolute()
+    root = project_root.expanduser().absolute().resolve(strict=True)
+    try:
+        target.relative_to(root)
+    except ValueError:
+        pass
+    else:
+        raise FormalControllerError("formal smoke output path escaped invalidation")
+    return target
+
+
+def _remove_smoke_success_report(arguments: Sequence[str], project_root: Path) -> None:
+    target = _smoke_output_path(arguments, project_root)
+    parent = target.parent.resolve(strict=True)
+    if parent != target.parent:
+        raise FormalControllerError("formal smoke output parent changed")
+    parent_descriptor = os.open(
+        parent,
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0),
+    )
+    try:
+        try:
+            metadata = os.stat(
+                target.name, dir_fd=parent_descriptor, follow_symlinks=False
+            )
+        except FileNotFoundError:
+            return
+        if not stat.S_ISREG(metadata.st_mode):
+            raise FormalControllerError("formal smoke report is not a regular file")
+        os.unlink(target.name, dir_fd=parent_descriptor)
+    except OSError as exc:
+        raise FormalControllerError("formal smoke report invalidation failed") from exc
+    finally:
+        os.close(parent_descriptor)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if len(arguments) < 3 or arguments[0] != "--project-root":
@@ -501,7 +550,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                     pass
             raise
         else:
-            _remove_export(export)
+            try:
+                _remove_export(export)
+            except BaseException as cleanup:
+                if action == "smoke" and result == 0:
+                    try:
+                        _remove_smoke_success_report(forwarded, project_root)
+                    except BaseException as invalidation:
+                        try:
+                            cleanup.add_note(
+                                "formal smoke report invalidation also failed: "
+                                f"{type(invalidation).__name__}"
+                            )
+                        except AttributeError:
+                            pass
+                raise
             return result
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"formal controller blocked: {type(exc).__name__}", file=sys.stderr)

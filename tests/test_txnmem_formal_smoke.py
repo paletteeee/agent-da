@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import errno
 import json
 import os
+import signal
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -469,6 +473,40 @@ class FormalSmokeOrchestrationTests(unittest.TestCase):
                         self._collect(fixture)
                     self.assertFalse(fixture.out_path.exists())
 
+    def test_surviving_child_process_group_preserves_guard_and_blocks_report(self):
+        script = (
+            "import os, time\n"
+            "pid = os.fork()\n"
+            "if pid == 0:\n"
+            "    time.sleep(30)\n"
+            "else:\n"
+            "    os._exit(0)\n"
+        )
+        survivor = subprocess.Popen(
+            [sys.executable, "-c", script],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        survivor.wait(timeout=5)
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                with self._success_dependencies(Path(tmp).resolve()) as fixture:
+                    fixture.child.process = survivor
+                    with self.assertRaisesRegex(
+                        smoke.FormalSmokeError, "cleanup"
+                    ):
+                        self._collect(fixture)
+                    self.assertTrue(fixture.guard.active)
+                    self.assertNotIn("guard_removed", fixture.events)
+                    self.assertFalse(fixture.out_path.exists())
+        finally:
+            try:
+                os.killpg(survivor.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            survivor.wait(timeout=5)
+
     def test_report_validator_rejects_extra_nonexact_and_rehashed_values(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self._success_dependencies(Path(tmp).resolve()) as fixture:
@@ -502,6 +540,29 @@ class FormalSmokeOrchestrationTests(unittest.TestCase):
 
 
 class FormalSmokeProbeTests(unittest.TestCase):
+    def test_host_denial_probe_accepts_only_connection_refused(self):
+        with patch.object(
+            smoke.socket,
+            "create_connection",
+            side_effect=ConnectionRefusedError(
+                errno.ECONNREFUSED, "connection refused"
+            ),
+        ):
+            self.assertIs(smoke._tcp_connection_denied("127.0.0.1", 19000), True)
+
+        for failure in (
+            TimeoutError(errno.ETIMEDOUT, "timed out"),
+            OSError(errno.ENETUNREACH, "network unreachable"),
+            OSError(errno.EHOSTUNREACH, "host unreachable"),
+        ):
+            with self.subTest(errno=getattr(failure, "errno", None)), patch.object(
+                smoke.socket, "create_connection", side_effect=failure
+            ):
+                with self.assertRaisesRegex(
+                    smoke.FormalSmokeError, "unexpected connection probe"
+                ):
+                    smoke._tcp_connection_denied("127.0.0.1", 19000)
+
     def test_forward_probe_prohibits_pull_and_removes_ephemeral_container(self):
         calls: list[tuple[str, ...]] = []
         container_id = "a" * 64
@@ -564,6 +625,123 @@ class FormalSmokeProbeTests(unittest.TestCase):
                     },
                     image_id="sha256:" + "b" * 64,
                 )
+
+    def test_forward_probe_unexpected_start_status_fails_not_denied(self):
+        container_id = "a" * 64
+        calls: list[tuple[str, ...]] = []
+
+        def run(command, **_kwargs):
+            calls.append(tuple(command))
+            operation = command[1]
+            if operation == "create":
+                return SimpleNamespace(returncode=0, stdout=container_id + "\n", stderr="")
+            if operation == "start":
+                return SimpleNamespace(returncode=92, stdout="", stderr="network unreachable\n")
+            if operation == "rm":
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if operation == "inspect":
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
+            raise AssertionError(operation)
+
+        with patch.object(smoke.subprocess, "run", side_effect=run):
+            with self.assertRaisesRegex(
+                smoke.FormalSmokeError, "unexpected container probe"
+            ):
+                smoke._probe_forward_path_denial(
+                    backend_ipv4_by_role={
+                        "qdrant": "192.0.2.2",
+                        "neo4j": "192.0.2.3",
+                        "toxiproxy_ingress": "198.51.100.2",
+                    },
+                    image_id="sha256:" + "b" * 64,
+                )
+        self.assertEqual([call[1] for call in calls], ["create", "start", "rm", "inspect"])
+
+    def test_forward_probe_malformed_create_output_still_removes_by_name(self):
+        calls: list[tuple[str, ...]] = []
+
+        def run(command, **_kwargs):
+            calls.append(tuple(command))
+            operation = command[1]
+            if operation == "create":
+                return SimpleNamespace(returncode=0, stdout="not-a-container-id\n", stderr="")
+            if operation == "rm":
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if operation == "inspect":
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
+            raise AssertionError(operation)
+
+        with patch.object(smoke.secrets, "token_hex", return_value="1" * 24), patch.object(
+            smoke.subprocess, "run", side_effect=run
+        ):
+            with self.assertRaisesRegex(
+                smoke.FormalSmokeError, "could not start"
+            ):
+                smoke._probe_forward_path_denial(
+                    backend_ipv4_by_role={
+                        "qdrant": "192.0.2.2",
+                        "neo4j": "192.0.2.3",
+                        "toxiproxy_ingress": "198.51.100.2",
+                    },
+                    image_id="sha256:" + "b" * 64,
+                )
+        self.assertEqual([call[1] for call in calls], ["create", "rm", "inspect"])
+        self.assertEqual(
+            calls[1][1:4], ("rm", "--force", "txnmem-smoke-" + "1" * 24)
+        )
+
+    def test_forward_probe_create_timeout_still_removes_by_name(self):
+        calls: list[tuple[str, ...]] = []
+
+        def run(command, **_kwargs):
+            calls.append(tuple(command))
+            operation = command[1]
+            if operation == "create":
+                raise subprocess.TimeoutExpired(command, 15.0)
+            if operation == "rm":
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if operation == "inspect":
+                return SimpleNamespace(returncode=1, stdout="", stderr="")
+            raise AssertionError(operation)
+
+        with patch.object(smoke.secrets, "token_hex", return_value="2" * 24), patch.object(
+            smoke.subprocess, "run", side_effect=run
+        ):
+            with self.assertRaisesRegex(
+                smoke.FormalSmokeError, "container probe"
+            ):
+                smoke._probe_forward_path_denial(
+                    backend_ipv4_by_role={
+                        "qdrant": "192.0.2.2",
+                        "neo4j": "192.0.2.3",
+                        "toxiproxy_ingress": "198.51.100.2",
+                    },
+                    image_id="sha256:" + "b" * 64,
+                )
+        self.assertGreaterEqual(len(calls), 3, calls)
+        self.assertEqual(calls[1][1:4], ("rm", "--force", "txnmem-smoke-" + "2" * 24))
+
+    def test_workspace_partial_creation_cleanup_failure_is_not_silent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            root.chmod(0o750)
+            try:
+                with patch.object(smoke.os, "chmod", side_effect=OSError("chmod")), patch.object(
+                    smoke.os, "rmdir", side_effect=OSError("rmdir")
+                ):
+                    caught = None
+                    try:
+                        smoke._create_smoke_workspace(
+                            workspace_root=root,
+                            controller_uid=os.getuid(),
+                            runner_gid=os.getgid(),
+                        )
+                    except BaseException as exc:
+                        caught = exc
+                    self.assertIsInstance(caught, smoke.FormalSmokeError)
+                    self.assertRegex(str(caught), "rollback failed")
+            finally:
+                root.chmod(0o700)
 
 
 class ProvenanceSmokeRunnerTests(unittest.TestCase):

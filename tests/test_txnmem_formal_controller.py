@@ -328,6 +328,57 @@ class FormalControllerCleanupTests(unittest.TestCase):
             self.assertIn("ValueError", stderr.getvalue())
             self.assertNotIn("OSError", stderr.getvalue())
 
+    def test_main_removes_successful_smoke_report_when_export_cleanup_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve() / "repository"
+            root.mkdir()
+            bootstrap = Path(tmp).resolve() / "bootstrap"
+            bootstrap.mkdir()
+            export = bootstrap / "source-fixture"
+            export.mkdir()
+            report = Path(tmp).resolve() / "reports" / "smoke.json"
+            report.parent.mkdir()
+            identity = self._identity(export, bootstrap)
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=(),
+                manifest={},
+                manifest_sha256="b" * 64,
+            )
+
+            def dispatch(action, arguments, *_args):
+                self.assertEqual(action, "smoke")
+                self.assertEqual(arguments, ["--out", str(report)])
+                report.write_text('{"schema":"success"}\n', encoding="utf-8")
+                return 0
+
+            stderr = io.StringIO()
+            with patch.object(controller.os, "geteuid", return_value=0), patch.object(
+                controller, "_verify_installed_controller", return_value=approved
+            ), patch.object(
+                controller, "_create_committed_export", return_value=identity
+            ), patch.object(
+                controller, "_dispatch", side_effect=dispatch
+            ), patch.object(
+                controller, "_remove_export", side_effect=OSError("cleanup")
+            ), contextlib.redirect_stderr(stderr):
+                status = controller.main(
+                    ["--project-root", str(root), "smoke", "--out", str(report)]
+                )
+
+            self.assertEqual(status, 2)
+            self.assertFalse(report.exists())
+            self.assertIn("OSError", stderr.getvalue())
+
+    def test_smoke_report_invalidation_rejects_relative_output_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve() / "repository"
+            root.mkdir()
+            with self.assertRaisesRegex(
+                controller.FormalControllerError, "invalid"
+            ):
+                controller._smoke_output_path(["--out", "smoke.json"], root)
+
     def test_repository_installer_builds_the_root_protected_formal_boundary(self):
         root = Path(__file__).resolve().parents[1]
         installer = root / "scripts" / "install_formal_provenance_runtime.sh"

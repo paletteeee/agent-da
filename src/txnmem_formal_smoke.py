@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import errno
 import hashlib
 import ipaddress
 import os
@@ -232,13 +233,20 @@ def _create_smoke_workspace(
     try:
         os.mkdir(name, mode=0o700, dir_fd=root_descriptor)
         created = True
-        os.chown(
-            name,
-            controller_uid,
-            runner_gid,
-            dir_fd=root_descriptor,
-            follow_symlinks=False,
+        created_metadata = os.stat(
+            name, dir_fd=root_descriptor, follow_symlinks=False
         )
+        if (
+            created_metadata.st_uid != controller_uid
+            or created_metadata.st_gid != runner_gid
+        ):
+            os.chown(
+                name,
+                controller_uid,
+                runner_gid,
+                dir_fd=root_descriptor,
+                follow_symlinks=False,
+            )
         os.chmod(
             name,
             0o700,
@@ -275,8 +283,10 @@ def _create_smoke_workspace(
         if created:
             try:
                 os.rmdir(name, dir_fd=root_descriptor)
-            except OSError:
-                pass
+            except OSError as cleanup_error:
+                raise FormalSmokeError(
+                    "formal smoke workspace rollback failed"
+                ) from cleanup_error
         raise
     finally:
         os.close(root_descriptor)
@@ -592,8 +602,12 @@ def _tcp_connection_denied(host: str, port: int) -> bool:
     connection = None
     try:
         connection = socket.create_connection((host, port), timeout=2.0)
-    except OSError:
-        return True
+    except OSError as exc:
+        if getattr(exc, "errno", None) == errno.ECONNREFUSED:
+            return True
+        raise FormalSmokeError(
+            "formal smoke unexpected connection probe failure"
+        ) from exc
     finally:
         if connection is not None:
             connection.close()
@@ -667,6 +681,19 @@ def _docker_run(arguments: Sequence[str], *, timeout: float = 15.0):
         raise FormalSmokeError("formal smoke container probe failed") from exc
 
 
+def _remove_probe_container(container_ref: str) -> None:
+    if not isinstance(container_ref, str) or not re.fullmatch(
+        r"(?:[0-9a-f]{64}|txnmem-smoke-[0-9a-f]{24})", container_ref
+    ):
+        raise FormalSmokeError("formal smoke container cleanup identity is invalid")
+    removed = _docker_run(("rm", "--force", container_ref))
+    if removed.returncode != 0:
+        raise FormalSmokeError("formal smoke container cleanup failed")
+    inspected = _docker_run(("inspect", container_ref))
+    if inspected.returncode == 0:
+        raise FormalSmokeError("formal smoke container cleanup failed")
+
+
 def _probe_forward_path_denial(
     *, backend_ipv4_by_role: Mapping[str, Any], image_id: str
 ) -> bool:
@@ -678,69 +705,109 @@ def _probe_forward_path_denial(
     name = "txnmem-smoke-" + secrets.token_hex(12)
     script = (
         'while [[ "$#" -gt 0 ]]; do '
-        'if exec 3<>"/dev/tcp/$1/$2" 2>/dev/null; then '
-        'exec 3>&-; exit 91; fi; shift 2; done; exit 0'
+        'probe_error=$(exec 3<>"/dev/tcp/$1/$2" 2>&1); '
+        'probe_status=$?; '
+        'if [[ "$probe_status" -eq 0 ]]; then exec 3>&-; exit 91; fi; '
+        'case "$probe_error" in *"Connection refused"*) ;; *) exit 92 ;; esac; '
+        'shift 2; '
+        'done; exit 0'
     )
-    create = _docker_run(
-        (
-            "create",
-            "--pull=never",
-            "--name",
-            name,
-            "--network",
-            "bridge",
-            "--read-only",
-            "--cap-drop=ALL",
-            "--security-opt",
-            "no-new-privileges",
-            "--entrypoint",
-            "/bin/bash",
-            image_id,
-            "--noprofile",
-            "--norc",
-            "-c",
-            script,
-            "txnmem-forward-probe",
-            addresses["qdrant"],
-            "6333",
-            addresses["neo4j"],
-            "7687",
-            addresses["toxiproxy_ingress"],
-            "8474",
-            addresses["toxiproxy_ingress"],
-            "19000",
-            addresses["toxiproxy_ingress"],
-            "19001",
-        )
-    )
+    cleanup_ref = name
+    create_started = False
     container_id: str | None = None
-    if create.returncode == 0:
-        observed_id = create.stdout.strip()
-        if re.fullmatch(r"[0-9a-f]{64}", observed_id):
-            container_id = observed_id
-    if container_id is None:
-        raise FormalSmokeError("formal smoke container probe could not start")
     try:
+        create_started = True
+        create = _docker_run(
+            (
+                "create",
+                "--pull=never",
+                "--name",
+                name,
+                "--network",
+                "bridge",
+                "--read-only",
+                "--cap-drop=ALL",
+                "--security-opt",
+                "no-new-privileges",
+                "--entrypoint",
+                "/bin/bash",
+                image_id,
+                "--noprofile",
+                "--norc",
+                "-c",
+                script,
+                "txnmem-forward-probe",
+                addresses["qdrant"],
+                "6333",
+                addresses["neo4j"],
+                "7687",
+                addresses["toxiproxy_ingress"],
+                "8474",
+                addresses["toxiproxy_ingress"],
+                "19000",
+                addresses["toxiproxy_ingress"],
+                "19001",
+            )
+        )
+        if create.returncode == 0:
+            observed_id = create.stdout.strip()
+            if re.fullmatch(r"[0-9a-f]{64}", observed_id):
+                container_id = observed_id
+                cleanup_ref = container_id
+        if container_id is None:
+            raise FormalSmokeError("formal smoke container probe could not start")
         started = _docker_run(("start", "--attach", container_id))
-        return started.returncode == 0
+        if started.returncode == 0:
+            return True
+        if started.returncode == 91:
+            return False
+        raise FormalSmokeError("formal smoke unexpected container probe failure")
     finally:
+        if create_started:
+            try:
+                _remove_probe_container(cleanup_ref)
+            except FormalSmokeError:
+                raise
+            except BaseException as exc:
+                raise FormalSmokeError(
+                    "formal smoke container cleanup failed"
+                ) from exc
+
+
+def _verify_smoke_child_quiescence(child: Any) -> None:
+    process = getattr(child, "process", None)
+    if process is None or type(getattr(process, "pid", None)) is not int:
+        raise FormalSmokeError("formal smoke child identity is unavailable")
+    pid = int(process.pid)
+    if pid <= 0:
+        raise FormalSmokeError("formal smoke child identity is unavailable")
+    try:
+        running = process.poll() is None
+    except BaseException as exc:
+        raise FormalSmokeError(
+            "formal smoke child process state is unavailable"
+        ) from exc
+    if running:
+        raise FormalSmokeError("formal smoke child process is still running")
+    if hasattr(os, "killpg"):
         try:
-            removed = _docker_run(("rm", "--force", container_id))
-            if removed.returncode != 0:
-                raise FormalSmokeError(
-                    "formal smoke container cleanup failed"
-                )
-            inspected = _docker_run(("inspect", container_id))
-            if inspected.returncode == 0:
-                raise FormalSmokeError(
-                    "formal smoke container cleanup failed"
-                )
-        except FormalSmokeError:
-            raise
-        except BaseException as exc:
+            os.killpg(pid, 0)
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
             raise FormalSmokeError(
-                "formal smoke container cleanup failed"
+                "formal smoke child process group quiescence is unproven"
             ) from exc
+        else:
+            raise FormalSmokeError(
+                "formal smoke child process group survived cleanup"
+            )
+    try:
+        _require_formal_uid_processes(FORMAL_RUNNER_UID, expected={})
+    except BaseException as exc:
+        raise FormalSmokeError(
+            "formal smoke runner UID quiescence is unproven"
+        ) from exc
 
 
 def validate_smoke_child_receipt(value: Any) -> dict[str, Any]:
@@ -1013,6 +1080,7 @@ def collect_formal_smoke(
         primary = exc
 
     cleanup_failures: list[BaseException] = []
+    child_quiescent = child is None
     if child is not None:
         cleanup_failures.extend(
             _cleanup_formal_execution_resources(
@@ -1021,18 +1089,33 @@ def collect_formal_smoke(
                 child=child,
             )
         )
+        try:
+            _verify_smoke_child_quiescence(child)
+            child_quiescent = True
+        except BaseException as exc:
+            cleanup_failures.append(exc)
     if guard is not None and bool(getattr(guard, "active", False)):
-        try:
-            guard.deactivate()
-            if bool(getattr(guard, "active", False)):
-                raise FormalSmokeError("formal smoke guard cleanup failed")
-        except BaseException as exc:
-            cleanup_failures.append(exc)
+        if child_quiescent:
+            try:
+                guard.deactivate()
+                if bool(getattr(guard, "active", False)):
+                    raise FormalSmokeError("formal smoke guard cleanup failed")
+            except BaseException as exc:
+                cleanup_failures.append(exc)
+        else:
+            cleanup_failures.append(
+                FormalSmokeError("formal smoke preserved guard after live child")
+            )
     if workspace is not None:
-        try:
-            _remove_smoke_workspace(workspace)
-        except BaseException as exc:
-            cleanup_failures.append(exc)
+        if child_quiescent:
+            try:
+                _remove_smoke_workspace(workspace)
+            except BaseException as exc:
+                cleanup_failures.append(exc)
+        else:
+            cleanup_failures.append(
+                FormalSmokeError("formal smoke preserved workspace after live child")
+            )
     if cleanup_failures:
         raise FormalSmokeError("formal smoke cleanup failed") from cleanup_failures[0]
     if primary is not None:
