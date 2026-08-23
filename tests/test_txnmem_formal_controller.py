@@ -370,6 +370,141 @@ class FormalControllerCleanupTests(unittest.TestCase):
             self.assertFalse(report.exists())
             self.assertIn("OSError", stderr.getvalue())
 
+    def test_main_removes_successful_smoke_report_with_equals_output_form(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve() / "repository"
+            root.mkdir()
+            bootstrap = Path(tmp).resolve() / "bootstrap"
+            bootstrap.mkdir()
+            export = bootstrap / "source-fixture"
+            export.mkdir()
+            report = Path(tmp).resolve() / "reports" / "smoke.json"
+            report.parent.mkdir()
+            identity = self._identity(export, bootstrap)
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=(),
+                manifest={},
+                manifest_sha256="b" * 64,
+            )
+
+            def dispatch(action, arguments, *_args):
+                self.assertEqual(action, "smoke")
+                self.assertIn(arguments, (["--out", str(report)], [f"--out={report}"]))
+                report.write_text('{"schema":"success"}\n', encoding="utf-8")
+                return 0
+
+            stderr = io.StringIO()
+            with patch.object(controller.os, "geteuid", return_value=0), patch.object(
+                controller, "_verify_installed_controller", return_value=approved
+            ), patch.object(
+                controller, "_create_committed_export", return_value=identity
+            ), patch.object(
+                controller, "_dispatch", side_effect=dispatch
+            ), patch.object(
+                controller, "_remove_export", side_effect=OSError("cleanup")
+            ), contextlib.redirect_stderr(stderr):
+                status = controller.main(
+                    ["--project-root", str(root), "smoke", f"--out={report}"]
+                )
+
+            self.assertEqual(status, 2)
+            self.assertFalse(report.exists())
+            self.assertIn("OSError", stderr.getvalue())
+
+    def test_main_rejects_abbreviated_smoke_output_before_dispatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve() / "repository"
+            root.mkdir()
+            bootstrap = Path(tmp).resolve() / "bootstrap"
+            bootstrap.mkdir()
+            export = bootstrap / "source-fixture"
+            export.mkdir()
+            report = Path(tmp).resolve() / "reports" / "smoke.json"
+            report.parent.mkdir()
+            identity = self._identity(export, bootstrap)
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=(),
+                manifest={},
+                manifest_sha256="b" * 64,
+            )
+            dispatch_calls: list[tuple[str, list[str]]] = []
+
+            def dispatch(action, arguments, *_args):
+                dispatch_calls.append((action, list(arguments)))
+                report.write_text('{"schema":"success"}\n', encoding="utf-8")
+                return 0
+
+            stderr = io.StringIO()
+            with patch.object(controller.os, "geteuid", return_value=0), patch.object(
+                controller, "_verify_installed_controller", return_value=approved
+            ), patch.object(
+                controller, "_create_committed_export", return_value=identity
+            ), patch.object(
+                controller, "_dispatch", side_effect=dispatch
+            ), patch.object(
+                controller, "_remove_export"
+            ), contextlib.redirect_stderr(stderr):
+                status = controller.main(
+                    ["--project-root", str(root), "smoke", "--ou", str(report)]
+                )
+
+            self.assertEqual(status, 2)
+            self.assertEqual(dispatch_calls, [])
+            self.assertFalse(report.exists())
+
+    def test_main_rejects_repeated_mixed_smoke_output_before_dispatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve() / "repository"
+            root.mkdir()
+            bootstrap = Path(tmp).resolve() / "bootstrap"
+            bootstrap.mkdir()
+            export = bootstrap / "source-fixture"
+            export.mkdir()
+            first = Path(tmp).resolve() / "reports" / "first.json"
+            second = Path(tmp).resolve() / "reports" / "second.json"
+            first.parent.mkdir()
+            identity = self._identity(export, bootstrap)
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=(),
+                manifest={},
+                manifest_sha256="b" * 64,
+            )
+            dispatch_calls: list[tuple[str, list[str]]] = []
+
+            def dispatch(action, arguments, *_args):
+                dispatch_calls.append((action, list(arguments)))
+                second.write_text('{"schema":"success"}\n', encoding="utf-8")
+                return 0
+
+            stderr = io.StringIO()
+            with patch.object(controller.os, "geteuid", return_value=0), patch.object(
+                controller, "_verify_installed_controller", return_value=approved
+            ), patch.object(
+                controller, "_create_committed_export", return_value=identity
+            ), patch.object(
+                controller, "_dispatch", side_effect=dispatch
+            ), patch.object(
+                controller, "_remove_export"
+            ), contextlib.redirect_stderr(stderr):
+                status = controller.main(
+                    [
+                        "--project-root",
+                        str(root),
+                        "smoke",
+                        "--out",
+                        str(first),
+                        f"--out={second}",
+                    ]
+                )
+
+            self.assertEqual(status, 2)
+            self.assertEqual(dispatch_calls, [])
+            self.assertFalse(first.exists())
+            self.assertFalse(second.exists())
+
     def test_smoke_report_invalidation_rejects_relative_output_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve() / "repository"

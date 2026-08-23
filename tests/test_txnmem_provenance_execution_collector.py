@@ -1383,6 +1383,52 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertTrue(guard.active)
         self.assertIn(("delete", "table", "inet", table_name), calls)
 
+    def test_nft_guard_apply_failure_inventory_error_remains_active_for_cleanup(self):
+        table_name = "txnmem_" + "6" * 16
+        guard = collector_module._NftNetworkGuard(
+            table_name,
+            backend_ipv4_subnet="172.19.0.0/16",
+            ingress_ipv4_subnet="172.20.0.0/16",
+            backend_bridge_interface="br-aaaaaaaaaaaa",
+            ingress_bridge_interface="br-bbbbbbbbbbbb",
+            toxiproxy_ingress_ipv4="172.20.0.2",
+        )
+        calls: list[tuple[str, ...]] = []
+        table_queries = 0
+
+        def table_names():
+            nonlocal table_queries
+            table_queries += 1
+            if table_queries == 1:
+                return set()
+            if table_queries == 2:
+                raise CollectorError("inventory unavailable")
+            return set()
+
+        def run(arguments, *, stdin=None, check=True):
+            calls.append(tuple(arguments))
+            if arguments == ("-f", "-"):
+                raise CollectorError("apply failed after partial create")
+            if arguments == ("delete", "table", "inet", table_name):
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch.object(guard, "_table_names", side_effect=table_names), patch.object(
+            guard, "_run", side_effect=run
+        ):
+            with self.assertRaisesRegex(CollectorError, "rollback"):
+                guard.activate()
+            self.assertTrue(guard.active)
+            cleanup_failures = collector_module._cleanup_formal_execution_resources(
+                execution_monitor=None,
+                network_guard=guard,
+                child=None,
+            )
+
+        self.assertEqual(cleanup_failures, [])
+        self.assertFalse(guard.active)
+        self.assertIn(("delete", "table", "inet", table_name), calls)
+
     def test_topology_snapshot_v3_binds_structured_counters_and_backend_isolation_v3(self):
         roles, routes, counters, isolation = collector_module._snapshot_components(
             self._snapshot()

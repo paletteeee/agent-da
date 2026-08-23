@@ -566,18 +566,37 @@ class FormalSmokeProbeTests(unittest.TestCase):
     def test_forward_probe_prohibits_pull_and_removes_ephemeral_container(self):
         calls: list[tuple[str, ...]] = []
         container_id = "a" * 64
+        owner_label = "txnmem.formal-smoke.owner"
+        owner_value = None
+        inspect_count = 0
 
         def run(command, **_kwargs):
+            nonlocal inspect_count, owner_value
             calls.append(tuple(command))
             operation = command[1]
             if operation == "create":
+                self.assertIn("--label", command)
+                owner_value = command[command.index("--label") + 1].split("=", 1)[1]
                 return SimpleNamespace(returncode=0, stdout=container_id + "\n", stderr="")
             if operation == "start":
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
             if operation == "rm":
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
             if operation == "inspect":
-                return SimpleNamespace(returncode=1, stdout="", stderr="")
+                inspect_count += 1
+                if inspect_count == 1:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout=json.dumps(
+                            [{"Config": {"Labels": {owner_label: owner_value}}}]
+                        ),
+                        stderr="",
+                    )
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr=f"Error response from daemon: No such object: {command[2]}\n",
+                )
             raise AssertionError(operation)
 
         with patch.object(smoke.subprocess, "run", side_effect=run):
@@ -598,17 +617,32 @@ class FormalSmokeProbeTests(unittest.TestCase):
         self.assertIn("--pull=never", create)
         self.assertIn("--network", create)
         self.assertEqual(create[create.index("--network") + 1], "bridge")
-        self.assertEqual([call[1] for call in calls], ["create", "start", "rm", "inspect"])
+        self.assertEqual(
+            [call[1] for call in calls],
+            ["create", "start", "inspect", "rm", "inspect"],
+        )
 
     def test_forward_probe_cleanup_failure_is_a_hard_failure(self):
         container_id = "a" * 64
+        owner_label = "txnmem.formal-smoke.owner"
+        owner_value = None
 
         def run(command, **_kwargs):
+            nonlocal owner_value
             operation = command[1]
             if operation == "create":
+                owner_value = command[command.index("--label") + 1].split("=", 1)[1]
                 return SimpleNamespace(returncode=0, stdout=container_id + "\n", stderr="")
             if operation == "start":
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if operation == "inspect":
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(
+                        [{"Config": {"Labels": {owner_label: owner_value}}}]
+                    ),
+                    stderr="",
+                )
             if operation == "rm":
                 return SimpleNamespace(returncode=1, stdout="", stderr="")
             raise AssertionError(operation)
@@ -629,18 +663,36 @@ class FormalSmokeProbeTests(unittest.TestCase):
     def test_forward_probe_unexpected_start_status_fails_not_denied(self):
         container_id = "a" * 64
         calls: list[tuple[str, ...]] = []
+        owner_label = "txnmem.formal-smoke.owner"
+        owner_value = None
+        inspect_count = 0
 
         def run(command, **_kwargs):
+            nonlocal inspect_count, owner_value
             calls.append(tuple(command))
             operation = command[1]
             if operation == "create":
+                owner_value = command[command.index("--label") + 1].split("=", 1)[1]
                 return SimpleNamespace(returncode=0, stdout=container_id + "\n", stderr="")
             if operation == "start":
                 return SimpleNamespace(returncode=92, stdout="", stderr="network unreachable\n")
             if operation == "rm":
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
             if operation == "inspect":
-                return SimpleNamespace(returncode=1, stdout="", stderr="")
+                inspect_count += 1
+                if inspect_count == 1:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout=json.dumps(
+                            [{"Config": {"Labels": {owner_label: owner_value}}}]
+                        ),
+                        stderr="",
+                    )
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr=f"Error response from daemon: No such object: {command[2]}\n",
+                )
             raise AssertionError(operation)
 
         with patch.object(smoke.subprocess, "run", side_effect=run):
@@ -655,12 +707,18 @@ class FormalSmokeProbeTests(unittest.TestCase):
                     },
                     image_id="sha256:" + "b" * 64,
                 )
-        self.assertEqual([call[1] for call in calls], ["create", "start", "rm", "inspect"])
+        self.assertEqual(
+            [call[1] for call in calls],
+            ["create", "start", "inspect", "rm", "inspect"],
+        )
 
     def test_forward_probe_malformed_create_output_still_removes_by_name(self):
         calls: list[tuple[str, ...]] = []
+        owner_label = "txnmem.formal-smoke.owner"
+        inspect_count = 0
 
         def run(command, **_kwargs):
+            nonlocal inspect_count
             calls.append(tuple(command))
             operation = command[1]
             if operation == "create":
@@ -668,7 +726,20 @@ class FormalSmokeProbeTests(unittest.TestCase):
             if operation == "rm":
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
             if operation == "inspect":
-                return SimpleNamespace(returncode=1, stdout="", stderr="")
+                inspect_count += 1
+                if inspect_count == 1:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout=json.dumps(
+                            [{"Config": {"Labels": {owner_label: "1" * 24}}}]
+                        ),
+                        stderr="",
+                    )
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr=f"Error response from daemon: No such object: {command[2]}\n",
+                )
             raise AssertionError(operation)
 
         with patch.object(smoke.secrets, "token_hex", return_value="1" * 24), patch.object(
@@ -685,15 +756,20 @@ class FormalSmokeProbeTests(unittest.TestCase):
                     },
                     image_id="sha256:" + "b" * 64,
                 )
-        self.assertEqual([call[1] for call in calls], ["create", "rm", "inspect"])
         self.assertEqual(
-            calls[1][1:4], ("rm", "--force", "txnmem-smoke-" + "1" * 24)
+            [call[1] for call in calls], ["create", "inspect", "rm", "inspect"]
+        )
+        self.assertEqual(
+            calls[2][1:4], ("rm", "--force", "txnmem-smoke-" + "1" * 24)
         )
 
     def test_forward_probe_create_timeout_still_removes_by_name(self):
         calls: list[tuple[str, ...]] = []
+        owner_label = "txnmem.formal-smoke.owner"
+        inspect_count = 0
 
         def run(command, **_kwargs):
+            nonlocal inspect_count
             calls.append(tuple(command))
             operation = command[1]
             if operation == "create":
@@ -701,7 +777,20 @@ class FormalSmokeProbeTests(unittest.TestCase):
             if operation == "rm":
                 return SimpleNamespace(returncode=0, stdout="", stderr="")
             if operation == "inspect":
-                return SimpleNamespace(returncode=1, stdout="", stderr="")
+                inspect_count += 1
+                if inspect_count == 1:
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout=json.dumps(
+                            [{"Config": {"Labels": {owner_label: "2" * 24}}}]
+                        ),
+                        stderr="",
+                    )
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr=f"Error response from daemon: No such object: {command[2]}\n",
+                )
             raise AssertionError(operation)
 
         with patch.object(smoke.secrets, "token_hex", return_value="2" * 24), patch.object(
@@ -718,8 +807,146 @@ class FormalSmokeProbeTests(unittest.TestCase):
                     },
                     image_id="sha256:" + "b" * 64,
                 )
-        self.assertGreaterEqual(len(calls), 3, calls)
-        self.assertEqual(calls[1][1:4], ("rm", "--force", "txnmem-smoke-" + "2" * 24))
+        self.assertEqual(
+            [call[1] for call in calls], ["create", "inspect", "rm", "inspect"]
+        )
+        self.assertEqual(calls[2][1:4], ("rm", "--force", "txnmem-smoke-" + "2" * 24))
+
+    def test_forward_probe_inspect_permission_failure_is_cleanup_failure(self):
+        container_id = "c" * 64
+
+        def run(command, **_kwargs):
+            operation = command[1]
+            if operation == "create":
+                return SimpleNamespace(returncode=0, stdout=container_id + "\n", stderr="")
+            if operation == "start":
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if operation == "rm":
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if operation == "inspect":
+                return SimpleNamespace(
+                    returncode=1,
+                    stdout="",
+                    stderr="permission denied while inspecting container",
+                )
+            raise AssertionError(operation)
+
+        with patch.object(smoke.subprocess, "run", side_effect=run):
+            with self.assertRaisesRegex(
+                smoke.FormalSmokeError, "container cleanup|inspect"
+            ):
+                smoke._probe_forward_path_denial(
+                    backend_ipv4_by_role={
+                        "qdrant": "192.0.2.2",
+                        "neo4j": "192.0.2.3",
+                        "toxiproxy_ingress": "198.51.100.2",
+                    },
+                    image_id="sha256:" + "b" * 64,
+                )
+
+    def test_forward_probe_duplicate_name_never_removes_unowned_container(self):
+        owner_label = "txnmem.formal-smoke.owner"
+
+        for labels in ({}, {owner_label: "foreign"}):
+            with self.subTest(labels=labels):
+                calls: list[tuple[str, ...]] = []
+
+                def run(command, **_kwargs):
+                    calls.append(tuple(command))
+                    operation = command[1]
+                    if operation == "create":
+                        return SimpleNamespace(
+                            returncode=1,
+                            stdout="",
+                            stderr="Conflict. The container name is already in use.",
+                        )
+                    if operation == "inspect":
+                        return SimpleNamespace(
+                            returncode=0,
+                            stdout=json.dumps([{"Config": {"Labels": labels}}]),
+                            stderr="",
+                        )
+                    if operation == "rm":
+                        return SimpleNamespace(returncode=0, stdout="", stderr="")
+                    raise AssertionError(operation)
+
+                with patch.object(smoke.secrets, "token_hex", return_value="3" * 24), patch.object(
+                    smoke.subprocess, "run", side_effect=run
+                ):
+                    with self.assertRaisesRegex(
+                        smoke.FormalSmokeError,
+                        "container cleanup|container probe|could not start|ownership",
+                    ):
+                        smoke._probe_forward_path_denial(
+                            backend_ipv4_by_role={
+                                "qdrant": "192.0.2.2",
+                                "neo4j": "192.0.2.3",
+                                "toxiproxy_ingress": "198.51.100.2",
+                            },
+                            image_id="sha256:" + "b" * 64,
+                        )
+
+                self.assertNotIn("rm", [call[1] for call in calls])
+
+    def test_forward_probe_owned_partial_create_cleanup_proves_exact_absence(self):
+        owner_label = "txnmem.formal-smoke.owner"
+
+        for mode in ("malformed", "timeout"):
+            with self.subTest(mode=mode):
+                token = "4" * 24
+                name = "txnmem-smoke-" + token
+                calls: list[tuple[str, ...]] = []
+                inspect_count = 0
+
+                def run(command, **_kwargs):
+                    nonlocal inspect_count
+                    calls.append(tuple(command))
+                    operation = command[1]
+                    if operation == "create":
+                        if mode == "timeout":
+                            raise subprocess.TimeoutExpired(command, 15.0)
+                        return SimpleNamespace(
+                            returncode=0,
+                            stdout="not-a-container-id\n",
+                            stderr="",
+                        )
+                    if operation == "inspect":
+                        inspect_count += 1
+                        if inspect_count == 1:
+                            return SimpleNamespace(
+                                returncode=0,
+                                stdout=json.dumps(
+                                    [{"Config": {"Labels": {owner_label: token}}}]
+                                ),
+                                stderr="",
+                            )
+                        return SimpleNamespace(
+                            returncode=1,
+                            stdout="",
+                            stderr=f"Error response from daemon: No such object: {name}\n",
+                        )
+                    if operation == "rm":
+                        return SimpleNamespace(returncode=0, stdout="", stderr="")
+                    raise AssertionError(operation)
+
+                with patch.object(smoke.secrets, "token_hex", return_value=token), patch.object(
+                    smoke.subprocess, "run", side_effect=run
+                ):
+                    with self.assertRaises(smoke.FormalSmokeError):
+                        smoke._probe_forward_path_denial(
+                            backend_ipv4_by_role={
+                                "qdrant": "192.0.2.2",
+                                "neo4j": "192.0.2.3",
+                                "toxiproxy_ingress": "198.51.100.2",
+                            },
+                            image_id="sha256:" + "b" * 64,
+                        )
+
+                operations = [call[1] for call in calls]
+                self.assertEqual(operations, ["create", "inspect", "rm", "inspect"])
+                self.assertIn("--label", calls[0])
+                self.assertIn(f"{owner_label}={token}", calls[0])
+                self.assertEqual(calls[2][1:4], ("rm", "--force", name))
 
     def test_workspace_partial_creation_cleanup_failure_is_not_silent(self):
         with tempfile.TemporaryDirectory() as tmp:

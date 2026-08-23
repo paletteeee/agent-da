@@ -7,6 +7,7 @@ to a private, detached tree.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import importlib
 import json
@@ -474,13 +475,26 @@ def _dispatch(
 
 
 def _smoke_output_path(arguments: Sequence[str], project_root: Path) -> Path:
+    target, _forwarded = _bind_smoke_output_arguments(arguments, project_root)
+    return target
+
+
+class _ControllerArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise FormalControllerError("formal smoke output arguments are invalid")
+
+
+def _bind_smoke_output_arguments(
+    arguments: Sequence[str], project_root: Path
+) -> tuple[Path, tuple[str, str]]:
     forwarded = list(arguments)
-    if forwarded.count("--out") != 1:
+    parser = _ControllerArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("--out", action="append", type=Path, required=True)
+    namespace = parser.parse_args(forwarded)
+    outputs = list(namespace.out)
+    if len(outputs) != 1:
         raise FormalControllerError("formal smoke output path is ambiguous")
-    index = forwarded.index("--out")
-    if index + 1 >= len(forwarded):
-        raise FormalControllerError("formal smoke output path is missing")
-    raw_target = Path(forwarded[index + 1]).expanduser()
+    raw_target = outputs[0].expanduser()
     if not raw_target.is_absolute() or raw_target.name in {"", ".", ".."}:
         raise FormalControllerError("formal smoke output path is invalid")
     target = raw_target.absolute()
@@ -491,11 +505,10 @@ def _smoke_output_path(arguments: Sequence[str], project_root: Path) -> Path:
         pass
     else:
         raise FormalControllerError("formal smoke output path escaped invalidation")
-    return target
+    return target, ("--out", str(target))
 
 
-def _remove_smoke_success_report(arguments: Sequence[str], project_root: Path) -> None:
-    target = _smoke_output_path(arguments, project_root)
+def _remove_smoke_success_report(target: Path) -> None:
     parent = target.parent.resolve(strict=True)
     if parent != target.parent:
         raise FormalControllerError("formal smoke output parent changed")
@@ -534,6 +547,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if os.geteuid() != 0:
             raise FormalControllerError("formal controller requires root")
         project_root = project_root.resolve(strict=True)
+        smoke_output_path: Path | None = None
+        if action == "smoke":
+            smoke_output_path, bound_forwarded = _bind_smoke_output_arguments(
+                forwarded, project_root
+            )
+            forwarded = list(bound_forwarded)
         approved = _verify_installed_controller(project_root)
         export = _create_committed_export(project_root, approved)
         try:
@@ -553,9 +572,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             try:
                 _remove_export(export)
             except BaseException as cleanup:
-                if action == "smoke" and result == 0:
+                if action == "smoke" and result == 0 and smoke_output_path is not None:
                     try:
-                        _remove_smoke_success_report(forwarded, project_root)
+                        _remove_smoke_success_report(smoke_output_path)
                     except BaseException as invalidation:
                         try:
                             cleanup.add_note(

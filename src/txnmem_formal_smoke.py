@@ -14,6 +14,7 @@ from dataclasses import dataclass
 import errno
 import hashlib
 import ipaddress
+import json
 import os
 from pathlib import Path
 import re
@@ -88,6 +89,7 @@ _CHILD_RECEIPT_SCHEMA = "txnmem-provenance-smoke-child-receipt-v1"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _SMOKE_NAME = re.compile(r"^smoke-[0-9a-f]{32}$")
+_SMOKE_PROBE_OWNER_LABEL = "txnmem.formal-smoke.owner"
 _SMOKE_WORKSPACE_ROOT = _FORMAL_RUNS_ROOT
 _REPORT_FIELDS = frozenset(
     {
@@ -681,16 +683,71 @@ def _docker_run(arguments: Sequence[str], *, timeout: float = 15.0):
         raise FormalSmokeError("formal smoke container probe failed") from exc
 
 
-def _remove_probe_container(container_ref: str) -> None:
+def _validate_probe_container_ref(container_ref: str) -> None:
     if not isinstance(container_ref, str) or not re.fullmatch(
         r"(?:[0-9a-f]{64}|txnmem-smoke-[0-9a-f]{24})", container_ref
     ):
         raise FormalSmokeError("formal smoke container cleanup identity is invalid")
+
+
+def _docker_inspect_is_not_found(result: Any, container_ref: str) -> bool:
+    stderr = getattr(result, "stderr", "")
+    if not isinstance(stderr, str):
+        return False
+    return getattr(result, "returncode", 0) != 0 and any(
+        marker in stderr
+        for marker in (
+            f"No such object: {container_ref}",
+            f"No such container: {container_ref}",
+        )
+    )
+
+
+def _inspect_probe_container_labels(container_ref: str) -> dict[str, str] | None:
+    _validate_probe_container_ref(container_ref)
+    inspected = _docker_run(("inspect", container_ref))
+    if inspected.returncode != 0:
+        if _docker_inspect_is_not_found(inspected, container_ref):
+            return None
+        raise FormalSmokeError("formal smoke container inspect failed")
+    try:
+        document = json.loads(inspected.stdout)
+    except (TypeError, ValueError) as exc:
+        raise FormalSmokeError("formal smoke container inspect failed") from exc
+    if not isinstance(document, list) or len(document) != 1:
+        raise FormalSmokeError("formal smoke container inspect failed")
+    details = document[0]
+    if not isinstance(details, Mapping):
+        raise FormalSmokeError("formal smoke container inspect failed")
+    config = details.get("Config")
+    if not isinstance(config, Mapping):
+        raise FormalSmokeError("formal smoke container inspect failed")
+    labels = config.get("Labels")
+    if labels is None:
+        return {}
+    if not isinstance(labels, Mapping) or any(
+        not isinstance(key, str) or not isinstance(value, str)
+        for key, value in labels.items()
+    ):
+        raise FormalSmokeError("formal smoke container inspect failed")
+    return dict(labels)
+
+
+def _remove_probe_container(container_ref: str, *, owner_label: str) -> None:
+    _validate_probe_container_ref(container_ref)
+    if not isinstance(owner_label, str) or not re.fullmatch(
+        r"[0-9a-f]{24}", owner_label
+    ):
+        raise FormalSmokeError("formal smoke container cleanup identity is invalid")
+    labels = _inspect_probe_container_labels(container_ref)
+    if labels is None:
+        return
+    if labels.get(_SMOKE_PROBE_OWNER_LABEL) != owner_label:
+        raise FormalSmokeError("formal smoke container cleanup ownership mismatch")
     removed = _docker_run(("rm", "--force", container_ref))
     if removed.returncode != 0:
         raise FormalSmokeError("formal smoke container cleanup failed")
-    inspected = _docker_run(("inspect", container_ref))
-    if inspected.returncode == 0:
+    if _inspect_probe_container_labels(container_ref) is not None:
         raise FormalSmokeError("formal smoke container cleanup failed")
 
 
@@ -702,7 +759,8 @@ def _probe_forward_path_denial(
         r"sha256:[0-9a-f]{64}", image_id
     ):
         raise FormalSmokeError("formal smoke probe image identity is invalid")
-    name = "txnmem-smoke-" + secrets.token_hex(12)
+    owner_label = secrets.token_hex(12)
+    name = "txnmem-smoke-" + owner_label
     script = (
         'while [[ "$#" -gt 0 ]]; do '
         'probe_error=$(exec 3<>"/dev/tcp/$1/$2" 2>&1); '
@@ -729,6 +787,8 @@ def _probe_forward_path_denial(
                 "--cap-drop=ALL",
                 "--security-opt",
                 "no-new-privileges",
+                "--label",
+                f"{_SMOKE_PROBE_OWNER_LABEL}={owner_label}",
                 "--entrypoint",
                 "/bin/bash",
                 image_id,
@@ -765,7 +825,7 @@ def _probe_forward_path_denial(
     finally:
         if create_started:
             try:
-                _remove_probe_container(cleanup_ref)
+                _remove_probe_container(cleanup_ref, owner_label=owner_label)
             except FormalSmokeError:
                 raise
             except BaseException as exc:
@@ -1137,18 +1197,21 @@ def main(
     _controller_context: Mapping[str, Any] | None = None,
 ) -> int:
     parser = argparse.ArgumentParser(
-        description="run the protected provenance ingress smoke gate"
+        description="run the protected provenance ingress smoke gate",
+        allow_abbrev=False,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."))
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--out", type=Path, action="append", required=True)
     args = parser.parse_args(argv)
     try:
+        if len(args.out) != 1:
+            raise FormalSmokeError("formal smoke output path is ambiguous")
         password = os.environ.pop("TXNMEM_NEO4J_PASSWORD", None)
         if not password:
             raise FormalSmokeError("Neo4j runtime credential is unavailable")
         collect_formal_smoke(
             project_root=args.project_root,
-            out_path=args.out,
+            out_path=args.out[0],
             qdrant_url=_QDRANT_URL,
             neo4j_uri=_NEO4J_URI,
             toxiproxy_url=_TOXIPROXY_URL,
