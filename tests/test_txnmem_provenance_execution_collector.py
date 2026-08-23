@@ -89,6 +89,41 @@ def proxy_payload_sha256(snapshot):
 class ProvenanceExecutionCollectorTests(unittest.TestCase):
     AUTHORIZATION_NONCE = b"collector-fixture-authorization-nonce-0001"
 
+    def _assert_exact_bridge_tcp_reset_policy(self, batch):
+        host_tcp_deny = (
+            "tcp dport { 6333, 6334, 7474, 7687, 8474, 19000, 19001 } "
+            "ip daddr { 172.19.0.0/16, 172.20.0.0/16 } "
+            "reject with tcp reset "
+            'comment "txnmem-host-bridge-tcp-deny"'
+        )
+        forward_tcp_deny = (
+            'iifname != { "br-aaaaaaaaaaaa", "br-bbbbbbbbbbbb" } '
+            "tcp dport { 6333, 6334, 7474, 7687, 8474, 19000, 19001 } "
+            "ip daddr { 172.19.0.0/16, 172.20.0.0/16 } "
+            "reject with tcp reset "
+            'comment "txnmem-forward-bridge-tcp-deny"'
+        )
+        bridge_tcp_reset_rules = tuple(
+            line.strip()
+            for line in batch.splitlines()
+            if "bridge-tcp-deny" in line
+        )
+
+        self.assertEqual(
+            bridge_tcp_reset_rules,
+            (host_tcp_deny, forward_tcp_deny),
+        )
+        self.assertEqual(
+            batch.count(
+                "tcp dport { 6333, 6334, 7474, 7687, 8474, 19000, 19001 }"
+            ),
+            2,
+        )
+        for rule in bridge_tcp_reset_rules:
+            self.assertNotIn("meta l4proto tcp", rule)
+
+        return host_tcp_deny, forward_tcp_deny
+
     def test_toxiproxy_version_parser_accepts_exact_registered_forms(self):
         cases = (
             (b"2.5.0", "2.5.0"),
@@ -1270,11 +1305,8 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             "reject with tcp reset "
             'comment "txnmem-attribution-deny"'
         )
-        host_tcp_deny = (
-            "meta l4proto tcp "
-            "ip daddr { 172.19.0.0/16, 172.20.0.0/16 } "
-            "reject with tcp reset "
-            'comment "txnmem-host-bridge-tcp-deny"'
+        host_tcp_deny, forward_tcp_deny = (
+            self._assert_exact_bridge_tcp_reset_policy(batch)
         )
         host_fallback_deny = (
             "ip daddr { 172.19.0.0/16, 172.20.0.0/16 } "
@@ -1282,13 +1314,6 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         )
         forward_prefix = (
             'iifname != { "br-aaaaaaaaaaaa", "br-bbbbbbbbbbbb" } '
-        )
-        forward_tcp_deny = (
-            forward_prefix
-            + "meta l4proto tcp "
-            + "ip daddr { 172.19.0.0/16, 172.20.0.0/16 } "
-            + "reject with tcp reset "
-            + 'comment "txnmem-forward-bridge-tcp-deny"'
         )
         forward_fallback_deny = (
             forward_prefix
@@ -1319,6 +1344,37 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertEqual(batch.count(" accept comment"), 3)
         self.assertEqual(batch.count(" reject with tcp reset comment"), 4)
         self.assertEqual(batch.count(" reject comment"), 3)
+
+    def test_nft_bridge_tcp_reset_policy_rejects_noncanonical_port_predicates(self):
+        batch = collector_module._nft_guard_batch(
+            "txnmem_" + "5" * 16,
+            runner_uid=65532,
+            backend_ipv4_subnet="172.19.0.0/16",
+            ingress_ipv4_subnet="172.20.0.0/16",
+            backend_bridge_interface="br-aaaaaaaaaaaa",
+            ingress_bridge_interface="br-bbbbbbbbbbbb",
+            toxiproxy_ingress_ipv4="172.20.0.2",
+        )
+        exact_ports = (
+            "tcp dport { 6333, 6334, 7474, 7687, 8474, 19000, 19001 }"
+        )
+        port_mutations = (
+            "tcp dport { 6333, 6334, 7474, 7687, 8474, 19000 }",
+            "tcp dport { 6334, 6333, 7474, 7687, 8474, 19000, 19001 }",
+            "tcp dport { 6333, 6333, 6334, 7474, 7687, 8474, 19000, 19001 }",
+            "tcp dport { 6333-6334, 7474, 7687, 8474, 19000, 19001 }",
+            "tcp dport { 6333, 6334, 7474, 7687, 8474, 19000, 19001, 19002 }",
+        )
+        for scope, occurrence in (("host", 1), ("forward", 2)):
+            for predicate in (*port_mutations, "meta l4proto tcp"):
+                with self.subTest(scope=scope, predicate=predicate):
+                    parts = batch.split(exact_ports)
+                    self.assertEqual(len(parts), 3)
+                    mutated = exact_ports.join(parts[:occurrence])
+                    mutated += predicate
+                    mutated += exact_ports.join(parts[occurrence:])
+                    with self.assertRaises(AssertionError):
+                        self._assert_exact_bridge_tcp_reset_policy(mutated)
 
     def test_nft_network_guard_rejects_nonexclusive_ingress_addresses(self):
         for name, address in (
