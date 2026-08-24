@@ -466,6 +466,9 @@ FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN: dict[str, str] = {
     # txnmem-provenance-formal-20260824-v2
     "7651f39b4f8681ef7ce609f9b0f7e47b5d917867088194da9929c7d1581b4af0":
         "c3bf87f31151a021b142589048fc1b0be32bfaa9bd69662c59cbccb5a0851ef7",
+    # txnmem-provenance-formal-20260824-v3
+    "4a2d2f6394325c21bb19432ae0b7a4c3b2de525fb19fdd2c55c5ee607e855c85":
+        "e07bbf42cf32a71c834ecaf40128215ab066f826f35359f8c8ac2e77b2e84362",
 }
 
 
