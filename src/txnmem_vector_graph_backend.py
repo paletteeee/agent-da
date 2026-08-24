@@ -166,15 +166,21 @@ class _QdrantHTTPClient:
             ]
         }
 
-    def _scroll(self, filters: Mapping[str, Any], limit: int = 1000) -> list[dict[str, Any]]:
-        if type(limit) is not int or limit <= 0:
+    def _scroll(
+        self,
+        filters: Mapping[str, Any],
+        limit: int | None = 1000,
+    ) -> list[dict[str, Any]]:
+        if limit is not None and (type(limit) is not int or limit <= 0):
             raise ValueError("scroll limit must be positive")
         self._ensure_collection()
         rows: list[dict[str, Any]] = []
         offset: Any = None
         observed_offsets: set[str] = set()
-        while len(rows) < limit:
-            page_limit = min(1000, limit - len(rows))
+        while limit is None or len(rows) < limit:
+            page_limit = (
+                1000 if limit is None else min(1000, limit - len(rows))
+            )
             payload: dict[str, Any] = {
                 "filter": dict(filters),
                 "limit": page_limit,
@@ -203,7 +209,7 @@ class _QdrantHTTPClient:
                 raise RuntimeError("Qdrant scroll returned a repeated offset")
             observed_offsets.add(offset_key)
             offset = next_offset
-        return rows[:limit]
+        return rows if limit is None else rows[:limit]
 
     def retrieve_many_by_txn(self, namespace, txn_id):
         try:
@@ -221,8 +227,8 @@ class _QdrantHTTPClient:
             return {"read_ok": False, "error": type(exc).__name__}
         return {"read_ok": True, "rows": rows}
 
-    def scan_namespace(self, namespace, limit=1000):
-        if type(limit) is not int or limit <= 0:
+    def scan_namespace(self, namespace, limit: int | None = 1000):
+        if limit is not None and (type(limit) is not int or limit <= 0):
             raise ValueError("namespace scan limit must be a positive integer")
         try:
             rows = self._scroll(
@@ -1889,7 +1895,7 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
                 "qdrant",
                 f"{operation}_rows",
                 lambda: self._require_readback(
-                    method(self.db_namespace, 1000),
+                    method(self.db_namespace, None),
                     "Qdrant namespace readback is unknown",
                 ),
                 key,

@@ -1787,6 +1787,48 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertEqual(len(result["rows"]), 1500)
         self.assertEqual(offsets, [None, 1000])
 
+    def test_qdrant_unbounded_namespace_scan_paginates_until_exhaustion(self):
+        client = _QdrantHTTPClient("http://qdrant")
+        offsets = []
+
+        def request(method, path, payload=None):
+            if method == "PUT":
+                return {}
+            if method == "GET":
+                return {
+                    "result": {
+                        "config": {
+                            "params": {
+                                "vectors": {"size": 32, "distance": "Cosine"}
+                            }
+                        }
+                    }
+                }
+            self.assertTrue(path.endswith("/points/scroll"))
+            offset = payload.get("offset")
+            offsets.append(offset)
+            start = 0 if offset is None else int(offset)
+            stop = min(start + int(payload["limit"]), 1001)
+            points = [
+                {"payload": {"memory_id": f"m{index}"}}
+                for index in range(start, stop)
+            ]
+            return {
+                "result": {
+                    "points": points,
+                    "next_page_offset": stop if stop < 1001 else None,
+                }
+            }
+
+        client._request = request
+
+        result = client.scan_namespace("tenant", limit=None)
+
+        self.assertTrue(result["read_ok"])
+        self.assertEqual(len(result["rows"]), 1001)
+        self.assertEqual(result["rows"][-1]["memory_id"], "m1000")
+        self.assertEqual(offsets, [None, 1000])
+
     def test_namespace_scans_reject_bool_and_fractional_limits(self):
         qdrant = _QdrantHTTPClient("http://qdrant")
         neo4j = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
@@ -1861,6 +1903,20 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             ("neo4j", "password"),
             qdrant_client=self.qdrant,
             neo4j_client=self.neo4j,
+        )
+
+    def test_search_committed_scans_past_first_qdrant_page(self):
+        for index in range(1001):
+            self.backend.write(
+                f"m-{index:04d}",
+                value=f"value-{index:04d}",
+            )
+
+        matches = self.backend.search_committed("value-1000")
+
+        self.assertEqual(
+            [record["memory_id"] for record in matches],
+            ["m-1000"],
         )
 
     def test_write_read_search_derive_provenance_and_supersede(self):
