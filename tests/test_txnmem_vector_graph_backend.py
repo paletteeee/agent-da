@@ -913,6 +913,66 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             ],
         )
 
+    def test_neo4j_canonical_cas_locks_all_identities_in_sorted_order(self):
+        events = []
+
+        class Result:
+            def __init__(self, row=None):
+                self.row = row
+
+            def single(self):
+                return self.row
+
+            def consume(self):
+                return None
+
+        class Transaction:
+            def run(self, query, **parameters):
+                if query.startswith(
+                    "MERGE (identity:MemoryIdentity "
+                    "{namespace:$namespace, memory_id:$lock_memory_id})"
+                ):
+                    events.append(("lock", parameters["lock_memory_id"]))
+                    return Result()
+                if "RETURN coalesce(m.canonical, false) AS canonical" in query:
+                    events.append(("canonical-read", parameters["memory_id"]))
+                    return Result(
+                        {
+                            "canonical": False,
+                            "claim_txn_ids": [],
+                        }
+                    )
+                return Result()
+
+        client = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
+        client._execute_write_once = lambda work: work(Transaction())
+
+        result = client.compare_and_set_memory(
+            "tenant",
+            "m-target",
+            {
+                "status": "active",
+                "version": 1,
+                "_canonical_state_hash": "state-hash",
+            },
+            ["z-source", "a-source", "z-source"],
+            "m-old",
+            0,
+            "operation-id",
+        )
+
+        self.assertEqual(result["status"], "applied")
+        self.assertEqual(
+            events[:5],
+            [
+                ("lock", "a-source"),
+                ("lock", "m-old"),
+                ("lock", "m-target"),
+                ("lock", "z-source"),
+                ("canonical-read", "m-target"),
+            ],
+        )
+
     def test_neo4j_healthcheck_reports_server_version(self):
         class Session:
             def __enter__(self):

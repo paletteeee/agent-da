@@ -945,9 +945,20 @@ class _Neo4jBoltClient:
         desired_hash = str(payload["_canonical_state_hash"])
 
         def transition(tx):
+            lock_ids = {memory_id, *source_ids}
+            if supersedes_id is not None:
+                lock_ids.add(str(supersedes_id))
+            for lock_memory_id in sorted(lock_ids):
+                tx.run(
+                    "MERGE (identity:MemoryIdentity "
+                    "{namespace:$namespace, memory_id:$lock_memory_id}) "
+                    "SET identity._cas_lock="
+                    "coalesce(identity._cas_lock, 0) + 1",
+                    namespace=namespace,
+                    lock_memory_id=lock_memory_id,
+                ).consume()
             current = tx.run(
-                "MERGE (m:MemoryIdentity {namespace:$namespace, memory_id:$memory_id}) "
-                "SET m._cas_lock=coalesce(m._cas_lock, 0) + 1 "
+                "MATCH (m:MemoryIdentity {namespace:$namespace, memory_id:$memory_id}) "
                 "WITH m OPTIONAL MATCH (claim:MemoryWriteClaim "
                 "{namespace:$namespace, memory_id:$memory_id}) "
                 "WHERE claim IS NULL OR ("
