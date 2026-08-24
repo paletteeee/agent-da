@@ -1571,12 +1571,18 @@ def _nft_guard_batch(
         raise CollectorError("formal nftables bridge interface is invalid")
     subnet_set = ", ".join(normalized_subnets)
     interface_set = ", ".join(f'"{value}"' for value in bridge_interfaces)
+    # The runner UID gates each new proxy flow.  Kernel-emitted packets can
+    # lose socket ownership after that flow is established, so preserve only
+    # the established proxy tuple before applying the non-runner reset rule.
     return (
         f"table inet {table_name} {{\n"
         "  chain output {\n"
         "    type filter hook output priority -150; policy accept;\n"
         f"    meta skuid {runner_uid} ip daddr 127.0.0.1 "
         "tcp dport { 19000, 19001 } accept comment \"txnmem-proxy-allow\"\n"
+        "    ct state established ip daddr 127.0.0.1 "
+        "tcp dport { 19000, 19001 } accept "
+        "comment \"txnmem-proxy-established-allow\"\n"
         "    meta skuid 0 ip daddr 127.0.0.1 tcp dport 8474 "
         "accept comment \"txnmem-management-allow\"\n"
         f"    meta skuid 0 ip daddr {ingress_address} "
@@ -1692,6 +1698,7 @@ def _normalize_nft_snapshot(document: Any, *, table_name: str) -> dict[str, Any]
         "txnmem-management-allow",
         "txnmem-management-deny",
         "txnmem-proxy-allow",
+        "txnmem-proxy-established-allow",
         "txnmem-runner-deny",
     ]:
         raise CollectorError("formal nftables rule closure is incomplete")

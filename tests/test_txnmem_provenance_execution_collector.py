@@ -299,6 +299,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 }
                 for comment in (
                     "txnmem-proxy-allow",
+                    "txnmem-proxy-established-allow",
                     "txnmem-management-allow",
                     "txnmem-docker-proxy-ingress-allow",
                     "txnmem-runner-deny",
@@ -1342,9 +1343,49 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             'iifname != { "br-aaaaaaaaaaaa", "br-bbbbbbbbbbbb" }',
             batch,
         )
-        self.assertEqual(batch.count(" accept comment"), 4)
+        self.assertEqual(batch.count(" accept comment"), 5)
         self.assertEqual(batch.count(" reject with tcp reset comment"), 4)
         self.assertEqual(batch.count(" reject comment"), 3)
+
+    def test_nft_network_guard_preserves_established_proxy_flow_attribution(self):
+        batch = collector_module._nft_guard_batch(
+            "txnmem_" + "5" * 16,
+            runner_uid=65532,
+            backend_ipv4_subnet="172.19.0.0/16",
+            ingress_ipv4_subnet="172.20.0.0/16",
+            backend_bridge_interface="br-aaaaaaaaaaaa",
+            ingress_bridge_interface="br-bbbbbbbbbbbb",
+            toxiproxy_ingress_ipv4="172.20.0.2",
+        )
+        established_proxy_allow = (
+            "ct state established ip daddr 127.0.0.1 "
+            "tcp dport { 19000, 19001 } accept "
+            'comment "txnmem-proxy-established-allow"'
+        )
+
+        self.assertIn(established_proxy_allow, batch)
+        self.assertEqual(batch.count("txnmem-proxy-established-allow"), 1)
+        self.assertLess(
+            batch.index("txnmem-proxy-allow"),
+            batch.index(established_proxy_allow),
+        )
+        self.assertLess(
+            batch.index(established_proxy_allow),
+            batch.index("txnmem-runner-deny"),
+        )
+        self.assertLess(
+            batch.index(established_proxy_allow),
+            batch.index("txnmem-attribution-deny"),
+        )
+        self.assertNotIn(
+            "ct state established ip daddr 127.0.0.1 tcp dport 8474",
+            batch,
+        )
+        self.assertNotIn("ct state established,related", batch)
+        self.assertNotIn(
+            "ct state established ip daddr {",
+            batch,
+        )
 
     def test_nft_network_guard_preserves_host_reset_before_bridge_fallback(self):
         batch = collector_module._nft_guard_batch(
@@ -1446,9 +1487,10 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             )
         except CollectorError as exc:
             self.fail(f"expected exact nft rule closure to normalize: {exc}")
-        self.assertEqual(len(normalized["nftables"]), 14)
+        self.assertEqual(len(normalized["nftables"]), 15)
 
         for missing_comment in (
+            "txnmem-proxy-established-allow",
             "txnmem-host-bridge-reset-allow",
             "txnmem-host-bridge-tcp-deny",
             "txnmem-forward-bridge-tcp-deny",
