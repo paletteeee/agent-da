@@ -913,8 +913,9 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             ],
         )
 
-    def test_neo4j_canonical_cas_locks_all_identities_in_sorted_order(self):
-        events = []
+    def test_neo4j_canonical_cas_coordinates_only_overlapping_identities(self):
+        activity_lock = threading.Lock()
+        activity = {"active": 0, "peak": 0}
 
         class Result:
             def __init__(self, row=None):
@@ -928,14 +929,7 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
 
         class Transaction:
             def run(self, query, **parameters):
-                if query.startswith(
-                    "MERGE (identity:MemoryIdentity "
-                    "{namespace:$namespace, memory_id:$lock_memory_id})"
-                ):
-                    events.append(("lock", parameters["lock_memory_id"]))
-                    return Result()
                 if "RETURN coalesce(m.canonical, false) AS canonical" in query:
-                    events.append(("canonical-read", parameters["memory_id"]))
                     return Result(
                         {
                             "canonical": False,
@@ -944,34 +938,74 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
                     )
                 return Result()
 
-        client = _Neo4jBoltClient.__new__(_Neo4jBoltClient)
-        client._execute_write_once = lambda work: work(Transaction())
+        class Driver:
+            pass
 
-        result = client.compare_and_set_memory(
-            "tenant",
-            "m-target",
-            {
-                "status": "active",
-                "version": 1,
-                "_canonical_state_hash": "state-hash",
-            },
-            ["z-source", "a-source", "z-source"],
-            "m-old",
-            0,
-            "operation-id",
-        )
+        class GraphDatabase:
+            @staticmethod
+            def driver(_uri, **_kwargs):
+                return Driver()
 
-        self.assertEqual(result["status"], "applied")
-        self.assertEqual(
-            events[:5],
-            [
-                ("lock", "a-source"),
-                ("lock", "m-old"),
-                ("lock", "m-target"),
-                ("lock", "z-source"),
-                ("canonical-read", "m-target"),
-            ],
-        )
+        module = ModuleType("neo4j")
+        module.GraphDatabase = GraphDatabase
+        with patch.dict(sys.modules, {"neo4j": module}), patch.object(
+            _Neo4jBoltClient, "_initialize_schema"
+        ):
+            client = _Neo4jBoltClient(
+                "bolt://proxy",
+                ("neo4j", "secret"),
+            )
+
+        def execute_once(work):
+            with activity_lock:
+                activity["active"] += 1
+                activity["peak"] = max(activity["peak"], activity["active"])
+            try:
+                time.sleep(0.05)
+                return work(Transaction())
+            finally:
+                with activity_lock:
+                    activity["active"] -= 1
+
+        client._execute_write_once = execute_once
+
+        def run_pair(source_ids):
+            activity.update({"active": 0, "peak": 0})
+            barrier = threading.Barrier(2)
+            errors = []
+
+            def worker(index):
+                try:
+                    barrier.wait(timeout=1.0)
+                    result = client.compare_and_set_memory(
+                        "tenant",
+                        f"target-{index}",
+                        {
+                            "status": "active",
+                            "version": 1,
+                            "_canonical_state_hash": f"state-{index}",
+                        },
+                        [source_ids[index]],
+                        None,
+                        0,
+                        f"operation-{index}",
+                    )
+                    self.assertEqual(result["status"], "applied")
+                except Exception as exc:  # pragma: no cover - asserted below
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=worker, args=(index,)) for index in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=2.0)
+            self.assertFalse(errors)
+            self.assertTrue(all(not thread.is_alive() for thread in threads))
+            return activity["peak"]
+
+        self.assertEqual(run_pair(["shared-source", "shared-source"]), 1)
+        self.assertEqual(run_pair(["source-a", "source-b"]), 2)
+        self.assertEqual(client._identity_lock_coordinator._entries, {})
 
     def test_neo4j_healthcheck_reports_server_version(self):
         class Session:

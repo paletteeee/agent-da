@@ -13,8 +13,9 @@ import hashlib
 import json
 import threading
 import time
+from contextlib import contextmanager
 from uuid import NAMESPACE_URL, uuid5
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError
@@ -50,6 +51,56 @@ class _ServiceBoundaryFailure(VectorGraphBackendError):
         self.service = str(service)
         self.operation = str(operation)
         self.__cause__ = cause
+
+
+class _IdentityLockCoordinator:
+    """Serialize overlapping identity mutations without retaining idle locks."""
+
+    def __init__(self) -> None:
+        self._guard = threading.Lock()
+        self._entries: dict[
+            tuple[str, str], tuple[threading.RLock, int]
+        ] = {}
+
+    @contextmanager
+    def hold(
+        self,
+        namespace: str,
+        memory_ids: Iterable[str],
+    ) -> Iterator[None]:
+        keys = [
+            (str(namespace), memory_id)
+            for memory_id in sorted({str(item) for item in memory_ids})
+        ]
+        selected: list[tuple[tuple[str, str], threading.RLock]] = []
+        with self._guard:
+            for key in keys:
+                current = self._entries.get(key)
+                lock, references = (
+                    current if current is not None else (threading.RLock(), 0)
+                )
+                self._entries[key] = (lock, references + 1)
+                selected.append((key, lock))
+
+        acquired: list[threading.RLock] = []
+        try:
+            for _key, lock in selected:
+                lock.acquire()
+                acquired.append(lock)
+            yield
+        finally:
+            for lock in reversed(acquired):
+                lock.release()
+            with self._guard:
+                for key, lock in selected:
+                    current = self._entries.get(key)
+                    if current is None or current[0] is not lock:
+                        continue
+                    references = current[1] - 1
+                    if references == 0:
+                        del self._entries[key]
+                    else:
+                        self._entries[key] = (lock, references)
 
 
 def _qdrant_point_id(namespace: str, memory_id: str) -> str:
@@ -271,6 +322,7 @@ class _Neo4jBoltClient:
         if type(migrate_legacy) is not bool:
             raise ValueError("migrate_legacy must be a boolean")
         self.notifications_min_severity = notifications_min_severity
+        self._identity_lock_coordinator = _IdentityLockCoordinator()
         driver_config: dict[str, Any] = {
             "auth": tuple(auth),
             "max_transaction_retry_time": self.max_transaction_retry_time_seconds,
@@ -945,20 +997,9 @@ class _Neo4jBoltClient:
         desired_hash = str(payload["_canonical_state_hash"])
 
         def transition(tx):
-            lock_ids = {memory_id, *source_ids}
-            if supersedes_id is not None:
-                lock_ids.add(str(supersedes_id))
-            for lock_memory_id in sorted(lock_ids):
-                tx.run(
-                    "MERGE (identity:MemoryIdentity "
-                    "{namespace:$namespace, memory_id:$lock_memory_id}) "
-                    "SET identity._cas_lock="
-                    "coalesce(identity._cas_lock, 0) + 1",
-                    namespace=namespace,
-                    lock_memory_id=lock_memory_id,
-                ).consume()
             current = tx.run(
-                "MATCH (m:MemoryIdentity {namespace:$namespace, memory_id:$memory_id}) "
+                "MERGE (m:MemoryIdentity {namespace:$namespace, memory_id:$memory_id}) "
+                "SET m._cas_lock=coalesce(m._cas_lock, 0) + 1 "
                 "WITH m OPTIONAL MATCH (claim:MemoryWriteClaim "
                 "{namespace:$namespace, memory_id:$memory_id}) "
                 "WHERE claim IS NULL OR ("
@@ -1095,7 +1136,11 @@ class _Neo4jBoltClient:
                 },
             }
 
-        return self._execute_write_once(transition)
+        identity_ids = {str(memory_id), *source_ids}
+        if supersedes_id is not None:
+            identity_ids.add(str(supersedes_id))
+        with self._identity_lock_coordinator.hold(namespace, identity_ids):
+            return self._execute_write_once(transition)
 
     def project_if_current(
         self, namespace, memory_id, operation_id, projector
