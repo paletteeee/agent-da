@@ -251,6 +251,7 @@ class _Neo4jBoltClient:
         auth: Sequence[str],
         *,
         notifications_min_severity: str | None = None,
+        migrate_legacy: bool = True,
     ):
         try:
             from neo4j import GraphDatabase
@@ -261,6 +262,8 @@ class _Neo4jBoltClient:
         self.max_transaction_retry_time_seconds = 0.0
         if notifications_min_severity not in {None, "OFF"}:
             raise ValueError("unsupported Neo4j notification severity policy")
+        if type(migrate_legacy) is not bool:
+            raise ValueError("migrate_legacy must be a boolean")
         self.notifications_min_severity = notifications_min_severity
         driver_config: dict[str, Any] = {
             "auth": tuple(auth),
@@ -271,7 +274,7 @@ class _Neo4jBoltClient:
                 self.notifications_min_severity
             )
         self.driver = GraphDatabase.driver(str(uri), **driver_config)
-        self._initialize_schema()
+        self._initialize_schema(migrate_legacy=migrate_legacy)
 
     def _execute_write_once(self, work: Callable[[Any], Any]) -> Any:
         """Execute exactly one explicit transaction without driver callback retry."""
@@ -295,8 +298,11 @@ class _Neo4jBoltClient:
                 if callable(close):
                     close()
 
-    def _initialize_schema(self) -> None:
-        """Atomically reconcile every legacy identity before installing constraints."""
+    def _initialize_schema(self, *, migrate_legacy: bool = True) -> None:
+        """Optionally reconcile legacy identities, then install constraints."""
+
+        if type(migrate_legacy) is not bool:
+            raise ValueError("migrate_legacy must be a boolean")
 
         def migrate(tx):
             candidates = [
@@ -477,7 +483,8 @@ class _Neo4jBoltClient:
             ).consume()
             return {"winner_count": len(winners), "loser_count": len(losers)}
 
-        self._execute_write_once(migrate)
+        if migrate_legacy:
+            self._execute_write_once(migrate)
         with self.driver.session() as session:
             session.run(
                 "CREATE CONSTRAINT memory_identity_unique IF NOT EXISTS "

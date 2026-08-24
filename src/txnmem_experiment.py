@@ -8,6 +8,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import subprocess
 from collections import Counter
 from importlib.metadata import PackageNotFoundError, version as package_version
@@ -79,6 +80,52 @@ CORE_WORKLOADS = (
     "revoke_before_commit",
     "provenance_chain_repair",
 )
+
+_SAFE_FAILURE_CLASS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+_SAFE_FAILURE_OPERATION = re.compile(r"^[A-Za-z0-9_:-]{1,128}$")
+
+
+def _safe_failure_provenance(exc: BaseException) -> dict[str, Any]:
+    """Retain only closed exception classes and backend attribution fields."""
+
+    error_classes: list[str] = []
+    service = None
+    operation = None
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen and len(error_classes) < 8:
+        seen.add(id(current))
+        class_name = type(current).__name__
+        error_classes.append(
+            class_name if _SAFE_FAILURE_CLASS.fullmatch(class_name) else "BackendError"
+        )
+        try:
+            candidate_service = getattr(
+                current, "_txnmem_service", getattr(current, "service", None)
+            )
+            candidate_operation = getattr(
+                current, "_txnmem_operation", getattr(current, "operation", None)
+            )
+        except Exception:
+            candidate_service = None
+            candidate_operation = None
+        if service is None and candidate_service in {"qdrant", "neo4j"}:
+            service = candidate_service
+        if (
+            operation is None
+            and isinstance(candidate_operation, str)
+            and _SAFE_FAILURE_OPERATION.fullmatch(candidate_operation)
+        ):
+            operation = candidate_operation
+        current = current.__cause__ or current.__context__
+    return {
+        "error_classes": error_classes,
+        "operation": operation,
+        "root_error_class": error_classes[-1],
+        "service": service,
+    }
+
+
 FORMAL_WORKLOADS = WORKLOADS
 
 
@@ -1437,13 +1484,15 @@ def main(argv: list[str] | None = None) -> int:
                 topology_attestation=topology_attestation,
             )
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, RuntimeError) as exc:
+            failure_provenance = _safe_failure_provenance(exc)
             blocked = {
-                "schema": "txnmem-provenance-performance-blocked-v1",
+                "schema": "txnmem-provenance-performance-blocked-v2",
                 "status": "blocked",
                 "backend": args.backend,
                 "formal_requested": args.formal,
                 "reason_code": "formal_preflight_or_execution_failed",
-                "error_class": type(exc).__name__,
+                "error_class": failure_provenance["error_classes"][0],
+                "failure_provenance": failure_provenance,
                 "production_backend_claim": False,
             }
             try:

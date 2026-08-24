@@ -30,7 +30,13 @@ class TxnMemCliOutputTests(unittest.TestCase):
 
         class FailingBackend:
             def healthcheck(self):
-                raise RuntimeError("password=private at http://203.0.113.10:6333")
+                cause = TimeoutError("token=private-cause")
+                failure = RuntimeError(
+                    "password=private at http://203.0.113.10:6333"
+                )
+                failure._txnmem_service = "neo4j"
+                failure._txnmem_operation = "healthcheck"
+                raise failure from cause
 
             def close(self):
                 return None
@@ -72,8 +78,20 @@ class TxnMemCliOutputTests(unittest.TestCase):
         self.assertNotIn("private", blocked_text)
         self.assertNotIn("203.0.113.10", blocked_text)
         blocked = json.loads(blocked_text)
+        self.assertEqual(
+            blocked["schema"], "txnmem-provenance-performance-blocked-v2"
+        )
         self.assertEqual(blocked["error_class"], "RuntimeError")
         self.assertEqual(blocked["reason_code"], "formal_preflight_or_execution_failed")
+        self.assertEqual(
+            blocked["failure_provenance"],
+            {
+                "error_classes": ["RuntimeError", "TimeoutError"],
+                "operation": "healthcheck",
+                "root_error_class": "TimeoutError",
+                "service": "neo4j",
+            },
+        )
 
     def test_provenance_formal_config_rejects_duplicate_keys_before_backend(self):
         sys.path.insert(0, str(ROOT / "src"))

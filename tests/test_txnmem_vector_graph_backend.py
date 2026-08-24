@@ -861,6 +861,58 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             )
         self.assertEqual(events, ["begin", "rollback", "close"])
 
+    def test_neo4j_performance_initialization_skips_legacy_scan_but_installs_constraints(self):
+        events = []
+
+        class Result:
+            def consume(self):
+                return None
+
+        class Session:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def begin_transaction(self):
+                raise AssertionError("legacy migration transaction was opened")
+
+            def run(self, query, **_parameters):
+                events.append(query)
+                return Result()
+
+        class Driver:
+            def session(self):
+                return Session()
+
+        class GraphDatabase:
+            @staticmethod
+            def driver(_uri, **_kwargs):
+                return Driver()
+
+        module = ModuleType("neo4j")
+        module.GraphDatabase = GraphDatabase
+        with patch.dict(sys.modules, {"neo4j": module}):
+            _Neo4jBoltClient(
+                "bolt://proxy",
+                ("neo4j", "secret"),
+                notifications_min_severity="OFF",
+                migrate_legacy=False,
+            )
+
+        self.assertEqual(
+            events,
+            [
+                "CREATE CONSTRAINT memory_identity_unique IF NOT EXISTS "
+                "FOR (m:MemoryIdentity) REQUIRE (m.namespace, m.memory_id) IS UNIQUE",
+                "DROP CONSTRAINT memory_write_claim_unique IF EXISTS",
+                "CREATE CONSTRAINT memory_write_claim_unique IF NOT EXISTS "
+                "FOR (c:MemoryWriteClaim) REQUIRE "
+                "(c.namespace, c.memory_id, c.base_version, c.final_version) IS UNIQUE",
+            ],
+        )
+
     def test_neo4j_healthcheck_reports_server_version(self):
         class Session:
             def __enter__(self):

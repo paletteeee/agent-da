@@ -425,6 +425,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
             "bolt://neo4j",
             ("neo4j", "password"),
             notifications_min_severity="OFF",
+            migrate_legacy=False,
         )
         self.assertEqual(len(constructed), 2)
         self.assertTrue(

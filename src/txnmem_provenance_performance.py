@@ -1974,6 +1974,7 @@ class _ReusableVectorGraphBackendFactory:
             self.neo4j_uri,
             self.neo4j_auth,
             notifications_min_severity="OFF",
+            migrate_legacy=False,
         )
         self._closed = False
         self._close_lock = threading.Lock()
