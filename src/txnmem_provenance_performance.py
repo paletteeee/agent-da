@@ -818,6 +818,7 @@ def run_matrix_cell(
     environment_attestation: Mapping[str, Any]
     | Callable[[Any], Mapping[str, Any]]
     | None = None,
+    progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run one matrix cell and return sanitized samples plus repetition units."""
 
@@ -1106,6 +1107,14 @@ def run_matrix_cell(
             close = getattr(backend, "close", None)
             if callable(close):
                 close()
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "cell_id": cell_id,
+                    "completed_repetition_count": len(repetition_rows),
+                    "completed_operation_sample_count": len(all_samples),
+                }
+            )
 
     return {
         "schema": MATRIX_SCHEMA,

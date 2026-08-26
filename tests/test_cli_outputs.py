@@ -24,6 +24,20 @@ class TxnMemCliOutputTests(unittest.TestCase):
             "toxiproxy_version": "2.9.0",
         }
 
+    @staticmethod
+    def _small_provenance_config():
+        return {
+            "schema": "txnmem-provenance-performance-v2",
+            "graph_node_counts": [2],
+            "concurrency_levels": [1],
+            "repetitions": 1,
+            "graph_seed": 17,
+            "operations_per_type": 1,
+            "bootstrap_repetitions": 10,
+            "bootstrap_seed": 17,
+            "request_timeout_seconds": 30.0,
+        }
+
     def test_provenance_blocked_report_does_not_persist_backend_exception_text(self):
         sys.path.insert(0, str(ROOT / "src"))
         from txnmem_experiment import main
@@ -79,10 +93,14 @@ class TxnMemCliOutputTests(unittest.TestCase):
         self.assertNotIn("203.0.113.10", blocked_text)
         blocked = json.loads(blocked_text)
         self.assertEqual(
-            blocked["schema"], "txnmem-provenance-performance-blocked-v2"
+            blocked["schema"], "txnmem-provenance-performance-blocked-v3"
         )
         self.assertEqual(blocked["error_class"], "RuntimeError")
         self.assertEqual(blocked["reason_code"], "formal_preflight_or_execution_failed")
+        self.assertEqual(blocked["failure_stage"], "matrix_execution")
+        self.assertEqual(blocked["completed_cell_count"], 0)
+        self.assertEqual(blocked["completed_repetition_count"], 0)
+        self.assertEqual(blocked["completed_operation_sample_count"], 0)
         self.assertEqual(
             blocked["failure_provenance"],
             {
@@ -92,6 +110,403 @@ class TxnMemCliOutputTests(unittest.TestCase):
                 "service": "neo4j",
             },
         )
+
+    def test_provenance_blocked_report_catches_non_runtime_driver_exception(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        class DriverFailure(Exception):
+            pass
+
+        class FailingBackend:
+            def healthcheck(self):
+                raise DriverFailure("token=private at http://203.0.113.10:6333")
+
+            def close(self):
+                return None
+
+        with TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", {"TXNMEM_NEO4J_PASSWORD": "runtime-only"}, clear=False
+        ), patch(
+            "txnmem_provenance_performance.make_vector_graph_backend_factory",
+            return_value=lambda _namespace: FailingBackend(),
+        ):
+            root = Path(tmp).resolve()
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(self._small_provenance_config()), encoding="utf-8"
+            )
+            attestation = root / "environment.json"
+            attestation.write_text(
+                json.dumps(self._provenance_environment()), encoding="utf-8"
+            )
+            out_dir = root / "out"
+
+            exit_code = main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "vector-graph",
+                    "--config",
+                    str(config),
+                    "--run-id",
+                    "non-runtime-driver-failure",
+                    "--environment-attestation",
+                    str(attestation),
+                    "--out-dir",
+                    str(out_dir),
+                ]
+            )
+            blocked_text = (
+                out_dir / "results" / "provenance_performance_blocked.json"
+            ).read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 2)
+        self.assertNotIn("private", blocked_text)
+        self.assertNotIn("203.0.113.10", blocked_text)
+        blocked = json.loads(blocked_text)
+        self.assertEqual(blocked["error_class"], "DriverFailure")
+        self.assertEqual(blocked["failure_stage"], "matrix_execution")
+        self.assertEqual(blocked["completed_repetition_count"], 0)
+
+    def test_provenance_blocked_report_rejects_untrusted_operation_metadata(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        class FailingBackend:
+            def __init__(self, attribute, value):
+                self.attribute = attribute
+                self.value = value
+
+            def healthcheck(self):
+                failure = RuntimeError("hidden backend detail")
+                setattr(failure, self.attribute, self.value)
+                raise failure
+
+            def close(self):
+                return None
+
+        cases = (
+            ("operation", "healthcheck"),
+            ("_txnmem_operation", "private-token"),
+            ("_txnmem_operation", "localhost:6333"),
+        )
+        for attribute, value in cases:
+            with self.subTest(attribute=attribute, value=value):
+                with TemporaryDirectory() as tmp, patch.dict(
+                    "os.environ",
+                    {"TXNMEM_NEO4J_PASSWORD": "runtime-only"},
+                    clear=False,
+                ), patch(
+                    "txnmem_provenance_performance.make_vector_graph_backend_factory",
+                    return_value=lambda _namespace: FailingBackend(
+                        attribute, value
+                    ),
+                ):
+                    root = Path(tmp).resolve()
+                    config = root / "config.json"
+                    config.write_text(
+                        json.dumps(self._small_provenance_config()),
+                        encoding="utf-8",
+                    )
+                    attestation = root / "environment.json"
+                    attestation.write_text(
+                        json.dumps(self._provenance_environment()), encoding="utf-8"
+                    )
+                    out_dir = root / "out"
+
+                    exit_code = main(
+                        [
+                            "provenance-performance",
+                            "--backend",
+                            "vector-graph",
+                            "--config",
+                            str(config),
+                            "--run-id",
+                            f"untrusted-operation-{attribute}",
+                            "--environment-attestation",
+                            str(attestation),
+                            "--out-dir",
+                            str(out_dir),
+                        ]
+                    )
+                    blocked_text = (
+                        out_dir / "results" / "provenance_performance_blocked.json"
+                    ).read_text(encoding="utf-8")
+
+                self.assertEqual(exit_code, 2)
+                blocked = json.loads(blocked_text)
+                self.assertIsNone(blocked["failure_provenance"]["operation"])
+                if attribute == "_txnmem_operation":
+                    self.assertNotIn(value, blocked_text)
+
+    def test_provenance_blocked_report_handles_unhashable_failure_metadata(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        class FailingBackend:
+            def healthcheck(self):
+                failure = RuntimeError("hidden backend detail")
+                failure._txnmem_service = []
+                failure._txnmem_operation = []
+                raise failure
+
+            def close(self):
+                return None
+
+        with TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", {"TXNMEM_NEO4J_PASSWORD": "runtime-only"}, clear=False
+        ), patch(
+            "txnmem_provenance_performance.make_vector_graph_backend_factory",
+            return_value=lambda _namespace: FailingBackend(),
+        ):
+            root = Path(tmp).resolve()
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(self._small_provenance_config()), encoding="utf-8"
+            )
+            attestation = root / "environment.json"
+            attestation.write_text(
+                json.dumps(self._provenance_environment()), encoding="utf-8"
+            )
+            out_dir = root / "out"
+
+            exit_code = main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "vector-graph",
+                    "--config",
+                    str(config),
+                    "--run-id",
+                    "unhashable-failure-metadata",
+                    "--environment-attestation",
+                    str(attestation),
+                    "--out-dir",
+                    str(out_dir),
+                ]
+            )
+            blocked = json.loads(
+                (
+                    out_dir / "results" / "provenance_performance_blocked.json"
+                ).read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(exit_code, 2)
+        self.assertIsNone(blocked["failure_provenance"]["service"])
+        self.assertIsNone(blocked["failure_provenance"]["operation"])
+
+    def test_provenance_blocked_report_preserves_partial_cell_progress(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_backend import InstrumentedMemoryBackend
+        from txnmem_experiment import main
+
+        class FailingBackend:
+            def healthcheck(self):
+                raise RuntimeError("password=private at http://203.0.113.10:6333")
+
+            def close(self):
+                return None
+
+        calls = 0
+
+        def backend_factory(_namespace):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return InstrumentedMemoryBackend()
+            return FailingBackend()
+
+        with TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", {"TXNMEM_NEO4J_PASSWORD": "runtime-only"}, clear=False
+        ), patch(
+            "txnmem_provenance_performance.make_vector_graph_backend_factory",
+            return_value=backend_factory,
+        ):
+            root = Path(tmp).resolve()
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "schema": "txnmem-provenance-performance-v2",
+                        "graph_node_counts": [2],
+                        "concurrency_levels": [1],
+                        "repetitions": 2,
+                        "graph_seed": 17,
+                        "operations_per_type": 1,
+                        "bootstrap_repetitions": 10,
+                        "bootstrap_seed": 17,
+                        "request_timeout_seconds": 30.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            attestation = root / "environment.json"
+            attestation.write_text(
+                json.dumps(self._provenance_environment()), encoding="utf-8"
+            )
+            out_dir = root / "out"
+
+            exit_code = main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "vector-graph",
+                    "--config",
+                    str(config),
+                    "--run-id",
+                    "partial-progress-fixture",
+                    "--environment-attestation",
+                    str(attestation),
+                    "--out-dir",
+                    str(out_dir),
+                ]
+            )
+            blocked_text = (
+                out_dir / "results" / "provenance_performance_blocked.json"
+            ).read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 2)
+        self.assertNotIn("private", blocked_text)
+        self.assertNotIn("203.0.113.10", blocked_text)
+        blocked = json.loads(blocked_text)
+        self.assertEqual(
+            blocked,
+            {
+                "schema": "txnmem-provenance-performance-blocked-v3",
+                "status": "blocked",
+                "backend": "vector-graph",
+                "formal_requested": False,
+                "reason_code": "formal_preflight_or_execution_failed",
+                "error_class": "RuntimeError",
+                "failure_provenance": {
+                    "error_classes": ["RuntimeError"],
+                    "operation": None,
+                    "root_error_class": "RuntimeError",
+                    "service": None,
+                },
+                "failure_stage": "matrix_execution",
+                "completed_cell_count": 0,
+                "completed_repetition_count": 1,
+                "completed_operation_sample_count": 4,
+                "production_backend_claim": False,
+            },
+        )
+
+    def test_provenance_blocked_report_identifies_pre_execution_stage(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        cases = (
+            (
+                "txnmem_provenance_performance.validate_environment_attestation",
+                "input_attestation",
+            ),
+            (
+                "txnmem_provenance_performance.preflight_provenance_output",
+                "output_preflight",
+            ),
+            (
+                "txnmem_provenance_performance.make_vector_graph_backend_factory",
+                "backend_initialization",
+            ),
+        )
+        for target, expected_stage in cases:
+            with self.subTest(expected_stage=expected_stage):
+                with TemporaryDirectory() as tmp, patch.dict(
+                    "os.environ",
+                    {"TXNMEM_NEO4J_PASSWORD": "runtime-only"},
+                    clear=False,
+                ), patch(target, side_effect=RuntimeError("token=private")):
+                    root = Path(tmp).resolve()
+                    config = root / "config.json"
+                    config.write_text(
+                        json.dumps(self._small_provenance_config()),
+                        encoding="utf-8",
+                    )
+                    attestation = root / "environment.json"
+                    attestation.write_text(
+                        json.dumps(self._provenance_environment()), encoding="utf-8"
+                    )
+                    out_dir = root / "out"
+                    out_dir.mkdir()
+
+                    exit_code = main(
+                        [
+                            "provenance-performance",
+                            "--backend",
+                            "vector-graph",
+                            "--config",
+                            str(config),
+                            "--run-id",
+                            f"stage-{expected_stage}",
+                            "--environment-attestation",
+                            str(attestation),
+                            "--out-dir",
+                            str(out_dir),
+                        ]
+                    )
+                    blocked_text = (
+                        out_dir / "results" / "provenance_performance_blocked.json"
+                    ).read_text(encoding="utf-8")
+
+                self.assertEqual(exit_code, 2)
+                self.assertNotIn("private", blocked_text)
+                blocked = json.loads(blocked_text)
+                self.assertEqual(blocked["failure_stage"], expected_stage)
+                self.assertEqual(blocked["completed_cell_count"], 0)
+                self.assertEqual(blocked["completed_repetition_count"], 0)
+                self.assertEqual(blocked["completed_operation_sample_count"], 0)
+
+    def test_provenance_blocked_report_identifies_post_measurement_stage(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        cases = (
+            ("txnmem_provenance_performance.aggregate_matrix", "aggregation"),
+            (
+                "txnmem_provenance_performance.publish_provenance_bundle",
+                "publication",
+            ),
+        )
+        for target, expected_stage in cases:
+            with self.subTest(expected_stage=expected_stage):
+                with TemporaryDirectory() as tmp, patch(
+                    target, side_effect=RuntimeError("password=private")
+                ):
+                    root = Path(tmp).resolve()
+                    config = root / "config.json"
+                    config.write_text(
+                        json.dumps(self._small_provenance_config()),
+                        encoding="utf-8",
+                    )
+                    out_dir = root / "out"
+                    out_dir.mkdir()
+
+                    exit_code = main(
+                        [
+                            "provenance-performance",
+                            "--backend",
+                            "memory",
+                            "--config",
+                            str(config),
+                            "--run-id",
+                            f"stage-{expected_stage}",
+                            "--out-dir",
+                            str(out_dir),
+                        ]
+                    )
+                    blocked_text = (
+                        out_dir / "results" / "provenance_performance_blocked.json"
+                    ).read_text(encoding="utf-8")
+
+                self.assertEqual(exit_code, 2)
+                self.assertNotIn("private", blocked_text)
+                blocked = json.loads(blocked_text)
+                self.assertEqual(blocked["failure_stage"], expected_stage)
+                self.assertEqual(blocked["completed_cell_count"], 1)
+                self.assertEqual(blocked["completed_repetition_count"], 1)
+                self.assertEqual(blocked["completed_operation_sample_count"], 4)
 
     def test_provenance_formal_config_rejects_duplicate_keys_before_backend(self):
         sys.path.insert(0, str(ROOT / "src"))
@@ -118,6 +533,7 @@ class TxnMemCliOutputTests(unittest.TestCase):
             topology = root / "topology.json"
             topology.write_text("{}", encoding="utf-8")
             out_dir = root / "out"
+            out_dir.mkdir()
 
             exit_code = main(
                 [
@@ -137,9 +553,18 @@ class TxnMemCliOutputTests(unittest.TestCase):
                     str(out_dir),
                 ]
             )
+            blocked = json.loads(
+                (
+                    out_dir / "results" / "provenance_performance_blocked.json"
+                ).read_text(encoding="utf-8")
+            )
 
         self.assertEqual(exit_code, 2)
         factory.assert_not_called()
+        self.assertEqual(blocked["failure_stage"], "configuration")
+        self.assertEqual(blocked["completed_cell_count"], 0)
+        self.assertEqual(blocked["completed_repetition_count"], 0)
+        self.assertEqual(blocked["completed_operation_sample_count"], 0)
 
     def test_provenance_one_stage_formal_mode_is_disabled_before_backend(self):
         sys.path.insert(0, str(ROOT / "src"))

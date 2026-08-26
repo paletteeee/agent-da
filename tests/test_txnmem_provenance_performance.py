@@ -341,6 +341,38 @@ class ProvenanceMatrixTests(unittest.TestCase):
                 all(not forbidden.intersection(sample) for sample in report["samples"])
             )
 
+    def test_matrix_progress_callback_reports_only_completed_repetitions(self):
+        snapshots = []
+
+        report = run_matrix_cell(
+            lambda namespace: _FixtureBackend(namespace),
+            build_layered_dag(2, seed=17),
+            concurrency=1,
+            repetitions=2,
+            operations_per_type=1,
+            run_id="progress-fixture",
+            formal=True,
+            progress_callback=snapshots.append,
+        )
+
+        self.assertEqual(len(report["repetitions"]), 2)
+        self.assertEqual(len(report["samples"]), 8)
+        self.assertEqual(
+            snapshots,
+            [
+                {
+                    "cell_id": "n2-c1",
+                    "completed_repetition_count": 1,
+                    "completed_operation_sample_count": 4,
+                },
+                {
+                    "cell_id": "n2-c1",
+                    "completed_repetition_count": 2,
+                    "completed_operation_sample_count": 8,
+                },
+            ],
+        )
+
     def test_real_backend_preload_uses_fixed_layered_parallelism_and_accounts_repair(self):
         class ParallelPreloadBackend:
             supports_parallel_provenance_preload = True

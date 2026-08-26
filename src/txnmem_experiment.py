@@ -82,7 +82,7 @@ CORE_WORKLOADS = (
 )
 
 _SAFE_FAILURE_CLASS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
-_SAFE_FAILURE_OPERATION = re.compile(r"^[A-Za-z0-9_:-]{1,128}$")
+_SAFE_FAILURE_OPERATIONS = frozenset({"healthcheck"})
 
 
 def _safe_failure_provenance(exc: BaseException) -> dict[str, Any]:
@@ -103,18 +103,20 @@ def _safe_failure_provenance(exc: BaseException) -> dict[str, Any]:
             candidate_service = getattr(
                 current, "_txnmem_service", getattr(current, "service", None)
             )
-            candidate_operation = getattr(
-                current, "_txnmem_operation", getattr(current, "operation", None)
-            )
+            candidate_operation = getattr(current, "_txnmem_operation", None)
         except Exception:
             candidate_service = None
             candidate_operation = None
-        if service is None and candidate_service in {"qdrant", "neo4j"}:
+        if (
+            service is None
+            and type(candidate_service) is str
+            and candidate_service in {"qdrant", "neo4j"}
+        ):
             service = candidate_service
         if (
             operation is None
-            and isinstance(candidate_operation, str)
-            and _SAFE_FAILURE_OPERATION.fullmatch(candidate_operation)
+            and type(candidate_operation) is str
+            and candidate_operation in _SAFE_FAILURE_OPERATIONS
         ):
             operation = candidate_operation
         current = current.__cause__ or current.__context__
@@ -1331,6 +1333,13 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         output_path = None
+        failure_stage = "configuration"
+        cell_reports = []
+        progress = {
+            "completed_cell_count": 0,
+            "completed_repetition_count": 0,
+            "completed_operation_sample_count": 0,
+        }
         try:
             config_document, config_raw = load_strict_json_document(args.config)
             config = validate_matrix_config(config_document, formal=args.formal)
@@ -1340,6 +1349,7 @@ def main(argv: list[str] | None = None) -> int:
                     "direct formal measurement is disabled; use the attested "
                     "candidate and provenance-promote workflow"
                 )
+            failure_stage = "input_attestation"
             environment = {
                 "schema": "txnmem-provenance-environment-v1",
                 "isolation_verified": False,
@@ -1366,6 +1376,7 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError("topology attestation must be a mapping")
                 topology_attestation = topology_document
 
+            failure_stage = "output_preflight"
             config_canonical = json.dumps(
                 config,
                 ensure_ascii=False,
@@ -1383,6 +1394,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             preflight_provenance_output(args.out_dir, bundle_id)
 
+            failure_stage = "backend_initialization"
             if args.backend == "memory":
                 from txnmem_backend import InstrumentedMemoryBackend
 
@@ -1408,28 +1420,40 @@ def main(argv: list[str] | None = None) -> int:
                     ),
                 )
 
-            cell_reports = []
+            failure_stage = "matrix_execution"
             try:
                 for cell in cells:
                     graph = build_layered_dag(
                         int(cell["graph_node_count"]), int(cell["graph_seed"])
                     )
-                    cell_reports.append(
-                        run_matrix_cell(
-                            backend_factory,
-                            graph,
-                            concurrency=int(cell["concurrency"]),
-                            repetitions=int(cell["repetitions"]),
-                            operations_per_type=int(cell["operations_per_type"]),
-                            run_id=args.run_id,
-                            formal=args.formal,
-                            environment_attestation=(
-                                environment
-                                if args.backend == "vector-graph"
-                                else None
-                            ),
+                    base_repetitions = progress["completed_repetition_count"]
+                    base_samples = progress["completed_operation_sample_count"]
+
+                    def record_progress(snapshot):
+                        progress["completed_repetition_count"] = (
+                            base_repetitions
+                            + int(snapshot["completed_repetition_count"])
                         )
+                        progress["completed_operation_sample_count"] = (
+                            base_samples
+                            + int(snapshot["completed_operation_sample_count"])
+                        )
+
+                    cell_report = run_matrix_cell(
+                        backend_factory,
+                        graph,
+                        concurrency=int(cell["concurrency"]),
+                        repetitions=int(cell["repetitions"]),
+                        operations_per_type=int(cell["operations_per_type"]),
+                        run_id=args.run_id,
+                        formal=args.formal,
+                        environment_attestation=(
+                            environment if args.backend == "vector-graph" else None
+                        ),
+                        progress_callback=record_progress,
                     )
+                    cell_reports.append(cell_report)
+                    progress["completed_cell_count"] += 1
             finally:
                 close_backend_factory = getattr(backend_factory, "close", None)
                 if callable(close_backend_factory):
@@ -1440,6 +1464,7 @@ def main(argv: list[str] | None = None) -> int:
             repetition_rows = [
                 row for report in cell_reports for row in report["repetitions"]
             ]
+            failure_stage = "aggregation"
             aggregate = aggregate_matrix(
                 cell_reports,
                 bootstrap_repetitions=int(
@@ -1449,6 +1474,7 @@ def main(argv: list[str] | None = None) -> int:
                 require_formal=args.formal,
                 topology_attestation=topology_attestation,
             )
+            failure_stage = "publication"
             report = {
                 "schema": "txnmem-provenance-performance-report-v1",
                 "backend": args.backend,
@@ -1483,16 +1509,18 @@ def main(argv: list[str] | None = None) -> int:
                 report=report,
                 topology_attestation=topology_attestation,
             )
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, RuntimeError) as exc:
+        except Exception as exc:
             failure_provenance = _safe_failure_provenance(exc)
             blocked = {
-                "schema": "txnmem-provenance-performance-blocked-v2",
+                "schema": "txnmem-provenance-performance-blocked-v3",
                 "status": "blocked",
                 "backend": args.backend,
                 "formal_requested": args.formal,
                 "reason_code": "formal_preflight_or_execution_failed",
                 "error_class": failure_provenance["error_classes"][0],
                 "failure_provenance": failure_provenance,
+                "failure_stage": failure_stage,
+                **progress,
                 "production_backend_claim": False,
             }
             try:
