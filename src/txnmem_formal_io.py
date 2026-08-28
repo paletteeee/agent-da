@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import ctypes
 import errno
+import fcntl
+import hashlib
 import json
 import math
 import os
 import re
 import secrets
 import stat
+import sys
 from contextlib import contextmanager
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -25,6 +28,37 @@ class FormalIOError(ValueError):
 _AT_FDCWD = -100
 _AT_SYMLINK_FOLLOW = 0x400
 _AT_EMPTY_PATH = 0x1000
+_PR_GET_DUMPABLE = 3
+
+
+def _require_non_dumpable(
+    *, prctl: Callable[[int, int, int, int, int], int] | None = None
+) -> None:
+    """Require the current Linux process to be kernel non-dumpable."""
+
+    if not sys.platform.startswith("linux"):
+        raise FormalIOError("formal publication requires Linux non-dumpable state")
+    operation = prctl
+    if operation is None:
+        try:
+            raw_prctl = ctypes.CDLL(None, use_errno=True).prctl
+        except (AttributeError, OSError) as exc:
+            raise FormalIOError("formal non-dumpable query is unavailable") from exc
+        raw_prctl.argtypes = [
+            ctypes.c_int,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+        ]
+        raw_prctl.restype = ctypes.c_int
+        operation = raw_prctl
+    try:
+        observed = operation(_PR_GET_DUMPABLE, 0, 0, 0, 0)
+    except Exception as exc:
+        raise FormalIOError("formal non-dumpable query failed") from exc
+    if type(observed) is not int or observed != 0:
+        raise FormalIOError("formal publisher is not non-dumpable")
 
 
 def _open_anonymous_inode(parent_descriptor: int) -> int:
@@ -39,6 +73,25 @@ def _open_anonymous_inode(parent_descriptor: int) -> int:
         0o600,
         dir_fd=parent_descriptor,
     )
+
+
+def _open_anonymous_inode_read_only(descriptor: int) -> int:
+    """Open a new read-only description for the exact anonymous inode."""
+
+    return os.open(
+        f"/proc/self/fd/{descriptor}",
+        os.O_RDONLY | getattr(os, "O_CLOEXEC", 0),
+    )
+
+
+def _read_descriptor_bytes(descriptor: int, expected_size: int) -> bytes:
+    payload = bytearray()
+    while len(payload) <= expected_size:
+        chunk = os.read(descriptor, expected_size - len(payload) + 1)
+        if not chunk:
+            return bytes(payload)
+        payload.extend(chunk)
+    return bytes(payload)
 
 
 def _call_linkat(
@@ -205,6 +258,20 @@ class FormalStore:
         except OSError as exc:
             raise FormalIOError(f"formal output root is unavailable: {self.root}") from exc
 
+    @staticmethod
+    def _adopt_directory_child(parent: int, child: int) -> int:
+        """Close the old owner once, or close the unadopted child once."""
+
+        try:
+            os.close(parent)
+        except BaseException:
+            try:
+                os.close(child)
+            except BaseException:
+                pass
+            raise
+        return child
+
     def _open_parent(self, parts: Sequence[str], *, create: bool) -> tuple[int, str]:
         normalized = self._validate_parts(parts)
         descriptor = self._open_root()
@@ -224,11 +291,18 @@ class FormalStore:
                     raise FormalIOError(
                         f"formal path component is not a real directory: {component}"
                     ) from exc
-                os.close(descriptor)
-                descriptor = child
+                parent = descriptor
+                descriptor = None
+                descriptor = self._adopt_directory_child(parent, child)
             return descriptor, normalized[-1]
         except BaseException:
-            os.close(descriptor)
+            if descriptor is not None:
+                closing_descriptor = descriptor
+                descriptor = None
+                try:
+                    os.close(closing_descriptor)
+                except BaseException:
+                    pass
             raise
 
     def path(self, *parts: str) -> Path:
@@ -252,10 +326,21 @@ class FormalStore:
                     raise FormalIOError(
                         f"formal path component is not a real directory: {component}"
                     ) from exc
-                os.close(descriptor)
-                descriptor = child
-        finally:
-            os.close(descriptor)
+                parent = descriptor
+                descriptor = None
+                descriptor = self._adopt_directory_child(parent, child)
+        except BaseException:
+            if descriptor is not None:
+                closing_descriptor = descriptor
+                descriptor = None
+                try:
+                    os.close(closing_descriptor)
+                except BaseException:
+                    pass
+            raise
+        closing_descriptor = descriptor
+        descriptor = None
+        os.close(closing_descriptor)
 
     def entry_kind(self, *parts: str) -> str:
         try:
@@ -430,32 +515,39 @@ class FormalStore:
             return
 
         parent, name = self._open_parent(parts, create=True)
-        descriptor: int | None = None
+        writable_descriptor: int | None = None
+        commit_descriptor: int | None = None
         primary_failure: BaseException | None = None
         primary_traceback = None
         cleanup_failures: list[BaseException] = []
         try:
             try:
-                descriptor = _open_anonymous_inode(parent)
-                metadata = os.fstat(descriptor)
+                _require_non_dumpable()
+                writable_descriptor = _open_anonymous_inode(parent)
+                metadata = os.fstat(writable_descriptor)
                 if (
                     not stat.S_ISREG(metadata.st_mode)
                     or metadata.st_nlink != 0
                     or stat.S_IMODE(metadata.st_mode) != 0o600
+                    or metadata.st_size != 0
                 ):
                     raise FormalIOError(
                         "private publication anonymous inode is unsafe"
                     )
+                device = int(metadata.st_dev)
+                inode = int(metadata.st_ino)
                 offset = 0
                 while offset < len(encoded):
-                    written = os.write(descriptor, encoded[offset:])
+                    written = os.write(writable_descriptor, encoded[offset:])
                     if type(written) is not int or written <= 0:
                         raise OSError("short publication write")
                     offset += written
-                os.fsync(descriptor)
-                metadata = os.fstat(descriptor)
+                os.fsync(writable_descriptor)
+                metadata = os.fstat(writable_descriptor)
                 if (
                     not stat.S_ISREG(metadata.st_mode)
+                    or int(metadata.st_dev) != device
+                    or int(metadata.st_ino) != inode
                     or metadata.st_nlink != 0
                     or metadata.st_size != len(encoded)
                     or stat.S_IMODE(metadata.st_mode) != 0o600
@@ -463,6 +555,27 @@ class FormalStore:
                     raise FormalIOError(
                         "private publication anonymous inode changed"
                     )
+                commit_descriptor = _open_anonymous_inode_read_only(
+                    writable_descriptor
+                )
+                commit_metadata = os.fstat(commit_descriptor)
+                commit_flags = fcntl.fcntl(commit_descriptor, fcntl.F_GETFL)
+                if (
+                    not stat.S_ISREG(commit_metadata.st_mode)
+                    or int(commit_metadata.st_dev) != device
+                    or int(commit_metadata.st_ino) != inode
+                    or commit_metadata.st_nlink != 0
+                    or commit_metadata.st_size != len(encoded)
+                    or stat.S_IMODE(commit_metadata.st_mode) != 0o600
+                    or type(commit_flags) is not int
+                    or commit_flags & os.O_ACCMODE != os.O_RDONLY
+                ):
+                    raise FormalIOError(
+                        "private publication commit descriptor is unsafe"
+                    )
+                closing_writable = writable_descriptor
+                writable_descriptor = None
+                os.close(closing_writable)
             except FormalIOError:
                 raise
             except OSError as exc:
@@ -473,7 +586,8 @@ class FormalStore:
             try:
                 if _precommit_check is not None:
                     _precommit_check()
-                _link_anonymous_inode(descriptor, parent, name)
+                assert commit_descriptor is not None
+                _link_anonymous_inode(commit_descriptor, parent, name)
             except FileExistsError as exc:
                 raise FormalIOError(
                     f"refusing to overwrite existing formal file: {self.path(*parts)}"
@@ -483,9 +597,11 @@ class FormalStore:
                     f"cannot publish formal file: {self.path(*parts)}"
                 ) from exc
             try:
-                metadata = os.fstat(descriptor)
+                metadata = os.fstat(commit_descriptor)
                 if (
                     not stat.S_ISREG(metadata.st_mode)
+                    or int(metadata.st_dev) != device
+                    or int(metadata.st_ino) != inode
                     or metadata.st_nlink != 1
                     or metadata.st_size != len(encoded)
                     or stat.S_IMODE(metadata.st_mode) != 0o600
@@ -493,7 +609,20 @@ class FormalStore:
                     raise FormalIOError(
                         "published formal inode identity changed"
                     )
+                observed = _read_descriptor_bytes(
+                    commit_descriptor, len(encoded)
+                )
+                if (
+                    observed != encoded
+                    or hashlib.sha256(observed).digest()
+                    != hashlib.sha256(encoded).digest()
+                ):
+                    raise FormalIOError(
+                        "published formal inode canonical content changed"
+                    )
                 os.fsync(parent)
+            except FormalIOError:
+                raise
             except OSError as exc:
                 raise FormalIOError(
                     f"cannot synchronize formal file: {self.path(*parts)}"
@@ -502,9 +631,16 @@ class FormalStore:
             primary_failure = exc
             primary_traceback = exc.__traceback__
         finally:
-            if descriptor is not None:
-                closing_descriptor = descriptor
-                descriptor = None
+            if writable_descriptor is not None:
+                closing_descriptor = writable_descriptor
+                writable_descriptor = None
+                try:
+                    os.close(closing_descriptor)
+                except BaseException as exc:
+                    cleanup_failures.append(exc)
+            if commit_descriptor is not None:
+                closing_descriptor = commit_descriptor
+                commit_descriptor = None
                 try:
                     os.close(closing_descriptor)
                 except BaseException as exc:
@@ -647,8 +783,15 @@ class FormalStore:
                 "compatibility publication cleanup failed"
             ) from cleanup_failures[0]
 
-    def _require_fd_bound_publication_support(self, *directory_parts: str) -> None:
+    def _require_fd_bound_publication_support(
+        self,
+        *directory_parts: str,
+        _require_credential_match: bool = True,
+    ) -> None:
         """Probe O_TMPFILE plus fd-bound link semantics without named staging."""
+
+        if type(_require_credential_match) is not bool:
+            raise TypeError("private preflight credential policy must be a boolean")
 
         probe_name = ".txnmem-fd-bound-publication-preflight"
         if directory_parts:
@@ -657,42 +800,93 @@ class FormalStore:
             )
         else:
             parent = self._open_root()
-        descriptor: int | None = None
+        writable_descriptor: int | None = None
+        commit_descriptor: int | None = None
         linked = False
         primary_failure: BaseException | None = None
         primary_traceback = None
         cleanup_failures: list[BaseException] = []
         try:
-            descriptor = _open_anonymous_inode(parent)
-            metadata = os.fstat(descriptor)
+            if _require_credential_match:
+                _require_non_dumpable()
+            writable_descriptor = _open_anonymous_inode(parent)
+            metadata = os.fstat(writable_descriptor)
             if (
                 not stat.S_ISREG(metadata.st_mode)
                 or metadata.st_nlink != 0
                 or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_size != 0
             ):
                 raise FormalIOError("fd-bound publication preflight inode is unsafe")
+            device = int(metadata.st_dev)
+            inode = int(metadata.st_ino)
             probe = b"txnmem-fd-bound-publication-preflight\n"
-            written = os.write(descriptor, probe)
-            if type(written) is not int or written != len(probe):
-                raise OSError("short publication preflight write")
-            os.fsync(descriptor)
-            _link_anonymous_inode(descriptor, parent, probe_name)
+            offset = 0
+            while offset < len(probe):
+                written = os.write(writable_descriptor, probe[offset:])
+                if type(written) is not int or written <= 0:
+                    raise OSError("short publication preflight write")
+                offset += written
+            os.fsync(writable_descriptor)
+            metadata = os.fstat(writable_descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or int(metadata.st_dev) != device
+                or int(metadata.st_ino) != inode
+                or metadata.st_nlink != 0
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_size != len(probe)
+            ):
+                raise FormalIOError("fd-bound publication preflight inode changed")
+            commit_descriptor = _open_anonymous_inode_read_only(
+                writable_descriptor
+            )
+            commit_metadata = os.fstat(commit_descriptor)
+            commit_flags = fcntl.fcntl(commit_descriptor, fcntl.F_GETFL)
+            if (
+                not stat.S_ISREG(commit_metadata.st_mode)
+                or int(commit_metadata.st_dev) != device
+                or int(commit_metadata.st_ino) != inode
+                or commit_metadata.st_nlink != 0
+                or stat.S_IMODE(commit_metadata.st_mode) != 0o600
+                or commit_metadata.st_size != len(probe)
+                or type(commit_flags) is not int
+                or commit_flags & os.O_ACCMODE != os.O_RDONLY
+            ):
+                raise FormalIOError(
+                    "fd-bound publication preflight commit descriptor is unsafe"
+                )
+            closing_writable = writable_descriptor
+            writable_descriptor = None
+            os.close(closing_writable)
+            _link_anonymous_inode(commit_descriptor, parent, probe_name)
             linked = True
-            metadata = os.fstat(descriptor)
-            if metadata.st_nlink != 1 or metadata.st_size != len(probe):
+            metadata = os.fstat(commit_descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or int(metadata.st_dev) != device
+                or int(metadata.st_ino) != inode
+                or metadata.st_nlink != 1
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_size != len(probe)
+            ):
                 raise FormalIOError("fd-bound publication preflight identity changed")
+            observed = _read_descriptor_bytes(commit_descriptor, len(probe))
+            if observed != probe:
+                raise FormalIOError("fd-bound publication preflight content changed")
             os.unlink(probe_name, dir_fd=parent)
             linked = False
             os.fsync(parent)
         except BaseException as exc:
-            if isinstance(exc, FormalIOError):
+            if isinstance(exc, FormalIOError) or not isinstance(exc, Exception):
                 primary_failure = exc
+                primary_traceback = exc.__traceback__
             else:
                 primary_failure = FormalIOError(
                     "fd-bound publication support is unavailable"
                 )
                 primary_failure.__cause__ = exc
-            primary_traceback = primary_failure.__traceback__
+                primary_traceback = primary_failure.__traceback__
         finally:
             if linked:
                 try:
@@ -703,9 +897,16 @@ class FormalStore:
                     os.fsync(parent)
                 except BaseException as exc:
                     cleanup_failures.append(exc)
-            if descriptor is not None:
-                closing_descriptor = descriptor
-                descriptor = None
+            if writable_descriptor is not None:
+                closing_descriptor = writable_descriptor
+                writable_descriptor = None
+                try:
+                    os.close(closing_descriptor)
+                except BaseException as exc:
+                    cleanup_failures.append(exc)
+            if commit_descriptor is not None:
+                closing_descriptor = commit_descriptor
+                commit_descriptor = None
                 try:
                     os.close(closing_descriptor)
                 except BaseException as exc:

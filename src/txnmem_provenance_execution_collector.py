@@ -5998,7 +5998,9 @@ def collect_formal_execution(
     workspace = _prepare_formal_run_workspace(run_hash, nonce_hash)
     if workspace.candidate != derived_candidate:
         raise CollectorError("formal candidate derivation is inconsistent")
-    FormalStore(workspace.candidate)._require_fd_bound_publication_support()
+    FormalStore(workspace.candidate)._require_fd_bound_publication_support(
+        _require_credential_match=False
+    )
     _preflight_external_outputs(
         root, workspace.candidate, launch_path, completion_path
     )

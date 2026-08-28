@@ -1,4 +1,8 @@
 import copy
+import contextlib
+import ctypes
+import errno
+import functools
 import hashlib
 import inspect
 import json
@@ -44,6 +48,41 @@ from txnmem_toxiproxy_metrics import (
     derive_proxy_counter_deltas,
     proxy_counter_payload_sha256,
 )
+
+
+@contextlib.contextmanager
+def _temporarily_non_dumpable():
+    raw_prctl = ctypes.CDLL(None, use_errno=True).prctl
+    raw_prctl.argtypes = [
+        ctypes.c_int,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+    ]
+    raw_prctl.restype = ctypes.c_int
+    original = raw_prctl(3, 0, 0, 0, 0)
+    if original not in {0, 1}:
+        raise RuntimeError("test process dumpable state is not restorable")
+    if raw_prctl(4, 0, 0, 0, 0) != 0 or raw_prctl(3, 0, 0, 0, 0) != 0:
+        raise RuntimeError("cannot establish non-dumpable test process")
+    try:
+        yield
+    finally:
+        if (
+            raw_prctl(4, original, 0, 0, 0) != 0
+            or raw_prctl(3, 0, 0, 0, 0) != original
+        ):
+            raise RuntimeError("cannot restore test process dumpable state")
+
+
+def _with_non_dumpable_test_process(test):
+    @functools.wraps(test)
+    def wrapped(*args, **kwargs):
+        with _temporarily_non_dumpable():
+            return test(*args, **kwargs)
+
+    return wrapped
 
 
 def _proxy_snapshot(phase, *, qdrant, neo4j):
@@ -2016,15 +2055,18 @@ class ProvenanceAggregationTests(unittest.TestCase):
                 staging[0].unlink()
                 staging[0].symlink_to(attacker)
 
-            try:
-                store._publish_json_exclusive(
-                    "bundles",
-                    "pointer.json",
-                    payload=payload,
-                    _precommit_check=substitute_named_staging_entry,
-                )
-            except FormalIOError:
-                pass
+            with patch(
+                "txnmem_formal_io._require_non_dumpable", return_value=None
+            ):
+                try:
+                    store._publish_json_exclusive(
+                        "bundles",
+                        "pointer.json",
+                        payload=payload,
+                        _precommit_check=substitute_named_staging_entry,
+                    )
+                except FormalIOError:
+                    pass
 
             self.assertFalse(final_path.is_symlink())
             if final_path.exists():
@@ -2052,6 +2094,8 @@ class ProvenanceAggregationTests(unittest.TestCase):
 
             with patch.object(
                 store, "_open_parent", side_effect=observed_open_parent
+            ), patch(
+                "txnmem_formal_io._require_non_dumpable", return_value=None
             ), patch(
                 "txnmem_formal_io._open_anonymous_inode",
                 side_effect=OSError("anonymous-inode-unavailable"),
@@ -2101,11 +2145,29 @@ class ProvenanceAggregationTests(unittest.TestCase):
         expected = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
             "utf-8"
         )
-        anonymous_metadata = SimpleNamespace(
-            st_mode=stat.S_IFREG | 0o600,
-            st_nlink=0,
-            st_size=len(expected),
-        )
+        anonymous_metadata = [
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=0,
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(expected),
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(expected),
+            ),
+        ]
         closed = []
 
         with TemporaryDirectory() as tmp:
@@ -2117,11 +2179,19 @@ class ProvenanceAggregationTests(unittest.TestCase):
                 return_value=91,
                 create=True,
             ), patch(
+                "txnmem_formal_io._open_anonymous_inode_read_only",
+                return_value=92,
+                create=True,
+            ), patch(
+                "txnmem_formal_io._require_non_dumpable",
+                return_value=None,
+                create=True,
+            ), patch(
                 "txnmem_formal_io._link_anonymous_inode",
                 side_effect=OSError("fd-bound-link-failure"),
                 create=True,
             ), patch(
-                "txnmem_formal_io.os.fstat", return_value=anonymous_metadata
+                "txnmem_formal_io.os.fstat", side_effect=anonymous_metadata
             ), patch(
                 "txnmem_formal_io.os.write", return_value=len(expected)
             ), patch(
@@ -2129,17 +2199,1061 @@ class ProvenanceAggregationTests(unittest.TestCase):
             ), patch(
                 "txnmem_formal_io.os.close",
                 side_effect=lambda descriptor: closed.append(descriptor),
+            ), patch(
+                "txnmem_formal_io.fcntl.fcntl", return_value=os.O_RDONLY
             ), self.assertRaises(FormalIOError):
                 store._publish_json_exclusive(
                     "bundles", "pointer.json", payload=payload
                 )
 
-        self.assertEqual(closed, [91, 90])
+        self.assertEqual(closed, [91, 92, 90])
+
+    def test_formal_non_dumpable_query_is_exact_and_linux_only(self):
+        import txnmem_formal_io as formal_io
+
+        require_non_dumpable = getattr(
+            formal_io, "_require_non_dumpable", None
+        )
+        self.assertIsNotNone(require_non_dumpable)
+        if require_non_dumpable is None:
+            return
+        calls = []
+
+        def prctl(*arguments):
+            calls.append(arguments)
+            return 0
+
+        with patch.object(formal_io.sys, "platform", "linux"):
+            require_non_dumpable(prctl=prctl)
+        self.assertEqual(calls, [(3, 0, 0, 0, 0)])
+
+        with patch.object(formal_io.sys, "platform", "linux"), self.assertRaisesRegex(
+            formal_io.FormalIOError, "non-dumpable"
+        ):
+            require_non_dumpable(prctl=lambda *_arguments: 1)
+        with patch.object(formal_io.sys, "platform", "darwin"), self.assertRaisesRegex(
+            formal_io.FormalIOError, "Linux"
+        ):
+            require_non_dumpable(prctl=prctl)
+
+    def test_formal_pointer_transitions_to_read_only_before_precommit_and_link(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalStore
+
+        payload = {"publication_status": "complete"}
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+        metadata = [
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=0,
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(encoded),
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(encoded),
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=1,
+                st_size=len(encoded),
+            ),
+        ]
+        events = []
+        reads = iter((encoded, b""))
+
+        def close(descriptor):
+            events.append(("close", descriptor))
+
+        def precommit():
+            events.append(("precommit",))
+
+        def link(descriptor, parent, name):
+            events.append(("link", descriptor, parent, name))
+
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_parent", return_value=(90, "pointer.json")
+            ), patch.object(
+                formal_io,
+                "_require_non_dumpable",
+                side_effect=lambda: events.append(("dumpable",)),
+                create=True,
+            ), patch.object(
+                formal_io,
+                "_open_anonymous_inode",
+                side_effect=lambda _parent: events.append(("anonymous",)) or 91,
+            ), patch.object(
+                formal_io,
+                "_open_anonymous_inode_read_only",
+                side_effect=lambda descriptor: events.append(
+                    ("reopen-read-only", descriptor)
+                )
+                or 92,
+                create=True,
+            ), patch.object(
+                formal_io.os, "fstat", side_effect=metadata
+            ), patch.object(
+                formal_io.os, "write", return_value=len(encoded)
+            ), patch.object(
+                formal_io.os, "read", side_effect=lambda _fd, _size: next(reads)
+            ), patch.object(
+                formal_io.os, "fsync"
+            ), patch.object(
+                formal_io.os, "close", side_effect=close
+            ), patch.object(
+                formal_io,
+                "fcntl",
+                SimpleNamespace(
+                    F_GETFL=formal_io.fcntl.F_GETFL,
+                    fcntl=lambda _fd, _operation: os.O_RDONLY,
+                ),
+                create=True,
+            ), patch.object(
+                formal_io, "_link_anonymous_inode", side_effect=link
+            ):
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload=payload,
+                    _precommit_check=precommit,
+                )
+
+        self.assertLess(events.index(("dumpable",)), events.index(("anonymous",)))
+        self.assertLess(
+            events.index(("reopen-read-only", 91)), events.index(("close", 91))
+        )
+        self.assertLess(events.index(("close", 91)), events.index(("precommit",)))
+        self.assertLess(events.index(("precommit",)), events.index(("link", 92, 90, "pointer.json")))
+        self.assertEqual(
+            [event for event in events if event[0] == "close"],
+            [("close", 91), ("close", 92), ("close", 90)],
+        )
+
+    def test_writable_anonymous_close_failure_forbids_precommit_and_link(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        payload = {"publication_status": "complete"}
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+        metadata = [
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=0,
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(encoded),
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(encoded),
+            ),
+        ]
+        closes = []
+
+        def close(descriptor):
+            closes.append(descriptor)
+            if descriptor == 91:
+                raise OSError("writable-close-failure")
+
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_parent", return_value=(90, "pointer.json")
+            ), patch.object(
+                formal_io, "_require_non_dumpable", return_value=None, create=True
+            ), patch.object(
+                formal_io, "_open_anonymous_inode", return_value=91
+            ), patch.object(
+                formal_io, "_open_anonymous_inode_read_only", return_value=92, create=True
+            ), patch.object(
+                formal_io.os, "fstat", side_effect=metadata
+            ), patch.object(
+                formal_io.os, "write", return_value=len(encoded)
+            ), patch.object(
+                formal_io.os, "fsync"
+            ), patch.object(
+                formal_io.os, "close", side_effect=close
+            ), patch.object(
+                formal_io,
+                "fcntl",
+                SimpleNamespace(
+                    F_GETFL=formal_io.fcntl.F_GETFL,
+                    fcntl=lambda _fd, _operation: os.O_RDONLY,
+                ),
+                create=True,
+            ), patch.object(
+                formal_io, "_link_anonymous_inode"
+            ) as link, self.assertRaises(FormalIOError):
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload=payload,
+                    _precommit_check=lambda: self.fail(
+                        "precommit ran after writable close failure"
+                    ),
+                )
+
+        link.assert_not_called()
+        self.assertEqual(closes.count(91), 1)
+        self.assertEqual(closes.count(92), 1)
+        self.assertEqual(closes.count(90), 1)
+
+    def test_formal_pointer_rejects_commit_fd_identity_flags_and_postlink_bytes(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        payload = {"publication_status": "complete"}
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+
+        cases = (
+            ("identity", 12, os.O_RDONLY, encoded),
+            ("flags", 11, os.O_WRONLY, encoded),
+            ("postlink-bytes", 11, os.O_RDONLY, b"forged\n"),
+        )
+        for name, commit_ino, flags, observed_bytes in cases:
+            with self.subTest(name=name), TemporaryDirectory() as tmp:
+                store = FormalStore(Path(tmp).resolve())
+                reads = iter((observed_bytes, b""))
+                fstat_counts = {91: 0, 92: 0}
+
+                def fstat(descriptor):
+                    fstat_counts[descriptor] += 1
+                    if descriptor == 91 and fstat_counts[descriptor] == 1:
+                        return SimpleNamespace(
+                            st_dev=7,
+                            st_ino=11,
+                            st_mode=stat.S_IFREG | 0o600,
+                            st_nlink=0,
+                            st_size=0,
+                        )
+                    if descriptor == 91 and fstat_counts[descriptor] == 2:
+                        return SimpleNamespace(
+                            st_dev=7,
+                            st_ino=11,
+                            st_mode=stat.S_IFREG | 0o600,
+                            st_nlink=0,
+                            st_size=len(encoded),
+                        )
+                    if descriptor == 92 and fstat_counts[descriptor] == 1:
+                        return SimpleNamespace(
+                            st_dev=7,
+                            st_ino=commit_ino,
+                            st_mode=stat.S_IFREG | 0o600,
+                            st_nlink=0,
+                            st_size=len(encoded),
+                        )
+                    return SimpleNamespace(
+                        st_dev=7,
+                        st_ino=11,
+                        st_mode=stat.S_IFREG | 0o600,
+                        st_nlink=1,
+                        st_size=len(encoded),
+                    )
+
+                with patch.object(
+                    store, "_open_parent", return_value=(90, "pointer.json")
+                ), patch.object(
+                    formal_io, "_require_non_dumpable", return_value=None, create=True
+                ), patch.object(
+                    formal_io, "_open_anonymous_inode", return_value=91
+                ), patch.object(
+                    formal_io, "_open_anonymous_inode_read_only", return_value=92, create=True
+                ), patch.object(
+                    formal_io.os, "fstat", side_effect=fstat
+                ), patch.object(
+                    formal_io.os, "write", return_value=len(encoded)
+                ), patch.object(
+                    formal_io.os,
+                    "read",
+                    side_effect=lambda _fd, _size: next(reads),
+                ), patch.object(
+                    formal_io.os, "fsync"
+                ), patch.object(
+                    formal_io.os, "close"
+                ), patch.object(
+                    formal_io,
+                    "fcntl",
+                    SimpleNamespace(
+                        F_GETFL=formal_io.fcntl.F_GETFL,
+                        fcntl=lambda _fd, _operation: flags,
+                    ),
+                    create=True,
+                ), patch.object(
+                    formal_io, "_link_anonymous_inode"
+                ), self.assertRaises(FormalIOError):
+                    store._publish_json_exclusive(
+                        "bundles", "pointer.json", payload=payload
+                    )
+
+    def test_directory_walk_close_failures_preserve_primary_and_close_each_fd_once(self):
+        from txnmem_formal_io import FormalStore
+
+        class OldCloseFailure(BaseException):
+            pass
+
+        class ChildCloseFailure(BaseException):
+            pass
+
+        primary = OldCloseFailure("old-close-primary")
+        secondary = ChildCloseFailure("child-close-secondary")
+        for operation in ("open_parent", "ensure_directory"):
+            with self.subTest(operation=operation), TemporaryDirectory() as tmp:
+                store = FormalStore(Path(tmp).resolve())
+                closes = []
+
+                def close(descriptor):
+                    closes.append(descriptor)
+                    if descriptor == 10:
+                        raise primary
+                    if descriptor == 11:
+                        raise secondary
+
+                with patch.object(
+                    store, "_open_root", return_value=10
+                ), patch(
+                    "txnmem_formal_io.os.open", return_value=11
+                ), patch(
+                    "txnmem_formal_io.os.close", side_effect=close
+                ), self.assertRaises(BaseException) as raised:
+                    if operation == "open_parent":
+                        store._open_parent(("child", "file.json"), create=False)
+                    else:
+                        store.ensure_directory("child")
+
+                self.assertIs(raised.exception, primary)
+                self.assertEqual(closes, [10, 11])
+
+    def test_directory_walk_cleanup_cannot_replace_open_primary(self):
+        from txnmem_formal_io import FormalStore
+
+        class OpenFailure(BaseException):
+            pass
+
+        primary = OpenFailure("open-primary")
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            closes = []
+            with patch.object(
+                store, "_open_root", return_value=10
+            ), patch(
+                "txnmem_formal_io.os.open", side_effect=primary
+            ), patch(
+                "txnmem_formal_io.os.close",
+                side_effect=lambda descriptor: closes.append(descriptor)
+                or (_ for _ in ()).throw(OSError("cleanup-secondary")),
+            ), self.assertRaises(BaseException) as raised:
+                store._open_parent(("child", "file.json"), create=False)
+
+        self.assertIs(raised.exception, primary)
+        self.assertEqual(closes, [10])
+
+    def test_credential_preflight_links_only_through_read_only_fd_and_leaves_no_name(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalStore
+
+        probe = b"txnmem-fd-bound-publication-preflight\n"
+        metadata = [
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=0,
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(probe),
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(probe),
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=1,
+                st_size=len(probe),
+            ),
+        ]
+        events = []
+        reads = iter((probe, b""))
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_root", return_value=90
+            ), patch.object(
+                formal_io, "_require_non_dumpable", return_value=None, create=True
+            ), patch.object(
+                formal_io, "_open_anonymous_inode", return_value=91
+            ), patch.object(
+                formal_io, "_open_anonymous_inode_read_only", return_value=92, create=True
+            ), patch.object(
+                formal_io.os, "fstat", side_effect=metadata
+            ), patch.object(
+                formal_io.os, "write", return_value=len(probe)
+            ), patch.object(
+                formal_io.os, "read", side_effect=lambda _fd, _size: next(reads)
+            ), patch.object(
+                formal_io.os, "fsync"
+            ), patch.object(
+                formal_io.os,
+                "close",
+                side_effect=lambda descriptor: events.append(("close", descriptor)),
+            ), patch.object(
+                formal_io,
+                "fcntl",
+                SimpleNamespace(
+                    F_GETFL=formal_io.fcntl.F_GETFL,
+                    fcntl=lambda _fd, _operation: os.O_RDONLY,
+                ),
+                create=True,
+            ), patch.object(
+                formal_io,
+                "_link_anonymous_inode",
+                side_effect=lambda descriptor, parent, name: events.append(
+                    ("link", descriptor, parent, name)
+                ),
+            ), patch.object(
+                formal_io.os,
+                "unlink",
+                side_effect=lambda name, *, dir_fd: events.append(
+                    ("unlink", name, dir_fd)
+                ),
+            ):
+                store._require_fd_bound_publication_support()
+
+        self.assertLess(events.index(("close", 91)), events.index(("link", 92, 90, ".txnmem-fd-bound-publication-preflight")))
+        self.assertLess(events.index(("link", 92, 90, ".txnmem-fd-bound-publication-preflight")), events.index(("unlink", ".txnmem-fd-bound-publication-preflight", 90)))
+        self.assertEqual(
+            [event for event in events if event[0] == "close"],
+            [("close", 91), ("close", 92), ("close", 90)],
+        )
+
+    def test_credential_preflight_writable_close_failure_never_links(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        probe = b"txnmem-fd-bound-publication-preflight\n"
+        metadata = [
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=0,
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(probe),
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(probe),
+            ),
+        ]
+        closes = []
+
+        def close(descriptor):
+            closes.append(descriptor)
+            if descriptor == 91:
+                raise OSError("preflight-writable-close-failure")
+
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_root", return_value=90
+            ), patch.object(
+                formal_io, "_require_non_dumpable", return_value=None, create=True
+            ), patch.object(
+                formal_io, "_open_anonymous_inode", return_value=91
+            ), patch.object(
+                formal_io, "_open_anonymous_inode_read_only", return_value=92, create=True
+            ), patch.object(
+                formal_io.os, "fstat", side_effect=metadata
+            ), patch.object(
+                formal_io.os, "write", return_value=len(probe)
+            ), patch.object(
+                formal_io.os, "fsync"
+            ), patch.object(
+                formal_io.os, "close", side_effect=close
+            ), patch.object(
+                formal_io,
+                "fcntl",
+                SimpleNamespace(
+                    F_GETFL=formal_io.fcntl.F_GETFL,
+                    fcntl=lambda _fd, _operation: os.O_RDONLY,
+                ),
+                create=True,
+            ), patch.object(
+                formal_io, "_link_anonymous_inode"
+            ) as link, self.assertRaises(FormalIOError):
+                store._require_fd_bound_publication_support()
+
+        link.assert_not_called()
+        self.assertEqual(closes.count(91), 1)
+        self.assertEqual(closes.count(92), 1)
+        self.assertEqual(closes.count(90), 1)
+
+    def test_root_empty_path_success_does_not_substitute_for_runner_fallback(self):
+        import txnmem_formal_io as formal_io
+
+        with patch.object(formal_io, "_call_linkat") as root_linkat:
+            formal_io._link_anonymous_inode(92, 90, "probe")
+
+        root_linkat.assert_called_once_with(
+            92,
+            b"",
+            90,
+            "probe",
+            formal_io._AT_EMPTY_PATH,
+        )
+
+        fallback_denied = PermissionError(
+            errno.EACCES, "runner proc-fd fallback denied"
+        )
+        with patch.object(
+            formal_io,
+            "_call_linkat",
+            side_effect=[
+                PermissionError(errno.EPERM, "AT_EMPTY_PATH denied"),
+                fallback_denied,
+            ],
+        ) as runner_linkat, self.assertRaises(PermissionError) as raised:
+            formal_io._link_anonymous_inode(92, 90, "probe")
+
+        self.assertIs(raised.exception, fallback_denied)
+        self.assertEqual(
+            runner_linkat.call_args_list[1].args,
+            (
+                formal_io._AT_FDCWD,
+                b"/proc/self/fd/92",
+                90,
+                "probe",
+                formal_io._AT_SYMLINK_FOLLOW,
+            ),
+        )
+
+    def test_formal_anonymous_prelink_faults_never_reach_visibility(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        payload = {"publication_status": "complete"}
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+
+        def metadata(*, inode=11, mode=0o600, size=0):
+            return SimpleNamespace(
+                st_dev=7,
+                st_ino=inode,
+                st_mode=stat.S_IFREG | mode,
+                st_nlink=0,
+                st_size=size,
+            )
+
+        cases = {
+            "zero-write": {
+                "stats": [metadata()],
+                "write": [0],
+            },
+            "first-fstat-mode": {
+                "stats": [metadata(mode=0o644)],
+                "write": [],
+            },
+            "first-fstat-size": {
+                "stats": [metadata(size=1)],
+                "write": [],
+            },
+            "second-fstat-identity": {
+                "stats": [metadata(), metadata(inode=12, size=len(encoded))],
+                "write": [len(encoded)],
+            },
+            "second-fstat-mode": {
+                "stats": [metadata(), metadata(mode=0o644, size=len(encoded))],
+                "write": [len(encoded)],
+            },
+            "second-fstat-size": {
+                "stats": [metadata(), metadata(size=len(encoded) - 1)],
+                "write": [len(encoded)],
+            },
+            "file-fsync": {
+                "stats": [metadata()],
+                "write": [len(encoded)],
+                "fsync": OSError("file-fsync-failure"),
+            },
+            "read-only-reopen": {
+                "stats": [metadata(), metadata(size=len(encoded))],
+                "write": [len(encoded)],
+                "reopen": OSError("read-only-reopen-failure"),
+            },
+        }
+        for name, fixture in cases.items():
+            with self.subTest(name=name), TemporaryDirectory() as tmp:
+                store = FormalStore(Path(tmp).resolve())
+                reopen_failure = fixture.get("reopen")
+                with patch.object(
+                    store, "_open_parent", return_value=(90, "pointer.json")
+                ), patch.object(
+                    formal_io, "_require_non_dumpable", return_value=None
+                ), patch.object(
+                    formal_io, "_open_anonymous_inode", return_value=91
+                ), patch.object(
+                    formal_io,
+                    "_open_anonymous_inode_read_only",
+                    side_effect=reopen_failure,
+                    return_value=92,
+                ), patch.object(
+                    formal_io.os, "fstat", side_effect=fixture["stats"]
+                ), patch.object(
+                    formal_io.os, "write", side_effect=fixture["write"]
+                ), patch.object(
+                    formal_io.os,
+                    "fsync",
+                    side_effect=fixture.get("fsync"),
+                ), patch.object(
+                    formal_io.os, "close"
+                ), patch.object(
+                    formal_io, "_link_anonymous_inode"
+                ) as link, self.assertRaises(FormalIOError):
+                    store._publish_json_exclusive(
+                        "bundles", "pointer.json", payload=payload
+                    )
+                link.assert_not_called()
+
+    def test_formal_anonymous_partial_writes_are_completed_before_read_only_commit(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalStore
+
+        payload = {"publication_status": "complete"}
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+        fstat_counts = {91: 0, 92: 0}
+
+        def fstat(descriptor):
+            fstat_counts[descriptor] += 1
+            if descriptor == 91 and fstat_counts[descriptor] == 1:
+                links, size = 0, 0
+            elif descriptor == 92 and fstat_counts[descriptor] == 2:
+                links, size = 1, len(encoded)
+            else:
+                links, size = 0, len(encoded)
+            return SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=links,
+                st_size=size,
+            )
+
+        reads = iter((encoded, b""))
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_parent", return_value=(90, "pointer.json")
+            ), patch.object(
+                formal_io, "_require_non_dumpable", return_value=None
+            ), patch.object(
+                formal_io, "_open_anonymous_inode", return_value=91
+            ), patch.object(
+                formal_io, "_open_anonymous_inode_read_only", return_value=92
+            ), patch.object(
+                formal_io.os, "fstat", side_effect=fstat
+            ), patch.object(
+                formal_io.os, "write", side_effect=[1, len(encoded) - 1]
+            ) as write, patch.object(
+                formal_io.os, "read", side_effect=lambda _fd, _size: next(reads)
+            ), patch.object(
+                formal_io.os, "fsync"
+            ), patch.object(
+                formal_io.os, "close"
+            ), patch.object(
+                formal_io.fcntl, "fcntl", return_value=os.O_RDONLY
+            ), patch.object(
+                formal_io, "_link_anonymous_inode"
+            ):
+                store._publish_json_exclusive(
+                    "bundles", "pointer.json", payload=payload
+                )
+
+        self.assertEqual(write.call_count, 2)
+        self.assertEqual(write.call_args_list[0].args, (91, encoded))
+        self.assertEqual(write.call_args_list[1].args, (91, encoded[1:]))
+
+    def test_formal_publication_preserves_baseexception_when_commit_cleanup_fails(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalStore
+
+        class PublicationPrimary(BaseException):
+            pass
+
+        primary = PublicationPrimary("publication-primary")
+        origin = []
+        payload = {"publication_status": "complete"}
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+        stats = [
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=size,
+            )
+            for size in (0, len(encoded), len(encoded))
+        ]
+
+        def precommit():
+            try:
+                raise primary
+            except BaseException as exc:
+                origin.append(exc.__traceback__)
+                raise
+
+        def close(descriptor):
+            if descriptor in {92, 90}:
+                raise OSError("cleanup-secondary")
+
+        caught = None
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_parent", return_value=(90, "pointer.json")
+            ), patch.object(
+                formal_io, "_require_non_dumpable", return_value=None
+            ), patch.object(
+                formal_io, "_open_anonymous_inode", return_value=91
+            ), patch.object(
+                formal_io, "_open_anonymous_inode_read_only", return_value=92
+            ), patch.object(
+                formal_io.os, "fstat", side_effect=stats
+            ), patch.object(
+                formal_io.os, "write", return_value=len(encoded)
+            ), patch.object(
+                formal_io.os, "fsync"
+            ), patch.object(
+                formal_io.os, "close", side_effect=close
+            ), patch.object(
+                formal_io.fcntl, "fcntl", return_value=os.O_RDONLY
+            ), patch.object(
+                formal_io, "_link_anonymous_inode"
+            ) as link:
+                try:
+                    store._publish_json_exclusive(
+                        "bundles",
+                        "pointer.json",
+                        payload=payload,
+                        _precommit_check=precommit,
+                    )
+                except BaseException as exc:
+                    caught = (exc, exc.__traceback__)
+
+        self.assertIsNotNone(caught)
+        self.assertIs(caught[0], primary)
+        traceback_nodes = []
+        current = caught[1]
+        while current is not None:
+            traceback_nodes.append(current)
+            current = current.tb_next
+        self.assertIn(origin[0], traceback_nodes)
+        link.assert_not_called()
+
+    def test_preflight_preserves_baseexception_when_unlink_and_fd_cleanup_fail(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalStore
+
+        class UnlinkPrimary(BaseException):
+            pass
+
+        primary = UnlinkPrimary("unlink-primary")
+        origin = []
+        probe = b"txnmem-fd-bound-publication-preflight\n"
+        stats = [
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=links,
+                st_size=size,
+            )
+            for links, size in (
+                (0, 0),
+                (0, len(probe)),
+                (0, len(probe)),
+                (1, len(probe)),
+            )
+        ]
+        unlink_calls = 0
+
+        def unlink(_name, *, dir_fd):
+            nonlocal unlink_calls
+            self.assertEqual(dir_fd, 90)
+            unlink_calls += 1
+            if unlink_calls == 1:
+                try:
+                    raise primary
+                except BaseException as exc:
+                    origin.append(exc.__traceback__)
+                    raise
+            raise OSError("unlink-cleanup-secondary")
+
+        def close(descriptor):
+            if descriptor in {92, 90}:
+                raise OSError("fd-cleanup-secondary")
+
+        reads = iter((probe, b""))
+        caught = None
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_root", return_value=90
+            ), patch.object(
+                formal_io, "_require_non_dumpable", return_value=None
+            ), patch.object(
+                formal_io, "_open_anonymous_inode", return_value=91
+            ), patch.object(
+                formal_io, "_open_anonymous_inode_read_only", return_value=92
+            ), patch.object(
+                formal_io.os, "fstat", side_effect=stats
+            ), patch.object(
+                formal_io.os, "write", return_value=len(probe)
+            ), patch.object(
+                formal_io.os, "read", side_effect=lambda _fd, _size: next(reads)
+            ), patch.object(
+                formal_io.os, "fsync"
+            ), patch.object(
+                formal_io.os, "unlink", side_effect=unlink
+            ), patch.object(
+                formal_io.os, "close", side_effect=close
+            ), patch.object(
+                formal_io.fcntl, "fcntl", return_value=os.O_RDONLY
+            ), patch.object(
+                formal_io, "_link_anonymous_inode"
+            ):
+                try:
+                    store._require_fd_bound_publication_support()
+                except BaseException as exc:
+                    caught = (exc, exc.__traceback__)
+
+        self.assertIsNotNone(caught)
+        self.assertIs(caught[0], primary)
+        traceback_nodes = []
+        current = caught[1]
+        while current is not None:
+            traceback_nodes.append(current)
+            current = current.tb_next
+        self.assertIn(origin[0], traceback_nodes)
+        self.assertEqual(unlink_calls, 2)
+
+    def test_formal_postlink_sync_and_descriptor_close_faults_are_observable_once(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        payload = {"publication_status": "complete"}
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+        for fault in ("directory-fsync", "commit-close", "parent-close"):
+            with self.subTest(fault=fault), TemporaryDirectory() as tmp:
+                fstat_counts = {91: 0, 92: 0}
+                closes = []
+                reads = iter((encoded, b""))
+
+                def fstat(descriptor):
+                    fstat_counts[descriptor] += 1
+                    if descriptor == 91 and fstat_counts[descriptor] == 1:
+                        links, size = 0, 0
+                    elif descriptor == 92 and fstat_counts[descriptor] == 2:
+                        links, size = 1, len(encoded)
+                    else:
+                        links, size = 0, len(encoded)
+                    return SimpleNamespace(
+                        st_dev=7,
+                        st_ino=11,
+                        st_mode=stat.S_IFREG | 0o600,
+                        st_nlink=links,
+                        st_size=size,
+                    )
+
+                def fsync(descriptor):
+                    if fault == "directory-fsync" and descriptor == 90:
+                        raise OSError("directory-fsync-failure")
+
+                def close(descriptor):
+                    closes.append(descriptor)
+                    if fault == "commit-close" and descriptor == 92:
+                        raise OSError("commit-close-failure")
+                    if fault == "parent-close" and descriptor == 90:
+                        raise OSError("parent-close-failure")
+
+                store = FormalStore(Path(tmp).resolve())
+                with patch.object(
+                    store, "_open_parent", return_value=(90, "pointer.json")
+                ), patch.object(
+                    formal_io, "_require_non_dumpable", return_value=None
+                ), patch.object(
+                    formal_io, "_open_anonymous_inode", return_value=91
+                ), patch.object(
+                    formal_io, "_open_anonymous_inode_read_only", return_value=92
+                ), patch.object(
+                    formal_io.os, "fstat", side_effect=fstat
+                ), patch.object(
+                    formal_io.os, "write", return_value=len(encoded)
+                ), patch.object(
+                    formal_io.os, "read", side_effect=lambda _fd, _size: next(reads)
+                ), patch.object(
+                    formal_io.os, "fsync", side_effect=fsync
+                ), patch.object(
+                    formal_io.os, "close", side_effect=close
+                ), patch.object(
+                    formal_io.fcntl, "fcntl", return_value=os.O_RDONLY
+                ), patch.object(
+                    formal_io, "_link_anonymous_inode"
+                ) as link, self.assertRaises(FormalIOError):
+                    store._publish_json_exclusive(
+                        "bundles", "pointer.json", payload=payload
+                    )
+
+                link.assert_called_once_with(92, 90, "pointer.json")
+                self.assertEqual(closes, [91, 92, 90])
+
+    def test_preflight_link_sync_and_descriptor_close_faults_are_observable_once(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        probe = b"txnmem-fd-bound-publication-preflight\n"
+        probe_name = ".txnmem-fd-bound-publication-preflight"
+        for fault in (
+            "link",
+            "directory-fsync",
+            "commit-close",
+            "parent-close",
+        ):
+            with self.subTest(fault=fault), TemporaryDirectory() as tmp:
+                fstat_counts = {91: 0, 92: 0}
+                closes = []
+                unlinks = []
+                reads = iter((probe, b""))
+
+                def fstat(descriptor):
+                    fstat_counts[descriptor] += 1
+                    if descriptor == 91 and fstat_counts[descriptor] == 1:
+                        links, size = 0, 0
+                    elif descriptor == 92 and fstat_counts[descriptor] == 2:
+                        links, size = 1, len(probe)
+                    else:
+                        links, size = 0, len(probe)
+                    return SimpleNamespace(
+                        st_dev=7,
+                        st_ino=11,
+                        st_mode=stat.S_IFREG | 0o600,
+                        st_nlink=links,
+                        st_size=size,
+                    )
+
+                def link(*_arguments):
+                    if fault == "link":
+                        raise OSError("link-failure")
+
+                def fsync(descriptor):
+                    if fault == "directory-fsync" and descriptor == 90:
+                        raise OSError("directory-fsync-failure")
+
+                def close(descriptor):
+                    closes.append(descriptor)
+                    if fault == "commit-close" and descriptor == 92:
+                        raise OSError("commit-close-failure")
+                    if fault == "parent-close" and descriptor == 90:
+                        raise OSError("parent-close-failure")
+
+                store = FormalStore(Path(tmp).resolve())
+                with patch.object(
+                    store, "_open_root", return_value=90
+                ), patch.object(
+                    formal_io, "_require_non_dumpable", return_value=None
+                ), patch.object(
+                    formal_io, "_open_anonymous_inode", return_value=91
+                ), patch.object(
+                    formal_io, "_open_anonymous_inode_read_only", return_value=92
+                ), patch.object(
+                    formal_io.os, "fstat", side_effect=fstat
+                ), patch.object(
+                    formal_io.os, "write", return_value=len(probe)
+                ), patch.object(
+                    formal_io.os, "read", side_effect=lambda _fd, _size: next(reads)
+                ), patch.object(
+                    formal_io.os, "fsync", side_effect=fsync
+                ), patch.object(
+                    formal_io.os,
+                    "unlink",
+                    side_effect=lambda name, *, dir_fd: unlinks.append(
+                        (name, dir_fd)
+                    ),
+                ), patch.object(
+                    formal_io.os, "close", side_effect=close
+                ), patch.object(
+                    formal_io.fcntl, "fcntl", return_value=os.O_RDONLY
+                ), patch.object(
+                    formal_io, "_link_anonymous_inode", side_effect=link
+                ), self.assertRaises(FormalIOError):
+                    store._require_fd_bound_publication_support()
+
+                self.assertEqual(closes, [91, 92, 90])
+                if fault == "link":
+                    self.assertEqual(unlinks, [])
+                else:
+                    self.assertEqual(unlinks, [(probe_name, 90)])
 
     @unittest.skipUnless(
         sys.platform.startswith("linux") and hasattr(os, "O_TMPFILE"),
         "Linux O_TMPFILE/linkat only",
     )
+    @_with_non_dumpable_test_process
     def test_formal_pointer_writer_real_anonymous_inode_linkat_has_no_residue(self):
         import txnmem_formal_io as formal_io
         from txnmem_formal_io import FormalIOError, FormalStore
@@ -2597,6 +3711,7 @@ class ProvenanceAggregationTests(unittest.TestCase):
         sys.platform.startswith("linux") and hasattr(os, "O_TMPFILE"),
         "Linux formal fd-bound publication only",
     )
+    @_with_non_dumpable_test_process
     def test_publisher_revalidates_and_exclusively_points_to_valid_formal_object(self):
         config = self._small_formal_config()
         report = self._valid_formal_report()
@@ -2688,6 +3803,7 @@ class ProvenanceAggregationTests(unittest.TestCase):
         sys.platform.startswith("linux") and hasattr(os, "O_TMPFILE"),
         "Linux formal fd-bound promotion only",
     )
+    @_with_non_dumpable_test_process
     def test_two_stage_candidate_attestation_and_promotion_reuses_exact_bytes(self):
         config = self._small_formal_config()
         graph = build_layered_dag(10, seed=17)

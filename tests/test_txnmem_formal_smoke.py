@@ -1298,6 +1298,20 @@ class FormalSmokeProbeTests(unittest.TestCase):
 class ProvenanceSmokeRunnerTests(unittest.TestCase):
     def setUp(self):
         super().setUp()
+        self._real_runner_harden = runner._harden_execd_formal_runner
+        self._real_runner_preflight = (
+            runner._require_credential_matched_publication_preflight
+        )
+        self._runner_harden_patch = patch.object(
+            runner, "_harden_execd_formal_runner", return_value=None
+        )
+        self._runner_preflight_patch = patch.object(
+            runner,
+            "_require_credential_matched_publication_preflight",
+            return_value=None,
+        )
+        self._runner_harden_patch.start()
+        self._runner_preflight_patch.start()
         self._runner_previous_mask = None
         if hasattr(signal, "pthread_sigmask") and hasattr(signal, "sigwait"):
             self._runner_previous_mask = signal.pthread_sigmask(
@@ -1315,6 +1329,8 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
                     signal.SIG_SETMASK, self._runner_previous_mask
                 )
         finally:
+            self._runner_preflight_patch.stop()
+            self._runner_harden_patch.stop()
             super().tearDown()
 
     def _run_publication_signal_scenario(self, scenario):
@@ -1639,6 +1655,237 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
                 runner.signal, "pthread_sigmask", return_value=observed
             ), self.assertRaisesRegex(RuntimeError, "signal mask"):
                 checker()
+
+    def test_runner_hardening_uses_exact_prctl_credentials_groups_and_mask(self):
+        harden = self._real_runner_harden
+        self.assertIsNotNone(harden)
+        if harden is None:
+            return
+        calls = []
+
+        def prctl(option, argument, third, fourth, fifth):
+            calls.append((option, argument, third, fourth, fifth))
+            return {4: 0, 3: 0, 39: 1}[option]
+
+        with patch.object(runner.sys, "platform", "linux"), patch.object(
+            runner.os, "getuid", return_value=runner.FORMAL_RUNNER_UID
+        ), patch.object(
+            runner.os, "geteuid", return_value=runner.FORMAL_RUNNER_UID
+        ), patch.object(
+            runner.os, "getgid", return_value=runner.FORMAL_RUNNER_GID
+        ), patch.object(
+            runner.os, "getegid", return_value=runner.FORMAL_RUNNER_GID
+        ), patch.object(
+            runner.os, "getgroups", return_value=[]
+        ), patch.object(
+            runner, "_require_controlled_sigterm_mask"
+        ) as require_mask:
+            harden(prctl=prctl)
+
+        self.assertEqual(
+            calls,
+            [
+                (4, 0, 0, 0, 0),
+                (3, 0, 0, 0, 0),
+                (39, 0, 0, 0, 0),
+            ],
+        )
+        require_mask.assert_called_once_with()
+
+    def test_runner_hardening_rejects_every_credential_and_kernel_mismatch(self):
+        harden = self._real_runner_harden
+        self.assertIsNotNone(harden)
+        if harden is None:
+            return
+
+        def valid_prctl(option, _argument, _third, _fourth, _fifth):
+            return {4: 0, 3: 0, 39: 1}[option]
+
+        cases = {
+            "set-dumpable": ({4: 1, 3: 0, 39: 1}, {}),
+            "set-dumpable-bool": ({4: False, 3: 0, 39: 1}, {}),
+            "get-dumpable": ({4: 0, 3: 1, 39: 1}, {}),
+            "get-dumpable-bool": ({4: 0, 3: False, 39: 1}, {}),
+            "no-new-privileges": ({4: 0, 3: 0, 39: 0}, {}),
+            "no-new-privileges-bool": ({4: 0, 3: 0, 39: True}, {}),
+            "real-uid": ({4: 0, 3: 0, 39: 1}, {"getuid": 1}),
+            "effective-uid": ({4: 0, 3: 0, 39: 1}, {"geteuid": 1}),
+            "real-gid": ({4: 0, 3: 0, 39: 1}, {"getgid": 1}),
+            "effective-gid": ({4: 0, 3: 0, 39: 1}, {"getegid": 1}),
+            "groups": ({4: 0, 3: 0, 39: 1}, {"getgroups": [1]}),
+        }
+        for name, (prctl_results, overrides) in cases.items():
+            with self.subTest(name=name), patch.object(
+                runner.sys, "platform", "linux"
+            ), patch.object(
+                runner.os,
+                "getuid",
+                return_value=overrides.get("getuid", runner.FORMAL_RUNNER_UID),
+            ), patch.object(
+                runner.os,
+                "geteuid",
+                return_value=overrides.get("geteuid", runner.FORMAL_RUNNER_UID),
+            ), patch.object(
+                runner.os,
+                "getgid",
+                return_value=overrides.get("getgid", runner.FORMAL_RUNNER_GID),
+            ), patch.object(
+                runner.os,
+                "getegid",
+                return_value=overrides.get("getegid", runner.FORMAL_RUNNER_GID),
+            ), patch.object(
+                runner.os,
+                "getgroups",
+                return_value=overrides.get("getgroups", []),
+            ), patch.object(
+                runner, "_require_controlled_sigterm_mask"
+            ), self.assertRaisesRegex(RuntimeError, "runner"):
+                harden(
+                    prctl=lambda option, _argument, _third, _fourth, _fifth: (
+                        prctl_results[option]
+                    )
+                )
+
+        class HardeningPrimary(BaseException):
+            pass
+
+        primary = HardeningPrimary("hardening-primary")
+
+        def fail_prctl(*_arguments):
+            raise primary
+
+        with patch.object(runner.sys, "platform", "linux"), self.assertRaises(
+            BaseException
+        ) as raised:
+            harden(prctl=fail_prctl)
+        self.assertIs(raised.exception, primary)
+
+    def test_runner_credential_preflight_finishes_before_ready_byte(self):
+        events = []
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp).resolve() / "runtime"
+            runtime.mkdir()
+            candidate = Path(tmp).resolve() / "candidate"
+            candidate.mkdir()
+            environment = {
+                "TXNMEM_PROVENANCE_START_GATE_FD": "10",
+                "TXNMEM_PROVENANCE_READY_FD": "11",
+                "TXNMEM_PROVENANCE_COMPLETION_FD": "12",
+                "TXNMEM_PROVENANCE_PROGRESS_FD": "13",
+                "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256": "a" * 64,
+                "TXNMEM_PROVENANCE_RUNTIME_SITE": str(runtime),
+            }
+
+            def write(descriptor, payload):
+                events.append(("ready", descriptor, payload))
+                return len(payload)
+
+            with patch.dict(os.environ, environment, clear=True), patch.object(
+                runner,
+                "_harden_execd_formal_runner",
+                side_effect=lambda: events.append(("harden",)),
+                create=True,
+            ), patch.object(
+                runner,
+                "_require_credential_matched_publication_preflight",
+                side_effect=lambda arguments: events.append(
+                    ("preflight", tuple(arguments))
+                ),
+                create=True,
+            ), patch.object(
+                runner.os, "write", side_effect=write
+            ), patch.object(
+                runner.os, "read", return_value=b""
+            ), patch.object(
+                runner.os, "close"
+            ):
+                status = runner.main(
+                    [
+                        "provenance-performance",
+                        "--out-dir",
+                        str(candidate),
+                    ]
+                )
+
+        self.assertEqual(status, 71)
+        self.assertEqual(events[0], ("harden",))
+        self.assertEqual(events[1][0], "preflight")
+        self.assertEqual(events[2], ("ready", 11, b"R"))
+
+    def test_runner_preflight_uses_only_validated_internal_out_dir(self):
+        preflight = self._real_runner_preflight
+        self.assertIsNotNone(preflight)
+        if preflight is None:
+            return
+
+        class Store:
+            def __init__(self, root):
+                self.root = root
+
+            def _require_fd_bound_publication_support(self):
+                observations.append(self.root)
+
+        observations = []
+        candidate = "/formal/candidate"
+        with patch("txnmem_formal_io.FormalStore", Store):
+            preflight(
+                [
+                    "provenance-performance",
+                    "--out-dir",
+                    candidate,
+                ]
+            )
+        self.assertEqual(observations, [candidate])
+
+        for arguments in (
+            ["provenance-performance"],
+            ["provenance-performance", "--out-dir", candidate, "--out-dir", candidate],
+        ):
+            with self.subTest(arguments=arguments), self.assertRaises(ValueError):
+                preflight(arguments)
+
+    def test_runner_preflight_failure_writes_no_ready_and_starts_no_workload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp).resolve() / "runtime"
+            runtime.mkdir()
+            candidate = Path(tmp).resolve() / "candidate"
+            candidate.mkdir()
+            environment = {
+                "TXNMEM_PROVENANCE_START_GATE_FD": "10",
+                "TXNMEM_PROVENANCE_READY_FD": "11",
+                "TXNMEM_PROVENANCE_COMPLETION_FD": "12",
+                "TXNMEM_PROVENANCE_PROGRESS_FD": "13",
+                "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256": "a" * 64,
+                "TXNMEM_PROVENANCE_RUNTIME_SITE": str(runtime),
+            }
+            with patch.dict(os.environ, environment, clear=True), patch.object(
+                runner,
+                "_harden_execd_formal_runner",
+                return_value=None,
+                create=True,
+            ), patch.object(
+                runner,
+                "_require_credential_matched_publication_preflight",
+                side_effect=RuntimeError("runner-preflight-denied"),
+                create=True,
+            ), patch.object(
+                runner.os, "write"
+            ) as write, patch.object(
+                runner.os, "read"
+            ) as read, patch.object(
+                runner.os, "close"
+            ):
+                status = runner.main(
+                    [
+                        "provenance-performance",
+                        "--out-dir",
+                        str(candidate),
+                    ]
+                )
+
+        self.assertEqual(status, 70)
+        write.assert_not_called()
+        read.assert_not_called()
 
     def test_runner_cleanup_attempts_all_and_preserves_interruption(self):
         import txnmem_experiment

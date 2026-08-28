@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import importlib
 import json
@@ -11,6 +12,13 @@ import re
 import signal
 import sys
 import urllib.request
+
+
+FORMAL_RUNNER_UID = 65532
+FORMAL_RUNNER_GID = 65532
+_PR_GET_DUMPABLE = 3
+_PR_SET_DUMPABLE = 4
+_PR_GET_NO_NEW_PRIVS = 39
 
 
 class _RunnerInterruption(BaseException):
@@ -49,6 +57,65 @@ def _require_controlled_sigterm_mask() -> None:
         raise RuntimeError("runner signal mask is not exact")
 
 
+def _harden_execd_formal_runner(*, prctl=None) -> None:
+    """Re-establish and verify the exact runner state reset by execve."""
+
+    if not sys.platform.startswith("linux"):
+        raise RuntimeError("formal runner hardening requires Linux")
+    operation = prctl
+    if operation is None:
+        try:
+            raw_prctl = ctypes.CDLL(None, use_errno=True).prctl
+        except (AttributeError, OSError) as exc:
+            raise RuntimeError("formal runner prctl is unavailable") from exc
+        raw_prctl.argtypes = [
+            ctypes.c_int,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+        ]
+        raw_prctl.restype = ctypes.c_int
+        operation = raw_prctl
+    try:
+        set_dumpable = operation(_PR_SET_DUMPABLE, 0, 0, 0, 0)
+        dumpable = operation(_PR_GET_DUMPABLE, 0, 0, 0, 0)
+        no_new_privileges = operation(_PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0)
+    except Exception:
+        raise RuntimeError("formal runner prctl verification failed") from None
+    if (
+        type(set_dumpable) is not int
+        or set_dumpable != 0
+        or type(dumpable) is not int
+        or dumpable != 0
+        or type(no_new_privileges) is not int
+        or no_new_privileges != 1
+    ):
+        raise RuntimeError("formal runner kernel state is not exact")
+    if (
+        os.getuid() != FORMAL_RUNNER_UID
+        or os.geteuid() != FORMAL_RUNNER_UID
+        or os.getgid() != FORMAL_RUNNER_GID
+        or os.getegid() != FORMAL_RUNNER_GID
+        or os.getgroups() != []
+    ):
+        raise RuntimeError("formal runner credentials are not exact")
+    _require_controlled_sigterm_mask()
+    source_directory = os.path.dirname(os.path.abspath(__file__))
+    if source_directory not in sys.path:
+        sys.path.insert(0, source_directory)
+    from txnmem_provenance_contract import (
+        FORMAL_RUNNER_GID as REGISTERED_FORMAL_RUNNER_GID,
+        FORMAL_RUNNER_UID as REGISTERED_FORMAL_RUNNER_UID,
+    )
+
+    if (
+        FORMAL_RUNNER_UID != REGISTERED_FORMAL_RUNNER_UID
+        or FORMAL_RUNNER_GID != REGISTERED_FORMAL_RUNNER_GID
+    ):
+        raise RuntimeError("formal runner registration changed")
+
+
 def _argument_value(arguments: list[str], name: str) -> str:
     if arguments.count(name) != 1:
         raise ValueError("formal runner argument is missing or duplicated")
@@ -56,6 +123,17 @@ def _argument_value(arguments: list[str], name: str) -> str:
     if index + 1 >= len(arguments) or not arguments[index + 1]:
         raise ValueError("formal runner argument has no value")
     return arguments[index + 1]
+
+
+def _require_credential_matched_publication_preflight(
+    arguments: list[str],
+) -> None:
+    """Run the decisive publication probe as the hardened exec'd runner."""
+
+    candidate_root = _argument_value(arguments, "--out-dir")
+    from txnmem_formal_io import FormalStore
+
+    FormalStore(candidate_root)._require_fd_bound_publication_support()
 
 
 def _candidate_completion_material(arguments: list[str]) -> dict:
@@ -232,8 +310,10 @@ def main(argv: list[str] | None = None) -> int:
     completion_fd = int(completion_value)
     progress_fd = int(progress_value) if progress_pair_present else None
     try:
-        _require_controlled_sigterm_mask()
-    except RuntimeError:
+        _harden_execd_formal_runner()
+        if performance_mode:
+            _require_credential_matched_publication_preflight(arguments)
+    except (OSError, TypeError, ValueError, RuntimeError):
         return 70
     try:
         if os.write(ready_fd, b"R") != 1:

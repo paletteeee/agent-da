@@ -5590,7 +5590,9 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 clear=True,
             ), patch.object(runner_module.os, "write", return_value=1), patch.object(
                 runner_module.os, "read", return_value=b"G"
-            ), patch.object(runner_module.os, "close"):
+            ), patch.object(runner_module.os, "close"), patch.object(
+                runner_module, "_harden_execd_formal_runner", return_value=None
+            ):
                 self.assertEqual(runner_module.main(["invalid-command"]), 70)
 
             with patch.dict(
@@ -5604,7 +5606,9 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 clear=True,
             ), patch.object(runner_module.os, "write", return_value=1), patch.object(
                 runner_module.os, "read", return_value=b"G"
-            ), patch.object(runner_module.os, "close"):
+            ), patch.object(runner_module.os, "close"), patch.object(
+                runner_module, "_harden_execd_formal_runner", return_value=None
+            ):
                 self.assertEqual(runner_module.main(["invalid-command"]), 72)
                 self.assertNotIn(
                     "TXNMEM_PROVENANCE_RUNTIME_SITE", os.environ
@@ -5661,6 +5665,12 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         ), patch(
             "txnmem_provenance_performance.candidate_attestation_material",
             return_value={"result": "sealed"},
+        ), patch.object(
+            runner_module, "_harden_execd_formal_runner", return_value=None
+        ), patch.object(
+            runner_module,
+            "_require_credential_matched_publication_preflight",
+            return_value=None,
         ):
             result = runner_module.main(
                 [
@@ -5748,6 +5758,12 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 ), patch(
                     "txnmem_provenance_performance.formal_matrix_config_sha256",
                     return_value="b" * 64,
+                ), patch.object(
+                    runner_module, "_harden_execd_formal_runner", return_value=None
+                ), patch.object(
+                    runner_module,
+                    "_require_credential_matched_publication_preflight",
+                    return_value=None,
                 ):
                     result = runner_module.main(
                         [
@@ -7132,6 +7148,150 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         term_seconds=0.5, kill_seconds=2.0
                     )
                 child.close()
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and hasattr(os, "geteuid")
+        and os.geteuid() == 0,
+        "protected Linux same-UID non-dumpable publisher only",
+    )
+    def test_protected_linux_same_uid_peer_cannot_reopen_commit_fd_for_writing(self):
+        collector_module._require_formal_uid_processes(
+            collector_module.FORMAL_RUNNER_UID,
+            expected={},
+        )
+        repository = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            root.chmod(0o755)
+            candidate = root / "candidate"
+            candidate.mkdir(mode=0o700)
+            candidate.chown(
+                collector_module.FORMAL_RUNNER_UID,
+                collector_module.FORMAL_RUNNER_GID,
+            )
+            release = root / "release"
+            control = candidate / "paused-commit.json"
+            publisher_script = root / "publisher.py"
+            publisher_script.write_text(
+                "\n".join(
+                    (
+                        "import json, os, sys, time",
+                        "from pathlib import Path",
+                        f"sys.path.insert(0, {str(repository / 'src')!r})",
+                        "import txnmem_formal_io as formal_io",
+                        "import txnmem_provenance_runner as runner",
+                        "candidate, control, release = map(Path, sys.argv[1:])",
+                        "gate = int(os.environ.pop('TXNMEM_PROVENANCE_START_GATE_FD'))",
+                        "ready = int(os.environ.pop('TXNMEM_PROVENANCE_READY_FD'))",
+                        "completion = int(os.environ.pop('TXNMEM_PROVENANCE_COMPLETION_FD'))",
+                        "runner._harden_execd_formal_runner()",
+                        "store = formal_io.FormalStore(candidate)",
+                        "store._require_fd_bound_publication_support()",
+                        "os.write(ready, b'R')",
+                        "os.close(ready)",
+                        "if os.read(gate, 1) != b'G': raise SystemExit(71)",
+                        "os.close(gate)",
+                        "store.ensure_directory('bundles')",
+                        "real_link = formal_io._link_anonymous_inode",
+                        "def paused_link(descriptor, parent, name):",
+                        "    control.write_text(json.dumps({'pid': os.getpid(), 'fd': descriptor}), encoding='utf-8')",
+                        "    while not release.exists(): time.sleep(0.01)",
+                        "    real_link(descriptor, parent, name)",
+                        "formal_io._link_anonymous_inode = paused_link",
+                        "store._publish_json_exclusive('bundles', 'pointer.json', payload={'publication_status': 'complete', 'schema': 'peer-fixture-v1'})",
+                        "os.write(completion, b'{}')",
+                        "os.close(completion)",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            publisher_script.chmod(0o555)
+            child = collector_module._start_gated_candidate(
+                command=(
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    str(publisher_script),
+                    str(candidate),
+                    str(control),
+                    str(release),
+                ),
+                cwd=root,
+                environment={
+                    "PYTHONPATH": str(repository / "src"),
+                },
+                formal_uid=collector_module.FORMAL_RUNNER_UID,
+                formal_gid=collector_module.FORMAL_RUNNER_GID,
+                require_completion_receipt=True,
+            )
+            try:
+                child.release()
+                deadline = time.monotonic() + 5.0
+                while time.monotonic() < deadline and not control.is_file():
+                    time.sleep(0.01)
+                self.assertTrue(control.is_file())
+                paused = json.loads(control.read_text(encoding="utf-8"))
+                peer_read, peer_write = os.pipe()
+                peer_pid = os.fork()
+                if peer_pid == 0:
+                    try:
+                        os.close(peer_read)
+                        collector_module._drop_formal_child_privileges(
+                            collector_module.FORMAL_RUNNER_UID,
+                            collector_module.FORMAL_RUNNER_GID,
+                        )
+                        try:
+                            descriptor = os.open(
+                                f"/proc/{paused['pid']}/fd/{paused['fd']}",
+                                os.O_WRONLY,
+                            )
+                        except PermissionError:
+                            os.write(peer_write, b"D")
+                        else:
+                            os.close(descriptor)
+                            os.write(peer_write, b"W")
+                    finally:
+                        os._exit(0)
+                os.close(peer_write)
+                peer_result = os.read(peer_read, 1)
+                os.close(peer_read)
+                waited_pid, peer_status = os.waitpid(peer_pid, 0)
+                self.assertEqual(waited_pid, peer_pid)
+                self.assertTrue(os.WIFEXITED(peer_status))
+                self.assertEqual(peer_result, b"D")
+                release.write_bytes(b"release\n")
+                exit_code, receipt = child.wait_with_receipt(timeout=5.0)
+                self.assertEqual(exit_code, 0)
+                self.assertEqual(receipt, {})
+                expected = (
+                    json.dumps(
+                        {
+                            "publication_status": "complete",
+                            "schema": "peer-fixture-v1",
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                        sort_keys=True,
+                    )
+                    + "\n"
+                ).encode("utf-8")
+                self.assertEqual(
+                    (candidate / "bundles" / "pointer.json").read_bytes(),
+                    expected,
+                )
+            finally:
+                if child.process.poll() is None:
+                    child.terminate_validated_group(
+                        term_seconds=0.5,
+                        kill_seconds=2.0,
+                    )
+                child.close()
+            collector_module._require_formal_uid_processes(
+                collector_module.FORMAL_RUNNER_UID,
+                expected={},
+            )
 
     @unittest.skipUnless(
         sys.platform.startswith("linux")
