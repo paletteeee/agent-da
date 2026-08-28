@@ -408,30 +408,59 @@ def _completed_progress_matches(
     )
 
 
-def _persist_blocked_progress(store: ProgressSnapshotStore) -> dict[str, Any]:
+_DIAGNOSTIC_BLOCK_REASON_CLASSES = frozenset(
+    {
+        "formal_eligibility_failed",
+        "backend_timeout",
+        "progress_protocol_failed",
+    }
+)
+
+
+def _persist_blocked_progress(
+    store: ProgressSnapshotStore,
+    reason_class: str = "progress_protocol_failed",
+) -> dict[str, Any]:
     """Persist one safe blocked terminal without exposing storage failures."""
+
+    if (
+        type(reason_class) is not str
+        or reason_class not in _DIAGNOSTIC_BLOCK_REASON_CLASSES
+    ):
+        raise CollectorError("candidate progress blocking reason is invalid")
 
     try:
         current = store.read_view()
     except BaseException:
         raise CollectorError("candidate progress blocking failed") from None
     if current.get("status") in {"blocked", "completed", "interrupted"}:
-        return current
+        if current.get("status") == "blocked" and current.get(
+            "terminal_reason_class"
+        ) != reason_class:
+            raise CollectorError("candidate progress blocking reason changed")
+        return dict(current)
     try:
-        store.write_terminal("blocked", "progress_protocol_failed")
+        store.write_terminal("blocked", reason_class)
     except BaseException:
         try:
             persisted = store.read_view()
         except BaseException:
             persisted = None
-        if isinstance(persisted, Mapping) and persisted.get("status") == "blocked":
+        if (
+            isinstance(persisted, Mapping)
+            and persisted.get("status") == "blocked"
+            and persisted.get("terminal_reason_class") == reason_class
+        ):
             return dict(persisted)
         raise CollectorError("candidate progress blocking failed") from None
     try:
         persisted = store.read_view()
     except BaseException:
         raise CollectorError("candidate progress blocking failed") from None
-    if persisted.get("status") != "blocked":
+    if (
+        persisted.get("status") != "blocked"
+        or persisted.get("terminal_reason_class") != reason_class
+    ):
         raise CollectorError("candidate progress blocking failed")
     return dict(persisted)
 
@@ -565,16 +594,36 @@ class _GatedCandidate:
         if failures:
             raise CollectorError("candidate descriptor cleanup failed") from None
 
-    def finish_progress(self, timeout: float) -> dict[str, Any]:
+    def finish_progress(
+        self,
+        timeout: float,
+        *,
+        allow_empty: bool = False,
+    ) -> dict[str, Any] | None:
+        if type(allow_empty) is not bool:
+            raise CollectorError("candidate progress empty policy is invalid")
         if self._progress_drainer is None:
             raise CollectorError("candidate progress channel is unavailable")
         try:
             snapshot = self._progress_drainer.finish(timeout)
         except ProgressProtocolError as exc:
             raise CollectorError("candidate progress channel failed") from exc
+        if snapshot is None and allow_empty:
+            return None
         if not isinstance(snapshot, dict):
             raise CollectorError("candidate progress snapshot is unavailable")
         return snapshot
+
+    def read_progress(self) -> dict[str, Any]:
+        if self._progress_store is None:
+            raise CollectorError("candidate progress store is unavailable")
+        try:
+            snapshot = self._progress_store.read_view()
+        except BaseException:
+            raise CollectorError("candidate progress snapshot is unavailable") from None
+        if not isinstance(snapshot, dict):
+            raise CollectorError("candidate progress snapshot is unavailable")
+        return dict(snapshot)
 
     def complete_progress(self) -> dict[str, Any]:
         if self._progress_store is None:
@@ -620,14 +669,17 @@ class _GatedCandidate:
             raise CollectorError("candidate progress completion failed") from None
         return terminal
 
-    def block_progress(self) -> None:
+    def block_progress(
+        self,
+        reason_class: str = "progress_protocol_failed",
+    ) -> dict[str, Any] | None:
         if self._progress_store is None:
-            return
-        _persist_blocked_progress(self._progress_store)
+            return None
+        return _persist_blocked_progress(self._progress_store, reason_class)
 
-    def interrupt_progress(self) -> None:
+    def interrupt_progress(self) -> dict[str, Any] | None:
         if self._progress_store is None:
-            return
+            return None
         try:
             current = self._progress_store.read_view()
             if current.get("status") in {
@@ -635,15 +687,20 @@ class _GatedCandidate:
                 "completed",
                 "interrupted",
             }:
-                return
+                return dict(current)
             self._progress_store.write_terminal(
                 "interrupted", "collector_interrupted"
             )
             persisted = self._progress_store.read_view()
         except BaseException:
             raise CollectorError("candidate progress interruption failed") from None
-        if persisted.get("status") != "interrupted":
+        if (
+            persisted.get("status") != "interrupted"
+            or persisted.get("terminal_reason_class")
+            != "collector_interrupted"
+        ):
             raise CollectorError("candidate progress interruption failed")
+        return dict(persisted)
 
     def bind_process_identity(self, start_identity: str) -> None:
         expected_prefix = f"candidate:{self.process.pid}:"
@@ -759,7 +816,7 @@ class _GatedCandidate:
         self,
         inventory: Mapping[int, str],
         signal_number: int,
-    ) -> None:
+    ) -> int:
         """Bind every exact member to a pidfd before sending any signal."""
 
         expected = dict(inventory)
@@ -775,6 +832,7 @@ class _GatedCandidate:
         primary_failure: BaseException | None = None
         primary_traceback = None
         close_failures: list[BaseException] = []
+        delivered_count = 0
         try:
             for pid in sorted(expected):
                 try:
@@ -792,6 +850,7 @@ class _GatedCandidate:
             for _pid, descriptor in opened:
                 try:
                     _pidfd_send_signal(descriptor, signal_number)
+                    delivered_count += 1
                 except OSError as exc:
                     if exc.errno == errno.ESRCH:
                         continue
@@ -811,10 +870,17 @@ class _GatedCandidate:
             raise primary_failure.with_traceback(primary_traceback)
         if close_failures:
             raise CollectorError("candidate pidfd cleanup failed") from None
+        return delivered_count
 
     def terminate_validated_group(
-        self, *, term_seconds: float = 5.0, kill_seconds: float = 5.0
-    ) -> None:
+        self,
+        *,
+        term_seconds: float = 5.0,
+        kill_seconds: float = 5.0,
+        require_signal: bool = False,
+    ) -> bool:
+        if type(require_signal) is not bool:
+            raise CollectorError("candidate signal requirement is invalid")
         for value in (term_seconds, kill_seconds):
             if (
                 isinstance(value, bool)
@@ -836,7 +902,11 @@ class _GatedCandidate:
             if not initial_inventory:
                 self._require_formal_quiescence()
                 self.exit_observed_monotonic_ns = time.monotonic_ns()
-                return
+                if require_signal:
+                    raise CollectorError(
+                        "candidate signal delivery was not proven"
+                    )
+                return False
             leader_start = (
                 self._bound_start_identity.rsplit(":", 1)[-1]
                 if self._bound_start_identity is not None
@@ -856,20 +926,32 @@ class _GatedCandidate:
                 raise CollectorError(
                     "candidate surviving process-group identity changed"
                 )
-            self._signal_formal_inventory(initial_inventory, signal.SIGTERM)
+            delivered_count = self._signal_formal_inventory(
+                initial_inventory, signal.SIGTERM
+            )
             if self._wait_for_formal_quiescence(float(term_seconds)):
                 self.exit_observed_monotonic_ns = time.monotonic_ns()
-                return
+                if require_signal and delivered_count == 0:
+                    raise CollectorError(
+                        "candidate signal delivery was not proven"
+                    )
+                return delivered_count > 0
             kill_deadline = time.monotonic() + float(kill_seconds)
             while True:
                 survivors = self._validate_surviving_formal_group()
-                self._signal_formal_inventory(survivors, signal.SIGKILL)
+                delivered_count += self._signal_formal_inventory(
+                    survivors, signal.SIGKILL
+                )
                 remaining = kill_deadline - time.monotonic()
                 if remaining <= 0.0:
                     break
                 if self._wait_for_formal_quiescence(min(0.05, remaining)):
                     self.exit_observed_monotonic_ns = time.monotonic_ns()
-                    return
+                    if require_signal and delivered_count == 0:
+                        raise CollectorError(
+                            "candidate signal delivery was not proven"
+                        )
+                    return delivered_count > 0
             raise CollectorError(
                 "candidate process-group and UID quiescence was not proven"
             )
@@ -881,12 +963,15 @@ class _GatedCandidate:
             self.process.wait(timeout=0)
             if self.exit_observed_monotonic_ns is None:
                 self.exit_observed_monotonic_ns = time.monotonic_ns()
-            return
+            if require_signal:
+                raise CollectorError("candidate signal delivery was not proven")
+            return False
         self._validate_bound_group()
         try:
             os.killpg(self.process.pid, signal.SIGTERM)
         except OSError:
             raise CollectorError("candidate process-group termination failed") from None
+        signal_delivered = True
         try:
             self.process.wait(timeout=float(term_seconds))
         except subprocess.TimeoutExpired:
@@ -902,6 +987,7 @@ class _GatedCandidate:
         except BaseException:
             raise CollectorError("candidate process-group termination failed") from None
         self.exit_observed_monotonic_ns = time.monotonic_ns()
+        return signal_delivered
 
     def wait_with_receipt(
         self,
@@ -2161,6 +2247,7 @@ def _start_gated_candidate(
     formal_gid: int | None = None,
     require_completion_receipt: bool = False,
     require_progress: bool = False,
+    progress_allow_empty: bool = False,
     progress_binding_sha256: str | None = None,
     progress_config_sha256: str | None = None,
     progress_snapshot_path: Path | None = None,
@@ -2195,6 +2282,12 @@ def _start_gated_candidate(
         raise CollectorError("candidate gate environment is reserved")
     if (formal_uid is None) != (formal_gid is None):
         raise CollectorError("formal child identity is incomplete")
+    if type(progress_allow_empty) is not bool:
+        raise CollectorError("candidate progress empty policy is invalid")
+    if progress_allow_empty and not require_progress:
+        raise CollectorError(
+            "candidate progress empty policy requires a channel"
+        )
     progress_values = (
         progress_binding_sha256,
         progress_config_sha256,
@@ -2418,9 +2511,17 @@ def _start_gated_candidate(
             progress_state = FormalProgressState(
                 progress_binding_sha256, progress_config_sha256
             )
-            progress_drainer = ProgressPipeDrainer(
-                progress_read_fd, progress_state, progress_store
-            )
+            if progress_allow_empty:
+                progress_drainer = ProgressPipeDrainer(
+                    progress_read_fd,
+                    progress_state,
+                    progress_store,
+                    allow_empty=True,
+                )
+            else:
+                progress_drainer = ProgressPipeDrainer(
+                    progress_read_fd, progress_state, progress_store
+                )
 
         assert read_fd is not None
         assert write_fd is not None

@@ -1759,14 +1759,19 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         class Store:
             def __init__(self):
                 self.status = "running"
+                self.reason = None
                 self.writes = []
 
             def read_view(self):
-                return {"status": self.status}
+                view = {"status": self.status}
+                if self.reason is not None:
+                    view["terminal_reason_class"] = self.reason
+                return view
 
             def write_terminal(self, status, reason):
                 self.writes.append((status, reason))
                 self.status = status
+                self.reason = reason
 
         store = Store()
         child = collector_module._GatedCandidate(
@@ -1783,6 +1788,84 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertEqual(
             store.writes, [("interrupted", "collector_interrupted")]
         )
+
+    def test_diagnostic_progress_terminals_preserve_exact_reason_and_view(self):
+        from txnmem_provenance_progress import ProgressSnapshotStore
+
+        binding = "a" * 64
+        config_hash = "b" * 64
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            root.chmod(0o700)
+
+            def candidate_for(name):
+                scenario_root = root / name
+                scenario_root.mkdir(mode=0o700)
+                store = ProgressSnapshotStore(
+                    scenario_root / "progress.json",
+                    expected_uid=os.getuid(),
+                    expected_gid=os.getgid(),
+                )
+                store.write_starting(binding, config_hash)
+                child = collector_module._GatedCandidate(
+                    process=SimpleNamespace(pid=4242),
+                    _release_fd=None,
+                    _receipt_fd=None,
+                    ready_observed=True,
+                    _progress_store=store,
+                )
+                return child, store
+
+            for reason in ("formal_eligibility_failed", "backend_timeout"):
+                child, store = candidate_for(reason)
+                terminal = child.block_progress(reason)
+                self.assertEqual(terminal, store.read_view())
+                self.assertEqual(terminal["status"], "blocked")
+                self.assertEqual(terminal["terminal_reason_class"], reason)
+                self.assertEqual(terminal["completed_repetitions"], 0)
+                self.assertEqual(terminal["completed_samples"], 0)
+                self.assertEqual(child.block_progress(reason), terminal)
+
+            interrupted, interrupted_store = candidate_for("interrupted")
+            terminal = interrupted.interrupt_progress()
+            self.assertEqual(terminal, interrupted_store.read_view())
+            self.assertEqual(terminal["status"], "interrupted")
+            self.assertEqual(
+                terminal["terminal_reason_class"], "collector_interrupted"
+            )
+            self.assertEqual(interrupted.interrupt_progress(), terminal)
+
+            invalid, invalid_store = candidate_for("invalid")
+            before = invalid_store.read_view()
+            with self.assertRaisesRegex(CollectorError, "reason"):
+                invalid.block_progress("resource_cleanup_failed")
+            self.assertEqual(invalid_store.read_view(), before)
+
+    def test_gated_child_reads_the_collector_owned_starting_snapshot(self):
+        from txnmem_provenance_progress import ProgressSnapshotStore
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            store = ProgressSnapshotStore(
+                root / "progress.json",
+                expected_uid=os.getuid(),
+                expected_gid=os.getgid(),
+            )
+            store.write_starting("a" * 64, "b" * 64)
+            child = collector_module._GatedCandidate(
+                process=SimpleNamespace(pid=4242),
+                _release_fd=None,
+                _receipt_fd=None,
+                ready_observed=True,
+                _progress_store=store,
+            )
+
+            observed = child.read_progress()
+
+        self.assertEqual(observed["status"], "starting")
+        self.assertEqual(observed["completed_repetitions"], 0)
+        self.assertEqual(observed["completed_samples"], 0)
+        self.assertEqual(observed["update_sequence"], 0)
 
     def test_gated_child_progress_pipe_is_collector_owned_and_drained(self):
         from txnmem_provenance_progress import canonical_progress_line
@@ -1867,6 +1950,61 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 completion_receipt={"result": "sealed"},
             )
             self.assertEqual(seal["file_count"], 1)
+
+    def test_gated_child_can_explicitly_close_an_empty_diagnostic_progress_pipe(self):
+        binding = "a" * 64
+        config_hash = "b" * 64
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            progress_path = root / "progress.json"
+            script = root / "empty_progress_fixture.py"
+            script.write_text(
+                "\n".join(
+                    [
+                        "import os",
+                        "ready = int(os.environ.pop('TXNMEM_PROVENANCE_READY_FD'))",
+                        "gate = int(os.environ.pop('TXNMEM_PROVENANCE_START_GATE_FD'))",
+                        "progress = int(os.environ.pop('TXNMEM_PROVENANCE_PROGRESS_FD'))",
+                        "os.environ.pop('TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256')",
+                        "os.write(ready, b'R')",
+                        "os.close(ready)",
+                        "token = os.read(gate, 1)",
+                        "os.close(gate)",
+                        "os.close(progress)",
+                        "raise SystemExit(0 if token == b'G' else 9)",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            child = collector_module._start_gated_candidate(
+                command=(sys.executable, "-I", "-B", str(script)),
+                cwd=root,
+                environment={},
+                require_progress=True,
+                progress_allow_empty=True,
+                progress_binding_sha256=binding,
+                progress_config_sha256=config_hash,
+                progress_snapshot_path=progress_path,
+                progress_expected_uid=os.getuid(),
+                progress_expected_gid=os.getgid(),
+            )
+            try:
+                child.release()
+                self.assertEqual(child.process.wait(timeout=5), 0)
+                self.assertIsNone(
+                    child.finish_progress(2.0, allow_empty=True)
+                )
+                terminal = child.block_progress("formal_eligibility_failed")
+            finally:
+                child.close()
+
+            self.assertEqual(terminal["status"], "blocked")
+            self.assertEqual(
+                terminal["terminal_reason_class"],
+                "formal_eligibility_failed",
+            )
+            self.assertEqual(terminal["completed_repetitions"], 0)
 
     def test_gated_child_rejects_caller_supplied_progress_environment(self):
         with TemporaryDirectory() as tmp:
@@ -2027,7 +2165,10 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 self.status = "starting"
 
             def read_view(self):
-                return {"status": self.status}
+                view = {"status": self.status}
+                if hasattr(self, "reason"):
+                    view["terminal_reason_class"] = self.reason
+                return view
 
             def write_terminal(self, status, reason):
                 self.write_attempts += 1
@@ -3635,7 +3776,10 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 self.write_count = 0
 
             def read_view(self):
-                return {"status": "blocked"}
+                return {
+                    "status": "blocked",
+                    "terminal_reason_class": "progress_protocol_failed",
+                }
 
             def write_terminal(self, _status, _reason):
                 self.write_count += 1
@@ -6340,6 +6484,75 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             [("signal", 4242, signal.SIGTERM), ("wait", 5.0)],
         )
         identity_reader.assert_called_once_with(4242, Process.args)
+
+    def test_required_signal_rejects_an_already_exited_formal_child(self):
+        class Process:
+            pid = 4242
+            args = ("python", "runner.py")
+
+            def poll(self):
+                return 0
+
+        child = collector_module._GatedCandidate(
+            process=Process(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _formal_uid=65532,
+        )
+        child.bind_process_identity("candidate:4242:99")
+        with patch.object(
+            child, "_formal_group_members", return_value={}
+        ), patch.object(
+            child, "_require_formal_quiescence"
+        ) as quiescence, self.assertRaisesRegex(
+            CollectorError, "signal delivery"
+        ):
+            child.terminate_validated_group(require_signal=True)
+
+        quiescence.assert_called_once_with()
+
+    def test_required_signal_returns_true_only_after_pidfd_signal_succeeds(self):
+        class Process:
+            pid = 4242
+            args = ("python", "runner.py")
+
+            def poll(self):
+                return None
+
+        inventory = {4242: "99"}
+        sent = []
+        child = collector_module._GatedCandidate(
+            process=Process(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _formal_uid=65532,
+        )
+        child.bind_process_identity("candidate:4242:99")
+        with patch.object(
+            child, "_validate_bound_group"
+        ), patch.object(
+            child, "_formal_group_members", side_effect=[inventory, inventory]
+        ), patch.object(
+            child, "_wait_for_formal_quiescence", return_value=True
+        ), patch.object(
+            collector_module, "_pidfd_open", return_value=51
+        ), patch.object(
+            collector_module,
+            "_pidfd_send_signal",
+            side_effect=lambda descriptor, sig: sent.append((descriptor, sig)),
+        ), patch.object(
+            collector_module, "_pidfd_close", return_value=None
+        ):
+            delivered = child.terminate_validated_group(
+                term_seconds=0.01,
+                kill_seconds=0.01,
+                require_signal=True,
+            )
+
+        self.assertIs(delivered, True)
+        self.assertEqual(sent, [(51, signal.SIGTERM)])
 
     def test_formal_pidfds_open_all_then_revalidate_start_identity_before_signal(self):
         class Process:

@@ -444,6 +444,34 @@ class ProvenanceMatrixTests(unittest.TestCase):
         self.assertEqual(len(created), 1)
         self.assertEqual(snapshots, [])
 
+    def test_explicit_ineligible_environment_fails_before_backend_factory(self):
+        created = []
+        environment = _FixtureBackend("environment").performance_environment()
+        environment["isolation_verified"] = False
+        environment["co_tenant_load_detected"] = False
+
+        def factory(namespace):
+            created.append(namespace)
+            return _FixtureBackend(namespace)
+
+        with self.assertRaisesRegex(
+            ProvenancePerformanceError,
+            "verified isolation",
+        ):
+            run_matrix_cell(
+                factory,
+                build_layered_dag(2, seed=17),
+                concurrency=1,
+                repetitions=3,
+                operations_per_type=1,
+                run_id="explicit-first-ineligible",
+                formal=False,
+                require_formal_eligibility=True,
+                environment_attestation=environment,
+            )
+
+        self.assertEqual(created, [])
+
     def test_protected_diagnostic_stops_after_completed_repetitions(self):
         created = []
         snapshots = []

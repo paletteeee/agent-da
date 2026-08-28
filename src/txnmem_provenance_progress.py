@@ -720,11 +720,20 @@ class ProgressSnapshotStore:
 class ProgressPipeDrainer:
     """Drain canonical progress lines without retaining unbounded pipe input."""
 
-    def __init__(self, descriptor: int, state: FormalProgressState, store: ProgressSnapshotStore) -> None:
+    def __init__(
+        self,
+        descriptor: int,
+        state: FormalProgressState,
+        store: ProgressSnapshotStore,
+        *,
+        allow_empty: bool = False,
+    ) -> None:
         if type(descriptor) is not int or descriptor < 0:
             _protocol_error("progress pipe descriptor must be a non-negative integer")
         if not isinstance(state, FormalProgressState) or not isinstance(store, ProgressSnapshotStore):
             _protocol_error("progress drainer dependencies are invalid")
+        if type(allow_empty) is not bool:
+            _protocol_error("progress empty-record policy must be a boolean")
         self._descriptor = descriptor
         self._state = state
         self._store = store
@@ -737,6 +746,7 @@ class ProgressPipeDrainer:
         self._failure: ProgressProtocolError | None = None
         self._last_view: dict[str, Any] | None = None
         self._received_event = False
+        self._allow_empty = allow_empty
 
     @property
     def thread(self) -> threading.Thread:
@@ -798,7 +808,7 @@ class ProgressPipeDrainer:
                 if not chunk:
                     if record:
                         _protocol_error("progress pipe closed with a partial record")
-                    if not self._received_event:
+                    if not self._received_event and not self._allow_empty:
                         _protocol_error("progress pipe closed without events")
                     return
                 record.extend(chunk)

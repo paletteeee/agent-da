@@ -1129,6 +1129,22 @@ class TxnMemProgressPipeDrainerTests(unittest.TestCase):
                 self.assertIsInstance(drainer.failure, ProgressProtocolError)
                 self.assertFalse(drainer.thread.is_alive())
 
+    def test_explicit_allow_empty_retains_the_starting_snapshot(self):
+        self.store.write_starting("a" * 64, "b" * 64)
+        drainer = progress.ProgressPipeDrainer(
+            self.reader,
+            self.state,
+            self.store,
+            allow_empty=True,
+        )
+        drainer.start()
+        self._close_writer()
+
+        self.assertIsNone(drainer.finish(2.0))
+        self.assertIsNone(drainer.failure)
+        self.assertEqual(self.store.read_view()["status"], "starting")
+        self.assertFalse(drainer.thread.is_alive())
+
     def test_abort_closes_the_reader_once_and_stops_the_daemon_thread(self):
         drainer = self._drainer()
         drainer.abort()

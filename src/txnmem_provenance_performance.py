@@ -837,6 +837,18 @@ def run_matrix_cell(
     if type(require_formal_eligibility) is not bool:
         raise ValueError("require_formal_eligibility must be a boolean")
     enforce_formal_eligibility = formal or require_formal_eligibility
+    prevalidated_environment: dict[str, Any] | None = None
+    if environment_attestation is not None and not callable(
+        environment_attestation
+    ):
+        prevalidated_environment = _safe_environment(environment_attestation)
+        if enforce_formal_eligibility and not (
+            prevalidated_environment["isolation_verified"]
+            and prevalidated_environment["co_tenant_load_detected"] is False
+        ):
+            raise ProvenancePerformanceError(
+                "formal run requires verified isolation without co-tenant load"
+            )
     plan = _operation_plan(graph, operations_per_type)
     expected_nodes, expected_edges, expected_statuses = _expected_final_graph(graph, plan)
     all_samples: list[dict[str, Any]] = []
@@ -861,14 +873,15 @@ def run_matrix_cell(
             )
             if callable(environment_attestation):
                 raw_environment = environment_attestation(backend)
-            elif environment_attestation is not None:
-                raw_environment = environment_attestation
+                environment = _safe_environment(raw_environment)
+            elif prevalidated_environment is not None:
+                environment = dict(prevalidated_environment)
             else:
                 environment_provider = getattr(backend, "performance_environment", None)
                 raw_environment = (
                     environment_provider() if callable(environment_provider) else None
                 )
-            environment = _safe_environment(raw_environment)
+                environment = _safe_environment(raw_environment)
             isolation_valid = bool(
                 environment["isolation_verified"]
                 and environment["co_tenant_load_detected"] is False

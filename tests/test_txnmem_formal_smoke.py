@@ -3,10 +3,12 @@ from __future__ import annotations
 import contextlib
 import copy
 import errno
+import hashlib
 import json
 import os
 import signal
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -19,6 +21,7 @@ from unittest.mock import patch
 import txnmem_formal_smoke as smoke
 import txnmem_provenance_execution_collector as collector
 import txnmem_provenance_performance as performance
+import txnmem_provenance_progress as progress
 import txnmem_provenance_runner as runner
 from txnmem_formal_io import FormalStore, canonical_json_bytes
 from txnmem_toxiproxy_metrics import parse_toxiproxy_byte_counters
@@ -83,7 +86,10 @@ class _FakeChild:
         self.events = events
         self.process = _FakeProcess()
         self.receipt = {
-            "schema": "txnmem-provenance-smoke-child-receipt-v1",
+            "schema": "txnmem-provenance-smoke-child-receipt-v2",
+            "scenario": "normal_prefix",
+            "outcome": "succeeded",
+            "completed_repetitions": 2,
             "qdrant_proxy_ok": True,
             "neo4j_proxy_ok": True,
         }
@@ -91,7 +97,7 @@ class _FakeChild:
     def release(self):
         self.events.append("child_released")
 
-    def wait_with_receipt(self):
+    def wait_with_receipt(self, *, timeout=None):
         return 0, dict(self.receipt)
 
 
@@ -141,6 +147,21 @@ class FormalSmokeOrchestrationTests(unittest.TestCase):
         )
         source_export = workspace_path / "source"
         runtime_snapshot = workspace_path / "runtime"
+        environment_snapshot = workspace_path / "environment.json"
+        environment_document = {
+            "schema": "txnmem-provenance-environment-v1",
+            "isolation_verified": True,
+            "co_tenant_load_detected": False,
+            "source": "collector-observation-v2",
+            "cpu_logical_count": 1,
+            "memory_total_bytes": 1,
+            "disk_medium": "nvme",
+            "toxiproxy_version": "2.5.0",
+        }
+        environment_raw = canonical_json_bytes(environment_document) + b"\n"
+        environment_sha256 = hashlib.sha256(
+            canonical_json_bytes(environment_document)
+        ).hexdigest()
         initial_guard = {
             "schema": "txnmem-provenance-network-guard-v3",
             "ruleset_sha256": "d" * 64,
@@ -195,6 +216,11 @@ class FormalSmokeOrchestrationTests(unittest.TestCase):
             runtime_snapshot.mkdir()
             return runtime_snapshot, {"schema": "runtime-fixture"}
 
+        def write_environment(_parent, document):
+            self.assertEqual(document, environment_document)
+            environment_snapshot.write_bytes(environment_raw)
+            return environment_snapshot, environment_raw
+
         def prepare_routes(*_args, **_kwargs):
             nonlocal prepare_count
             prepare_count += 1
@@ -207,19 +233,141 @@ class FormalSmokeOrchestrationTests(unittest.TestCase):
             events.append(phase if phase != "final" else "final_counters")
             return copy.deepcopy(snapshots[phase])
 
-        receipt_validator = smoke.validate_smoke_child_receipt
+        receipt_validator = smoke._validate_smoke_v2_child_receipt
 
-        def validate_receipt(value):
-            normalized = receipt_validator(value)
-            if normalized["qdrant_proxy_ok"] is True:
+        def validate_receipt(value, *, scenario):
+            normalized = receipt_validator(value, scenario=scenario)
+            if (
+                scenario == "normal_prefix"
+                and normalized["qdrant_proxy_ok"] is True
+                and "runner_qdrant_success" not in events
+            ):
                 events.append("runner_qdrant_success")
-            if normalized["neo4j_proxy_ok"] is True:
+            if (
+                scenario == "normal_prefix"
+                and normalized["neo4j_proxy_ok"] is True
+                and "runner_neo4j_success" not in events
+            ):
                 events.append("runner_neo4j_success")
             return normalized
 
         def remove_workspace(value):
             events.append("workspace_removed")
             shutil.rmtree(value.path)
+
+        scenario_specs = tuple(
+            smoke._SmokeV2ScenarioSpec(
+                scenario=scenario,
+                identity_sha256=str(index) * 64,
+                directory=workspace_path / f"diagnostic-{index}",
+                progress_path=workspace_path
+                / f"diagnostic-{index}"
+                / "progress.json",
+            )
+            for index, scenario in enumerate(
+                smoke._SMOKE_V2_SCENARIOS, start=1
+            )
+        )
+
+        def run_scenarios(**_kwargs):
+            self.assertEqual(
+                _kwargs["environment_attestation_path"],
+                environment_snapshot,
+            )
+            self.assertEqual(
+                _kwargs["environment_attestation_sha256"],
+                environment_sha256,
+            )
+            events.append("child_gated")
+            initial = smoke._validate_smoke_guard(guard.activate(), topology)
+            routes_b = smoke.prepare_isolated_toxiproxy_routes(
+                "http://127.0.0.1:8474",
+                qdrant_proxy="txnmem-qdrant",
+                neo4j_proxy="txnmem-neo4j",
+            )
+            baseline_b = smoke.capture_toxiproxy_counter_snapshot(
+                "http://127.0.0.1:8474",
+                phase="baseline_b",
+                proxy_routes=routes_b,
+            )
+            smoke._validate_toxiproxy_attribution_boundary(
+                snapshots["baseline_a"],
+                baseline_b,
+                ROUTES,
+                routes_b,
+            )
+            if smoke._probe_root_management(
+                "http://127.0.0.1:8474", routes_b
+            ) is not True:
+                raise smoke.FormalSmokeError("fixture management failure")
+            if smoke._probe_root_data_denial(
+                qdrant_url="http://127.0.0.1:19000",
+                neo4j_uri="bolt://127.0.0.1:19001",
+            ) is not True:
+                raise smoke.FormalSmokeError("fixture proxy denial failure")
+            if smoke._probe_direct_backend_denial(
+                topology.backend_ipv4_by_role
+            ) is not True:
+                raise smoke.FormalSmokeError("fixture backend denial failure")
+            if smoke._probe_forward_path_denial(
+                backend_ipv4_by_role=topology.backend_ipv4_by_role,
+                image_id=topology.probe_image_id,
+            ) is not True:
+                raise smoke.FormalSmokeError("fixture forward denial failure")
+            child.release()
+            exit_code, raw_receipt = child.wait_with_receipt(timeout=30.0)
+            if exit_code != 0:
+                raise smoke.FormalSmokeError("fixture runner failure")
+            receipt = smoke._validate_smoke_v2_child_receipt(
+                raw_receipt, scenario="normal_prefix"
+            )
+            observed_routes = smoke.observe_formal_toxiproxy_routes(
+                "http://127.0.0.1:8474",
+                qdrant_proxy="txnmem-qdrant",
+                neo4j_proxy="txnmem-neo4j",
+            )
+            if observed_routes != routes_b:
+                raise smoke.FormalSmokeError("fixture route drift")
+            final_counters = smoke.capture_toxiproxy_counter_snapshot(
+                "http://127.0.0.1:8474",
+                phase="final",
+                proxy_routes=observed_routes,
+            )
+            final_guard = smoke._validate_smoke_guard(guard.verify(), topology)
+            if canonical_json_bytes(final_guard) != canonical_json_bytes(initial):
+                raise smoke.FormalSmokeError("fixture guard drift")
+
+            cleanup_failures = list(
+                smoke._cleanup_formal_execution_resources(
+                    execution_monitor=None,
+                    network_guard=None,
+                    child=child,
+                )
+            )
+            child_quiescent = False
+            try:
+                smoke._verify_smoke_child_quiescence(child)
+                child_quiescent = True
+            except BaseException as exc:
+                cleanup_failures.append(exc)
+            if child_quiescent and guard.active:
+                try:
+                    guard.deactivate()
+                except BaseException as exc:
+                    cleanup_failures.append(exc)
+            if cleanup_failures:
+                raise smoke.FormalSmokeError("fixture cleanup failure")
+
+            outcomes = FormalSmokeV2ContractTests()._outcomes()
+            outcomes[0]["receipt"] = receipt
+            return smoke._SmokeV2Execution(
+                outcomes=tuple(outcomes),
+                normal_receipt=receipt,
+                routes_b=[dict(row) for row in routes_b],
+                baseline_b=baseline_b,
+                final_counters=final_counters,
+                initial_guard=initial,
+            )
 
         patches = {
             "_require_root_linux": {"return_value": None},
@@ -234,7 +382,17 @@ class FormalSmokeOrchestrationTests(unittest.TestCase):
             },
             "create_immutable_source_export": {"side_effect": create_source},
             "_create_locked_runtime_snapshot": {"side_effect": create_runtime},
+            "_collect_formal_environment_attestation": {
+                "return_value": copy.deepcopy(environment_document)
+            },
+            "_write_collected_environment_snapshot": {
+                "side_effect": write_environment
+            },
             "_publish_formal_input_tree": {"return_value": {}},
+            "_create_smoke_v2_scenario_specs": {
+                "return_value": scenario_specs
+            },
+            "_run_smoke_v2_scenarios": {"side_effect": run_scenarios},
             "_build_smoke_child_spec": {
                 "return_value": smoke._SmokeChildSpec(
                     command=("/usr/bin/python3", "provenance-smoke"),
@@ -291,7 +449,9 @@ class FormalSmokeOrchestrationTests(unittest.TestCase):
                     events.append("forward_path_denied") or True
                 )
             },
-            "validate_smoke_child_receipt": {"side_effect": validate_receipt},
+            "_validate_smoke_v2_child_receipt": {
+                "side_effect": validate_receipt
+            },
             "observe_formal_toxiproxy_routes": {
                 "return_value": copy.deepcopy(ROUTES)
             },
@@ -390,6 +550,18 @@ class FormalSmokeOrchestrationTests(unittest.TestCase):
             self.assertEqual(
                 json.loads(fixture.out_path.read_text(encoding="utf-8")), report
             )
+            self.assertEqual(
+                report["schema"],
+                "txnmem-formal-provenance-smoke-v2",
+            )
+            for field in (
+                "progress_monotonic",
+                "formal_fail_fast",
+                "backend_timeout_bounded",
+                "interruption_cleanup",
+                "candidate_unpublished",
+            ):
+                self.assertIs(report[field], True)
             self.assertIs(smoke.validate_formal_smoke_report(report)["candidate_created"], False)
 
     def test_each_success_and_denial_probe_fails_closed_without_report(self):
@@ -526,6 +698,19 @@ class FormalSmokeOrchestrationTests(unittest.TestCase):
         wrong_hash = dict(report)
         wrong_hash["report_sha256"] = "0" * 64
         mutations.append(wrong_hash)
+        for field in (
+            "progress_monotonic",
+            "formal_fail_fast",
+            "backend_timeout_bounded",
+            "interruption_cleanup",
+            "candidate_unpublished",
+        ):
+            missing = dict(report)
+            missing.pop(field)
+            mutations.append(missing)
+            type_confused = dict(report)
+            type_confused[field] = 1
+            mutations.append(type_confused)
 
         for value in mutations:
             with self.subTest(keys=sorted(value)):
@@ -540,7 +725,753 @@ class FormalSmokeOrchestrationTests(unittest.TestCase):
         )
 
 
+class FormalSmokeV2ContractTests(unittest.TestCase):
+    def test_child_spec_accepts_only_the_four_private_v2_scenarios(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            export = root / "source"
+            runtime = root / "runtime"
+            environment_path = root / "environment.json"
+            (export / "src").mkdir(parents=True)
+            runtime.mkdir()
+            (export / "src" / "txnmem_provenance_runner.py").write_text(
+                "# fixture\n", encoding="utf-8"
+            )
+            environment_document = {
+                "schema": "txnmem-provenance-environment-v1",
+                "isolation_verified": True,
+                "co_tenant_load_detected": False,
+                "source": "collector-observation-v2",
+                "cpu_logical_count": 1,
+                "memory_total_bytes": 1,
+                "disk_medium": "nvme",
+                "toxiproxy_version": "2.5.0",
+            }
+            environment_path.write_bytes(
+                canonical_json_bytes(environment_document) + b"\n"
+            )
+            environment_hash = hashlib.sha256(
+                canonical_json_bytes(environment_document)
+            ).hexdigest()
+            protected_metadata = SimpleNamespace(
+                st_mode=stat.S_IFREG | 0o440,
+                st_uid=0,
+                st_gid=smoke.FORMAL_RUNNER_GID,
+            )
+            with patch.object(
+                smoke, "_file_sha256", return_value="c" * 64
+            ), patch.object(
+                smoke, "verify_immutable_runtime_snapshot", return_value=None
+            ), patch.object(
+                Path, "lstat", return_value=protected_metadata
+            ):
+                for scenario in smoke._SMOKE_V2_SCENARIOS:
+                    child = smoke._build_smoke_child_spec(
+                        source_export=export,
+                        runtime_snapshot=runtime,
+                        runtime_manifest={"schema": "fixture"},
+                        runner_sha256="c" * 64,
+                        neo4j_password="test-only-placeholder",
+                        scenario=scenario,
+                        environment_attestation_path=environment_path,
+                        environment_attestation_sha256=environment_hash,
+                    )
+                    self.assertEqual(
+                        child.command[-2:],
+                        ("provenance-smoke-v2", scenario),
+                    )
+                    self.assertEqual(
+                        child.environment[
+                            "TXNMEM_PROVENANCE_SMOKE_ENVIRONMENT_PATH"
+                        ],
+                        str(environment_path),
+                    )
+
+                with self.assertRaisesRegex(
+                    smoke.FormalSmokeError, "scenario"
+                ):
+                    smoke._build_smoke_child_spec(
+                        source_export=export,
+                        runtime_snapshot=runtime,
+                        runtime_manifest={"schema": "fixture"},
+                        runner_sha256="c" * 64,
+                        neo4j_password="test-only-placeholder",
+                        scenario="normal_prefix/../../candidate",
+                        environment_attestation_path=environment_path,
+                        environment_attestation_sha256=environment_hash,
+                    )
+
+    @staticmethod
+    def _snapshot(
+        sequence: int,
+        *,
+        status: str,
+        reason: str | None = None,
+        identity_sha256: str = "a" * 64,
+    ) -> dict:
+        if sequence == 0:
+            cell_index = 1
+            graph_size = 100
+            concurrency = 1
+            repetition_index = 0
+        else:
+            cell_index = (sequence - 1) // 30 + 1
+            graph_size, concurrency = progress.FORMAL_MATRIX_CELLS[
+                cell_index - 1
+            ]
+            repetition_index = (sequence - 1) % 30 + 1
+        value = {
+            "schema": progress.PROGRESS_SNAPSHOT_SCHEMA,
+            "run_binding_sha256": identity_sha256,
+            "config_sha256": "b" * 64,
+            "phase": "measurement",
+            "cell_index": cell_index,
+            "cell_count": 15,
+            "graph_size": graph_size,
+            "concurrency": concurrency,
+            "repetition_index": repetition_index,
+            "repetition_count": 30,
+            "completed_repetitions": sequence,
+            "total_repetitions": 450,
+            "completed_samples": sequence * 32,
+            "total_samples": 14400,
+            "update_sequence": sequence,
+            "status": status,
+            "last_update_age_seconds": 0,
+        }
+        if reason is not None:
+            value["terminal_reason_class"] = reason
+        return json.loads(progress.canonical_snapshot_line(value))
+
+    @staticmethod
+    def _receipt(
+        scenario: str,
+        outcome: str,
+        completed: int,
+        qdrant_ok: bool,
+        neo4j_ok: bool,
+    ) -> dict:
+        return {
+            "schema": "txnmem-provenance-smoke-child-receipt-v2",
+            "scenario": scenario,
+            "outcome": outcome,
+            "completed_repetitions": completed,
+            "qdrant_proxy_ok": qdrant_ok,
+            "neo4j_proxy_ok": neo4j_ok,
+        }
+
+    def _outcomes(self) -> list[dict]:
+        return [
+            {
+                "scenario": "normal_prefix",
+                "identity_sha256": "1" * 64,
+                "progress": self._snapshot(
+                    2,
+                    status="running",
+                    identity_sha256="1" * 64,
+                ),
+                "receipt": self._receipt(
+                    "normal_prefix", "succeeded", 2, True, True
+                ),
+                "elapsed_milliseconds": 100,
+                "child_quiescent": True,
+                "guard_removed": True,
+                "candidate_artifact_count": 0,
+            },
+            {
+                "scenario": "first_ineligible",
+                "identity_sha256": "2" * 64,
+                "progress": self._snapshot(
+                    0,
+                    status="blocked",
+                    reason="formal_eligibility_failed",
+                    identity_sha256="2" * 64,
+                ),
+                "receipt": self._receipt(
+                    "first_ineligible",
+                    "formal_ineligible",
+                    0,
+                    False,
+                    False,
+                ),
+                "elapsed_milliseconds": 50,
+                "child_quiescent": True,
+                "guard_removed": True,
+                "candidate_artifact_count": 0,
+            },
+            {
+                "scenario": "backend_timeout",
+                "identity_sha256": "3" * 64,
+                "progress": self._snapshot(
+                    0,
+                    status="blocked",
+                    reason="backend_timeout",
+                    identity_sha256="3" * 64,
+                ),
+                "receipt": self._receipt(
+                    "backend_timeout",
+                    "backend_timeout",
+                    0,
+                    False,
+                    False,
+                ),
+                "elapsed_milliseconds": 1200,
+                "child_quiescent": True,
+                "guard_removed": True,
+                "candidate_artifact_count": 0,
+            },
+            {
+                "scenario": "interruption",
+                "identity_sha256": "4" * 64,
+                "progress": self._snapshot(
+                    0,
+                    status="interrupted",
+                    reason="collector_interrupted",
+                    identity_sha256="4" * 64,
+                ),
+                "receipt": None,
+                "elapsed_milliseconds": 200,
+                "child_quiescent": True,
+                "guard_removed": True,
+                "candidate_artifact_count": 0,
+            },
+        ]
+
+    def test_scenario_specs_have_distinct_derived_identities_and_private_progress_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp).resolve() / "smoke-workspace"
+            workspace.mkdir(mode=0o700)
+            specs = smoke._create_smoke_v2_scenario_specs(
+                workspace,
+                source_commit="a" * 40,
+                controller_uid=os.getuid(),
+                controller_gid=os.getgid(),
+            )
+
+            self.assertEqual(
+                [spec.scenario for spec in specs],
+                [
+                    "normal_prefix",
+                    "first_ineligible",
+                    "backend_timeout",
+                    "interruption",
+                ],
+            )
+            identities = {spec.identity_sha256 for spec in specs}
+            self.assertEqual(len(identities), 4)
+            for spec in specs:
+                self.assertRegex(spec.identity_sha256, r"^[0-9a-f]{64}$")
+                self.assertEqual(spec.progress_path.name, "progress.json")
+                self.assertEqual(spec.progress_path.parent, spec.directory)
+                self.assertEqual(spec.directory.parent, workspace)
+                self.assertNotIn("candidate", str(spec.progress_path).lower())
+                self.assertEqual(spec.directory.stat().st_mode & 0o777, 0o700)
+
+            with self.assertRaises(smoke.FormalSmokeError):
+                smoke._create_smoke_v2_scenario_specs(
+                    workspace,
+                    source_commit="a" * 40,
+                    controller_uid=os.getuid(),
+                    controller_gid=os.getgid(),
+                )
+
+    def test_v2_outcome_closure_derives_all_five_booleans_without_identity_output(self):
+        outcomes = self._outcomes()
+        observed = smoke._validate_smoke_v2_outcomes(outcomes)
+        self.assertEqual(
+            observed,
+            {
+                "progress_monotonic": True,
+                "formal_fail_fast": True,
+                "backend_timeout_bounded": True,
+                "interruption_cleanup": True,
+                "candidate_unpublished": True,
+            },
+        )
+        self.assertNotIn("identity", canonical_json_bytes(observed).decode())
+
+    def test_v2_outcome_closure_rejects_every_false_or_ambiguous_proof(self):
+        mutations = []
+        duplicate_identity = self._outcomes()
+        duplicate_identity[1]["identity_sha256"] = duplicate_identity[0][
+            "identity_sha256"
+        ]
+        mutations.append(duplicate_identity)
+        wrong_progress = self._outcomes()
+        wrong_progress[0]["progress"] = self._snapshot(1, status="running")
+        mutations.append(wrong_progress)
+        not_fail_fast = self._outcomes()
+        not_fail_fast[1]["progress"] = self._snapshot(1, status="running")
+        mutations.append(not_fail_fast)
+        slow_timeout = self._outcomes()
+        slow_timeout[2]["elapsed_milliseconds"] = 6001
+        mutations.append(slow_timeout)
+        live_child = self._outcomes()
+        live_child[3]["child_quiescent"] = False
+        mutations.append(live_child)
+        live_guard = self._outcomes()
+        live_guard[3]["guard_removed"] = False
+        mutations.append(live_guard)
+        candidate = self._outcomes()
+        candidate[0]["candidate_artifact_count"] = 1
+        mutations.append(candidate)
+        extra = self._outcomes()
+        extra[0]["private_path"] = "/seeded/private/candidate"
+        mutations.append(extra)
+
+        for value in mutations:
+            with self.subTest(value=value):
+                with self.assertRaises(smoke.FormalSmokeError):
+                    smoke._validate_smoke_v2_outcomes(value)
+
+
+class FormalSmokeV2LifecycleTests(unittest.TestCase):
+    def test_four_scenarios_use_distinct_progress_lifecycles_and_ordered_cleanup(self):
+        events = []
+        children = {}
+        start_calls = []
+        guard_index = 0
+
+        class Process:
+            def __init__(self, pid, args):
+                self.pid = pid
+                self.args = args
+                self.alive = True
+
+            def poll(self):
+                return None if self.alive else 0
+
+            def wait(self, timeout=None):
+                if self.alive:
+                    raise subprocess.TimeoutExpired(self.args, timeout)
+                return 0
+
+        class Child:
+            def __init__(self, scenario, call):
+                self.scenario = scenario
+                self.process = Process(4300 + len(children), call["command"])
+                self.store = progress.ProgressSnapshotStore(
+                    call["progress_snapshot_path"],
+                    expected_uid=os.getuid(),
+                    expected_gid=os.getgid(),
+                )
+                self.store.write_starting(
+                    call["progress_binding_sha256"],
+                    call["progress_config_sha256"],
+                )
+                self.state = progress.FormalProgressState(
+                    call["progress_binding_sha256"],
+                    call["progress_config_sha256"],
+                )
+                self.terminal = collector._GatedCandidate(
+                    process=self.process,
+                    _release_fd=None,
+                    _receipt_fd=None,
+                    ready_observed=True,
+                    _progress_store=self.store,
+                    _progress_state=self.state,
+                )
+                self.waited = False
+                self.terminated = None
+
+            def bind_process_identity(self, value):
+                self.terminal.bind_process_identity(value)
+                events.append(f"{self.scenario}:bound")
+
+            def release(self):
+                events.append(f"{self.scenario}:released")
+                if self.scenario == "normal_prefix":
+                    for sequence in (1, 2):
+                        event = progress.build_progress_event(
+                            run_binding_sha256=self.store.read_view()[
+                                "run_binding_sha256"
+                            ],
+                            config_sha256=self.store.read_view()[
+                                "config_sha256"
+                            ],
+                            cell_index=1,
+                            graph_size=100,
+                            concurrency=1,
+                            repetition_index=sequence,
+                            completed_repetitions=sequence,
+                            completed_samples=sequence * 32,
+                            update_sequence=sequence,
+                        )
+                        self.store.write_running(self.state.consume(event))
+
+            def wait_with_receipt(self, *, timeout=None):
+                self.waited = True
+                self.process.alive = False
+                events.append(f"{self.scenario}:waited")
+                receipts = {
+                    "normal_prefix": (
+                        "succeeded",
+                        2,
+                        True,
+                        True,
+                    ),
+                    "first_ineligible": (
+                        "formal_ineligible",
+                        0,
+                        False,
+                        False,
+                    ),
+                    "backend_timeout": (
+                        "backend_timeout",
+                        0,
+                        False,
+                        False,
+                    ),
+                }
+                outcome, count, qdrant_ok, neo4j_ok = receipts[self.scenario]
+                return 0, {
+                    "schema": "txnmem-provenance-smoke-child-receipt-v2",
+                    "scenario": self.scenario,
+                    "outcome": outcome,
+                    "completed_repetitions": count,
+                    "qdrant_proxy_ok": qdrant_ok,
+                    "neo4j_proxy_ok": neo4j_ok,
+                }
+
+            def finish_progress(self, timeout, *, allow_empty=False):
+                self.assert_allow_empty = allow_empty
+                events.append(f"{self.scenario}:progress_finished")
+                if self.scenario == "normal_prefix":
+                    return self.store.read_view()
+                return None
+
+            def read_progress(self):
+                return self.store.read_view()
+
+            def block_progress(self, reason):
+                events.append(f"{self.scenario}:blocked:{reason}")
+                return collector._persist_blocked_progress(self.store, reason)
+
+            def interrupt_progress(self):
+                events.append(f"{self.scenario}:interrupted")
+                return self.terminal.interrupt_progress()
+
+            def terminate_validated_group(
+                self,
+                *,
+                term_seconds,
+                kill_seconds,
+                require_signal=False,
+            ):
+                if require_signal and not self.process.alive:
+                    raise AssertionError("fixture signal target already exited")
+                self.terminated = (
+                    term_seconds,
+                    kill_seconds,
+                    require_signal,
+                )
+                self.process.alive = False
+                events.append(f"{self.scenario}:terminated")
+                return require_signal
+
+            def require_quiescence(self):
+                if self.process.alive:
+                    raise AssertionError("fixture child remained live")
+
+            def close(self):
+                events.append(f"{self.scenario}:child_closed")
+
+        class Guard:
+            def __init__(self, scenario):
+                self.scenario = scenario
+                self.active = False
+                self.attestation = {
+                    "schema": "txnmem-provenance-network-guard-v3",
+                    "ruleset_sha256": "d" * 64,
+                }
+
+            def activate(self):
+                self.active = True
+                events.append(f"{self.scenario}:guard_on")
+                return dict(self.attestation)
+
+            def verify(self):
+                events.append(f"{self.scenario}:guard_verified")
+                return dict(self.attestation)
+
+            def deactivate(self):
+                self.active = False
+                events.append(f"{self.scenario}:guard_off")
+
+        def start_child(**call):
+            scenario = call["command"][-1]
+            start_calls.append(dict(call))
+            child = Child(scenario, call)
+            children[scenario] = child
+            events.append(f"{scenario}:started")
+            return child
+
+        def make_guard(*_args, **_kwargs):
+            nonlocal guard_index
+            scenario = smoke._SMOKE_V2_SCENARIOS[guard_index]
+            guard_index += 1
+            return Guard(scenario)
+
+        def cleanup_child(*, execution_monitor, network_guard, child):
+            self.assertIsNone(execution_monitor)
+            self.assertIsNone(network_guard)
+            if child.process.alive:
+                child.terminate_validated_group(
+                    term_seconds=5.0, kill_seconds=5.0
+                )
+            child.close()
+            return []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            root.chmod(0o700)
+            source = root / "source"
+            runtime = root / "runtime"
+            environment_path = root / "environment.json"
+            source.mkdir()
+            runtime.mkdir()
+            environment_document = {
+                "schema": "txnmem-provenance-environment-v1",
+                "isolation_verified": True,
+                "co_tenant_load_detected": False,
+                "source": "collector-observation-v2",
+                "cpu_logical_count": 1,
+                "memory_total_bytes": 1,
+                "disk_medium": "nvme",
+                "toxiproxy_version": "2.5.0",
+            }
+            environment_path.write_bytes(
+                canonical_json_bytes(environment_document) + b"\n"
+            )
+            environment_sha256 = hashlib.sha256(
+                canonical_json_bytes(environment_document)
+            ).hexdigest()
+            specs = smoke._create_smoke_v2_scenario_specs(
+                root,
+                source_commit="a" * 40,
+                controller_uid=os.getuid(),
+                controller_gid=os.getgid(),
+            )
+            topology = smoke._SmokeTopology(
+                raw_backend_isolation={"schema": "raw-fixture"},
+                sanitized_backend_isolation={"schema": "sanitized-fixture"},
+                guard_profile={
+                    "backend_ipv4_subnet": "192.0.2.0/28",
+                    "ingress_ipv4_subnet": "198.51.100.0/28",
+                    "backend_bridge_interface": "br-000000000001",
+                    "ingress_bridge_interface": "br-000000000002",
+                    "toxiproxy_ingress_ipv4": "198.51.100.2",
+                },
+                backend_ipv4_by_role={
+                    "qdrant": "192.0.2.2",
+                    "neo4j": "192.0.2.3",
+                    "toxiproxy_ingress": "198.51.100.2",
+                },
+                probe_image_id="sha256:" + "e" * 64,
+                toxiproxy_manifest_digest="f" * 64,
+            )
+            with contextlib.ExitStack() as stack:
+                stack.enter_context(
+                    patch.object(
+                        smoke,
+                        "_build_smoke_child_spec",
+                        side_effect=lambda **kwargs: smoke._SmokeChildSpec(
+                            command=(
+                                "/usr/bin/python3",
+                                "provenance-smoke-v2",
+                                kwargs["scenario"],
+                            ),
+                            cwd=source,
+                            environment={"LANG": "C.UTF-8"},
+                        ),
+                    )
+                )
+                stack.enter_context(
+                    patch.object(smoke, "_start_gated_candidate", side_effect=start_child)
+                )
+                stack.enter_context(
+                    patch.object(
+                        smoke,
+                        "_observe_formal_child_process",
+                        side_effect=lambda pid, **_kwargs: {
+                            "start_identity": f"candidate:{pid}:99"
+                        },
+                    )
+                )
+                stack.enter_context(
+                    patch.object(smoke, "_require_formal_uid_processes", return_value={})
+                )
+                stack.enter_context(patch.object(smoke, "_NftNetworkGuard", side_effect=make_guard))
+                stack.enter_context(
+                    patch.object(
+                        smoke,
+                        "_validate_smoke_guard",
+                        side_effect=lambda value, _topology: dict(value),
+                    )
+                )
+                stack.enter_context(
+                    patch.object(
+                        smoke,
+                        "prepare_isolated_toxiproxy_routes",
+                        return_value=copy.deepcopy(ROUTES),
+                    )
+                )
+                stack.enter_context(
+                    patch.object(
+                        smoke,
+                        "capture_toxiproxy_counter_snapshot",
+                        side_effect=lambda *_args, phase, **_kwargs: _counter_snapshot(
+                            phase,
+                            qdrant_delta=4 if phase == "final" else 0,
+                            neo4j_delta=6 if phase == "final" else 0,
+                        ),
+                    )
+                )
+                stack.enter_context(
+                    patch.object(
+                        smoke,
+                        "_validate_toxiproxy_attribution_boundary",
+                        return_value=None,
+                    )
+                )
+                stack.enter_context(patch.object(smoke, "_probe_root_management", return_value=True))
+                stack.enter_context(patch.object(smoke, "_probe_root_data_denial", return_value=True))
+                stack.enter_context(patch.object(smoke, "_probe_direct_backend_denial", return_value=True))
+                stack.enter_context(patch.object(smoke, "_probe_forward_path_denial", return_value=True))
+                stack.enter_context(
+                    patch.object(
+                        smoke,
+                        "observe_formal_toxiproxy_routes",
+                        return_value=copy.deepcopy(ROUTES),
+                    )
+                )
+                stack.enter_context(
+                    patch.object(
+                        smoke,
+                        "_install_smoke_timeout_toxic",
+                        side_effect=lambda *_args, **_kwargs: events.append(
+                            "backend_timeout:toxic_on"
+                        ),
+                    )
+                )
+                stack.enter_context(
+                    patch.object(
+                        smoke,
+                        "_remove_smoke_timeout_toxic",
+                        side_effect=lambda *_args, **_kwargs: events.append(
+                            "backend_timeout:toxic_off"
+                        ),
+                    )
+                )
+                stack.enter_context(
+                    patch.object(
+                        smoke,
+                        "_cleanup_formal_execution_resources",
+                        side_effect=cleanup_child,
+                    )
+                )
+                stack.enter_context(
+                    patch.object(
+                        smoke,
+                        "_verify_smoke_child_quiescence",
+                        side_effect=lambda child: child.require_quiescence(),
+                    )
+                )
+                execution = smoke._run_smoke_v2_scenarios(
+                    scenario_specs=specs,
+                    source_export=source,
+                    runtime_snapshot=runtime,
+                    runtime_manifest={"schema": "fixture"},
+                    runner_sha256="c" * 64,
+                    neo4j_password="test-only-placeholder",
+                    environment_attestation_path=environment_path,
+                    environment_attestation_sha256=environment_sha256,
+                    topology=topology,
+                    qdrant_url="http://127.0.0.1:19000",
+                    neo4j_uri="bolt://127.0.0.1:19001",
+                    toxiproxy_url="http://127.0.0.1:8474",
+                    routes_a=copy.deepcopy(ROUTES),
+                    baseline_a=_counter_snapshot("baseline_a"),
+                )
+
+        proofs = smoke._validate_smoke_v2_outcomes(execution.outcomes)
+        self.assertTrue(all(proofs.values()))
+        self.assertEqual(len(start_calls), 4)
+        self.assertEqual(
+            [call["command"][-1] for call in start_calls],
+            list(smoke._SMOKE_V2_SCENARIOS),
+        )
+        self.assertEqual(
+            len({call["progress_binding_sha256"] for call in start_calls}),
+            4,
+        )
+        self.assertEqual(
+            len({call["progress_snapshot_path"] for call in start_calls}),
+            4,
+        )
+        for call in start_calls:
+            self.assertIs(call["require_completion_receipt"], True)
+            self.assertIs(call["require_progress"], True)
+            self.assertIs(call["progress_allow_empty"], True)
+
+        timeout_events = [
+            events.index("backend_timeout:child_closed"),
+            events.index("backend_timeout:toxic_off"),
+            events.index("backend_timeout:guard_off"),
+        ]
+        self.assertEqual(timeout_events, sorted(timeout_events))
+        interruption = children["interruption"]
+        self.assertEqual(interruption.terminated, (5.0, 5.0, True))
+        self.assertFalse(interruption.waited)
+        self.assertLess(
+            events.index("interruption:terminated"),
+            events.index("interruption:guard_off"),
+        )
+
+
 class FormalSmokeProbeTests(unittest.TestCase):
+    def test_timeout_toxic_has_exact_delay_and_explicit_ambiguous_cleanup(self):
+        calls = []
+
+        def request(base_url, path, **kwargs):
+            calls.append((base_url, path, dict(kwargs)))
+            if kwargs["method"] == "POST":
+                return {
+                    "name": "txnmem-formal-smoke-timeout-v2",
+                    "type": "latency",
+                    "stream": "downstream",
+                    "toxicity": 1.0,
+                    "attributes": {"latency": 2000, "jitter": 0},
+                }
+            return None
+
+        with patch.object(
+            smoke, "_toxiproxy_json_request", side_effect=request
+        ):
+            smoke._install_smoke_timeout_toxic("http://127.0.0.1:8474")
+            smoke._remove_smoke_timeout_toxic(
+                "http://127.0.0.1:8474", allow_not_found=True
+            )
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(
+            calls[0][2],
+            {
+                "method": "POST",
+                "payload": {
+                    "name": "txnmem-formal-smoke-timeout-v2",
+                    "type": "latency",
+                    "stream": "downstream",
+                    "toxicity": 1.0,
+                    "attributes": {"latency": 2000, "jitter": 0},
+                },
+            },
+        )
+        self.assertEqual(
+            calls[1][2],
+            {"method": "DELETE", "allow_not_found": True},
+        )
+
     def test_root_health_accepts_exact_plain_text_toxiproxy_version(self):
         with patch.object(
             smoke, "_http_read", return_value=(b"2.5.0", 0.0)
@@ -1296,6 +2227,9 @@ class FormalSmokeProbeTests(unittest.TestCase):
 
 
 class ProvenanceSmokeRunnerTests(unittest.TestCase):
+    def test_first_ineligible_helper_exercises_the_real_formal_gate(self):
+        self.assertIsNone(runner._prove_smoke_first_repetition_ineligible())
+
     def setUp(self):
         super().setUp()
         self._real_runner_harden = runner._harden_execd_formal_runner
@@ -1979,6 +2913,264 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
                     os.close(descriptor)
                 except OSError:
                     pass
+
+    @contextlib.contextmanager
+    def _runner_v2_descriptors(self, runtime_site: Path):
+        gate_read, gate_write = os.pipe()
+        ready_read, ready_write = os.pipe()
+        receipt_read, receipt_write = os.pipe()
+        progress_read, progress_write = os.pipe()
+        environment_path = runtime_site / "smoke-environment.json"
+        environment_path.write_text(
+            json.dumps(
+                {
+                    "schema": "txnmem-provenance-environment-v1",
+                    "isolation_verified": True,
+                    "co_tenant_load_detected": False,
+                    "source": "collector-observation-v2",
+                    "cpu_logical_count": 1,
+                    "memory_total_bytes": 1,
+                    "disk_medium": "nvme",
+                    "toxiproxy_version": "2.5.0",
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        os.write(gate_write, b"G")
+        os.close(gate_write)
+        environment = {
+            "TXNMEM_PROVENANCE_START_GATE_FD": str(gate_read),
+            "TXNMEM_PROVENANCE_READY_FD": str(ready_write),
+            "TXNMEM_PROVENANCE_COMPLETION_FD": str(receipt_write),
+            "TXNMEM_PROVENANCE_PROGRESS_FD": str(progress_write),
+            "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256": "a" * 64,
+            "TXNMEM_PROVENANCE_RUNTIME_SITE": str(runtime_site),
+            "TXNMEM_PROVENANCE_SMOKE_ENVIRONMENT_PATH": str(
+                environment_path
+            ),
+            "TXNMEM_NEO4J_PASSWORD": "test-only-placeholder",
+        }
+        try:
+            with patch.dict(os.environ, environment, clear=True):
+                yield ready_read, receipt_read, progress_read
+        finally:
+            for descriptor in (ready_read, receipt_read, progress_read):
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
+    def test_runner_v2_normal_prefix_emits_two_real_monotonic_progress_events(self):
+        backend_factory = object()
+
+        def run_prefix(factory, graph, *, concurrency, repetitions, **kwargs):
+            self.assertIs(factory, backend_factory)
+            self.assertEqual(graph.node_count, 100)
+            self.assertEqual(concurrency, 1)
+            self.assertEqual(repetitions, 2)
+            self.assertEqual(kwargs["operations_per_type"], 8)
+            self.assertIs(kwargs["require_formal_eligibility"], True)
+            self.assertIs(kwargs["formal"], False)
+            self.assertIs(
+                kwargs["environment_attestation"]["isolation_verified"],
+                True,
+            )
+            callback = kwargs["progress_callback"]
+            callback(
+                {
+                    "cell_id": "n100-c1",
+                    "completed_repetition_count": 1,
+                    "completed_operation_sample_count": 32,
+                }
+            )
+            callback(
+                {
+                    "cell_id": "n100-c1",
+                    "completed_repetition_count": 2,
+                    "completed_operation_sample_count": 64,
+                }
+            )
+            return {
+                "schema": performance.MATRIX_SCHEMA,
+                "cell_id": "n100-c1",
+                "graph": {"node_count": 100},
+                "concurrency": 1,
+                "repetition_count": 2,
+                "operations_per_type": 8,
+                "samples": [{} for _index in range(64)],
+                "repetitions": [
+                    {"eligible_for_formal": True},
+                    {"eligible_for_formal": True},
+                ],
+                "formal_requested": False,
+                "formal_eligible": True,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_site = Path(tmp).resolve()
+            with self._runner_v2_descriptors(runtime_site) as (
+                ready,
+                completed,
+                progress_stream,
+            ), patch.object(
+                runner, "_probe_smoke_qdrant"
+            ) as qdrant, patch.object(
+                runner, "_probe_smoke_neo4j"
+            ) as neo4j, patch.object(
+                performance,
+                "formal_matrix_config_sha256",
+                return_value="b" * 64,
+            ), patch.object(
+                performance,
+                "make_vector_graph_backend_factory",
+                return_value=backend_factory,
+            ) as make_factory, patch.object(
+                performance,
+                "run_matrix_cell",
+                side_effect=run_prefix,
+            ) as run_cell:
+                status = runner.main(
+                    ["provenance-smoke-v2", "normal_prefix"]
+                )
+                self.assertEqual(os.read(ready, 1), b"R")
+                receipt_payload = os.read(completed, 65537)
+                progress_payload = os.read(progress_stream, 8192)
+
+        self.assertEqual(status, 0)
+        receipt = json.loads(receipt_payload)
+        self.assertEqual(
+            receipt,
+            {
+                "schema": "txnmem-provenance-smoke-child-receipt-v2",
+                "scenario": "normal_prefix",
+                "outcome": "succeeded",
+                "completed_repetitions": 2,
+                "qdrant_proxy_ok": True,
+                "neo4j_proxy_ok": True,
+            },
+        )
+        lines = progress_payload.splitlines(keepends=True)
+        self.assertEqual(len(lines), 2)
+        state = progress.FormalProgressState("a" * 64, "b" * 64)
+        first = state.consume(progress.decode_progress_line(lines[0]))
+        second = state.consume(progress.decode_progress_line(lines[1]))
+        self.assertEqual(
+            (
+                first["cell_index"],
+                first["graph_size"],
+                first["concurrency"],
+                first["repetition_index"],
+                first["update_sequence"],
+            ),
+            (1, 100, 1, 1, 1),
+        )
+        self.assertEqual(
+            (
+                second["cell_index"],
+                second["graph_size"],
+                second["concurrency"],
+                second["repetition_index"],
+                second["completed_repetitions"],
+                second["completed_samples"],
+                second["update_sequence"],
+            ),
+            (1, 100, 1, 2, 2, 64, 2),
+        )
+        qdrant.assert_not_called()
+        neo4j.assert_not_called()
+        make_factory.assert_called_once()
+        run_cell.assert_called_once()
+
+    def test_runner_v2_first_ineligible_fails_fast_before_probe_or_progress(self):
+        def reject_first_repetition(*_args, **kwargs):
+            self.assertIs(kwargs["require_formal_eligibility"], True)
+            self.assertIs(kwargs["formal"], False)
+            self.assertEqual(kwargs["repetitions"], 1)
+            self.assertIs(
+                kwargs["environment_attestation"]["isolation_verified"],
+                False,
+            )
+            raise performance.ProvenancePerformanceError(
+                "formal run requires verified isolation without co-tenant load"
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_site = Path(tmp).resolve()
+            with self._runner_v2_descriptors(runtime_site) as (
+                ready,
+                completed,
+                progress_stream,
+            ), patch.object(runner, "_probe_smoke_qdrant") as qdrant, patch.object(
+                runner, "_probe_smoke_neo4j"
+            ) as neo4j, patch.object(
+                performance,
+                "run_matrix_cell",
+                side_effect=reject_first_repetition,
+            ) as eligibility_gate:
+                status = runner.main(
+                    ["provenance-smoke-v2", "first_ineligible"]
+                )
+                self.assertEqual(os.read(ready, 1), b"R")
+                receipt_payload = os.read(completed, 65537)
+                progress_payload = os.read(progress_stream, 8192)
+
+        self.assertEqual(status, 0)
+        self.assertEqual(progress_payload, b"")
+        self.assertEqual(
+            json.loads(receipt_payload),
+            {
+                "schema": "txnmem-provenance-smoke-child-receipt-v2",
+                "scenario": "first_ineligible",
+                "outcome": "formal_ineligible",
+                "completed_repetitions": 0,
+                "qdrant_proxy_ok": False,
+                "neo4j_proxy_ok": False,
+            },
+        )
+        qdrant.assert_not_called()
+        neo4j.assert_not_called()
+        eligibility_gate.assert_called_once()
+
+    def test_runner_v2_backend_timeout_is_closed_and_emits_no_progress(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_site = Path(tmp).resolve()
+            with self._runner_v2_descriptors(runtime_site) as (
+                ready,
+                completed,
+                progress_stream,
+            ), patch.object(
+                runner,
+                "_probe_smoke_qdrant",
+                side_effect=TimeoutError("seeded timeout"),
+            ) as qdrant, patch.object(runner, "_probe_smoke_neo4j") as neo4j:
+                status = runner.main(
+                    ["provenance-smoke-v2", "backend_timeout"]
+                )
+                self.assertEqual(os.read(ready, 1), b"R")
+                receipt_payload = os.read(completed, 65537)
+                progress_payload = os.read(progress_stream, 8192)
+
+        self.assertEqual(status, 0)
+        self.assertEqual(progress_payload, b"")
+        self.assertEqual(
+            json.loads(receipt_payload),
+            {
+                "schema": "txnmem-provenance-smoke-child-receipt-v2",
+                "scenario": "backend_timeout",
+                "outcome": "backend_timeout",
+                "completed_repetitions": 0,
+                "qdrant_proxy_ok": False,
+                "neo4j_proxy_ok": False,
+            },
+        )
+        qdrant.assert_called_once_with(
+            "http://127.0.0.1:19000/readyz",
+            timeout_seconds=1.0,
+        )
+        neo4j.assert_not_called()
 
     def test_runner_smoke_mode_releases_only_after_gate_and_writes_receipt(self):
         receipt = {
