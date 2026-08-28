@@ -958,7 +958,7 @@ class ProvenanceAggregationTests(unittest.TestCase):
             "operation_sample_count": material["operation_sample_count"],
         }
         command_manifest = {
-            "schema": "txnmem-provenance-command-manifest-v2",
+            "schema": "txnmem-provenance-command-manifest-v3",
             "transport": "local_loopback",
             "argv_sha256": "e" * 64,
             "argv_template": [
@@ -1049,6 +1049,15 @@ class ProvenanceAggregationTests(unittest.TestCase):
             "ready_environment_variable": "TXNMEM_PROVENANCE_READY_FD",
             "completion_environment_variable": "TXNMEM_PROVENANCE_COMPLETION_FD",
             "completion_receipt_required": True,
+            "progress_environment_variable": "TXNMEM_PROVENANCE_PROGRESS_FD",
+            "progress_binding_environment_variable": "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256",
+            "progress_channel_required": True,
+            "backend_timeout_policy": {
+                "qdrant_request_seconds": 30.0,
+                "neo4j_connection_seconds": 30.0,
+                "neo4j_connection_acquisition_seconds": 30.0,
+                "neo4j_transaction_query_seconds": 30.0,
+            },
             "runtime_environment_variable": "TXNMEM_PROVENANCE_RUNTIME_SITE",
             "inherited_environment": False,
         }
@@ -1075,6 +1084,17 @@ class ProvenanceAggregationTests(unittest.TestCase):
                 ("python", "4"),
             )
         ]
+        progress_binding = {
+            "schema": "txnmem-provenance-progress-binding-v1",
+            "source_manifest_sha256": command_manifest["source_manifest_sha256"],
+            "argv_sha256": command_manifest["argv_sha256"],
+            "config_file_sha256": command_manifest["config_file_sha256"],
+            "run_id_sha256": command_manifest["run_id_sha256"],
+            "candidate_root_sha256": command_manifest["candidate_root_sha256"],
+        }
+        command_manifest["progress_binding_sha256"] = hashlib.sha256(
+            provenance_module._canonical_json_bytes(progress_binding)
+        ).hexdigest()
         child_identity = "candidate-process:4321:fixture-start"
         shared["command_manifest"] = command_manifest
         shared["command_sha256"] = hashlib.sha256(
