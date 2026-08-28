@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -118,6 +120,151 @@ class RealBackendScriptTests(unittest.TestCase):
             text=True,
         )
         self.assertNotEqual(relative.returncode, 0)
+
+    def test_formal_progress_wrapper_has_exact_arguments_and_an_isolated_read_only_environment(self):
+        wrapper = ROOT / "scripts" / "read_formal_provenance_progress.sh"
+        self.assertTrue(wrapper.is_file())
+        script = wrapper.read_text(encoding="utf-8")
+
+        self.assertIn("[[ $# -ne 2 ]]", script)
+        self.assertIn("exec /usr/bin/env -i", script)
+        self.assertIn("LANG=C.UTF-8", script)
+        self.assertIn("LC_ALL=C.UTF-8", script)
+        self.assertIn("PYTHONDONTWRITEBYTECODE=1", script)
+        self.assertIn("/usr/bin/python3 -I -S -B", script)
+        self.assertIn(
+            "/opt/txnmem-formal-controller/txnmem_formal_controller.py",
+            script,
+        )
+        self.assertIn(
+            'progress --run-id "$1" --authorization-nonce "$2"',
+            script,
+        )
+        for forbidden in (
+            "TXNMEM_NEO4J_PASSWORD",
+            "neo4j",
+            "qdrant",
+            "docker",
+            "journalctl",
+            "tail ",
+            "grep ",
+            "candidate-root",
+            "progress.json",
+        ):
+            self.assertNotIn(forbidden, script.lower())
+
+        seeded_run = "seeded-private-run-id"
+        seeded_nonce = "/seeded/private/authorization.nonce"
+        invalid = subprocess.run(
+            ["/bin/bash", str(wrapper), seeded_run, seeded_nonce, "extra"],
+            cwd=ROOT,
+            env={
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "HOSTILE_SECRET": "must-not-survive",
+            },
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(invalid.returncode, 64)
+        self.assertNotIn(seeded_run, invalid.stdout + invalid.stderr)
+        self.assertNotIn(seeded_nonce, invalid.stdout + invalid.stderr)
+
+    def test_installer_registers_the_exact_progress_wrapper_bytes(self):
+        installer = ROOT / "scripts" / "install_formal_provenance_runtime.sh"
+        installer_text = installer.read_text(encoding="utf-8")
+        try:
+            embedded = installer_text.split("<<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+        except IndexError as exc:
+            self.fail(f"installer embedded source exporter is unavailable: {type(exc).__name__}")
+
+        wrapper_relative = "scripts/read_formal_provenance_progress.sh"
+        wrapper_bytes = b"#!/usr/bin/env bash\n# exact committed wrapper fixture\n"
+        controller_required = {
+            "configs/provenance_performance_matrix.json",
+            "configs/provenance_runtime_lock.json",
+            "infra/real_backend/docker-compose.yml",
+            "scripts/install_formal_provenance_runtime.sh",
+            "scripts/run_cross_host_provenance_performance.sh",
+            "scripts/run_formal_provenance_smoke.sh",
+            "scripts/run_provenance_performance.sh",
+            wrapper_relative,
+            "src/txnmem_formal_controller.py",
+            "src/txnmem_formal_smoke.py",
+            "src/txnmem_provenance_execution_collector.py",
+            "src/txnmem_provenance_progress.py",
+            "src/txnmem_provenance_runner.py",
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            repository = root / "repository"
+            staging = root / "staging"
+            repository.mkdir()
+            staging.mkdir()
+            for relative in sorted(controller_required):
+                path = repository / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if relative == "scripts/install_formal_provenance_runtime.sh":
+                    path.write_bytes(installer.read_bytes())
+                elif relative == wrapper_relative:
+                    path.write_bytes(wrapper_bytes)
+                else:
+                    path.write_text(f"# {relative}\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "installer@example.invalid"],
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Installer Fixture"],
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "approved"],
+                cwd=repository,
+                check=True,
+            )
+            commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            environment = {
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "SCRIPT_PATH": str(repository / "scripts" / "install_formal_provenance_runtime.sh"),
+                "PROJECT_ROOT": str(repository),
+                "APPROVED_COMMIT": commit,
+                "STAGING": str(staging),
+            }
+            completed = subprocess.run(
+                [sys.executable, "-I", "-S", "-B", "-c", embedded],
+                cwd=repository,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            manifest = json.loads(
+                (staging / "approved_source_manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            rows = {
+                row["path"]: row["blob_sha256"] for row in manifest["files"]
+            }
+            self.assertIn(wrapper_relative, rows)
+            self.assertEqual(
+                rows[wrapper_relative], hashlib.sha256(wrapper_bytes).hexdigest()
+            )
 
     def test_cross_host_wrapper_adds_smoke_without_removing_existing_actions(self):
         script = (

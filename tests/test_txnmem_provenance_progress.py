@@ -1,8 +1,10 @@
 import gc
+import hashlib
 import json
 import math
 import os
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -11,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 import txnmem_provenance_progress as progress
+import txnmem_provenance_execution_collector as collector_module
 from txnmem_provenance_progress import (
     FORMAL_MATRIX_CELLS,
     FormalProgressState,
@@ -19,6 +22,394 @@ from txnmem_provenance_progress import (
     canonical_progress_line,
     decode_progress_line,
 )
+
+
+class TxnMemProtectedProgressReaderTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary_directory.cleanup)
+        self.root = Path(self.temporary_directory.name).resolve()
+        self.project = self.root / "project"
+        self.project.mkdir(mode=0o700)
+
+        self.run_id = "seeded-private-formal-run-id"
+        self.authorization_nonce = b"seeded-private-authorization-nonce-0123456789"
+        self.nonce_parent = self.root / "private-controller-input"
+        self.nonce_parent.mkdir(mode=0o700)
+        self.nonce_parent.chmod(0o700)
+        self.nonce_path = self.nonce_parent / "authorization.nonce"
+        self.nonce_path.write_bytes(self.authorization_nonce)
+        self.nonce_path.chmod(0o600)
+
+        self.run_hash = hashlib.sha256(self.run_id.encode("utf-8")).hexdigest()
+        self.nonce_hash = hashlib.sha256(self.authorization_nonce).hexdigest()
+        self.runs_root = self.root / "runs"
+        self.runs_root.mkdir(mode=0o750)
+        self.runs_root.chmod(0o750)
+        self.run_root = (
+            self.runs_root
+            / f"run-{self.run_hash}-{self.nonce_hash[:16]}"
+        )
+        self.run_root.mkdir(mode=0o750)
+        self.run_root.chmod(0o750)
+        self.candidate = self.run_root / "candidate"
+        self.candidate.mkdir(mode=0o700)
+        self.candidate.chmod(0o700)
+        self.progress_path = self.run_root / "progress.json"
+        self.store = progress.ProgressSnapshotStore(
+            self.progress_path,
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+        self.store.write_running(
+            build_progress_event(
+                run_binding_sha256="a" * 64,
+                config_sha256="b" * 64,
+                cell_index=1,
+                graph_size=100,
+                concurrency=1,
+                repetition_index=1,
+                completed_repetitions=1,
+                completed_samples=32,
+                update_sequence=1,
+            )
+        )
+        self.valid_snapshot = self.progress_path.read_bytes()
+
+        rows = [
+            {
+                "path": path,
+                "blob_sha256": hashlib.sha256(path.encode("utf-8")).hexdigest(),
+            }
+            for path in sorted(collector_module._REQUIRED_SOURCE_PATHS)
+        ]
+        source_manifest = {
+            "schema": "txnmem-provenance-source-manifest-v1",
+            "source_commit": "c" * 40,
+            "files": rows,
+        }
+        approval_manifest = {
+            "schema": "txnmem-formal-approved-source-v1",
+            "source_commit": "c" * 40,
+            "files": rows,
+        }
+        approval_bytes = json.dumps(
+            approval_manifest,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        self.controller_context = {
+            "schema": "txnmem-formal-controller-context-v1",
+            "source_commit": "c" * 40,
+            "source_manifest": source_manifest,
+            "approval_manifest_sha256": hashlib.sha256(approval_bytes).hexdigest(),
+        }
+
+        self.patchers = (
+            mock.patch.object(collector_module, "_FORMAL_RUNS_ROOT", self.runs_root),
+            mock.patch.object(
+                collector_module,
+                "_FORMAL_CONTROLLER_UID",
+                os.getuid(),
+                create=True,
+            ),
+            mock.patch.object(
+                collector_module,
+                "_FORMAL_CONTROLLER_GID",
+                os.getgid(),
+                create=True,
+            ),
+            mock.patch.object(collector_module, "FORMAL_RUNNER_UID", os.getuid()),
+            mock.patch.object(collector_module, "FORMAL_RUNNER_GID", os.getgid()),
+            mock.patch.dict(
+                collector_module.FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
+                {self.run_hash: self.nonce_hash},
+                clear=True,
+            ),
+        )
+        for patcher in self.patchers:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def reader_arguments(self):
+        return [
+            "--run-id",
+            self.run_id,
+            "--authorization-nonce",
+            str(self.nonce_path),
+        ]
+
+    def read_line(self, arguments=None):
+        self.assertTrue(
+            hasattr(collector_module, "read_formal_progress_line"),
+            "protected progress reader entry point is missing",
+        )
+        return collector_module.read_formal_progress_line(
+            self.reader_arguments() if arguments is None else arguments,
+            _controller_context=self.controller_context,
+            _controller_project_root=self.project,
+        )
+
+    def restore_snapshot(self):
+        if self.progress_path.is_symlink():
+            self.progress_path.unlink()
+        if not self.progress_path.exists():
+            self.progress_path.write_bytes(self.valid_snapshot)
+        else:
+            self.progress_path.write_bytes(self.valid_snapshot)
+        self.progress_path.chmod(0o600)
+        linked_copy = self.run_root / "progress-copy.json"
+        if linked_copy.exists():
+            linked_copy.unlink()
+
+    def test_reader_returns_only_the_canonical_sanitized_snapshot_and_opens_no_candidate_file(self):
+        opened_paths = []
+        real_open = os.open
+
+        def guarded_open(path, *args, **kwargs):
+            normalized = Path(path) if isinstance(path, (str, os.PathLike)) else None
+            if normalized is not None:
+                opened_paths.append(str(normalized))
+                if normalized == Path("candidate"):
+                    raise AssertionError("candidate directory must not be opened")
+                if normalized.is_absolute() and (
+                    normalized == self.candidate or self.candidate in normalized.parents
+                ):
+                    raise AssertionError("candidate content must not be opened")
+            return real_open(path, *args, **kwargs)
+
+        before_modules = set(sys.modules)
+        with mock.patch("os.open", side_effect=guarded_open):
+            payload = self.read_line()
+        imported_modules = set(sys.modules) - before_modules
+
+        view = json.loads(payload)
+        self.assertEqual(payload, progress.canonical_snapshot_line(view))
+        self.assertEqual(set(view), progress.SNAPSHOT_FIELDS)
+        self.assertGreaterEqual(view["last_update_age_seconds"], 0)
+        self.assertEqual(view["completed_repetitions"], 1)
+        self.assertEqual(view["completed_samples"], 32)
+        self.assertTrue({"neo4j", "qdrant_client"}.isdisjoint(imported_modules))
+        self.assertNotIn("candidate", opened_paths)
+        for forbidden in (
+            self.run_id,
+            self.authorization_nonce.decode("utf-8"),
+            str(self.nonce_path),
+            str(self.candidate),
+            "bolt://127.0.0.1:19001",
+            "seeded-database-credential",
+        ):
+            self.assertNotIn(forbidden.encode("utf-8"), payload)
+
+    def test_reader_rejects_duplicate_abbreviated_unknown_and_candidate_path_arguments(self):
+        cases = {
+            "duplicate run": self.reader_arguments()
+            + ["--run-id", self.run_id],
+            "abbreviated run": [
+                "--run",
+                self.run_id,
+                "--authorization-nonce",
+                str(self.nonce_path),
+            ],
+            "unknown": self.reader_arguments() + ["--unknown", "value"],
+            "candidate injection": self.reader_arguments()
+            + ["--candidate-root", str(self.candidate)],
+        }
+        for label, arguments in cases.items():
+            with self.subTest(case=label):
+                with self.assertRaises(collector_module.CollectorError):
+                    self.read_line(arguments)
+
+    def test_reader_rejects_unregistered_run_or_nonce(self):
+        with mock.patch.dict(
+            collector_module.FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
+            {},
+            clear=True,
+        ):
+            with self.assertRaises(collector_module.CollectorError):
+                self.read_line()
+
+        other_nonce = self.nonce_parent / "other.nonce"
+        other_nonce.write_bytes(b"different-private-authorization-nonce-0123456789")
+        other_nonce.chmod(0o600)
+        with self.assertRaises(collector_module.CollectorError):
+            self.read_line(
+                [
+                    "--run-id",
+                    self.run_id,
+                    "--authorization-nonce",
+                    str(other_nonce),
+                ]
+            )
+
+    def test_reader_rejects_wrong_workspace_mode_owner_and_symlink_parent(self):
+        self.run_root.chmod(0o770)
+        try:
+            with self.assertRaises(collector_module.CollectorError):
+                self.read_line()
+        finally:
+            self.run_root.chmod(0o750)
+
+        with mock.patch.object(
+            collector_module, "_FORMAL_CONTROLLER_UID", os.getuid() + 1
+        ):
+            with self.assertRaises(collector_module.CollectorError):
+                self.read_line()
+
+        moved = self.runs_root / (self.run_root.name + "-actual")
+        os.rename(self.run_root, moved)
+        self.run_root.symlink_to(moved, target_is_directory=True)
+        try:
+            with self.assertRaises(collector_module.CollectorError):
+                self.read_line()
+        finally:
+            self.run_root.unlink()
+            os.rename(moved, self.run_root)
+
+    def test_reader_rejects_symlink_linked_wrong_mode_malformed_noncanonical_and_extra_key_snapshot(self):
+        linked_copy = self.run_root / "progress-copy.json"
+        mutations = []
+
+        def symlink_snapshot():
+            self.progress_path.unlink()
+            secret = self.candidate / "private-payload.json"
+            secret.write_text("do-not-read", encoding="utf-8")
+            self.progress_path.symlink_to(secret)
+
+        mutations.append(("symlink", symlink_snapshot))
+        mutations.append(("wrong mode", lambda: self.progress_path.chmod(0o644)))
+        mutations.append(
+            ("hard link", lambda: os.link(self.progress_path, linked_copy))
+        )
+        mutations.append(
+            ("malformed", lambda: self.progress_path.write_bytes(b"{malformed}\n"))
+        )
+
+        def noncanonical():
+            document = json.loads(self.valid_snapshot)
+            self.progress_path.write_text(
+                json.dumps(document, indent=2) + "\n", encoding="utf-8"
+            )
+
+        mutations.append(("noncanonical", noncanonical))
+
+        def unexpected_key():
+            document = json.loads(self.valid_snapshot)
+            document["private_path"] = str(self.candidate)
+            self.progress_path.write_text(
+                json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+
+        mutations.append(("unexpected key", unexpected_key))
+
+        for label, mutate in mutations:
+            with self.subTest(case=label):
+                self.restore_snapshot()
+                mutate()
+                with self.assertRaises(collector_module.CollectorError):
+                    self.read_line()
+        self.restore_snapshot()
+
+    def test_reader_binds_snapshot_store_to_the_validated_run_parent_inode(self):
+        moved = self.runs_root / (self.run_root.name + "-validated")
+        real_store = progress.ProgressSnapshotStore
+        rebound = False
+
+        def rebind_then_construct(*args, **kwargs):
+            nonlocal rebound
+            os.rename(self.run_root, moved)
+            rebound = True
+            self.run_root.mkdir(mode=0o750)
+            self.run_root.chmod(0o750)
+            replacement_candidate = self.run_root / "candidate"
+            replacement_candidate.mkdir(mode=0o700)
+            replacement_candidate.chmod(0o700)
+            return real_store(*args, **kwargs)
+
+        try:
+            with mock.patch.object(
+                collector_module,
+                "ProgressSnapshotStore",
+                side_effect=rebind_then_construct,
+            ):
+                with self.assertRaises(collector_module.CollectorError):
+                    self.read_line()
+        finally:
+            if rebound and self.run_root.exists():
+                replacement_candidate = self.run_root / "candidate"
+                if replacement_candidate.exists():
+                    replacement_candidate.rmdir()
+                self.run_root.rmdir()
+            if rebound and moved.exists():
+                os.rename(moved, self.run_root)
+
+    def test_reader_cleanup_preserves_primary_and_attempts_both_directory_fds(self):
+        class ReaderPrimary(BaseException):
+            pass
+
+        class CloseFailure(BaseException):
+            pass
+
+        primary = ReaderPrimary("reader-primary")
+        origin = []
+        close_calls = []
+        real_close = os.close
+
+        def fail_store(*_args, **_kwargs):
+            try:
+                raise primary
+            except BaseException as exc:
+                origin.append(exc.__traceback__)
+                raise
+
+        def fail_close(descriptor):
+            close_calls.append(descriptor)
+            raise CloseFailure(f"close-{descriptor}")
+
+        caught = None
+        try:
+            with mock.patch.object(
+                collector_module,
+                "_read_private_authorization_nonce",
+                return_value=self.authorization_nonce,
+            ), mock.patch.object(
+                collector_module,
+                "ProgressSnapshotStore",
+                side_effect=fail_store,
+            ), mock.patch.object(
+                collector_module.os,
+                "close",
+                side_effect=fail_close,
+            ):
+                try:
+                    collector_module._read_registered_formal_progress_view(
+                        run_id=self.run_id,
+                        authorization_nonce_path=self.nonce_path,
+                        project_root=self.project,
+                        controller_context=self.controller_context,
+                    )
+                except BaseException as exc:
+                    caught = (exc, exc.__traceback__)
+        finally:
+            for descriptor in set(close_calls):
+                try:
+                    real_close(descriptor)
+                except OSError:
+                    pass
+
+        self.assertIsNotNone(caught)
+        self.assertIs(caught[0], primary)
+        traceback_nodes = []
+        current = caught[1]
+        while current is not None:
+            traceback_nodes.append(current)
+            current = current.tb_next
+        self.assertIn(origin[0], traceback_nodes)
+        self.assertEqual(len(close_calls), 2)
+        self.assertEqual(len(set(close_calls)), 2)
 
 
 class TxnMemProvenanceProgressTests(unittest.TestCase):

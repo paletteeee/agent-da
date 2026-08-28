@@ -123,6 +123,7 @@ auxiliary = {
     "configs/provenance_runtime_lock.json",
     "infra/real_backend/docker-compose.yml",
     "scripts/install_formal_provenance_runtime.sh",
+    "scripts/read_formal_provenance_progress.sh",
     "scripts/run_cross_host_provenance_performance.sh",
     "scripts/run_formal_provenance_smoke.sh",
     "scripts/run_provenance_performance.sh",

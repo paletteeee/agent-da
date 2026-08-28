@@ -69,9 +69,11 @@ from txnmem_provenance_performance import (
 from txnmem_provenance_progress import (
     FormalProgressState,
     PROGRESS_SNAPSHOT_SCHEMA,
+    SNAPSHOT_FIELDS,
     ProgressPipeDrainer,
     ProgressProtocolError,
     ProgressSnapshotStore,
+    canonical_snapshot_line,
 )
 from txnmem_topology_attestation import (
     COLLECTOR_ID,
@@ -108,6 +110,8 @@ _FORMAL_MAX_LOAD1_PER_CPU_MILLI = 1000
 _FORMAL_MAX_LOGICAL_CPU_COUNT = 1024
 _FORMAL_RUNTIME_WHEEL_DIRECTORY = Path("/opt/txnmem-formal-runtime/wheels")
 _FORMAL_RUNS_ROOT = Path("/var/lib/txnmem-formal/runs")
+_FORMAL_CONTROLLER_UID = 0
+_FORMAL_CONTROLLER_GID = 0
 _FORMAL_GIT_EXECUTABLE = "/usr/bin/git"
 _FORMAL_DOCKER_EXECUTABLE = "/usr/bin/docker"
 _FORMAL_NFT_EXECUTABLE = "/usr/sbin/nft"
@@ -5860,6 +5864,241 @@ def _read_private_authorization_nonce(path: Path, project_root: Path) -> bytes:
         )
     except ValueError as exc:
         raise CollectorError(str(exc)) from exc
+
+
+class _ProgressArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise CollectorError("formal progress arguments are invalid")
+
+
+def _require_progress_directory(
+    metadata: os.stat_result,
+    *,
+    expected_uid: int,
+    expected_gid: int,
+    expected_mode: int,
+    label: str,
+) -> tuple[int, int]:
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != expected_uid
+        or metadata.st_gid != expected_gid
+        or stat.S_IMODE(metadata.st_mode) != expected_mode
+    ):
+        raise CollectorError(f"{label} is not protected")
+    return int(metadata.st_dev), int(metadata.st_ino)
+
+
+def _read_registered_formal_progress_view(
+    *,
+    run_id: str,
+    authorization_nonce_path: Path,
+    project_root: Path,
+    controller_context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Read only the identity-derived root-owned progress snapshot."""
+
+    _validate_formal_controller_context(controller_context)
+    if type(run_id) is not str or not run_id:
+        raise CollectorError("formal progress run identity is invalid")
+    if not isinstance(authorization_nonce_path, Path):
+        raise CollectorError("formal progress nonce path is invalid")
+    if not isinstance(project_root, Path):
+        raise CollectorError("formal progress project root is invalid")
+    try:
+        root = project_root.expanduser().absolute().resolve(strict=True)
+    except OSError as exc:
+        raise CollectorError("formal progress project root is unavailable") from exc
+
+    authorization_nonce = _read_private_authorization_nonce(
+        authorization_nonce_path, root
+    )
+    run_hash = hashlib.sha256(run_id.encode("utf-8")).hexdigest()
+    nonce_hash = hashlib.sha256(authorization_nonce).hexdigest()
+    if FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN.get(run_hash) != nonce_hash:
+        raise CollectorError("formal progress identity is not registered")
+
+    runs_root = _FORMAL_RUNS_ROOT.expanduser().absolute()
+    derived_candidate = _formal_candidate_root(
+        run_hash,
+        nonce_hash,
+        runs_root=runs_root,
+    )
+    candidate = _require_derived_candidate_root(
+        derived_candidate,
+        run_hash=run_hash,
+        nonce_hash=nonce_hash,
+        runs_root=runs_root,
+    )
+    run_root = candidate.parent
+    if run_root.parent != runs_root or not run_root.name.startswith("run-"):
+        raise CollectorError("formal progress workspace derivation is invalid")
+
+    directory_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    runs_descriptor: int | None = None
+    run_descriptor: int | None = None
+    try:
+        try:
+            runs_descriptor = os.open(runs_root, directory_flags)
+            runs_metadata = os.fstat(runs_descriptor)
+        except OSError as exc:
+            raise CollectorError("formal progress runs root is unavailable") from exc
+        runs_identity = _require_progress_directory(
+            runs_metadata,
+            expected_uid=_FORMAL_CONTROLLER_UID,
+            expected_gid=FORMAL_RUNNER_GID,
+            expected_mode=0o750,
+            label="formal progress runs root",
+        )
+        try:
+            run_descriptor = os.open(
+                run_root.name,
+                directory_flags,
+                dir_fd=runs_descriptor,
+            )
+            run_metadata = os.fstat(run_descriptor)
+        except OSError as exc:
+            raise CollectorError("formal progress run workspace is unavailable") from exc
+        run_identity = _require_progress_directory(
+            run_metadata,
+            expected_uid=_FORMAL_CONTROLLER_UID,
+            expected_gid=FORMAL_RUNNER_GID,
+            expected_mode=0o750,
+            label="formal progress run workspace",
+        )
+        try:
+            candidate_metadata = os.stat(
+                candidate.name,
+                dir_fd=run_descriptor,
+                follow_symlinks=False,
+            )
+        except OSError as exc:
+            raise CollectorError("formal progress candidate identity is unavailable") from exc
+        candidate_identity = _require_progress_directory(
+            candidate_metadata,
+            expected_uid=FORMAL_RUNNER_UID,
+            expected_gid=FORMAL_RUNNER_GID,
+            expected_mode=0o700,
+            label="formal progress candidate directory",
+        )
+
+        try:
+            store = ProgressSnapshotStore(
+                run_root / "progress.json",
+                expected_uid=_FORMAL_CONTROLLER_UID,
+                expected_gid=_FORMAL_CONTROLLER_GID,
+                expected_parent_identity=run_identity,
+            )
+            view = store.read_view()
+        except ProgressProtocolError as exc:
+            raise CollectorError("formal progress snapshot is unavailable") from exc
+
+        final_runs_metadata = os.fstat(runs_descriptor)
+        final_run_metadata = os.fstat(run_descriptor)
+        final_candidate_metadata = os.stat(
+            candidate.name,
+            dir_fd=run_descriptor,
+            follow_symlinks=False,
+        )
+        if (
+            _require_progress_directory(
+                final_runs_metadata,
+                expected_uid=_FORMAL_CONTROLLER_UID,
+                expected_gid=FORMAL_RUNNER_GID,
+                expected_mode=0o750,
+                label="formal progress runs root",
+            )
+            != runs_identity
+            or _require_progress_directory(
+                final_run_metadata,
+                expected_uid=_FORMAL_CONTROLLER_UID,
+                expected_gid=FORMAL_RUNNER_GID,
+                expected_mode=0o750,
+                label="formal progress run workspace",
+            )
+            != run_identity
+            or _require_progress_directory(
+                final_candidate_metadata,
+                expected_uid=FORMAL_RUNNER_UID,
+                expected_gid=FORMAL_RUNNER_GID,
+                expected_mode=0o700,
+                label="formal progress candidate directory",
+            )
+            != candidate_identity
+        ):
+            raise CollectorError("formal progress workspace identity changed")
+    except CollectorError:
+        raise
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise CollectorError("formal progress snapshot cannot be read") from exc
+    finally:
+        primary_failure = sys.exc_info()[1]
+        close_failures: list[BaseException] = []
+        for descriptor in (run_descriptor, runs_descriptor):
+            if descriptor is None:
+                continue
+            try:
+                os.close(descriptor)
+            except BaseException as exc:
+                close_failures.append(exc)
+        if close_failures and primary_failure is None:
+            raise CollectorError(
+                "formal progress descriptor cleanup failed"
+            ) from close_failures[0]
+
+    expected_fields = SNAPSHOT_FIELDS | (
+        {"terminal_reason_class"} if "terminal_reason_class" in view else set()
+    )
+    if set(view) != expected_fields:
+        raise CollectorError("formal progress snapshot closure is invalid")
+    age = view.get("last_update_age_seconds")
+    if type(age) is not int or age < 0:
+        raise CollectorError("formal progress snapshot age is invalid")
+    return dict(view)
+
+
+def read_formal_progress_line(
+    argv: Sequence[str] | None = None,
+    *,
+    _controller_context: Mapping[str, Any] | None = None,
+    _controller_project_root: Path | None = None,
+) -> bytes:
+    """Return one canonical sanitized progress line for the protected controller."""
+
+    arguments = list(() if argv is None else argv)
+    parser = _ProgressArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("--run-id", action="append", required=True)
+    parser.add_argument(
+        "--authorization-nonce",
+        action="append",
+        type=Path,
+        required=True,
+    )
+    try:
+        namespace = parser.parse_args(arguments)
+    except CollectorError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise CollectorError("formal progress arguments are invalid") from exc
+    run_ids = list(namespace.run_id)
+    nonce_paths = list(namespace.authorization_nonce)
+    if len(run_ids) != 1 or len(nonce_paths) != 1:
+        raise CollectorError("formal progress arguments are ambiguous")
+    view = _read_registered_formal_progress_view(
+        run_id=run_ids[0],
+        authorization_nonce_path=nonce_paths[0],
+        project_root=_controller_project_root,
+        controller_context=_controller_context,
+    )
+    try:
+        return canonical_snapshot_line(view)
+    except ProgressProtocolError as exc:
+        raise CollectorError("formal progress output is invalid") from exc
 
 
 def _deactivate_guard_after_quiescence(*, child: Any, network_guard: Any) -> None:

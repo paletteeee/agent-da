@@ -411,13 +411,26 @@ class FormalProgressState:
 class ProgressSnapshotStore:
     """Persist a sanitized formal-progress snapshot using one directory-owned replace."""
 
-    def __init__(self, path: Path, *, expected_uid: int, expected_gid: int) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        expected_uid: int,
+        expected_gid: int,
+        expected_parent_identity: tuple[int, int] | None = None,
+    ) -> None:
         if not isinstance(path, Path) or not path.name or path.name in {".", ".."}:
             _protocol_error("progress snapshot path must name a file")
         if type(expected_uid) is not int or expected_uid < 0:
             _protocol_error("expected snapshot UID must be a non-negative integer")
         if type(expected_gid) is not int or expected_gid < 0:
             _protocol_error("expected snapshot GID must be a non-negative integer")
+        if expected_parent_identity is not None and (
+            type(expected_parent_identity) is not tuple
+            or len(expected_parent_identity) != 2
+            or any(type(value) is not int or value < 0 for value in expected_parent_identity)
+        ):
+            _protocol_error("expected snapshot parent identity is invalid")
         self._parent = path.parent
         self._target_name = path.name
         self._expected_uid = expected_uid
@@ -427,6 +440,11 @@ class ProgressSnapshotStore:
         try:
             parent_stat = os.fstat(parent_fd)
             self._parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
+            if (
+                expected_parent_identity is not None
+                and self._parent_identity != expected_parent_identity
+            ):
+                _protocol_error("progress snapshot parent identity does not match")
         finally:
             os.close(parent_fd)
         self._writer_lock = _store_writer_lock(self._parent_identity, self._target_name)

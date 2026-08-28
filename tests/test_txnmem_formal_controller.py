@@ -1,6 +1,7 @@
 import contextlib
 import hashlib
 import io
+import json
 import os
 import subprocess
 import sys
@@ -10,9 +11,34 @@ from pathlib import Path
 from unittest.mock import patch
 
 import txnmem_formal_controller as controller
+import txnmem_provenance_progress as progress_protocol
 
 
 class FormalControllerCleanupTests(unittest.TestCase):
+    @staticmethod
+    def _progress_line() -> bytes:
+        return progress_protocol.canonical_snapshot_line(
+            {
+                "schema": "txnmem-provenance-progress-snapshot-v1",
+                "run_binding_sha256": "a" * 64,
+                "config_sha256": "b" * 64,
+                "phase": "measurement",
+                "cell_index": 1,
+                "cell_count": 15,
+                "graph_size": 100,
+                "concurrency": 1,
+                "repetition_index": 1,
+                "repetition_count": 30,
+                "completed_repetitions": 1,
+                "total_repetitions": 450,
+                "completed_samples": 32,
+                "total_samples": 14400,
+                "update_sequence": 1,
+                "status": "running",
+                "last_update_age_seconds": 0,
+            }
+        )
+
     @staticmethod
     def _identity(path: Path, parent: Path):
         metadata = path.stat()
@@ -124,6 +150,10 @@ class FormalControllerCleanupTests(unittest.TestCase):
                 try:
                     for relative in controller._FORMAL_AUXILIARY_PATHS:
                         self.assertTrue((exported.path / relative).is_file())
+                        self.assertEqual(
+                            (exported.path / relative).read_bytes(),
+                            (repository / relative).read_bytes(),
+                        )
                     self.assertEqual(
                         (exported.path / "configs" / "provenance_performance_matrix.json").stat().st_mode
                         & 0o777,
@@ -143,6 +173,14 @@ class FormalControllerCleanupTests(unittest.TestCase):
         )
         self.assertIn(
             "src/txnmem_provenance_progress.py",
+            controller._REQUIRED_APPROVED_PATHS,
+        )
+        self.assertIn(
+            "scripts/read_formal_provenance_progress.sh",
+            controller._FORMAL_AUXILIARY_PATHS,
+        )
+        self.assertIn(
+            "scripts/read_formal_provenance_progress.sh",
             controller._REQUIRED_APPROVED_PATHS,
         )
 
@@ -273,6 +311,319 @@ class FormalControllerCleanupTests(unittest.TestCase):
                 sys.modules.pop(module_name, None)
                 if previous is not None:
                     sys.modules[module_name] = previous
+
+    def test_dispatch_progress_uses_the_dedicated_reader_and_never_measurement_main(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            export = Path(tmp).resolve() / "export"
+            (export / "src").mkdir(parents=True)
+            expected_line = self._progress_line()
+            (export / "src" / "txnmem_provenance_execution_collector.py").write_text(
+                "\n".join(
+                    (
+                        "def main(*_args, **_kwargs):",
+                        "    raise RuntimeError('measurement entry point used')",
+                        "def read_formal_progress_line(argv, *, _controller_context=None, _controller_project_root=None):",
+                        f"    return {expected_line!r} if argv == ['--run-id', 'run', '--authorization-nonce', '/private/nonce'] and _controller_context.get('source_commit') and str(_controller_project_root) == '/approved/project' else b''",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            rows = tuple(
+                (path, hashlib.sha256(path.encode()).hexdigest())
+                for path in sorted(controller._REQUIRED_APPROVED_PATHS)
+            )
+            manifest = {
+                "schema": controller._APPROVAL_SCHEMA,
+                "source_commit": "a" * 40,
+                "files": [
+                    {"path": path, "blob_sha256": digest}
+                    for path, digest in rows
+                ],
+            }
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=rows,
+                manifest=manifest,
+                manifest_sha256=hashlib.sha256(
+                    controller._canonical_json_bytes(manifest)
+                ).hexdigest(),
+            )
+            module_name = "txnmem_provenance_execution_collector"
+            previous = sys.modules.pop(module_name, None)
+            try:
+                try:
+                    observed = controller._dispatch(
+                        "progress",
+                        [
+                            "--run-id",
+                            "run",
+                            "--authorization-nonce",
+                            "/private/nonce",
+                        ],
+                        export,
+                        approved,
+                        project_root=Path("/approved/project"),
+                    )
+                except controller.FormalControllerError as exc:
+                    self.fail(
+                        "dedicated progress dispatch is missing: "
+                        + type(exc).__name__
+                    )
+                self.assertEqual(observed, expected_line)
+            finally:
+                sys.modules.pop(module_name, None)
+                if previous is not None:
+                    sys.modules[module_name] = previous
+
+    def test_dispatch_progress_rejects_a_reader_blocked_record_as_non_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            export = Path(tmp).resolve() / "export"
+            (export / "src").mkdir(parents=True)
+            blocked_line = (
+                b'{"blocked_class":"formal_progress_unavailable",'
+                b'"schema":"txnmem-provenance-progress-reader-v1",'
+                b'"status":"blocked"}\n'
+            )
+            (export / "src" / "txnmem_provenance_execution_collector.py").write_text(
+                "\n".join(
+                    (
+                        "def main(*_args, **_kwargs):",
+                        "    raise RuntimeError('measurement entry point used')",
+                        "def read_formal_progress_line(*_args, **_kwargs):",
+                        f"    return {blocked_line!r}",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=(),
+                manifest={},
+                manifest_sha256="b" * 64,
+            )
+            module_name = "txnmem_provenance_execution_collector"
+            previous = sys.modules.pop(module_name, None)
+            try:
+                with self.assertRaises(controller.FormalControllerError):
+                    controller._dispatch(
+                        "progress",
+                        [
+                            "--run-id",
+                            "run",
+                            "--authorization-nonce",
+                            "/private/nonce",
+                        ],
+                        export,
+                        approved,
+                        project_root=Path("/approved/project"),
+                    )
+            finally:
+                sys.modules.pop(module_name, None)
+                if previous is not None:
+                    sys.modules[module_name] = previous
+
+    def test_main_progress_emits_exactly_one_canonical_line_after_export_cleanup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve() / "repository"
+            root.mkdir()
+            export = Path(tmp).resolve() / "source-fixture"
+            export.mkdir()
+            identity = self._identity(export, export.parent)
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=(),
+                manifest={},
+                manifest_sha256="b" * 64,
+            )
+            expected_line = self._progress_line()
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            cleanup_observed = []
+
+            def remove_export(_identity):
+                cleanup_observed.append(True)
+
+            with patch.object(controller.os, "geteuid", return_value=0), patch.object(
+                controller, "_verify_installed_controller", return_value=approved
+            ), patch.object(
+                controller, "_create_committed_export", return_value=identity
+            ), patch.object(
+                controller, "_dispatch", return_value=expected_line
+            ), patch.object(
+                controller, "_remove_export", side_effect=remove_export
+            ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                status = controller.main(
+                    [
+                        "--project-root",
+                        str(root),
+                        "progress",
+                        "--run-id",
+                        "private-run",
+                        "--authorization-nonce",
+                        "/private/nonce",
+                    ]
+                )
+
+            self.assertEqual(status, 0)
+            self.assertEqual(stdout.getvalue().encode("utf-8"), expected_line)
+            self.assertEqual(stderr.getvalue(), "")
+            self.assertEqual(cleanup_observed, [True])
+
+    def test_main_progress_rejects_canonical_json_outside_the_sanitized_closure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve() / "repository"
+            root.mkdir()
+            export = Path(tmp).resolve() / "source-fixture"
+            export.mkdir()
+            identity = self._identity(export, export.parent)
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=(),
+                manifest={},
+                manifest_sha256="b" * 64,
+            )
+            leaked_value = "/seeded/private/progress.json"
+            unsanitized_line = (
+                b'{"private_path":"/seeded/private/progress.json"}\n'
+            )
+            expected_blocked = (
+                b'{"blocked_class":"formal_progress_unavailable",'
+                b'"schema":"txnmem-provenance-progress-reader-v1",'
+                b'"status":"blocked"}\n'
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with patch.object(controller.os, "geteuid", return_value=0), patch.object(
+                controller, "_verify_installed_controller", return_value=approved
+            ), patch.object(
+                controller, "_create_committed_export", return_value=identity
+            ), patch.object(
+                controller, "_dispatch", return_value=unsanitized_line
+            ), patch.object(
+                controller, "_remove_export"
+            ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                status = controller.main(
+                    [
+                        "--project-root",
+                        str(root),
+                        "progress",
+                        "--run-id",
+                        "private-run",
+                        "--authorization-nonce",
+                        "/private/nonce",
+                    ]
+                )
+
+            self.assertEqual(status, 2)
+            self.assertEqual(stdout.getvalue().encode("utf-8"), expected_blocked)
+            self.assertNotIn(leaked_value, stdout.getvalue())
+            self.assertEqual(stderr.getvalue(), "")
+
+    def test_progress_output_gate_rejects_raw_values_in_sanitized_fields(self):
+        valid = json.loads(self._progress_line())
+        raw_run = dict(valid)
+        raw_run["run_binding_sha256"] = "seeded-private-run-id"
+        raw_exception = dict(valid)
+        raw_exception["status"] = "blocked"
+        raw_exception["terminal_reason_class"] = (
+            "seeded raw exception /private/progress.json"
+        )
+
+        for label, document in (
+            ("run identity", raw_run),
+            ("terminal reason", raw_exception),
+        ):
+            with self.subTest(case=label):
+                payload = (
+                    json.dumps(
+                        document,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    + b"\n"
+                )
+                with self.assertRaises(controller.FormalControllerError):
+                    controller._validate_progress_output(payload)
+
+    def test_main_progress_failures_emit_only_stable_canonical_blocked_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve() / "repository"
+            root.mkdir()
+            export = Path(tmp).resolve() / "source-fixture"
+            export.mkdir()
+            identity = self._identity(export, export.parent)
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=(),
+                manifest={},
+                manifest_sha256="b" * 64,
+            )
+            raw_failure = "seeded raw private path /private/nonce and credential"
+
+            for label, dispatch_result, cleanup_failure in (
+                ("reader", RuntimeError(raw_failure), None),
+                ("cleanup", self._progress_line(), OSError(raw_failure)),
+            ):
+                with self.subTest(case=label):
+                    stdout = io.StringIO()
+                    stderr = io.StringIO()
+                    dispatch_patch = (
+                        patch.object(controller, "_dispatch", side_effect=dispatch_result)
+                        if isinstance(dispatch_result, BaseException)
+                        else patch.object(controller, "_dispatch", return_value=dispatch_result)
+                    )
+                    cleanup_patch = (
+                        patch.object(controller, "_remove_export", side_effect=cleanup_failure)
+                        if cleanup_failure is not None
+                        else patch.object(controller, "_remove_export")
+                    )
+                    with patch.object(
+                        controller.os, "geteuid", return_value=0
+                    ), patch.object(
+                        controller, "_verify_installed_controller", return_value=approved
+                    ), patch.object(
+                        controller, "_create_committed_export", return_value=identity
+                    ), dispatch_patch, cleanup_patch, contextlib.redirect_stdout(
+                        stdout
+                    ), contextlib.redirect_stderr(stderr):
+                        status = controller.main(
+                            [
+                                "--project-root",
+                                str(root),
+                                "progress",
+                                "--run-id",
+                                "private-run",
+                                "--authorization-nonce",
+                                "/private/nonce",
+                            ]
+                        )
+
+                    blocked = stdout.getvalue().encode("utf-8")
+                    self.assertEqual(status, 2)
+                    self.assertEqual(blocked.count(b"\n"), 1)
+                    document = json.loads(blocked)
+                    self.assertEqual(
+                        document,
+                        {
+                            "blocked_class": "formal_progress_unavailable",
+                            "schema": "txnmem-provenance-progress-reader-v1",
+                            "status": "blocked",
+                        },
+                    )
+                    self.assertEqual(
+                        blocked,
+                        json.dumps(
+                            document,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                        + b"\n",
+                    )
+                    self.assertNotIn(raw_failure, stdout.getvalue())
+                    self.assertEqual(stderr.getvalue(), "")
 
     def test_mixed_installer_generation_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:

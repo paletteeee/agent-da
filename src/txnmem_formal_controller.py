@@ -34,11 +34,66 @@ _COMMIT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _APPROVAL_SCHEMA = "txnmem-formal-approved-source-v1"
 _CONTEXT_SCHEMA = "txnmem-formal-controller-context-v1"
+_PROGRESS_SNAPSHOT_SCHEMA = "txnmem-provenance-progress-snapshot-v1"
+_PROGRESS_READER_SCHEMA = "txnmem-provenance-progress-reader-v1"
+_PROGRESS_SNAPSHOT_FIELDS = frozenset(
+    {
+        "schema",
+        "run_binding_sha256",
+        "config_sha256",
+        "phase",
+        "cell_index",
+        "cell_count",
+        "graph_size",
+        "concurrency",
+        "repetition_index",
+        "repetition_count",
+        "completed_repetitions",
+        "total_repetitions",
+        "completed_samples",
+        "total_samples",
+        "update_sequence",
+        "status",
+        "last_update_age_seconds",
+    }
+)
+_PROGRESS_INTEGER_FIELDS = frozenset(
+    {
+        "cell_index",
+        "cell_count",
+        "graph_size",
+        "concurrency",
+        "repetition_index",
+        "repetition_count",
+        "completed_repetitions",
+        "total_repetitions",
+        "completed_samples",
+        "total_samples",
+        "update_sequence",
+    }
+)
+_PROGRESS_TERMINAL_STATUSES = frozenset({"completed", "blocked", "interrupted"})
+_PROGRESS_TERMINAL_REASON_CLASSES = frozenset(
+    {
+        "completed",
+        "formal_eligibility_failed",
+        "backend_timeout",
+        "progress_protocol_failed",
+        "collector_interrupted",
+        "resource_cleanup_failed",
+    }
+)
+_PROGRESS_BLOCKED_DOCUMENT = {
+    "blocked_class": "formal_progress_unavailable",
+    "schema": _PROGRESS_READER_SCHEMA,
+    "status": "blocked",
+}
 _FORMAL_AUXILIARY_PATHS = (
     "configs/provenance_performance_matrix.json",
     "configs/provenance_runtime_lock.json",
     "infra/real_backend/docker-compose.yml",
     "scripts/install_formal_provenance_runtime.sh",
+    "scripts/read_formal_provenance_progress.sh",
     "scripts/run_cross_host_provenance_performance.sh",
     "scripts/run_formal_provenance_smoke.sh",
     "scripts/run_provenance_performance.sh",
@@ -91,6 +146,87 @@ def _canonical_json_bytes(value: Any) -> bytes:
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise FormalControllerError("formal approval manifest is not canonical") from exc
+
+
+def _validate_progress_output(value: Any, *, allow_blocked: bool = True) -> bytes:
+    if (
+        type(value) is not bytes
+        or len(value) > 4096
+        or not value.endswith(b"\n")
+        or value[:-1].find(b"\n") != -1
+    ):
+        raise FormalControllerError("formal progress output is invalid")
+
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        document: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in document:
+                raise FormalControllerError("formal progress output is invalid")
+            document[key] = item
+        return document
+
+    try:
+        document = json.loads(
+            value[:-1].decode("utf-8", errors="strict"),
+            object_pairs_hook=reject_duplicates,
+            parse_constant=lambda _value: (_ for _ in ()).throw(
+                FormalControllerError("formal progress output is invalid")
+            ),
+        )
+    except FormalControllerError:
+        raise
+    except (UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise FormalControllerError("formal progress output is invalid") from exc
+    if not isinstance(document, dict) or _canonical_json_bytes(document) + b"\n" != value:
+        raise FormalControllerError("formal progress output is invalid")
+    if document == _PROGRESS_BLOCKED_DOCUMENT:
+        if allow_blocked:
+            return value
+        raise FormalControllerError("formal progress output is invalid")
+    expected_fields = _PROGRESS_SNAPSHOT_FIELDS | (
+        {"terminal_reason_class"}
+        if "terminal_reason_class" in document
+        else set()
+    )
+    if (
+        set(document) != expected_fields
+        or document.get("schema") != _PROGRESS_SNAPSHOT_SCHEMA
+        or document.get("phase") != "measurement"
+        or type(document.get("run_binding_sha256")) is not str
+        or _SHA256.fullmatch(document["run_binding_sha256"]) is None
+        or type(document.get("config_sha256")) is not str
+        or _SHA256.fullmatch(document["config_sha256"]) is None
+        or any(type(document.get(field)) is not int for field in _PROGRESS_INTEGER_FIELDS)
+        or type(document.get("last_update_age_seconds")) is not int
+        or document["last_update_age_seconds"] < 0
+    ):
+        raise FormalControllerError("formal progress output is invalid")
+    status = document.get("status")
+    if type(status) is not str or status not in {
+        "starting",
+        "running",
+        *_PROGRESS_TERMINAL_STATUSES,
+    }:
+        raise FormalControllerError("formal progress output is invalid")
+    if status in _PROGRESS_TERMINAL_STATUSES:
+        if document.get("terminal_reason_class") not in _PROGRESS_TERMINAL_REASON_CLASSES:
+            raise FormalControllerError("formal progress output is invalid")
+    elif "terminal_reason_class" in document:
+        raise FormalControllerError("formal progress output is invalid")
+    return value
+
+
+def _blocked_progress_output() -> bytes:
+    return _canonical_json_bytes(_PROGRESS_BLOCKED_DOCUMENT) + b"\n"
+
+
+def _write_progress_output(value: bytes) -> None:
+    payload = _validate_progress_output(value)
+    try:
+        sys.stdout.write(payload.decode("utf-8", errors="strict"))
+        sys.stdout.flush()
+    except (OSError, UnicodeError) as exc:
+        raise FormalControllerError("formal progress output is unavailable") from exc
 
 
 def _normalize_approved_source(value: Any) -> _ApprovedSource:
@@ -413,9 +549,12 @@ def _dispatch(
     arguments: Sequence[str],
     export: Path,
     approved: _ApprovedSource,
-) -> int:
+    *,
+    project_root: Path | None = None,
+) -> int | bytes:
     module_name = {
         "measure": "txnmem_provenance_execution_collector",
+        "progress": "txnmem_provenance_execution_collector",
         "smoke": "txnmem_formal_smoke",
         "material": "txnmem_experiment",
         "attest": "txnmem_topology_attestation",
@@ -435,26 +574,39 @@ def _dispatch(
     sys.path.insert(0, str(source_directory))
     try:
         module = importlib.import_module(module_name)
-        entry = getattr(module, "main", None)
+        entry_name = "read_formal_progress_line" if action == "progress" else "main"
+        entry = getattr(module, entry_name, None)
         if not callable(entry):
             raise FormalControllerError("formal controller target has no entry point")
-        if action in {"measure", "smoke"}:
-            result = entry(
-                forwarded,
-                _controller_context={
-                    "schema": _CONTEXT_SCHEMA,
+        if action in {"measure", "smoke", "progress"}:
+            controller_context = {
+                "schema": _CONTEXT_SCHEMA,
+                "source_commit": approved.commit,
+                "source_manifest": {
+                    "schema": "txnmem-provenance-source-manifest-v1",
                     "source_commit": approved.commit,
-                    "source_manifest": {
-                        "schema": "txnmem-provenance-source-manifest-v1",
-                        "source_commit": approved.commit,
-                        "files": [
-                            {"path": path, "blob_sha256": digest}
-                            for path, digest in approved.files
-                        ],
-                    },
-                    "approval_manifest_sha256": approved.manifest_sha256,
+                    "files": [
+                        {"path": path, "blob_sha256": digest}
+                        for path, digest in approved.files
+                    ],
                 },
-            )
+                "approval_manifest_sha256": approved.manifest_sha256,
+            }
+            if action == "progress":
+                if not isinstance(project_root, Path):
+                    raise FormalControllerError(
+                        "formal progress project root is unavailable"
+                    )
+                result = entry(
+                    forwarded,
+                    _controller_context=controller_context,
+                    _controller_project_root=project_root,
+                )
+            else:
+                result = entry(
+                    forwarded,
+                    _controller_context=controller_context,
+                )
         else:
             result = entry(forwarded)
     finally:
@@ -470,6 +622,8 @@ def _dispatch(
                 sys.modules.pop(name, None)
         if sys.path and sys.path[0] == str(source_directory):
             sys.path.pop(0)
+    if action == "progress":
+        return _validate_progress_output(result, allow_blocked=False)
     if type(result) is not int:
         raise FormalControllerError("formal controller target returned an invalid status")
     return result
@@ -538,8 +692,12 @@ def _remove_smoke_success_report(target: Path) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    progress_invocation = len(arguments) >= 3 and arguments[2] == "progress"
     if len(arguments) < 3 or arguments[0] != "--project-root":
-        print("formal controller blocked: invalid invocation", file=sys.stderr)
+        if progress_invocation:
+            _write_progress_output(_blocked_progress_output())
+        else:
+            print("formal controller blocked: invalid invocation", file=sys.stderr)
         return 64
     project_root = Path(arguments[1]).expanduser().absolute()
     action = arguments[2]
@@ -557,7 +715,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         approved = _verify_installed_controller(project_root)
         export = _create_committed_export(project_root, approved)
         try:
-            result = _dispatch(action, forwarded, export.path, approved)
+            if action == "progress":
+                result = _dispatch(
+                    action,
+                    forwarded,
+                    export.path,
+                    approved,
+                    project_root=project_root,
+                )
+            else:
+                result = _dispatch(action, forwarded, export.path, approved)
         except BaseException as primary:
             try:
                 _remove_export(export)
@@ -585,10 +752,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                         except AttributeError:
                             pass
                 raise
+            if action == "progress":
+                _write_progress_output(result)
+                return 0
             return result
-    except (OSError, ValueError, RuntimeError) as exc:
-        print(f"formal controller blocked: {type(exc).__name__}", file=sys.stderr)
-        return 2
+    except BaseException as exc:
+        if action == "progress":
+            try:
+                _write_progress_output(_blocked_progress_output())
+            except BaseException:
+                pass
+            return 2
+        if isinstance(exc, (OSError, ValueError, RuntimeError)):
+            print(f"formal controller blocked: {type(exc).__name__}", file=sys.stderr)
+            return 2
+        raise
 
 
 if __name__ == "__main__":
