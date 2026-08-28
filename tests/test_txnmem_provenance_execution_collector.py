@@ -6,6 +6,7 @@ import inspect
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -8248,6 +8249,328 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 Path("."),
                 object(),
             )
+
+        with self.subTest(correction="recorded-pidfd-identities-only"):
+            signal_recorded = getattr(
+                collector_module,
+                "_signal_integrated_lifecycle_identities",
+                None,
+            )
+            self.assertTrue(callable(signal_recorded))
+            expected = {101: "11", 102: "12"}
+            opened = iter((71, 72))
+            delivered = []
+            closed = []
+            with patch.object(
+                collector_module,
+                "_integrated_lifecycle_start_ticks",
+                side_effect=lambda pid: expected[pid],
+            ), patch.object(
+                collector_module,
+                "_pidfd_open",
+                side_effect=lambda _pid: next(opened),
+            ), patch.object(
+                collector_module,
+                "_pidfd_send_signal",
+                side_effect=lambda descriptor, sig: delivered.append(
+                    (descriptor, sig)
+                ),
+            ), patch.object(
+                collector_module,
+                "_pidfd_close",
+                side_effect=lambda descriptor: closed.append(descriptor),
+            ), patch.object(
+                collector_module,
+                "_formal_uid_processes",
+                side_effect=AssertionError("UID inventory is assertion-only"),
+            ):
+                self.assertEqual(
+                    signal_recorded(expected, signal.SIGKILL),
+                    2,
+                )
+            self.assertEqual(
+                delivered,
+                [(71, signal.SIGKILL), (72, signal.SIGKILL)],
+            )
+            self.assertEqual(closed, [71, 72])
+
+            opened = iter((81, 82))
+            delivered = []
+            closed = []
+            with patch.object(
+                collector_module,
+                "_integrated_lifecycle_start_ticks",
+                side_effect=lambda pid: "13" if pid == 102 else expected[pid],
+            ), patch.object(
+                collector_module,
+                "_pidfd_open",
+                side_effect=lambda _pid: next(opened),
+            ), patch.object(
+                collector_module,
+                "_pidfd_send_signal",
+                side_effect=lambda descriptor, sig: delivered.append(
+                    (descriptor, sig)
+                ),
+            ), patch.object(
+                collector_module,
+                "_pidfd_close",
+                side_effect=lambda descriptor: closed.append(descriptor),
+            ), patch.object(
+                collector_module,
+                "_formal_uid_processes",
+                side_effect=AssertionError("UID inventory is assertion-only"),
+            ):
+                with self.assertRaisesRegex(CollectorError, "identity"):
+                    signal_recorded(expected, signal.SIGKILL)
+            self.assertEqual(delivered, [])
+            self.assertEqual(closed, [81, 82])
+            lifecycle_source = inspect.getsource(
+                collector_module._run_protected_linux_integrated_lifecycle
+            )
+            self.assertEqual(
+                lifecycle_source.count(
+                    "_signal_integrated_lifecycle_identities("
+                ),
+                2,
+            )
+            self.assertNotIn("_pidfd_send_signal(", lifecycle_source)
+
+        with self.subTest(correction="surviving-parent-owns-guard-removal"):
+            guard_owner_type = getattr(
+                collector_module,
+                "_IntegratedLifecycleGuardOwner",
+                None,
+            )
+            self.assertTrue(callable(guard_owner_type))
+            events = []
+            fake_guard = SimpleNamespace(
+                deactivate=lambda: events.append("deactivate")
+            )
+            owner = guard_owner_type(
+                guard=fake_guard,
+                owner_pid=os.getpid(),
+            )
+            with patch.object(
+                collector_module.os,
+                "getpid",
+                return_value=os.getpid() + 1,
+            ), self.assertRaisesRegex(CollectorError, "owner"):
+                owner.deactivate_after_quiescence(
+                    lambda: events.append("quiescence")
+                )
+            self.assertEqual(events, [])
+            with self.assertRaisesRegex(CollectorError, "drifted"):
+                owner.deactivate_after_quiescence(
+                    lambda: (_ for _ in ()).throw(
+                        CollectorError("recorded identity drifted")
+                    )
+                )
+            self.assertEqual(events, [])
+            owner.deactivate_after_quiescence(
+                lambda: events.append("quiescence")
+            )
+            self.assertEqual(events, ["quiescence", "deactivate"])
+            worker_start = lifecycle_source.index("    def worker_main()")
+            worker_end = lifecycle_source.index(
+                "\n    try:\n        worker_pid = os.fork()",
+                worker_start,
+            )
+            worker_source = lifecycle_source[worker_start:worker_end]
+            self.assertNotIn("guard.deactivate(", worker_source)
+            self.assertNotIn(".deactivate_after_quiescence(", worker_source)
+            self.assertEqual(
+                lifecycle_source.count(
+                    "guard_owner.deactivate_after_quiescence("
+                ),
+                2,
+            )
+
+        with self.subTest(correction="actual-receipt-and-completion-boundary"):
+            send_state = getattr(
+                collector_module,
+                "_send_integrated_lifecycle_worker_state",
+                None,
+            )
+            receive_state = getattr(
+                collector_module,
+                "_receive_integrated_lifecycle_worker_state",
+                None,
+            )
+            read_absent = getattr(
+                collector_module,
+                "_read_integrated_lifecycle_absent_receipt",
+                None,
+            )
+            completion_writer = getattr(
+                collector_module,
+                "_write_collector_completion_record",
+                None,
+            )
+            self.assertTrue(
+                all(
+                    callable(value)
+                    for value in (
+                        send_state,
+                        receive_state,
+                        read_absent,
+                        completion_writer,
+                    )
+                )
+            )
+            state = {
+                "schema": "txnmem-integrated-lifecycle-worker-state-v1",
+                "runner_pid": 101,
+                "runner_start_ticks": "11",
+                "descendant_pid": 102,
+                "descendant_start_ticks": "12",
+            }
+            sender, receiver = socket.socketpair()
+            receipt_read, receipt_write = os.pipe()
+            transferred_fd = None
+            try:
+                send_state(sender, state, receipt_read)
+                observed_state, transferred_fd = receive_state(
+                    receiver, timeout=1.0
+                )
+                self.assertEqual(observed_state, state)
+                os.close(receipt_read)
+                receipt_read = -1
+                os.close(receipt_write)
+                receipt_write = -1
+                absent_receipt = read_absent(transferred_fd, timeout=1.0)
+                transferred_fd = None
+            finally:
+                sender.close()
+                receiver.close()
+                for descriptor in (
+                    receipt_read,
+                    receipt_write,
+                    transferred_fd,
+                ):
+                    if descriptor is not None and descriptor >= 0:
+                        os.close(descriptor)
+            self.assertIsNone(absent_receipt)
+            collection_source = inspect.getsource(
+                collector_module._collect_execution_evidence
+            )
+            self.assertIn(
+                "_write_collector_completion_record(",
+                collection_source,
+            )
+            receipt_read = lifecycle_source.index(
+                "_read_integrated_lifecycle_absent_receipt("
+            )
+            reap_proof = lifecycle_source.index(
+                "set(reaped_statuses) != expected_pids"
+            )
+            self.assertGreater(receipt_read, reap_proof)
+            self.assertIn(
+                "completion_receipt=absent_receipt",
+                lifecycle_source,
+            )
+            self.assertNotIn("completion_receipt={}", lifecycle_source)
+            with TemporaryDirectory() as tmp:
+                boundary_root = Path(tmp).resolve()
+                boundary_store = FormalStore(boundary_root)
+                with self.assertRaisesRegex(
+                    CollectorError, "completion evidence"
+                ):
+                    completion_writer(
+                        boundary_store,
+                        "completion.json",
+                        absent_receipt,
+                    )
+                self.assertEqual(
+                    boundary_store.entry_kind("completion.json"),
+                    "missing",
+                )
+                candidate = boundary_root / "candidate"
+                candidate.mkdir(mode=0o700)
+                candidate_mode = candidate.stat().st_mode & 0o777
+                with self.assertRaisesRegex(
+                    CollectorError, "completion receipt"
+                ):
+                    collector_module._seal_candidate_tree(
+                        candidate,
+                        expected_owner_uid=os.getuid(),
+                        sealed_owner_uid=os.getuid(),
+                        sealed_owner_gid=os.getgid(),
+                        completion_receipt=absent_receipt,
+                    )
+                self.assertEqual(
+                    candidate.stat().st_mode & 0o777,
+                    candidate_mode,
+                )
+
+        with self.subTest(correction="descriptor-relative-tree-removal"):
+            remove_tree = collector_module._remove_integrated_lifecycle_tree
+            parameters = inspect.signature(remove_tree).parameters
+            self.assertTrue(
+                {
+                    "expected_parent_device",
+                    "expected_parent_inode",
+                    "controller_uid",
+                    "runner_uid",
+                    "runner_owned_relative",
+                }.issubset(parameters)
+            )
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                lifecycle = parent / "lifecycle"
+                lifecycle.mkdir(mode=0o700)
+                candidate = lifecycle / "candidate"
+                candidate.mkdir(mode=0o700)
+                payload = candidate / "payload.json"
+                payload.write_text("{}\n", encoding="utf-8")
+                linked = candidate / "linked"
+                linked.symlink_to(payload.name)
+                parent_metadata = parent.stat()
+                lifecycle_metadata = lifecycle.stat()
+                with self.assertRaisesRegex(CollectorError, "special file"):
+                    remove_tree(
+                        lifecycle,
+                        expected_parent_device=int(parent_metadata.st_dev),
+                        expected_parent_inode=int(parent_metadata.st_ino),
+                        expected_device=int(lifecycle_metadata.st_dev),
+                        expected_inode=int(lifecycle_metadata.st_ino),
+                        controller_uid=os.getuid(),
+                        runner_uid=os.getuid(),
+                        runner_owned_relative=Path("candidate"),
+                    )
+                self.assertTrue(lifecycle.is_dir())
+                self.assertTrue(linked.is_symlink())
+
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                lifecycle = parent / "lifecycle"
+                lifecycle.symlink_to("missing-lifecycle")
+                parent_metadata = parent.stat()
+                with self.assertRaisesRegex(CollectorError, "identity"):
+                    remove_tree(
+                        lifecycle,
+                        expected_parent_device=int(parent_metadata.st_dev),
+                        expected_parent_inode=int(parent_metadata.st_ino),
+                        expected_device=int(parent_metadata.st_dev),
+                        expected_inode=int(parent_metadata.st_ino),
+                        controller_uid=os.getuid(),
+                        runner_uid=os.getuid(),
+                        runner_owned_relative=Path("candidate"),
+                    )
+                self.assertTrue(lifecycle.is_symlink())
+
+            remove_source = inspect.getsource(remove_tree)
+            inspect_source = inspect.getsource(
+                collector_module._inspect_integrated_lifecycle_tree_fd
+            )
+            delete_source = inspect.getsource(
+                collector_module._delete_integrated_lifecycle_tree_fd
+            )
+            cleanup_source = remove_source + inspect_source + delete_source
+            self.assertNotIn("shutil", cleanup_source)
+            self.assertNotIn("rglob", cleanup_source)
+            self.assertNotIn(".exists()", remove_source)
+            self.assertIn("O_NOFOLLOW", cleanup_source)
+            self.assertIn("dir_fd=", cleanup_source)
 
         protected_primitives = bool(
             sys.platform.startswith("linux")
