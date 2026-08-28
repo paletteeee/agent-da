@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import copy
 import json
+import math
+import os
 import re
+import select
+import stat
+import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -40,6 +47,18 @@ EVENT_FIELDS = frozenset(
         "total_samples",
         "update_sequence",
         "status",
+    }
+)
+SNAPSHOT_FIELDS = frozenset((EVENT_FIELDS - {"schema"}) | {"schema", "last_update_age_seconds"})
+TERMINAL_STATUSES = frozenset({"completed", "blocked", "interrupted"})
+TERMINAL_REASON_CLASSES = frozenset(
+    {
+        "completed",
+        "formal_eligibility_failed",
+        "backend_timeout",
+        "progress_protocol_failed",
+        "collector_interrupted",
+        "resource_cleanup_failed",
     }
 )
 
@@ -241,6 +260,88 @@ def canonical_progress_line(event: Mapping[str, Any]) -> bytes:
     return line
 
 
+def _validate_snapshot(snapshot: Mapping[str, Any], *, persisted: bool = False) -> dict[str, Any]:
+    if not isinstance(snapshot, Mapping):
+        _protocol_error("progress snapshot must be a mapping")
+    try:
+        normalized = dict(snapshot)
+        actual_fields = frozenset(normalized)
+    except (TypeError, ValueError):
+        _protocol_error("progress snapshot must be a plain mapping")
+
+    has_terminal_reason = "terminal_reason_class" in actual_fields
+    expected_fields = SNAPSHOT_FIELDS | ({"terminal_reason_class"} if has_terminal_reason else set())
+    if actual_fields != expected_fields:
+        _protocol_error("invalid progress snapshot fields")
+    if normalized["schema"] != PROGRESS_SNAPSHOT_SCHEMA:
+        _protocol_error("snapshot schema has an invalid value")
+    if normalized["phase"] != "measurement":
+        _protocol_error("snapshot phase has an invalid value")
+    _validate_hash("run_binding_sha256", normalized["run_binding_sha256"])
+    _validate_hash("config_sha256", normalized["config_sha256"])
+    if type(normalized["last_update_age_seconds"]) is not int or normalized["last_update_age_seconds"] < 0:
+        _protocol_error("last_update_age_seconds must be a non-negative integer")
+    if persisted and normalized["last_update_age_seconds"] != 0:
+        _protocol_error("persisted last_update_age_seconds must be zero")
+
+    status = normalized["status"]
+    if type(status) is not str or status not in {"starting", "running"} | TERMINAL_STATUSES:
+        _protocol_error("snapshot status has an invalid value")
+    if status in TERMINAL_STATUSES:
+        if (
+            not has_terminal_reason
+            or type(normalized["terminal_reason_class"]) is not str
+            or normalized["terminal_reason_class"] not in TERMINAL_REASON_CLASSES
+        ):
+            _protocol_error("snapshot terminal reason class has an invalid value")
+    elif has_terminal_reason:
+        _protocol_error("non-terminal snapshot cannot have a terminal reason class")
+
+    event_like = {key: value for key, value in normalized.items() if key not in {"last_update_age_seconds", "terminal_reason_class"}}
+    event_like["schema"] = PROGRESS_EVENT_SCHEMA
+    event_like["status"] = "running"
+    if normalized["update_sequence"] == 0:
+        if any(type(normalized[name]) is not int for name in _INTEGER_FIELDS):
+            _protocol_error("snapshot starting counts must be integers")
+        zero_values = {
+            "cell_index": 1,
+            "cell_count": 15,
+            "graph_size": 100,
+            "concurrency": 1,
+            "repetition_index": 0,
+            "repetition_count": 30,
+            "completed_repetitions": 0,
+            "total_repetitions": 450,
+            "completed_samples": 0,
+            "total_samples": 14400,
+            "update_sequence": 0,
+        }
+        if status == "running" or any(normalized.get(name) != value for name, value in zero_values.items()):
+            _protocol_error("snapshot starting counts are invalid")
+    else:
+        _validate_event(event_like)
+    return copy.deepcopy(normalized)
+
+
+def canonical_snapshot_line(snapshot: Mapping[str, Any]) -> bytes:
+    """Return the sole canonical encoding for an already-valid snapshot closure."""
+
+    normalized = _validate_snapshot(snapshot)
+    try:
+        encoded = json.dumps(
+            normalized,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        raise ProgressProtocolError("progress snapshot cannot be canonically encoded") from exc
+    line = encoded + b"\n"
+    if len(line) > MAX_PROGRESS_LINE_BYTES:
+        _protocol_error("progress snapshot exceeds 4096 bytes")
+    return line
+
+
 @dataclass
 class FormalProgressState:
     run_binding_sha256: str
@@ -280,3 +381,370 @@ class FormalProgressState:
         self._last_sequence = expected_sequence
         self._last_event = copy.deepcopy(normalized)
         return copy.deepcopy(self._last_event)
+
+
+class ProgressSnapshotStore:
+    """Persist a sanitized formal-progress snapshot using one directory-owned replace."""
+
+    _TEMPORARY_NAME = ".txnmem-progress-snapshot.tmp"
+
+    def __init__(self, path: Path, *, expected_uid: int, expected_gid: int) -> None:
+        if not isinstance(path, Path) or not path.name or path.name in {".", ".."}:
+            _protocol_error("progress snapshot path must name a file")
+        if type(expected_uid) is not int or expected_uid < 0:
+            _protocol_error("expected snapshot UID must be a non-negative integer")
+        if type(expected_gid) is not int or expected_gid < 0:
+            _protocol_error("expected snapshot GID must be a non-negative integer")
+        self._parent = path.parent
+        self._target_name = path.name
+        self._expected_uid = expected_uid
+        self._expected_gid = expected_gid
+
+    def _open_parent(self) -> int:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            parent_fd = os.open(self._parent, flags)
+        except OSError as exc:
+            raise ProgressProtocolError("progress snapshot parent is unsafe") from exc
+        try:
+            parent_stat = os.fstat(parent_fd)
+            if not stat.S_ISDIR(parent_stat.st_mode):
+                _protocol_error("progress snapshot parent is not a directory")
+        except BaseException:
+            os.close(parent_fd)
+            raise
+        return parent_fd
+
+    def _validate_file_stat(self, file_stat: os.stat_result) -> None:
+        if not stat.S_ISREG(file_stat.st_mode):
+            _protocol_error("progress snapshot is not a regular file")
+        if file_stat.st_uid != self._expected_uid or file_stat.st_gid != self._expected_gid:
+            _protocol_error("progress snapshot owner does not match")
+        if stat.S_IMODE(file_stat.st_mode) != 0o600:
+            _protocol_error("progress snapshot mode must be 0600")
+        if file_stat.st_nlink != 1:
+            _protocol_error("progress snapshot link count must be one")
+
+    def _stat_target(self, parent_fd: int) -> os.stat_result | None:
+        try:
+            file_stat = os.stat(self._target_name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise ProgressProtocolError("progress snapshot target cannot be inspected") from exc
+        self._validate_file_stat(file_stat)
+        return file_stat
+
+    def _read_persisted(self, parent_fd: int) -> tuple[dict[str, Any], os.stat_result]:
+        initial_stat = self._stat_target(parent_fd)
+        if initial_stat is None:
+            _protocol_error("progress snapshot does not exist")
+        try:
+            descriptor = os.open(
+                self._target_name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_fd,
+            )
+        except OSError as exc:
+            raise ProgressProtocolError("progress snapshot cannot be opened safely") from exc
+        try:
+            opened_stat = os.fstat(descriptor)
+            self._validate_file_stat(opened_stat)
+            if (opened_stat.st_dev, opened_stat.st_ino) != (initial_stat.st_dev, initial_stat.st_ino):
+                _protocol_error("progress snapshot changed while opening")
+            chunks: list[bytes] = []
+            remaining = MAX_PROGRESS_LINE_BYTES + 1
+            while remaining:
+                chunk = os.read(descriptor, remaining)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            if remaining == 0 and os.read(descriptor, 1):
+                _protocol_error("progress snapshot exceeds 4096 bytes")
+            payload = b"".join(chunks)
+            final_stat = os.fstat(descriptor)
+            self._validate_file_stat(final_stat)
+            current_stat = self._stat_target(parent_fd)
+            if current_stat is None or (final_stat.st_dev, final_stat.st_ino) != (
+                current_stat.st_dev,
+                current_stat.st_ino,
+            ):
+                _protocol_error("progress snapshot changed while reading")
+        except OSError as exc:
+            raise ProgressProtocolError("progress snapshot cannot be read") from exc
+        finally:
+            os.close(descriptor)
+
+        if not payload.endswith(b"\n") or payload[:-1].find(b"\n") != -1:
+            _protocol_error("progress snapshot must contain exactly one final newline")
+        try:
+            decoded = json.loads(
+                payload[:-1].decode("utf-8", errors="strict"),
+                object_pairs_hook=_reject_duplicate_keys,
+                parse_constant=_reject_json_constant,
+            )
+        except ProgressProtocolError:
+            raise
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise ProgressProtocolError("invalid progress snapshot JSON") from exc
+        if not isinstance(decoded, dict):
+            _protocol_error("progress snapshot JSON must be an object")
+        snapshot = _validate_snapshot(decoded, persisted=True)
+        if canonical_snapshot_line(snapshot) != payload:
+            _protocol_error("progress snapshot is not canonical JSON")
+        return snapshot, final_stat
+
+    def _write_all(self, descriptor: int, payload: bytes) -> None:
+        written = 0
+        while written < len(payload):
+            try:
+                count = os.write(descriptor, payload[written:])
+            except OSError as exc:
+                raise ProgressProtocolError("progress snapshot write failed") from exc
+            if count <= 0:
+                _protocol_error("progress snapshot write was incomplete")
+            written += count
+
+    def _write_snapshot(self, snapshot: Mapping[str, Any]) -> None:
+        normalized = _validate_snapshot(snapshot, persisted=True)
+        payload = canonical_snapshot_line(normalized)
+        parent_fd = self._open_parent()
+        temporary_fd: int | None = None
+        temporary_stat: os.stat_result | None = None
+        temporary_created = False
+        replaced = False
+        try:
+            if self._stat_target(parent_fd) is not None:
+                self._read_persisted(parent_fd)
+            try:
+                temporary_fd = os.open(
+                    self._TEMPORARY_NAME,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                    dir_fd=parent_fd,
+                )
+                temporary_created = True
+                temporary_stat = os.fstat(temporary_fd)
+            except OSError as exc:
+                raise ProgressProtocolError("progress snapshot temporary file cannot be created") from exc
+            try:
+                os.fchmod(temporary_fd, 0o600)
+                temporary_stat = os.fstat(temporary_fd)
+                self._validate_file_stat(temporary_stat)
+                self._write_all(temporary_fd, payload)
+                os.fsync(temporary_fd)
+            except OSError as exc:
+                raise ProgressProtocolError("progress snapshot temporary file cannot be finalized") from exc
+            finally:
+                os.close(temporary_fd)
+                temporary_fd = None
+            try:
+                os.replace(
+                    self._TEMPORARY_NAME,
+                    self._target_name,
+                    src_dir_fd=parent_fd,
+                    dst_dir_fd=parent_fd,
+                )
+            except OSError as exc:
+                raise ProgressProtocolError("progress snapshot atomic replace failed") from exc
+            replaced = True
+            replaced_stat = self._stat_target(parent_fd)
+            if replaced_stat is None or (replaced_stat.st_dev, replaced_stat.st_ino) != (
+                temporary_stat.st_dev,
+                temporary_stat.st_ino,
+            ):
+                _protocol_error("progress snapshot changed during replacement")
+            try:
+                os.fsync(parent_fd)
+            except OSError as exc:
+                raise ProgressProtocolError("progress snapshot directory cannot be finalized") from exc
+        finally:
+            if temporary_fd is not None:
+                os.close(temporary_fd)
+            if temporary_created and not replaced and temporary_stat is not None:
+                try:
+                    current_temporary_stat = os.stat(
+                        self._TEMPORARY_NAME,
+                        dir_fd=parent_fd,
+                        follow_symlinks=False,
+                    )
+                    if (current_temporary_stat.st_dev, current_temporary_stat.st_ino) == (
+                        temporary_stat.st_dev,
+                        temporary_stat.st_ino,
+                    ):
+                        os.unlink(self._TEMPORARY_NAME, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    pass
+            os.close(parent_fd)
+
+    def write_starting(self, run_binding_sha256: str, config_sha256: str) -> None:
+        _validate_hash("run_binding_sha256", run_binding_sha256)
+        _validate_hash("config_sha256", config_sha256)
+        self._write_snapshot(
+            {
+                "schema": PROGRESS_SNAPSHOT_SCHEMA,
+                "run_binding_sha256": run_binding_sha256,
+                "config_sha256": config_sha256,
+                "phase": "measurement",
+                "cell_index": 1,
+                "cell_count": 15,
+                "graph_size": 100,
+                "concurrency": 1,
+                "repetition_index": 0,
+                "repetition_count": 30,
+                "completed_repetitions": 0,
+                "total_repetitions": 450,
+                "completed_samples": 0,
+                "total_samples": 14400,
+                "update_sequence": 0,
+                "status": "starting",
+                "last_update_age_seconds": 0,
+            }
+        )
+
+    def write_running(self, event: Mapping[str, Any]) -> None:
+        normalized = _validate_event(event)
+        snapshot = dict(normalized)
+        snapshot["schema"] = PROGRESS_SNAPSHOT_SCHEMA
+        snapshot["last_update_age_seconds"] = 0
+        self._write_snapshot(snapshot)
+
+    def write_terminal(self, status: str, reason_class: str) -> None:
+        if type(status) is not str or status not in TERMINAL_STATUSES:
+            _protocol_error("terminal snapshot status has an invalid value")
+        if type(reason_class) is not str or reason_class not in TERMINAL_REASON_CLASSES:
+            _protocol_error("terminal snapshot reason class has an invalid value")
+        parent_fd = self._open_parent()
+        try:
+            snapshot, _ = self._read_persisted(parent_fd)
+        finally:
+            os.close(parent_fd)
+        if snapshot["status"] in TERMINAL_STATUSES:
+            _protocol_error("terminal progress snapshot cannot transition again")
+        snapshot["status"] = status
+        snapshot["terminal_reason_class"] = reason_class
+        snapshot["last_update_age_seconds"] = 0
+        self._write_snapshot(snapshot)
+
+    def read_view(self) -> dict[str, Any]:
+        parent_fd = self._open_parent()
+        try:
+            snapshot, file_stat = self._read_persisted(parent_fd)
+        finally:
+            os.close(parent_fd)
+        view = dict(snapshot)
+        view["last_update_age_seconds"] = max(0, math.floor(time.time() - file_stat.st_mtime))
+        return copy.deepcopy(view)
+
+
+class ProgressPipeDrainer:
+    """Drain canonical progress lines without retaining unbounded pipe input."""
+
+    def __init__(self, descriptor: int, state: FormalProgressState, store: ProgressSnapshotStore) -> None:
+        if type(descriptor) is not int or descriptor < 0:
+            _protocol_error("progress pipe descriptor must be a non-negative integer")
+        if not isinstance(state, FormalProgressState) or not isinstance(store, ProgressSnapshotStore):
+            _protocol_error("progress drainer dependencies are invalid")
+        self._descriptor = descriptor
+        self._state = state
+        self._store = store
+        self._lock = threading.Lock()
+        self._descriptor_lock = threading.Lock()
+        self._stopped = threading.Event()
+        self._aborted = threading.Event()
+        self._descriptor_closed = False
+        self._thread: threading.Thread | None = None
+        self._failure: ProgressProtocolError | None = None
+        self._last_view: dict[str, Any] | None = None
+        self._received_event = False
+
+    @property
+    def thread(self) -> threading.Thread:
+        if self._thread is None:
+            _protocol_error("progress drainer has not started")
+        return self._thread
+
+    @property
+    def failure(self) -> ProgressProtocolError | None:
+        with self._lock:
+            return self._failure
+
+    def _close_descriptor(self) -> None:
+        with self._descriptor_lock:
+            with self._lock:
+                if self._descriptor_closed:
+                    return
+                self._descriptor_closed = True
+                descriptor = self._descriptor
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+
+    def start(self) -> None:
+        with self._lock:
+            if self._thread is not None:
+                return
+            thread = threading.Thread(target=self._drain, name="formal-progress-drainer", daemon=True)
+            self._thread = thread
+        thread.start()
+
+    def _drain(self) -> None:
+        record = bytearray()
+        try:
+            while not self._aborted.is_set():
+                try:
+                    with self._descriptor_lock:
+                        if self._descriptor_closed:
+                            return
+                        readable, _, _ = select.select([self._descriptor], [], [], 0.1)
+                        if not readable:
+                            continue
+                        chunk = os.read(self._descriptor, 1)
+                except (OSError, ValueError) as exc:
+                    if self._aborted.is_set():
+                        return
+                    raise ProgressProtocolError("progress pipe cannot be monitored") from exc
+                if not chunk:
+                    if record:
+                        _protocol_error("progress pipe closed with a partial record")
+                    if not self._received_event:
+                        _protocol_error("progress pipe closed without events")
+                    return
+                record.extend(chunk)
+                if len(record) > MAX_PROGRESS_LINE_BYTES:
+                    _protocol_error("progress pipe record exceeds 4096 bytes")
+                if chunk != b"\n":
+                    continue
+                event = decode_progress_line(bytes(record))
+                consumed = self._state.consume(event)
+                self._store.write_running(consumed)
+                self._last_view = self._store.read_view()
+                self._received_event = True
+                record.clear()
+        except ProgressProtocolError as exc:
+            with self._lock:
+                self._failure = exc
+        finally:
+            self._close_descriptor()
+            self._stopped.set()
+
+    def finish(self, timeout_seconds: float) -> dict[str, Any] | None:
+        if type(timeout_seconds) not in {int, float} or not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            _protocol_error("progress drainer timeout must be finite and positive")
+        thread = self.thread
+        thread.join(timeout_seconds)
+        if thread.is_alive():
+            self.abort()
+            _protocol_error("progress drainer did not stop")
+        failure = self.failure
+        if failure is not None:
+            raise failure
+        return copy.deepcopy(self._last_view)
+
+    def abort(self) -> None:
+        self._aborted.set()
+        self._close_descriptor()

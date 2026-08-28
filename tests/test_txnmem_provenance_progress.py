@@ -1,6 +1,14 @@
 import json
+import math
+import os
+import stat
+import tempfile
+import time
 import unittest
+from pathlib import Path
+from unittest import mock
 
+import txnmem_provenance_progress as progress
 from txnmem_provenance_progress import (
     FORMAL_MATRIX_CELLS,
     FormalProgressState,
@@ -211,6 +219,267 @@ class TxnMemProvenanceProgressTests(unittest.TestCase):
         first["completed_samples"] = 999
         second = state.consume(self.event(repetition=2, completed=2, sequence=2))
         self.assertEqual(second["completed_samples"], 64)
+
+
+class TxnMemProgressSnapshotStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary_directory.cleanup)
+        self.path = Path(self.temporary_directory.name) / "formal-progress.json"
+        self.store = progress.ProgressSnapshotStore(
+            self.path, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+
+    def event(self, *, sequence=1):
+        graph_size, concurrency = FORMAL_MATRIX_CELLS[(sequence - 1) // 30]
+        return build_progress_event(
+            run_binding_sha256="a" * 64,
+            config_sha256="b" * 64,
+            cell_index=(sequence - 1) // 30 + 1,
+            graph_size=graph_size,
+            concurrency=concurrency,
+            repetition_index=(sequence - 1) % 30 + 1,
+            completed_repetitions=sequence,
+            completed_samples=sequence * 32,
+            update_sequence=sequence,
+        )
+
+    def test_running_snapshot_is_canonical_private_and_atomically_replaced(self):
+        self.store.write_running(self.event())
+        first_document = self.path.read_bytes()
+        first_stat = self.path.stat()
+        self.assertTrue(stat.S_ISREG(first_stat.st_mode))
+        self.assertEqual(stat.S_IMODE(first_stat.st_mode), 0o600)
+        self.assertEqual(first_document, progress.canonical_snapshot_line(self.store.read_view()))
+        self.assertEqual(first_document.count(b"\n"), 1)
+
+        self.store.write_running(self.event(sequence=2))
+        second_document = self.path.read_bytes()
+        self.assertNotEqual(first_document, second_document)
+        self.assertEqual(second_document, progress.canonical_snapshot_line(self.store.read_view()))
+        self.assertEqual(self.store.read_view()["update_sequence"], 2)
+        self.assertEqual(set(self.store.read_view()), progress.SNAPSHOT_FIELDS)
+
+    def test_replace_failure_keeps_previous_complete_document(self):
+        self.store.write_running(self.event())
+        previous_document = self.path.read_bytes()
+        with mock.patch("txnmem_provenance_progress.os.replace", side_effect=OSError("replace")):
+            with self.assertRaises(ProgressProtocolError):
+                self.store.write_running(self.event(sequence=2))
+        self.assertEqual(self.path.read_bytes(), previous_document)
+        self.assertEqual(self.store.read_view()["update_sequence"], 1)
+
+    def test_replace_failure_never_unlinks_a_replaced_temporary_file(self):
+        self.store.write_running(self.event())
+        temporary_path = self.path.parent / progress.ProgressSnapshotStore._TEMPORARY_NAME
+
+        def replace_after_temporary_substitution(*_args, **_kwargs):
+            temporary_path.unlink()
+            temporary_path.write_bytes(b"unrelated")
+            temporary_path.chmod(0o600)
+            raise OSError("replace")
+
+        with mock.patch("txnmem_provenance_progress.os.replace", replace_after_temporary_substitution):
+            with self.assertRaises(ProgressProtocolError):
+                self.store.write_running(self.event(sequence=2))
+        self.assertEqual(temporary_path.read_bytes(), b"unrelated")
+
+    def test_starting_snapshot_and_read_view_have_only_sanitized_fields(self):
+        self.store.write_starting("a" * 64, "b" * 64)
+        persisted = json.loads(self.path.read_text())
+        view = self.store.read_view()
+        self.assertEqual(persisted["last_update_age_seconds"], 0)
+        self.assertEqual(view["cell_index"], 1)
+        self.assertEqual(view["graph_size"], 100)
+        self.assertEqual(view["concurrency"], 1)
+        self.assertEqual(view["repetition_index"], 0)
+        self.assertEqual(view["completed_repetitions"], 0)
+        self.assertEqual(view["completed_samples"], 0)
+        self.assertEqual(view["update_sequence"], 0)
+        self.assertEqual(set(view), progress.SNAPSHOT_FIELDS)
+        self.assertNotIn("timestamp", view)
+        self.assertNotIn("path", view)
+
+    def test_read_view_derives_age_from_same_validated_file_metadata(self):
+        self.store.write_running(self.event())
+        old_mtime = time.time() - 2.2
+        os.utime(self.path, (old_mtime, old_mtime))
+        view = self.store.read_view()
+        self.assertGreaterEqual(view["last_update_age_seconds"], 2)
+        self.assertEqual(view["last_update_age_seconds"], math.floor(time.time() - self.path.stat().st_mtime))
+
+    def test_unsafe_snapshot_targets_are_rejected_without_replacement(self):
+        cases = []
+        symlink_target = Path(self.temporary_directory.name) / "symlink-target.json"
+        symlink_target.symlink_to("missing-target.json")
+        cases.append((symlink_target, None, "symlink target"))
+
+        nonregular_target = Path(self.temporary_directory.name) / "directory-target.json"
+        nonregular_target.mkdir()
+        cases.append((nonregular_target, None, "non-regular target"))
+
+        linked_target = Path(self.temporary_directory.name) / "linked-target.json"
+        linked_target.write_bytes(b"{}\n")
+        linked_target.chmod(0o600)
+        os.link(linked_target, Path(self.temporary_directory.name) / "linked-target-copy.json")
+        cases.append((linked_target, None, "hard-linked target"))
+
+        wrong_mode_target = Path(self.temporary_directory.name) / "wrong-mode-target.json"
+        wrong_mode_target.write_bytes(b"{}\n")
+        wrong_mode_target.chmod(0o644)
+        cases.append((wrong_mode_target, None, "wrong mode"))
+
+        wrong_owner_target = Path(self.temporary_directory.name) / "wrong-owner-target.json"
+        wrong_owner_target.write_bytes(b"{}\n")
+        wrong_owner_target.chmod(0o600)
+        cases.append((wrong_owner_target, os.getuid() + 1, "wrong owner"))
+
+        for target, expected_uid, label in cases:
+            with self.subTest(target=label):
+                store = progress.ProgressSnapshotStore(
+                    target,
+                    expected_uid=os.getuid() if expected_uid is None else expected_uid,
+                    expected_gid=os.getgid(),
+                )
+                with self.assertRaises(ProgressProtocolError):
+                    store.write_starting("a" * 64, "b" * 64)
+
+    def test_symlink_parent_and_malformed_persisted_json_are_rejected(self):
+        actual_parent = Path(self.temporary_directory.name) / "actual-parent"
+        actual_parent.mkdir()
+        linked_parent = Path(self.temporary_directory.name) / "linked-parent"
+        linked_parent.symlink_to(actual_parent, target_is_directory=True)
+        linked_store = progress.ProgressSnapshotStore(
+            linked_parent / "snapshot.json", expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+        with self.assertRaises(ProgressProtocolError):
+            linked_store.write_starting("a" * 64, "b" * 64)
+
+        self.path.write_bytes(b'{"not":"a snapshot"}\n')
+        self.path.chmod(0o600)
+        with self.assertRaises(ProgressProtocolError):
+            self.store.read_view()
+
+    def test_starting_snapshot_rejects_boolean_zero_counts(self):
+        self.store.write_starting("a" * 64, "b" * 64)
+        malformed = json.loads(self.path.read_text())
+        malformed["repetition_index"] = False
+        self.path.write_bytes(
+            json.dumps(malformed, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        )
+        self.path.chmod(0o600)
+        with self.assertRaises(ProgressProtocolError):
+            self.store.read_view()
+
+    def test_terminal_status_and_reason_are_restricted(self):
+        self.store.write_starting("a" * 64, "b" * 64)
+        for status, reason in (
+            ("failed", "formal_eligibility_failed"),
+            ("completed", "raw_exception"),
+        ):
+            with self.subTest(status=status, reason=reason):
+                with self.assertRaises(ProgressProtocolError):
+                    self.store.write_terminal(status, reason)
+        self.store.write_terminal("blocked", "formal_eligibility_failed")
+        view = self.store.read_view()
+        self.assertEqual(view["status"], "blocked")
+        self.assertEqual(view["terminal_reason_class"], "formal_eligibility_failed")
+
+
+class TxnMemProgressPipeDrainerTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary_directory.cleanup)
+        self.reader, self.writer = os.pipe()
+        self.addCleanup(self._close_writer)
+        self.addCleanup(self._close_reader)
+        self.store = progress.ProgressSnapshotStore(
+            Path(self.temporary_directory.name) / "formal-progress.json",
+            expected_uid=os.getuid(),
+            expected_gid=os.getgid(),
+        )
+        self.state = FormalProgressState("a" * 64, "b" * 64)
+
+    def _close_reader(self):
+        try:
+            os.close(self.reader)
+        except OSError:
+            pass
+
+    def _close_writer(self):
+        try:
+            os.close(self.writer)
+        except OSError:
+            pass
+
+    def event(self, sequence):
+        graph_size, concurrency = FORMAL_MATRIX_CELLS[(sequence - 1) // 30]
+        return build_progress_event(
+            run_binding_sha256="a" * 64,
+            config_sha256="b" * 64,
+            cell_index=(sequence - 1) // 30 + 1,
+            graph_size=graph_size,
+            concurrency=concurrency,
+            repetition_index=(sequence - 1) % 30 + 1,
+            completed_repetitions=sequence,
+            completed_samples=sequence * 32,
+            update_sequence=sequence,
+        )
+
+    def _drainer(self):
+        drainer = progress.ProgressPipeDrainer(self.reader, self.state, self.store)
+        drainer.start()
+        return drainer
+
+    def _write_and_close(self, payload):
+        os.write(self.writer, payload)
+        self._close_writer()
+
+    def test_drains_two_real_pipe_records_and_returns_the_second_snapshot(self):
+        drainer = self._drainer()
+        self._write_and_close(
+            canonical_progress_line(self.event(1)) + canonical_progress_line(self.event(2))
+        )
+        snapshot = drainer.finish(2.0)
+        self.assertEqual(snapshot["update_sequence"], 2)
+        self.assertIsNone(drainer.failure)
+        self.assertFalse(drainer.thread.is_alive())
+
+    def test_malformed_partial_oversized_and_empty_pipe_failures_are_retained(self):
+        cases = (
+            (b"{malformed}\n", "malformed"),
+            (canonical_progress_line(self.event(1))[:-1], "partial"),
+            (b"x" * 4096 + b"\n", "oversized"),
+            (b"", "no events"),
+        )
+        for payload, label in cases:
+            with self.subTest(case=label):
+                reader, writer = os.pipe()
+                store = progress.ProgressSnapshotStore(
+                    Path(self.temporary_directory.name) / (label + ".json"),
+                    expected_uid=os.getuid(),
+                    expected_gid=os.getgid(),
+                )
+                drainer = progress.ProgressPipeDrainer(
+                    reader, FormalProgressState("a" * 64, "b" * 64), store
+                )
+                drainer.start()
+                if payload:
+                    os.write(writer, payload)
+                os.close(writer)
+                with self.assertRaises(ProgressProtocolError):
+                    drainer.finish(2.0)
+                self.assertIsInstance(drainer.failure, ProgressProtocolError)
+                self.assertFalse(drainer.thread.is_alive())
+
+    def test_abort_closes_the_reader_once_and_stops_the_daemon_thread(self):
+        drainer = self._drainer()
+        drainer.abort()
+        drainer.abort()
+        self._close_writer()
+        self.assertIsNone(drainer.finish(2.0))
+        self.assertIsNone(drainer.failure)
+        self.assertFalse(drainer.thread.is_alive())
 
 
 if __name__ == "__main__":
