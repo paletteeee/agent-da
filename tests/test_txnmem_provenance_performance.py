@@ -3,6 +3,7 @@ import hashlib
 import inspect
 import json
 import math
+import os
 import threading
 import time
 import unittest
@@ -1943,17 +1944,15 @@ class ProvenanceAggregationTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             events = []
-            real_write = FormalStore.write_json_exclusive
+            real_link = os.link
 
-            def observed_write(store, *parts, payload):
-                if parts == ("bundles", f"{bundle_id}.json"):
-                    events.append("pointer")
-                return real_write(store, *parts, payload=payload)
+            def observed_link(source, target, **kwargs):
+                events.append("pointer")
+                return real_link(source, target, **kwargs)
 
-            with patch.object(
-                FormalStore,
-                "write_json_exclusive",
-                new=observed_write,
+            with patch(
+                "txnmem_formal_io.os.link",
+                side_effect=observed_link,
             ):
                 publish_provenance_bundle(
                     root,
@@ -1980,6 +1979,288 @@ class ProvenanceAggregationTests(unittest.TestCase):
                     _precommit_check="forbidden",
                 )
             self.assertFalse((Path(tmp) / "bundle_objects").exists())
+
+    def test_pointer_writer_materializes_before_atomic_no_replace_link(self):
+        from txnmem_formal_io import FormalStore
+
+        payload = {
+            "schema": "pointer-fixture-v1",
+            "publication_status": "complete",
+            "value": 7,
+        }
+        expected = (
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            store = FormalStore(root)
+            store.ensure_directory("bundles")
+            final_path = root / "bundles" / "pointer.json"
+            hook_observations = []
+            link_observations = []
+            real_link = os.link
+
+            def precommit():
+                temporary = [
+                    path
+                    for path in (root / "bundles").iterdir()
+                    if path.name != final_path.name
+                ]
+                hook_observations.append(
+                    (
+                        final_path.exists(),
+                        len(temporary),
+                        temporary[0].read_bytes() if len(temporary) == 1 else b"",
+                        temporary[0].stat().st_mode & 0o777
+                        if len(temporary) == 1
+                        else None,
+                    )
+                )
+
+            def observed_link(source, target, **kwargs):
+                link_observations.append((source, target, dict(kwargs)))
+                return real_link(source, target, **kwargs)
+
+            with patch(
+                "txnmem_formal_io.os.link",
+                side_effect=observed_link,
+            ):
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload=payload,
+                    _precommit_check=precommit,
+                )
+
+            final_bytes = final_path.read_bytes()
+            residue = sorted(path.name for path in (root / "bundles").iterdir())
+
+        self.assertEqual(hook_observations, [(False, 1, expected, 0o600)])
+        self.assertEqual(len(link_observations), 1)
+        self.assertEqual(link_observations[0][1], "pointer.json")
+        self.assertIs(link_observations[0][2]["follow_symlinks"], False)
+        self.assertEqual(final_bytes, expected)
+        self.assertEqual(residue, ["pointer.json"])
+
+    def test_pointer_writer_interruption_is_absent_or_complete(self):
+        from txnmem_formal_io import FormalStore
+
+        class PointerInterruption(BaseException):
+            pass
+
+        payload = {
+            "schema": "pointer-fixture-v1",
+            "publication_status": "complete",
+        }
+        expected = (
+            json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            store = FormalStore(root)
+            store.ensure_directory("bundles")
+            final_path = root / "bundles" / "pointer.json"
+            before = PointerInterruption("before-link")
+
+            with self.assertRaises(BaseException) as raised:
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload=payload,
+                    _precommit_check=lambda: (_ for _ in ()).throw(before),
+                )
+
+            self.assertIs(raised.exception, before)
+            self.assertFalse(final_path.exists())
+            self.assertEqual(list((root / "bundles").iterdir()), [])
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            store = FormalStore(root)
+            store.ensure_directory("bundles")
+            final_path = root / "bundles" / "pointer.json"
+            after = PointerInterruption("after-link")
+            real_link = os.link
+
+            def link_then_interrupt(source, target, **kwargs):
+                real_link(source, target, **kwargs)
+                raise after
+
+            with patch(
+                "txnmem_formal_io.os.link",
+                side_effect=link_then_interrupt,
+            ), self.assertRaises(BaseException) as raised:
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload=payload,
+                    _precommit_check=lambda: None,
+                )
+
+            self.assertIs(raised.exception, after)
+            self.assertEqual(final_path.read_bytes(), expected)
+            self.assertEqual(
+                sorted(path.name for path in (root / "bundles").iterdir()),
+                ["pointer.json"],
+            )
+
+    def test_pointer_writer_filesystem_failures_never_publish_partial_bytes(self):
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        payload = {
+            "schema": "pointer-fixture-v1",
+            "publication_status": "complete",
+            "value": 11,
+        }
+        expected = (
+            json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+
+        def new_store():
+            temporary = TemporaryDirectory()
+            root = Path(temporary.name).resolve()
+            store = FormalStore(root)
+            store.ensure_directory("bundles")
+            return temporary, root, store
+
+        for failure_name in ("short-write", "file-fsync", "link"):
+            with self.subTest(failure=failure_name):
+                temporary, root, store = new_store()
+                with temporary:
+                    final_path = root / "bundles" / "pointer.json"
+                    if failure_name == "short-write":
+                        operation_patch = patch(
+                            "txnmem_formal_io.os.write",
+                            side_effect=[1, 0],
+                        )
+                    elif failure_name == "file-fsync":
+                        operation_patch = patch(
+                            "txnmem_formal_io.os.fsync",
+                            side_effect=OSError("file-fsync-failure"),
+                        )
+                    else:
+                        operation_patch = patch(
+                            "txnmem_formal_io.os.link",
+                            side_effect=OSError("link-failure"),
+                        )
+                    with operation_patch, self.assertRaises(FormalIOError):
+                        store._publish_json_exclusive(
+                            "bundles", "pointer.json", payload=payload
+                        )
+                    self.assertFalse(final_path.exists())
+                    self.assertEqual(list((root / "bundles").iterdir()), [])
+
+        temporary, root, store = new_store()
+        with temporary:
+            final_path = root / "bundles" / "pointer.json"
+            real_open = os.open
+
+            def fail_temporary_open(path, flags, *args, **kwargs):
+                if flags & os.O_CREAT:
+                    raise OSError("temporary-open-failure")
+                return real_open(path, flags, *args, **kwargs)
+
+            with patch(
+                "txnmem_formal_io.os.open",
+                side_effect=fail_temporary_open,
+            ), self.assertRaises(FormalIOError):
+                store._publish_json_exclusive(
+                    "bundles", "pointer.json", payload=payload
+                )
+            self.assertFalse(final_path.exists())
+            self.assertEqual(list((root / "bundles").iterdir()), [])
+
+        for substitution in ("existing", "symlink"):
+            with self.subTest(substitution=substitution):
+                temporary, root, store = new_store()
+                with temporary:
+                    final_path = root / "bundles" / "pointer.json"
+                    sentinel = root / "sentinel.json"
+                    sentinel.write_text("sentinel", encoding="utf-8")
+                    if substitution == "existing":
+                        final_path.write_text("original", encoding="utf-8")
+                    else:
+                        final_path.symlink_to(sentinel)
+                    with self.assertRaises(FormalIOError):
+                        store._publish_json_exclusive(
+                            "bundles", "pointer.json", payload=payload
+                        )
+                    if substitution == "existing":
+                        self.assertEqual(final_path.read_bytes(), b"original")
+                    else:
+                        self.assertTrue(final_path.is_symlink())
+                    self.assertFalse(
+                        any(
+                            path.name not in {"pointer.json"}
+                            for path in (root / "bundles").iterdir()
+                        )
+                    )
+
+        temporary, root, store = new_store()
+        with temporary:
+            final_path = root / "bundles" / "pointer.json"
+            real_fsync = os.fsync
+            fsync_calls = 0
+
+            def fail_first_directory_sync(descriptor):
+                nonlocal fsync_calls
+                fsync_calls += 1
+                if fsync_calls == 2:
+                    raise OSError("directory-fsync-failure")
+                return real_fsync(descriptor)
+
+            with patch(
+                "txnmem_formal_io.os.fsync",
+                side_effect=fail_first_directory_sync,
+            ), self.assertRaises(FormalIOError):
+                store._publish_json_exclusive(
+                    "bundles", "pointer.json", payload=payload
+                )
+            self.assertEqual(final_path.read_bytes(), expected)
+            self.assertEqual(
+                sorted(path.name for path in (root / "bundles").iterdir()),
+                ["pointer.json"],
+            )
+
+        temporary, root, store = new_store()
+        with temporary:
+            final_path = root / "bundles" / "pointer.json"
+            with patch(
+                "txnmem_formal_io.os.unlink",
+                side_effect=OSError("temporary-cleanup-failure"),
+            ), self.assertRaises(FormalIOError):
+                store._publish_json_exclusive(
+                    "bundles", "pointer.json", payload=payload
+                )
+            self.assertEqual(final_path.read_bytes(), expected)
+            private_residue = [
+                path
+                for path in (root / "bundles").iterdir()
+                if path.name != "pointer.json"
+            ]
+            self.assertEqual(len(private_residue), 1)
+            self.assertTrue(private_residue[0].name.startswith(".pointer.json."))
+
+        bundle_id, _samples, _repetitions, _report = (
+            self._diagnostic_publication_fixture()
+        )
+        temporary, root, store = new_store()
+        with temporary:
+            stale = root / "bundles" / f".{bundle_id}.json.stale.tmp"
+            stale.write_bytes(expected)
+            with self.assertRaises((FormalIOError, ProvenancePerformanceError)):
+                candidate_attestation_material(root, bundle_id)
+            self.assertTrue(stale.is_file())
+            self.assertFalse((root / "bundles" / f"{bundle_id}.json").exists())
 
     def test_formal_named_bundle_cannot_dispatch_to_diagnostic_validator(self):
         config_hash = formal_matrix_config_sha256()

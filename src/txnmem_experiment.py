@@ -1623,7 +1623,10 @@ def main(
                         publication_traceback
                     )
         except Exception as exc:
-            check_interruption()
+            try:
+                check_interruption()
+            except Exception:
+                pass
             failure_provenance = _safe_failure_provenance(exc)
             blocked = {
                 "schema": "txnmem-provenance-performance-blocked-v3",

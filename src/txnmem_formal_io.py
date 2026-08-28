@@ -6,11 +6,12 @@ import json
 import math
 import os
 import re
+import secrets
 import stat
 from contextlib import contextmanager
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from txnmem_benchmark_manifests import _canonical_hash, shard_manifest
 
@@ -309,6 +310,146 @@ class FormalStore:
             if descriptor is not None:
                 os.close(descriptor)
             os.close(parent)
+
+    def _publish_json_exclusive(
+        self,
+        *parts: str,
+        payload: Any,
+        _precommit_check: Callable[[], None] | None = None,
+    ) -> None:
+        """Publish complete JSON with one same-directory no-replace link."""
+
+        if _precommit_check is not None and not callable(_precommit_check):
+            raise TypeError("private publication precommit check must be callable")
+        try:
+            encoded = (
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+                + "\n"
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise FormalIOError("formal payload is not valid JSON") from exc
+
+        parent, name = self._open_parent(parts, create=True)
+        temporary_name = f".{name}.{secrets.token_hex(16)}.tmp"
+        descriptor: int | None = None
+        temporary_created = False
+        primary_failure: BaseException | None = None
+        primary_traceback = None
+        cleanup_failures: list[BaseException] = []
+        try:
+            flags = (
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0)
+            )
+            try:
+                descriptor = os.open(
+                    temporary_name,
+                    flags,
+                    0o600,
+                    dir_fd=parent,
+                )
+                temporary_created = True
+                metadata = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_nlink != 1
+                    or stat.S_IMODE(metadata.st_mode) != 0o600
+                ):
+                    raise FormalIOError(
+                        "private publication temporary file is unsafe"
+                    )
+                offset = 0
+                while offset < len(encoded):
+                    written = os.write(descriptor, encoded[offset:])
+                    if type(written) is not int or written <= 0:
+                        raise OSError("short publication write")
+                    offset += written
+                os.fsync(descriptor)
+                metadata = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_nlink != 1
+                    or metadata.st_size != len(encoded)
+                ):
+                    raise FormalIOError(
+                        "private publication temporary file changed"
+                    )
+                closing_descriptor = descriptor
+                descriptor = None
+                os.close(closing_descriptor)
+            except FileExistsError as exc:
+                raise FormalIOError(
+                    "private publication temporary file already exists"
+                ) from exc
+            except FormalIOError:
+                raise
+            except OSError as exc:
+                raise FormalIOError(
+                    "cannot materialize private publication temporary file"
+                ) from exc
+
+            try:
+                if _precommit_check is not None:
+                    _precommit_check()
+                os.link(
+                    temporary_name,
+                    name,
+                    src_dir_fd=parent,
+                    dst_dir_fd=parent,
+                    follow_symlinks=False,
+                )
+            except FileExistsError as exc:
+                raise FormalIOError(
+                    f"refusing to overwrite existing formal file: {self.path(*parts)}"
+                ) from exc
+            except OSError as exc:
+                raise FormalIOError(
+                    f"cannot publish formal file: {self.path(*parts)}"
+                ) from exc
+            try:
+                os.fsync(parent)
+            except OSError as exc:
+                raise FormalIOError(
+                    f"cannot synchronize formal file: {self.path(*parts)}"
+                ) from exc
+        except BaseException as exc:
+            primary_failure = exc
+            primary_traceback = exc.__traceback__
+        finally:
+            if descriptor is not None:
+                closing_descriptor = descriptor
+                descriptor = None
+                try:
+                    os.close(closing_descriptor)
+                except BaseException as exc:
+                    cleanup_failures.append(exc)
+            if temporary_created:
+                try:
+                    os.unlink(temporary_name, dir_fd=parent)
+                except BaseException as exc:
+                    cleanup_failures.append(exc)
+                try:
+                    os.fsync(parent)
+                except BaseException as exc:
+                    cleanup_failures.append(exc)
+            try:
+                os.close(parent)
+            except BaseException as exc:
+                cleanup_failures.append(exc)
+
+        if primary_failure is not None:
+            raise primary_failure.with_traceback(primary_traceback)
+        if cleanup_failures:
+            raise FormalIOError("formal publication cleanup failed") from cleanup_failures[0]
 
     @contextmanager
     def open_text_exclusive(self, *parts: str):

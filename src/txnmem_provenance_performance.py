@@ -2509,10 +2509,11 @@ def publish_provenance_bundle(
         ).hexdigest(),
         "publication_status": "complete",
     }
-    if _precommit_check is not None:
-        _precommit_check()
-    store.write_json_exclusive(
-        "bundles", f"{bundle_id}.json", payload=pointer
+    store._publish_json_exclusive(
+        "bundles",
+        f"{bundle_id}.json",
+        payload=pointer,
+        _precommit_check=_precommit_check,
     )
     return store.path(
         "bundle_objects", object_id, "results", "provenance_performance.json"

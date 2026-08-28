@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import ctypes
+import errno
 from email import policy as email_policy
 from email.parser import BytesParser
 import functools
@@ -161,6 +162,40 @@ class _MonitorCandidateExited(RuntimeError):
 
 class _CollectorInterruption(RuntimeError):
     """The collector was asked to stop through its self-pipe signal latch."""
+
+
+def _require_pidfd_support() -> None:
+    """Fail closed unless the formal Linux pidfd signal boundary is available."""
+
+    if (
+        not sys.platform.startswith("linux")
+        or not callable(getattr(os, "pidfd_open", None))
+        or not callable(getattr(signal, "pidfd_send_signal", None))
+    ):
+        raise CollectorError("formal pidfd support is unavailable")
+
+
+def _pidfd_open(pid: int) -> int:
+    _require_pidfd_support()
+    if type(pid) is not int or pid <= 0:
+        raise CollectorError("formal pidfd target is invalid")
+    descriptor = os.pidfd_open(pid, 0)
+    if type(descriptor) is not int or descriptor < 0:
+        raise CollectorError("formal pidfd open returned an invalid descriptor")
+    return descriptor
+
+
+def _pidfd_send_signal(descriptor: int, signal_number: int) -> None:
+    _require_pidfd_support()
+    if type(descriptor) is not int or descriptor < 0:
+        raise CollectorError("formal pidfd descriptor is invalid")
+    signal.pidfd_send_signal(descriptor, signal_number, None, 0)
+
+
+def _pidfd_close(descriptor: int) -> None:
+    if type(descriptor) is not int or descriptor < 0:
+        raise CollectorError("formal pidfd descriptor is invalid")
+    os.close(descriptor)
 
 
 class _SignalLatch:
@@ -369,6 +404,28 @@ def _attempt_progress_blocker(
         pass
 
 
+def _complete_progress_terminal(
+    progress_completer: Callable[[], Mapping[str, Any]],
+    progress_blocker: Callable[[], None] | None,
+) -> dict[str, Any]:
+    """Complete progress while retaining the exact active primary failure."""
+
+    try:
+        terminal = progress_completer()
+        if (
+            not isinstance(terminal, Mapping)
+            or terminal.get("status") != "completed"
+        ):
+            raise CollectorError("candidate progress terminal is invalid")
+    except Exception:
+        _attempt_progress_blocker(progress_blocker)
+        raise
+    except BaseException:
+        _attempt_progress_blocker(progress_blocker)
+        raise
+    return dict(terminal)
+
+
 @dataclass(frozen=True)
 class _FormalChildSpec:
     command: tuple[str, ...]
@@ -396,6 +453,7 @@ class _GatedCandidate:
     _progress_state: FormalProgressState | None = None
     _bound_start_identity: str | None = None
     _formal_uid: int | None = None
+    _leader_pidfd: int | None = None
     gate_released_monotonic_ns: int | None = None
     exit_observed_monotonic_ns: int | None = None
 
@@ -450,6 +508,13 @@ class _GatedCandidate:
             self._progress_drainer = None
             try:
                 progress_drainer.abort()
+            except BaseException as exc:
+                failures.append(exc)
+        if self._leader_pidfd is not None:
+            descriptor = self._leader_pidfd
+            self._leader_pidfd = None
+            try:
+                _pidfd_close(descriptor)
             except BaseException as exc:
                 failures.append(exc)
         if failures:
@@ -645,6 +710,63 @@ class _GatedCandidate:
             )
         return second
 
+    def _signal_formal_inventory(
+        self,
+        inventory: Mapping[int, str],
+        signal_number: int,
+    ) -> None:
+        """Bind every exact member to a pidfd before sending any signal."""
+
+        expected = dict(inventory)
+        if not expected or any(
+            type(pid) is not int
+            or pid <= 0
+            or not isinstance(start_identity, str)
+            or not start_identity.isdigit()
+            for pid, start_identity in expected.items()
+        ):
+            raise CollectorError("candidate pidfd inventory is invalid")
+        opened: list[tuple[int, int]] = []
+        primary_failure: BaseException | None = None
+        primary_traceback = None
+        close_failures: list[BaseException] = []
+        try:
+            for pid in sorted(expected):
+                try:
+                    descriptor = _pidfd_open(pid)
+                except OSError:
+                    raise CollectorError(
+                        "candidate pidfd binding failed"
+                    ) from None
+                opened.append((pid, descriptor))
+            observed_after_open = self._formal_group_members()
+            if observed_after_open != expected:
+                raise CollectorError(
+                    "candidate surviving process-group identity changed"
+                )
+            for _pid, descriptor in opened:
+                try:
+                    _pidfd_send_signal(descriptor, signal_number)
+                except OSError as exc:
+                    if exc.errno == errno.ESRCH:
+                        continue
+                    raise CollectorError(
+                        "candidate pidfd signal failed"
+                    ) from None
+        except BaseException as exc:
+            primary_failure = exc
+            primary_traceback = exc.__traceback__
+        finally:
+            for _pid, descriptor in opened:
+                try:
+                    _pidfd_close(descriptor)
+                except BaseException as exc:
+                    close_failures.append(exc)
+        if primary_failure is not None:
+            raise primary_failure.with_traceback(primary_traceback)
+        if close_failures:
+            raise CollectorError("candidate pidfd cleanup failed") from None
+
     def terminate_validated_group(
         self, *, term_seconds: float = 5.0, kill_seconds: float = 5.0
     ) -> None:
@@ -665,32 +787,47 @@ class _GatedCandidate:
                 ) from None
             if running:
                 self._validate_bound_group()
-                self._require_stable_formal_group_inventory()
-                try:
-                    os.killpg(self.process.pid, signal.SIGTERM)
-                except OSError:
-                    raise CollectorError(
-                        "candidate process-group termination failed"
-                    ) from None
-            if self._wait_for_formal_quiescence(float(term_seconds)):
+            initial_inventory = self._formal_group_members()
+            if not initial_inventory:
+                self._require_formal_quiescence()
                 self.exit_observed_monotonic_ns = time.monotonic_ns()
                 return
-            first_survivors = self._validate_surviving_formal_group()
-            second_survivors = self._validate_surviving_formal_group()
-            if first_survivors != second_survivors:
+            leader_start = (
+                self._bound_start_identity.rsplit(":", 1)[-1]
+                if self._bound_start_identity is not None
+                else ""
+            )
+            if (
+                not leader_start.isdigit()
+                or (
+                    running
+                    and initial_inventory.get(self.process.pid) != leader_start
+                )
+                or any(
+                    not start.isdigit() or int(start) < int(leader_start)
+                    for start in initial_inventory.values()
+                )
+            ):
                 raise CollectorError(
                     "candidate surviving process-group identity changed"
                 )
-            try:
-                os.killpg(self.process.pid, signal.SIGKILL)
-            except OSError:
-                raise CollectorError("candidate process-group kill failed") from None
-            if not self._wait_for_formal_quiescence(float(kill_seconds)):
-                raise CollectorError(
-                    "candidate process-group and UID quiescence was not proven"
-                )
-            self.exit_observed_monotonic_ns = time.monotonic_ns()
-            return
+            self._signal_formal_inventory(initial_inventory, signal.SIGTERM)
+            if self._wait_for_formal_quiescence(float(term_seconds)):
+                self.exit_observed_monotonic_ns = time.monotonic_ns()
+                return
+            kill_deadline = time.monotonic() + float(kill_seconds)
+            while True:
+                survivors = self._validate_surviving_formal_group()
+                self._signal_formal_inventory(survivors, signal.SIGKILL)
+                remaining = kill_deadline - time.monotonic()
+                if remaining <= 0.0:
+                    break
+                if self._wait_for_formal_quiescence(min(0.05, remaining)):
+                    self.exit_observed_monotonic_ns = time.monotonic_ns()
+                    return
+            raise CollectorError(
+                "candidate process-group and UID quiescence was not proven"
+            )
         try:
             running = self.process.poll() is None
         except BaseException:
@@ -2038,6 +2175,7 @@ def _start_gated_candidate(
     if formal_uid is not None and formal_gid is not None:
         if not hasattr(os, "geteuid") or os.geteuid() != 0:
             raise CollectorError("formal child launch requires root")
+        _require_pidfd_support()
         preexec_fn = functools.partial(
             _prepare_formal_child_process,
             os.getpid(),
@@ -2064,19 +2202,61 @@ def _start_gated_candidate(
         if descriptor is not None and descriptor in owned_descriptors:
             owned_descriptors.remove(descriptor)
 
+    def close_startup_leader_pidfd() -> list[BaseException]:
+        nonlocal startup_leader_pidfd
+        failures: list[BaseException] = []
+        if startup_leader_pidfd is not None:
+            descriptor = startup_leader_pidfd
+            startup_leader_pidfd = None
+            try:
+                _pidfd_close(descriptor)
+            except BaseException as exc:
+                failures.append(exc)
+        return failures
+
     def stop_process(process: subprocess.Popen[Any]) -> list[BaseException]:
+        nonlocal startup_absence_proven
         failures: list[BaseException] = []
         if formal_uid is not None:
             if startup_start_identity is None:
                 try:
                     process.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    if startup_leader_pidfd is None:
+                        failures.append(
+                            CollectorError(
+                                "candidate startup leader pidfd is unavailable"
+                            )
+                        )
+                    else:
+                        try:
+                            _pidfd_send_signal(
+                                startup_leader_pidfd, signal.SIGKILL
+                            )
+                        except OSError as exc:
+                            if exc.errno != errno.ESRCH:
+                                failures.append(
+                                    CollectorError(
+                                        "candidate startup pidfd kill failed"
+                                    )
+                                )
+                        except BaseException as exc:
+                            failures.append(exc)
+                    try:
+                        process.wait(timeout=5.0)
+                    except BaseException as exc:
+                        failures.append(exc)
                 except BaseException as exc:
                     failures.append(exc)
-                    return failures
                 try:
                     _require_formal_uid_processes(formal_uid, expected={})
                 except BaseException as exc:
                     failures.append(exc)
+                else:
+                    startup_absence_proven = True
+                if startup_absence_proven is not True:
+                    return failures
+                failures.extend(close_startup_leader_pidfd())
                 return failures
             startup_candidate = _GatedCandidate(
                 process=process,
@@ -2092,6 +2272,7 @@ def _start_gated_candidate(
                 )
             except BaseException as exc:
                 failures.append(exc)
+            failures.extend(close_startup_leader_pidfd())
             return failures
         try:
             running = process.poll() is None
@@ -2156,6 +2337,9 @@ def _start_gated_candidate(
     drainer_owns_descriptor = False
     process: subprocess.Popen[Any] | None = None
     startup_start_identity: str | None = None
+    startup_leader_pidfd: int | None = None
+    startup_absence_proven: bool | None = None
+    retain_startup_cleanup_owner = False
     try:
         read_fd, write_fd = allocate_pipe()
         ready_read_fd, ready_write_fd = allocate_pipe()
@@ -2216,6 +2400,7 @@ def _start_gated_candidate(
             start_new_session=True,
         )
         if formal_uid is not None:
+            startup_leader_pidfd = _pidfd_open(process.pid)
             observed_group = _read_process_group_identity(
                 process.pid, tuple(command)
             )
@@ -2260,11 +2445,13 @@ def _start_gated_candidate(
             _progress_state=progress_state,
             ready_observed=True,
             _formal_uid=formal_uid,
+            _leader_pidfd=startup_leader_pidfd,
         )
         if startup_start_identity is not None:
             candidate.bind_process_identity(startup_start_identity)
         transfer_owned(write_fd)
         transfer_owned(receipt_read_fd)
+        startup_leader_pidfd = None
         return candidate
     except BaseException:
         cleanup_failures: list[BaseException] = []
@@ -2275,6 +2462,15 @@ def _start_gated_candidate(
                 except BaseException as exc:
                     cleanup_failures.append(exc)
             cleanup_failures.extend(stop_process(process))
+            if (
+                formal_uid is not None
+                and startup_start_identity is None
+                and startup_absence_proven is not True
+            ):
+                retain_startup_cleanup_owner = True
+                raise CollectorError(
+                    "candidate startup absence proof failed"
+                ) from None
         if progress_drainer is not None and drainer_owns_descriptor:
             try:
                 progress_drainer.abort()
@@ -2287,6 +2483,7 @@ def _start_gated_candidate(
             except BaseException as exc:
                 blocking_failure = exc
         descriptor_failures = close_remaining_owned()
+        cleanup_failures.extend(close_startup_leader_pidfd())
         if blocking_failure is not None:
             raise blocking_failure from None
         if cleanup_failures:
@@ -2298,7 +2495,9 @@ def _start_gated_candidate(
         raise
     finally:
         primary_failure = sys.exc_info()[1]
-        close_failures = close_remaining_owned()
+        close_failures = (
+            [] if retain_startup_cleanup_owner else close_remaining_owned()
+        )
         if close_failures and primary_failure is None:
             raise CollectorError("candidate startup cleanup failed") from None
 
@@ -3890,20 +4089,14 @@ def _collect_execution_evidence(
             progress_blocker=progress_blocker,
         )
         if progress_completer is not None:
-            try:
+            def complete_checked_progress() -> Mapping[str, Any]:
                 check_interruption()
-                terminal = progress_completer()
-                if (
-                    not isinstance(terminal, Mapping)
-                    or terminal.get("status") != "completed"
-                ):
-                    raise CollectorError("candidate progress terminal is invalid")
-            except CollectorError:
-                _attempt_progress_blocker(progress_blocker)
-                raise
-            except BaseException:
-                _attempt_progress_blocker(progress_blocker)
-                raise CollectorError("candidate progress completion failed") from None
+                return progress_completer()
+
+            _complete_progress_terminal(
+                complete_checked_progress,
+                progress_blocker,
+            )
         try:
             check_interruption()
             candidate_seal, _sanitized_seal = _validate_candidate_seal(

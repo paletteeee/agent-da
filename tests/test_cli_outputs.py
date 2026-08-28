@@ -529,12 +529,24 @@ class TxnMemCliOutputTests(unittest.TestCase):
         from txnmem_experiment import main
         from txnmem_formal_io import FormalStore
 
-        real_write = FormalStore.write_json_exclusive
+        real_publish = FormalStore._publish_json_exclusive
 
-        def fail_pointer_write(store, *parts, payload):
+        def fail_pointer_publish(
+            store,
+            *parts,
+            payload,
+            _precommit_check=None,
+        ):
             if len(parts) == 2 and parts[0] == "bundles":
+                if _precommit_check is not None:
+                    _precommit_check()
                 raise RuntimeError("primary-publication-failure")
-            return real_write(store, *parts, payload=payload)
+            return real_publish(
+                store,
+                *parts,
+                payload=payload,
+                _precommit_check=_precommit_check,
+            )
 
         with TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -546,8 +558,8 @@ class TxnMemCliOutputTests(unittest.TestCase):
             out_dir.mkdir()
             with patch.object(
                 FormalStore,
-                "write_json_exclusive",
-                new=fail_pointer_write,
+                "_publish_json_exclusive",
+                new=fail_pointer_publish,
             ), patch.object(
                 txnmem_experiment.signal,
                 "pthread_sigmask",
@@ -758,6 +770,85 @@ class TxnMemCliOutputTests(unittest.TestCase):
                 )
 
         blocked_writer.assert_not_called()
+
+    def test_generic_blocked_recheck_ignores_ordinary_secondary_failure(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        import txnmem_experiment as experiment_module
+
+        class PrimaryFailure(RuntimeError):
+            pass
+
+        class SecondaryRecheckFailure(RuntimeError):
+            pass
+
+        primary = PrimaryFailure("ordinary-primary")
+        primary_origin = []
+        primary_latched = False
+        observed_primary = []
+        real_safe_failure = experiment_module._safe_failure_provenance
+
+        def run_cell(_factory, _graph, **_kwargs):
+            nonlocal primary_latched
+            primary_latched = True
+            try:
+                raise primary
+            except Exception as exc:
+                primary_origin.append(exc.__traceback__)
+                raise
+
+        def interruption_recheck():
+            if primary_latched:
+                raise SecondaryRecheckFailure("ordinary-secondary")
+
+        def capture_primary(exc):
+            observed_primary.append((exc, exc.__traceback__))
+            return real_safe_failure(exc)
+
+        with TemporaryDirectory() as tmp, patch(
+            "txnmem_provenance_performance.run_matrix_cell",
+            side_effect=run_cell,
+        ), patch.object(
+            experiment_module,
+            "_safe_failure_provenance",
+            side_effect=capture_primary,
+        ), patch(
+            "txnmem_provenance_performance.write_provenance_blocked_report"
+        ) as blocked_writer:
+            root = Path(tmp).resolve()
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(self._small_provenance_config()), encoding="utf-8"
+            )
+
+            exit_code = experiment_module.main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "memory",
+                    "--config",
+                    str(config),
+                    "--run-id",
+                    "ordinary-recheck-fixture",
+                    "--out-dir",
+                    str(root / "out"),
+                ],
+                _interruption_check=interruption_recheck,
+            )
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(len(observed_primary), 1)
+        self.assertIs(observed_primary[0][0], primary)
+        traceback_nodes = []
+        current = observed_primary[0][1]
+        while current is not None:
+            traceback_nodes.append(current)
+            current = current.tb_next
+        self.assertIn(primary_origin[0], traceback_nodes)
+        blocked_writer.assert_called_once()
+        self.assertEqual(
+            blocked_writer.call_args.args[1]["error_class"],
+            "PrimaryFailure",
+        )
 
     def test_provenance_blocked_report_identifies_pre_execution_stage(self):
         sys.path.insert(0, str(ROOT / "src"))

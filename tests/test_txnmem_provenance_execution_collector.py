@@ -1,4 +1,5 @@
 import copy
+import errno
 import hashlib
 import inspect
 import json
@@ -2229,6 +2230,21 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             collector_module,
             "_require_formal_uid_processes",
             side_effect=prove_uid_empty,
+        ), patch.object(
+            collector_module,
+            "_require_pidfd_support",
+            return_value=None,
+            create=True,
+        ), patch.object(
+            collector_module,
+            "_pidfd_open",
+            return_value=91,
+            create=True,
+        ), patch.object(
+            collector_module,
+            "_pidfd_close",
+            return_value=None,
+            create=True,
         ):
             with self.assertRaises(CollectorError):
                 collector_module._start_gated_candidate(
@@ -2253,6 +2269,273 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertLess(events.index(("wait", 5.0)), uid_index)
         self.assertLess(uid_index, events.index("blocked-progress"))
         self.assertLess(uid_index, events.index(("close", 16)))
+
+    def test_startup_identity_timeout_kills_only_bound_leader_pidfd(self):
+        descriptors = iter(((10, 11), (12, 13), (14, 15), (16, 17)))
+        events = []
+
+        class Store:
+            def __init__(self, *_args, **_kwargs):
+                self.status = None
+
+            def write_starting(self, _binding, _config):
+                self.status = "starting"
+
+            def read_view(self):
+                return {"status": self.status}
+
+            def write_terminal(self, status, _reason):
+                events.append("blocked-progress")
+                self.status = status
+
+        class Drainer:
+            def __init__(self, descriptor, _state, _store):
+                self.descriptor = descriptor
+
+            def start(self):
+                raise AssertionError("identity failure must precede drainer start")
+
+        class Process:
+            pid = 4242
+            args = (sys.executable, "-I", "-B", "unused.py")
+
+            def __init__(self):
+                self.wait_calls = 0
+
+            def wait(self, timeout=None):
+                self.wait_calls += 1
+                events.append(("wait", timeout))
+                if self.wait_calls == 1:
+                    raise subprocess.TimeoutExpired(self.args, timeout)
+                return -signal.SIGKILL
+
+            def poll(self):
+                raise AssertionError("identity-unavailable cleanup must use wait")
+
+        process = Process()
+
+        def open_pidfd(pid):
+            events.append(("pidfd-open", pid))
+            return 91
+
+        def read_identity(*_args, **_kwargs):
+            events.append("identity-read")
+            raise CollectorError("startup identity unavailable")
+
+        def close_descriptor(descriptor):
+            events.append(("fd-close", descriptor))
+
+        def send_pidfd(descriptor, sig):
+            events.append(("pidfd-signal", descriptor, sig))
+
+        def close_pidfd(descriptor):
+            events.append(("pidfd-close", descriptor))
+
+        def prove_uid_empty(_uid, *, expected):
+            events.append(("uid", expected))
+            return {}
+
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module.os, "pipe", side_effect=lambda: next(descriptors)
+        ), patch.object(
+            collector_module.os, "close", side_effect=close_descriptor
+        ), patch.object(
+            collector_module.os, "geteuid", return_value=0
+        ), patch.object(
+            collector_module, "ProgressSnapshotStore", Store
+        ), patch.object(
+            collector_module, "ProgressPipeDrainer", Drainer
+        ), patch.object(
+            collector_module.subprocess, "Popen", return_value=process
+        ), patch.object(
+            collector_module,
+            "_read_process_group_identity",
+            side_effect=read_identity,
+        ), patch.object(
+            collector_module,
+            "_require_formal_uid_processes",
+            side_effect=prove_uid_empty,
+        ), patch.object(
+            collector_module,
+            "_require_pidfd_support",
+            return_value=None,
+            create=True,
+        ), patch.object(
+            collector_module,
+            "_pidfd_open",
+            side_effect=open_pidfd,
+            create=True,
+        ), patch.object(
+            collector_module,
+            "_pidfd_send_signal",
+            side_effect=send_pidfd,
+            create=True,
+        ), patch.object(
+            collector_module,
+            "_pidfd_close",
+            side_effect=close_pidfd,
+            create=True,
+        ):
+            with self.assertRaises(CollectorError):
+                collector_module._start_gated_candidate(
+                    command=Process.args,
+                    cwd=Path(tmp).resolve(),
+                    environment={},
+                    formal_uid=65532,
+                    formal_gid=65532,
+                    require_completion_receipt=True,
+                    require_progress=True,
+                    progress_binding_sha256="a" * 64,
+                    progress_config_sha256="b" * 64,
+                    progress_snapshot_path=Path(tmp).resolve() / "progress.json",
+                    progress_expected_uid=0,
+                    progress_expected_gid=0,
+                )
+
+        self.assertLess(events.index(("pidfd-open", 4242)), events.index("identity-read"))
+        self.assertLess(events.index(("fd-close", 11)), events.index(("wait", 5.0)))
+        first_wait = events.index(("wait", 5.0))
+        signal_index = events.index(("pidfd-signal", 91, signal.SIGKILL))
+        second_wait = events.index(("wait", 5.0), first_wait + 1)
+        uid_index = events.index(("uid", {}))
+        self.assertLess(first_wait, signal_index)
+        self.assertLess(signal_index, second_wait)
+        self.assertLess(second_wait, uid_index)
+        self.assertLess(uid_index, events.index("blocked-progress"))
+        self.assertLess(uid_index, events.index(("fd-close", 16)))
+        self.assertEqual(events.count(("pidfd-close", 91)), 1)
+
+    def test_startup_identity_absence_proof_failure_retains_cleanup_ownership(self):
+        descriptors = iter(((10, 11), (12, 13), (14, 15), (16, 17)))
+        events = []
+
+        class Store:
+            def __init__(self, *_args, **_kwargs):
+                self.status = None
+
+            def write_starting(self, _binding, _config):
+                self.status = "starting"
+
+            def read_view(self):
+                return {"status": self.status}
+
+            def write_terminal(self, status, _reason):
+                events.append("blocked-progress")
+                self.status = status
+
+        class Drainer:
+            def __init__(self, _descriptor, _state, _store):
+                pass
+
+            def start(self):
+                raise AssertionError("identity failure must precede drainer start")
+
+            def abort(self):
+                events.append("drainer-abort")
+
+        class Process:
+            pid = 4242
+            args = (sys.executable, "-I", "-B", "unused.py")
+
+            def wait(self, timeout=None):
+                events.append(("wait", timeout))
+                return 70
+
+            def poll(self):
+                raise AssertionError("identity-unavailable cleanup must bounded-wait")
+
+        def prove_uid_empty(_uid, *, expected):
+            events.append(("uid-proof", expected))
+            raise CollectorError("dedicated UID absence is unproven")
+
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module.os, "pipe", side_effect=lambda: next(descriptors)
+        ), patch.object(
+            collector_module.os,
+            "close",
+            side_effect=lambda descriptor: events.append(("fd-close", descriptor)),
+        ), patch.object(
+            collector_module.os, "geteuid", return_value=0
+        ), patch.object(
+            collector_module, "ProgressSnapshotStore", Store
+        ), patch.object(
+            collector_module, "ProgressPipeDrainer", Drainer
+        ), patch.object(
+            collector_module.subprocess, "Popen", return_value=Process()
+        ), patch.object(
+            collector_module,
+            "_read_process_group_identity",
+            side_effect=CollectorError("startup identity unavailable"),
+        ), patch.object(
+            collector_module,
+            "_require_formal_uid_processes",
+            side_effect=prove_uid_empty,
+        ), patch.object(
+            collector_module,
+            "_require_pidfd_support",
+            return_value=None,
+        ), patch.object(
+            collector_module,
+            "_pidfd_open",
+            return_value=91,
+        ), patch.object(
+            collector_module,
+            "_pidfd_close",
+            side_effect=lambda descriptor: events.append(
+                ("pidfd-close", descriptor)
+            ),
+        ):
+            with self.assertRaisesRegex(CollectorError, "startup"):
+                collector_module._start_gated_candidate(
+                    command=Process.args,
+                    cwd=Path(tmp).resolve(),
+                    environment={},
+                    formal_uid=65532,
+                    formal_gid=65532,
+                    require_completion_receipt=True,
+                    require_progress=True,
+                    progress_binding_sha256="a" * 64,
+                    progress_config_sha256="b" * 64,
+                    progress_snapshot_path=Path(tmp).resolve() / "progress.json",
+                    progress_expected_uid=0,
+                    progress_expected_gid=0,
+                )
+
+        self.assertEqual(
+            events[:3],
+            [("fd-close", 11), ("wait", 5.0), ("uid-proof", {})],
+        )
+        self.assertNotIn("blocked-progress", events)
+        self.assertNotIn("drainer-abort", events)
+        self.assertEqual(
+            [event for event in events if event[0] == "fd-close"],
+            [("fd-close", 11)],
+        )
+        self.assertNotIn(("pidfd-close", 91), events)
+
+    def test_formal_startup_fails_before_popen_without_pidfd_primitives(self):
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module.os, "geteuid", return_value=0
+        ), patch.object(
+            collector_module,
+            "_require_pidfd_support",
+            side_effect=CollectorError("formal pidfd support is unavailable"),
+            create=True,
+        ), patch.object(
+            collector_module.subprocess,
+            "Popen",
+            side_effect=AssertionError("Popen must not run"),
+        ) as popen:
+            with self.assertRaisesRegex(CollectorError, "pidfd"):
+                collector_module._start_gated_candidate(
+                    command=(sys.executable, "-I", "-B", "unused.py"),
+                    cwd=Path(tmp).resolve(),
+                    environment={},
+                    formal_uid=65532,
+                    formal_gid=65532,
+                )
+
+        popen.assert_not_called()
 
     def test_gated_child_drainer_setup_failure_terminalizes_starting_snapshot(self):
         with TemporaryDirectory() as tmp, patch.object(
@@ -2517,6 +2800,73 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 caught = exc
 
         self.assertIs(caught, primary)
+
+    def test_progress_completion_preserves_baseexception_primary_and_traceback(self):
+        class CompletionInterruption(BaseException):
+            pass
+
+        primary = CompletionInterruption("completion-interruption")
+        origin = []
+        blocker_calls = []
+
+        def complete_progress():
+            try:
+                raise primary
+            except BaseException as exc:
+                origin.append(exc.__traceback__)
+                raise
+
+        def fail_blocker():
+            blocker_calls.append("block")
+            raise RuntimeError("secondary-blocker-failure")
+
+        caught = None
+        try:
+            collector_module._complete_progress_terminal(
+                complete_progress,
+                fail_blocker,
+            )
+        except BaseException as exc:
+            caught = exc
+
+        self.assertIs(caught, primary)
+        self.assertEqual(blocker_calls, ["block"])
+        traceback_nodes = []
+        current = caught.__traceback__ if caught is not None else None
+        while current is not None:
+            traceback_nodes.append(current)
+            current = current.tb_next
+        self.assertIn(origin[0], traceback_nodes)
+
+    def test_progress_completion_preserves_ordinary_primary_when_blocker_fails(self):
+        primary = RuntimeError("ordinary-completion-failure")
+        origin = []
+
+        def complete_progress():
+            try:
+                raise primary
+            except Exception as exc:
+                origin.append(exc.__traceback__)
+                raise
+
+        caught = None
+        try:
+            collector_module._complete_progress_terminal(
+                complete_progress,
+                lambda: (_ for _ in ()).throw(
+                    OSError("secondary-progress-blocker-failure")
+                ),
+            )
+        except BaseException as exc:
+            caught = exc
+
+        self.assertIs(caught, primary)
+        traceback_nodes = []
+        current = caught.__traceback__ if caught is not None else None
+        while current is not None:
+            traceback_nodes.append(current)
+            current = current.tb_next
+        self.assertIn(origin[0], traceback_nodes)
 
     def test_blocked_progress_persistence_failure_is_sanitized_and_observable(self):
         class FailingStore:
@@ -4773,7 +5123,19 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             collector_module,
             "_read_process_group_identity",
             return_value=identity,
-        ) as identity_reader:
+        ) as identity_reader, patch.object(
+            collector_module,
+            "_require_pidfd_support",
+            return_value=None,
+        ), patch.object(
+            collector_module,
+            "_pidfd_open",
+            return_value=91,
+        ), patch.object(
+            collector_module,
+            "_pidfd_close",
+            return_value=None,
+        ) as pidfd_close:
             child = collector_module._start_gated_candidate(
                 command=Process.args,
                 cwd=Path(tmp).resolve(),
@@ -4789,10 +5151,13 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertIs(popen_kwargs["start_new_session"], True)
         self.assertEqual(child._bound_start_identity, "candidate:4242:99")
         identity_reader.assert_called_once_with(4242, Process.args)
+        pidfd_close.assert_called_once_with(91)
 
     def test_formal_startup_cleanup_uses_validated_process_group(self):
         descriptors = iter(((10, 11), (12, 13)))
         signals = []
+        pidfds = iter((90, 91))
+        closed_pidfds = []
 
         class Process:
             pid = 4242
@@ -4816,6 +5181,9 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             "pgid": 4242,
             "sid": 4242,
         }
+        def inventory(*_arguments, **_kwargs):
+            return {} if signals else {4242: "99"}
+
         with TemporaryDirectory() as tmp, patch.object(
             collector_module.os, "pipe", side_effect=lambda: next(descriptors)
         ), patch.object(
@@ -4833,15 +5201,30 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         ), patch.object(
             collector_module,
             "_process_group_members",
-            return_value={},
+            side_effect=inventory,
         ), patch.object(
             collector_module,
             "_formal_uid_processes",
-            return_value={},
+            side_effect=inventory,
         ), patch.object(
             collector_module.os,
             "killpg",
-            side_effect=lambda pgid, sig: signals.append((pgid, sig)),
+        ) as killpg, patch.object(
+            collector_module,
+            "_require_pidfd_support",
+            return_value=None,
+        ), patch.object(
+            collector_module,
+            "_pidfd_open",
+            side_effect=lambda _pid: next(pidfds),
+        ), patch.object(
+            collector_module,
+            "_pidfd_send_signal",
+            side_effect=lambda descriptor, sig: signals.append((descriptor, sig)),
+        ), patch.object(
+            collector_module,
+            "_pidfd_close",
+            side_effect=lambda descriptor: closed_pidfds.append(descriptor),
         ):
             with self.assertRaisesRegex(CollectorError, "readiness"):
                 collector_module._start_gated_candidate(
@@ -4852,7 +5235,9 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     formal_gid=65532,
                 )
 
-        self.assertEqual(signals, [(4242, signal.SIGTERM)])
+        self.assertEqual(signals, [(91, signal.SIGTERM)])
+        self.assertEqual(closed_pidfds, [91, 90])
+        killpg.assert_not_called()
 
     def test_candidate_seal_is_tree_complete_and_receipt_bound(self):
         with TemporaryDirectory() as tmp:
@@ -5583,6 +5968,254 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         )
         identity_reader.assert_called_once_with(4242, Process.args)
 
+    def test_formal_pidfds_open_all_then_revalidate_start_identity_before_signal(self):
+        class Process:
+            pid = 4242
+            args = ("python", "runner.py")
+
+            def poll(self):
+                return None
+
+        initial = {4242: "99", 4243: "100"}
+        drifted = {4242: "99", 4243: "101"}
+        opened = []
+        sent = []
+        closed = []
+        child = collector_module._GatedCandidate(
+            process=Process(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _formal_uid=65532,
+        )
+        child.bind_process_identity("candidate:4242:99")
+
+        with patch.object(
+            child, "_validate_bound_group"
+        ), patch.object(
+            child,
+            "_formal_group_members",
+            side_effect=[initial, drifted],
+        ), patch.object(
+            collector_module,
+            "_pidfd_open",
+            side_effect=lambda pid: opened.append(pid) or (pid + 1000),
+            create=True,
+        ), patch.object(
+            collector_module,
+            "_pidfd_send_signal",
+            side_effect=lambda descriptor, sig: sent.append((descriptor, sig)),
+            create=True,
+        ), patch.object(
+            collector_module,
+            "_pidfd_close",
+            side_effect=lambda descriptor: closed.append(descriptor),
+            create=True,
+        ), patch.object(
+            collector_module.os, "killpg"
+        ) as killpg, self.assertRaisesRegex(CollectorError, "identity"):
+            child.terminate_validated_group(
+                term_seconds=0.01, kill_seconds=0.01
+            )
+
+        self.assertEqual(opened, [4242, 4243])
+        self.assertEqual(sent, [])
+        self.assertEqual(closed, [5242, 5243])
+        killpg.assert_not_called()
+
+    def test_formal_pidfd_partial_open_failure_closes_once_without_signal(self):
+        class Process:
+            pid = 4242
+            args = ("python", "runner.py")
+
+            def poll(self):
+                return None
+
+        inventory = {4242: "99", 4243: "100"}
+        opened = []
+        sent = []
+        closed = []
+        child = collector_module._GatedCandidate(
+            process=Process(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _formal_uid=65532,
+        )
+        child.bind_process_identity("candidate:4242:99")
+
+        def open_pidfd(pid):
+            opened.append(pid)
+            if pid == 4243:
+                raise OSError("partial-pidfd-open")
+            return 51
+
+        with patch.object(
+            child, "_validate_bound_group"
+        ), patch.object(
+            child, "_formal_group_members", return_value=inventory
+        ), patch.object(
+            child, "_wait_for_formal_quiescence", side_effect=[False, True]
+        ), patch.object(
+            collector_module,
+            "_pidfd_open",
+            side_effect=open_pidfd,
+            create=True,
+        ), patch.object(
+            collector_module,
+            "_pidfd_send_signal",
+            side_effect=lambda descriptor, sig: sent.append((descriptor, sig)),
+            create=True,
+        ), patch.object(
+            collector_module,
+            "_pidfd_close",
+            side_effect=lambda descriptor: closed.append(descriptor),
+            create=True,
+        ), patch.object(
+            collector_module.os, "killpg"
+        ) as killpg, self.assertRaisesRegex(CollectorError, "pidfd"):
+            child.terminate_validated_group(
+                term_seconds=0.01, kill_seconds=0.01
+            )
+
+        self.assertEqual(opened, [4242, 4243])
+        self.assertEqual(sent, [])
+        self.assertEqual(closed, [51])
+        killpg.assert_not_called()
+
+    def test_formal_pidfd_esrch_reinventories_and_kills_new_survivor(self):
+        class Process:
+            pid = 4242
+            args = ("python", "runner.py")
+
+            def poll(self):
+                return None
+
+        term_inventory = {4242: "99", 4243: "100"}
+        kill_inventory = {4244: "101"}
+        inventories = iter(
+            (term_inventory, term_inventory, kill_inventory, kill_inventory)
+        )
+        descriptor_by_pid = {4242: 51, 4243: 52, 4244: 53}
+        opened = []
+        sent = []
+        closed = []
+        child = collector_module._GatedCandidate(
+            process=Process(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _formal_uid=65532,
+        )
+        child.bind_process_identity("candidate:4242:99")
+
+        def send_pidfd(descriptor, sig):
+            sent.append((descriptor, sig))
+            if descriptor == 52 and sig == signal.SIGTERM:
+                raise OSError(errno.ESRCH, "exited-before-signal")
+
+        with patch.object(
+            child, "_validate_bound_group"
+        ), patch.object(
+            child,
+            "_formal_group_members",
+            side_effect=lambda: next(inventories),
+        ), patch.object(
+            child, "_wait_for_formal_quiescence", side_effect=[False, True]
+        ), patch.object(
+            collector_module,
+            "_pidfd_open",
+            side_effect=lambda pid: opened.append(pid) or descriptor_by_pid[pid],
+            create=True,
+        ), patch.object(
+            collector_module,
+            "_pidfd_send_signal",
+            side_effect=send_pidfd,
+            create=True,
+        ), patch.object(
+            collector_module,
+            "_pidfd_close",
+            side_effect=lambda descriptor: closed.append(descriptor),
+            create=True,
+        ), patch.object(
+            collector_module.os, "killpg"
+        ) as killpg:
+            child.terminate_validated_group(
+                term_seconds=0.01, kill_seconds=0.1
+            )
+
+        self.assertEqual(opened, [4242, 4243, 4244])
+        self.assertEqual(
+            sent,
+            [
+                (51, signal.SIGTERM),
+                (52, signal.SIGTERM),
+                (53, signal.SIGKILL),
+            ],
+        )
+        self.assertEqual(closed, [51, 52, 53])
+        killpg.assert_not_called()
+
+    def test_formal_pidfd_close_failure_never_broadens_target(self):
+        class Process:
+            pid = 4242
+            args = ("python", "runner.py")
+
+            def poll(self):
+                return None
+
+        inventory = {4242: "99", 4243: "100"}
+        sent = []
+        closed = []
+        child = collector_module._GatedCandidate(
+            process=Process(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _formal_uid=65532,
+        )
+        child.bind_process_identity("candidate:4242:99")
+
+        def close_pidfd(descriptor):
+            closed.append(descriptor)
+            if descriptor == 51:
+                raise OSError("pidfd-close-failure")
+
+        with patch.object(
+            child, "_validate_bound_group"
+        ), patch.object(
+            child, "_formal_group_members", side_effect=[inventory, inventory]
+        ), patch.object(
+            child, "_wait_for_formal_quiescence", return_value=True
+        ), patch.object(
+            collector_module,
+            "_pidfd_open",
+            side_effect=lambda pid: {4242: 51, 4243: 52}[pid],
+            create=True,
+        ), patch.object(
+            collector_module,
+            "_pidfd_send_signal",
+            side_effect=lambda descriptor, sig: sent.append((descriptor, sig)),
+            create=True,
+        ), patch.object(
+            collector_module,
+            "_pidfd_close",
+            side_effect=close_pidfd,
+            create=True,
+        ), patch.object(
+            collector_module.os, "killpg"
+        ) as killpg, self.assertRaisesRegex(CollectorError, "pidfd"):
+            child.terminate_validated_group(
+                term_seconds=0.01, kill_seconds=0.01
+            )
+
+        self.assertEqual(
+            sent,
+            [(51, signal.SIGTERM), (52, signal.SIGTERM)],
+        )
+        self.assertEqual(closed, [51, 52])
+        killpg.assert_not_called()
+
     def test_validated_group_revalidates_before_bounded_kill(self):
         events = []
 
@@ -5640,6 +6273,8 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
 
     def test_validated_group_kills_survivors_after_leader_exits(self):
         signals = []
+        opened = []
+        closed = []
 
         class Process:
             pid = 4242
@@ -5657,10 +6292,15 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             "pgid": 4242,
             "sid": 4242,
         }
+        initial = {4242: "99", 4243: "100"}
         survivor = {4243: "100"}
 
         def inventory(*_arguments, **_kwargs):
-            return {} if any(sig == signal.SIGKILL for _, sig in signals) else survivor
+            if any(sig == signal.SIGKILL for _, sig in signals):
+                return {}
+            if any(sig == signal.SIGTERM for _, sig in signals):
+                return survivor
+            return initial
 
         child = collector_module._GatedCandidate(
             process=Process(),
@@ -5684,18 +6324,35 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             "_formal_uid_processes",
             side_effect=inventory,
         ), patch.object(
-            collector_module.os,
-            "killpg",
-            side_effect=lambda pgid, sig: signals.append((pgid, sig)),
-        ):
+            collector_module,
+            "_pidfd_open",
+            side_effect=lambda pid: opened.append(pid) or (50 + len(opened)),
+        ), patch.object(
+            collector_module,
+            "_pidfd_send_signal",
+            side_effect=lambda descriptor, sig: signals.append((descriptor, sig)),
+        ), patch.object(
+            collector_module,
+            "_pidfd_close",
+            side_effect=lambda descriptor: closed.append(descriptor),
+        ), patch.object(
+            collector_module.os, "killpg"
+        ) as killpg:
             child.terminate_validated_group(
                 term_seconds=0.01, kill_seconds=0.1
             )
 
         self.assertEqual(
             signals,
-            [(4242, signal.SIGTERM), (4242, signal.SIGKILL)],
+            [
+                (51, signal.SIGTERM),
+                (52, signal.SIGTERM),
+                (53, signal.SIGKILL),
+            ],
         )
+        self.assertEqual(opened, [4242, 4243, 4243])
+        self.assertEqual(closed, [51, 52, 53])
+        killpg.assert_not_called()
 
     def test_exited_leader_with_uid_residue_is_not_quiescent(self):
         class Process:
@@ -5734,6 +6391,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
 
     def test_post_term_group_uid_mismatch_forbids_kill(self):
         signals = []
+        closed = []
 
         class Process:
             pid = 4242
@@ -5781,16 +6439,28 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 {4244: "101"},
             ],
         ), patch.object(
-            collector_module.os,
-            "killpg",
-            side_effect=lambda pgid, sig: signals.append((pgid, sig)),
-        ):
+            collector_module,
+            "_pidfd_open",
+            return_value=51,
+        ), patch.object(
+            collector_module,
+            "_pidfd_send_signal",
+            side_effect=lambda descriptor, sig: signals.append((descriptor, sig)),
+        ), patch.object(
+            collector_module,
+            "_pidfd_close",
+            side_effect=lambda descriptor: closed.append(descriptor),
+        ), patch.object(
+            collector_module.os, "killpg"
+        ) as killpg:
             with self.assertRaisesRegex(CollectorError, "identity|quiescence"):
                 child.terminate_validated_group(
                     term_seconds=0.01, kill_seconds=0.01
                 )
 
-        self.assertEqual(signals, [(4242, signal.SIGTERM)])
+        self.assertEqual(signals, [(51, signal.SIGTERM)])
+        self.assertEqual(closed, [51])
+        killpg.assert_not_called()
 
     def test_pre_term_group_uid_mismatch_sends_no_signal(self):
         signals = []
@@ -5844,6 +6514,8 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         for first, second in cases:
             with self.subTest(first=first, second=second):
                 signals = []
+                closed = []
+                next_pidfd = iter((51, 52))
 
                 class Process:
                     pid = 4242
@@ -5860,7 +6532,10 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 )
                 child._formal_uid = 65532
                 child.bind_process_identity("candidate:4242:99")
-                inventories = iter((first, first, first, second))
+                term_inventory = {4242: "99"}
+                inventories = iter(
+                    (term_inventory, term_inventory, first, second)
+                )
                 with patch.object(
                     child,
                     "_validate_bound_group",
@@ -5873,15 +6548,29 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     "_wait_for_formal_quiescence",
                     side_effect=[False, True],
                 ), patch.object(
+                    collector_module,
+                    "_pidfd_open",
+                    side_effect=lambda _pid: next(next_pidfd),
+                ), patch.object(
+                    collector_module,
+                    "_pidfd_send_signal",
+                    side_effect=lambda descriptor, sig: signals.append(
+                        (descriptor, sig)
+                    ),
+                ), patch.object(
+                    collector_module,
+                    "_pidfd_close",
+                    side_effect=lambda descriptor: closed.append(descriptor),
+                ), patch.object(
                     collector_module.os,
                     "killpg",
-                    side_effect=lambda pgid, sig: signals.append((pgid, sig)),
                 ), self.assertRaises(CollectorError):
                     child.terminate_validated_group(
                         term_seconds=0.000001, kill_seconds=0.01
                     )
 
-                self.assertEqual(signals, [(4242, signal.SIGTERM)])
+                self.assertEqual(signals, [(51, signal.SIGTERM)])
+                self.assertEqual(closed, [51, 52])
 
     def test_receipt_success_requires_group_and_uid_quiescence(self):
         receipt_read, receipt_write = os.pipe()
@@ -6094,6 +6783,415 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertIs(guard.active, False)
         self.assertLess(elapsed, 12.0)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and hasattr(os, "geteuid")
+        and os.geteuid() == 0,
+        "protected Linux root integrated lifecycle only",
+    )
+    def test_protected_linux_integrated_root_drop_parent_death_pidfd_guard_pointer_zero_residue(self):
+        collector_module._require_pidfd_support()
+        nft_path = Path(collector_module._FORMAL_NFT_EXECUTABLE)
+        self.assertTrue(nft_path.is_file(), "protected Linux nft is unavailable")
+        collector_module._require_formal_uid_processes(
+            collector_module.FORMAL_RUNNER_UID,
+            expected={},
+        )
+
+        def exact_pidfd_kill(pid):
+            try:
+                descriptor = collector_module._pidfd_open(pid)
+            except ProcessLookupError:
+                return
+            try:
+                collector_module._pidfd_send_signal(descriptor, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            finally:
+                collector_module._pidfd_close(descriptor)
+
+        def current_pidfds():
+            observed = {}
+            for entry in (Path("/proc") / "self" / "fd").iterdir():
+                try:
+                    target = os.readlink(entry)
+                except FileNotFoundError:
+                    continue
+                if "pidfd" in target:
+                    observed[int(entry.name)] = target
+            return observed
+
+        repository = Path(__file__).resolve().parents[1]
+        isolated_environment = {
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "PYTHONPATH": str(repository / "src"),
+        }
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            root.chmod(0o755)
+            runtime = root / "runtime"
+            runtime.mkdir(mode=0o755)
+            runner_copy = root / "runner.py"
+            runner_copy.write_bytes(
+                (repository / "src" / "txnmem_provenance_runner.py").read_bytes()
+            )
+            runner_copy.chmod(0o555)
+
+            parent_fixture = root / "parent_fixture.py"
+            parent_fixture.write_text(
+                "\n".join(
+                    (
+                        "import json, os, sys",
+                        "from pathlib import Path",
+                        "from txnmem_provenance_execution_collector import "
+                        "FORMAL_RUNNER_GID, FORMAL_RUNNER_UID, _start_gated_candidate",
+                        f"root = Path({str(root)!r})",
+                        f"runner = {str(runner_copy)!r}",
+                        f"runtime = {str(runtime)!r}",
+                        "child = _start_gated_candidate(",
+                        "    command=(sys.executable, '-I', '-B', runner, "
+                        "'invalid-command'),",
+                        "    cwd=root,",
+                        "    environment={'TXNMEM_PROVENANCE_RUNTIME_SITE': runtime},",
+                        "    formal_uid=FORMAL_RUNNER_UID,",
+                        "    formal_gid=FORMAL_RUNNER_GID,",
+                        "    require_completion_receipt=True,",
+                        ")",
+                        "print(json.dumps({'pid': child.process.pid, "
+                        "'args': list(child.process.args)}, sort_keys=True), flush=True)",
+                        "if os.read(0, 1) != b'X': os._exit(91)",
+                        "os._exit(0)",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            parent_fixture.chmod(0o555)
+
+            libc = collector_module.ctypes.CDLL(None, use_errno=True)
+            prctl = libc.prctl
+            prctl.argtypes = [
+                collector_module.ctypes.c_int,
+                collector_module.ctypes.c_ulong,
+                collector_module.ctypes.c_ulong,
+                collector_module.ctypes.c_ulong,
+                collector_module.ctypes.c_ulong,
+            ]
+            prctl.restype = collector_module.ctypes.c_int
+            prior_subreaper = collector_module.ctypes.c_int(0)
+            self.assertEqual(
+                prctl(
+                    37,
+                    collector_module.ctypes.addressof(prior_subreaper),
+                    0,
+                    0,
+                    0,
+                ),
+                0,
+            )
+            self.assertEqual(prctl(36, 1, 0, 0, 0), 0)
+            parent = None
+            runner_pid = None
+            runner_wait_status = None
+            try:
+                parent = subprocess.Popen(
+                    (sys.executable, "-B", str(parent_fixture)),
+                    cwd=root,
+                    env=isolated_environment,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                raw_identity = parent.stdout.readline()
+                if not raw_identity:
+                    parent.wait(timeout=7.0)
+                    self.fail(parent.stderr.read().decode("utf-8", errors="replace"))
+                identity = json.loads(raw_identity)
+                runner_pid = int(identity["pid"])
+                runner_args = tuple(identity["args"])
+                status_rows = {}
+                for line in (Path("/proc") / str(runner_pid) / "status").read_text(
+                    encoding="utf-8"
+                ).splitlines():
+                    if ":" in line:
+                        key, value = line.split(":", 1)
+                        status_rows[key] = value.strip()
+                self.assertEqual(
+                    [int(value) for value in status_rows["Uid"].split()],
+                    [collector_module.FORMAL_RUNNER_UID] * 4,
+                )
+                self.assertEqual(
+                    [int(value) for value in status_rows["Gid"].split()],
+                    [collector_module.FORMAL_RUNNER_GID] * 4,
+                )
+                self.assertEqual(status_rows["Groups"].split(), [])
+                self.assertEqual(
+                    int(status_rows["SigBlk"], 16),
+                    1 << (signal.SIGTERM - 1),
+                )
+                observed_runner = collector_module._read_process_group_identity(
+                    runner_pid,
+                    runner_args,
+                )
+                runner_start = observed_runner["start_identity"].rsplit(":", 1)[-1]
+                collector_module._require_formal_uid_processes(
+                    collector_module.FORMAL_RUNNER_UID,
+                    expected={runner_pid: runner_start},
+                )
+
+                parent.stdin.write(b"X")
+                parent.stdin.flush()
+                parent.stdin.close()
+                self.assertEqual(parent.wait(timeout=5.0), 0)
+                deadline = time.monotonic() + 5.0
+                while time.monotonic() < deadline:
+                    waited_pid, status = os.waitpid(runner_pid, os.WNOHANG)
+                    if waited_pid == runner_pid:
+                        runner_wait_status = status
+                        break
+                    time.sleep(0.01)
+                self.assertIsNotNone(runner_wait_status)
+                self.assertTrue(os.WIFSIGNALED(runner_wait_status))
+                self.assertEqual(os.WTERMSIG(runner_wait_status), signal.SIGKILL)
+                collector_module._require_formal_uid_processes(
+                    collector_module.FORMAL_RUNNER_UID,
+                    expected={},
+                )
+            finally:
+                if parent is not None and parent.poll() is None:
+                    if parent.stdin is not None and not parent.stdin.closed:
+                        parent.stdin.close()
+                    try:
+                        parent.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        exact_pidfd_kill(parent.pid)
+                        parent.wait(timeout=5.0)
+                if runner_pid is not None and runner_wait_status is None:
+                    exact_pidfd_kill(runner_pid)
+                    deadline = time.monotonic() + 5.0
+                    while time.monotonic() < deadline:
+                        try:
+                            waited_pid, _status = os.waitpid(
+                                runner_pid, os.WNOHANG
+                            )
+                        except ChildProcessError:
+                            break
+                        if waited_pid == runner_pid:
+                            break
+                        time.sleep(0.01)
+                self.assertEqual(
+                    prctl(36, int(prior_subreaper.value), 0, 0, 0),
+                    0,
+                )
+
+            gil_fixture = root / "gil_descendant.py"
+            gil_fixture.write_text(
+                "\n".join(
+                    (
+                        "import ctypes, os, signal",
+                        "ready = int(os.environ.pop('TXNMEM_PROVENANCE_READY_FD'))",
+                        "gate = int(os.environ.pop('TXNMEM_PROVENANCE_START_GATE_FD'))",
+                        "if signal.pthread_sigmask(signal.SIG_BLOCK, set()) != "
+                        "{signal.SIGTERM}: raise SystemExit(90)",
+                        "descendant = os.fork()",
+                        "if descendant == 0:",
+                        "    os.close(ready)",
+                        "    os.close(gate)",
+                        "    signal.signal(signal.SIGTERM, signal.SIG_IGN)",
+                        "    ctypes.PyDLL(None).sleep(60)",
+                        "    os._exit(0)",
+                        "os.write(ready, b'R')",
+                        "os.close(ready)",
+                        "if os.read(gate, 1) != b'G': raise SystemExit(91)",
+                        "os.close(gate)",
+                        "ctypes.PyDLL(None).sleep(60)",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            gil_fixture.chmod(0o555)
+            pidfds_before = current_pidfds()
+            child = None
+            guard = collector_module._NftNetworkGuard(
+                "txnmem_"
+                + hashlib.sha256(
+                    f"{os.getpid()}:{time.monotonic_ns()}".encode("ascii")
+                ).hexdigest()[:16],
+                backend_ipv4_subnet="10.253.0.0/24",
+                ingress_ipv4_subnet="10.254.0.0/24",
+                backend_bridge_interface="br-f3f3f3f3f3f3",
+                ingress_bridge_interface="br-e3e3e3e3e3e3",
+                toxiproxy_ingress_ipv4="10.254.0.2",
+            )
+            signal_targets = []
+            real_pidfd_signal = collector_module._pidfd_send_signal
+            cleanup_failures = []
+
+            def observed_pidfd_signal(descriptor, signal_number):
+                self.assertTrue(guard.active)
+                fdinfo = (
+                    Path("/proc") / "self" / "fdinfo" / str(descriptor)
+                ).read_text(encoding="utf-8")
+                pid_rows = [
+                    line for line in fdinfo.splitlines() if line.startswith("Pid:")
+                ]
+                self.assertEqual(len(pid_rows), 1)
+                target_pid = int(pid_rows[0].split()[1])
+                inventory = collector_module._formal_uid_processes(
+                    collector_module.FORMAL_RUNNER_UID
+                )
+                self.assertIn(target_pid, inventory)
+                signal_targets.append((target_pid, inventory[target_pid], signal_number))
+                real_pidfd_signal(descriptor, signal_number)
+
+            try:
+                child = collector_module._start_gated_candidate(
+                    command=(sys.executable, "-I", "-B", str(gil_fixture)),
+                    cwd=root,
+                    environment={},
+                    formal_uid=collector_module.FORMAL_RUNNER_UID,
+                    formal_gid=collector_module.FORMAL_RUNNER_GID,
+                )
+                guard.activate()
+                guard.verify()
+                child.release()
+                started = time.monotonic()
+                with patch.object(
+                    collector_module,
+                    "_pidfd_send_signal",
+                    side_effect=observed_pidfd_signal,
+                ):
+                    cleanup_failures = (
+                        collector_module._cleanup_formal_execution_resources(
+                            execution_monitor=None,
+                            network_guard=guard,
+                            child=child,
+                        )
+                    )
+                elapsed = time.monotonic() - started
+            finally:
+                if child is not None and child.process.poll() is None:
+                    child.terminate_validated_group(
+                        term_seconds=0.1,
+                        kill_seconds=2.0,
+                    )
+                if child is not None:
+                    child.close()
+                if guard.active:
+                    collector_module._require_formal_uid_processes(
+                        collector_module.FORMAL_RUNNER_UID,
+                        expected={},
+                    )
+                    guard.deactivate()
+
+            self.assertEqual(cleanup_failures, [])
+            self.assertLess(elapsed, 12.0)
+            self.assertFalse(guard.active)
+            self.assertNotIn(guard.table_name, guard._table_names())
+            self.assertIn(signal.SIGTERM, [row[2] for row in signal_targets])
+            self.assertIn(signal.SIGKILL, [row[2] for row in signal_targets])
+            collector_module._require_formal_uid_processes(
+                collector_module.FORMAL_RUNNER_UID,
+                expected={},
+            )
+            self.assertEqual(current_pidfds(), pidfds_before)
+
+            pointer_fixture = root / "pointer_fixture.py"
+            pointer_fixture.write_text(
+                "\n".join(
+                    (
+                        "import json, os, signal, sys",
+                        "from pathlib import Path",
+                        "import txnmem_formal_io as formal_io",
+                        "phase, raw_root = sys.argv[1:]",
+                        "root = Path(raw_root)",
+                        "store = formal_io.FormalStore(root)",
+                        "store.ensure_directory('bundles')",
+                        "payload = {'publication_status': 'complete', "
+                        "'schema': 'txnmem-integrated-pointer-v1'}",
+                        "def before_link():",
+                        "    if phase == 'before-link': os.kill(os.getpid(), signal.SIGKILL)",
+                        "real_link = formal_io.os.link",
+                        "def link_then_kill(*args, **kwargs):",
+                        "    real_link(*args, **kwargs)",
+                        "    os.kill(os.getpid(), signal.SIGKILL)",
+                        "if phase == 'after-link': formal_io.os.link = link_then_kill",
+                        "store._publish_json_exclusive('bundles', 'pointer.json', "
+                        "payload=payload, _precommit_check=before_link)",
+                        "(root / 'receipt.json').write_bytes("
+                        "(root / 'bundles' / 'pointer.json').read_bytes())",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            pointer_fixture.chmod(0o555)
+            expected_pointer = (
+                json.dumps(
+                    {
+                        "publication_status": "complete",
+                        "schema": "txnmem-integrated-pointer-v1",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                    allow_nan=False,
+                )
+                + "\n"
+            ).encode("utf-8")
+            for phase in ("before-link", "after-link"):
+                with self.subTest(pointer_phase=phase):
+                    publication_root = root / phase
+                    publication_root.mkdir(mode=0o700)
+                    publisher = subprocess.run(
+                        (
+                            sys.executable,
+                            "-B",
+                            str(pointer_fixture),
+                            phase,
+                            str(publication_root),
+                        ),
+                        cwd=root,
+                        env=isolated_environment,
+                        check=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                    )
+                    self.assertEqual(publisher.returncode, -signal.SIGKILL)
+                    pointer = publication_root / "bundles" / "pointer.json"
+                    receipt = publication_root / "receipt.json"
+                    if phase == "before-link":
+                        self.assertFalse(pointer.exists())
+                    else:
+                        self.assertEqual(pointer.read_bytes(), expected_pointer)
+                    self.assertFalse(receipt.exists())
+                    self.assertFalse(pointer.exists() and receipt.exists())
+                    for path in (publication_root / "bundles").iterdir():
+                        if path.name.startswith(".pointer.json."):
+                            path.unlink()
+                    directory_fd = os.open(
+                        publication_root / "bundles",
+                        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+                    )
+                    try:
+                        os.fsync(directory_fd)
+                    finally:
+                        os.close(directory_fd)
+                    self.assertFalse(
+                        any(
+                            path.name.startswith(".pointer.json.")
+                            for path in (publication_root / "bundles").iterdir()
+                        )
+                    )
+
+            collector_module._require_formal_uid_processes(
+                collector_module.FORMAL_RUNNER_UID,
+                expected={},
+            )
+            self.assertEqual(current_pidfds(), pidfds_before)
 
     def test_validated_group_identity_mismatch_sends_no_signal(self):
         valid = {
