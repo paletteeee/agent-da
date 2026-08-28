@@ -12,6 +12,7 @@ import select
 import stat
 import threading
 import time
+import weakref
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -63,7 +64,16 @@ TERMINAL_REASON_CLASSES = frozenset(
     }
 )
 _STORE_LOCKS_GUARD = threading.Lock()
-_STORE_LOCKS: dict[str, threading.RLock] = {}
+
+
+class _StoreWriterLock:
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
+
+
+_STORE_LOCKS: weakref.WeakValueDictionary[tuple[int, int, str], _StoreWriterLock] = (
+    weakref.WeakValueDictionary()
+)
 
 _HASH_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _INTEGER_FIELDS = frozenset(
@@ -83,10 +93,14 @@ _INTEGER_FIELDS = frozenset(
 )
 
 
-def _store_writer_lock(path: Path) -> threading.RLock:
-    lock_key = os.path.normcase(os.path.abspath(os.fspath(path)))
+def _store_writer_lock(parent_identity: tuple[int, int], target_name: str) -> _StoreWriterLock:
+    lock_key = (*parent_identity, target_name)
     with _STORE_LOCKS_GUARD:
-        return _STORE_LOCKS.setdefault(lock_key, threading.RLock())
+        writer_lock = _STORE_LOCKS.get(lock_key)
+        if writer_lock is None:
+            writer_lock = _StoreWriterLock()
+            _STORE_LOCKS[lock_key] = writer_lock
+        return writer_lock
 
 
 def _protocol_error(message: str) -> None:
@@ -409,7 +423,13 @@ class ProgressSnapshotStore:
         self._expected_uid = expected_uid
         self._expected_gid = expected_gid
         self._transition_lock = threading.Lock()
-        self._writer_lock = _store_writer_lock(path)
+        parent_fd = self._open_parent()
+        try:
+            parent_stat = os.fstat(parent_fd)
+            self._parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
+        finally:
+            os.close(parent_fd)
+        self._writer_lock = _store_writer_lock(self._parent_identity, self._target_name)
 
     def _open_parent(self) -> int:
         flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -421,6 +441,17 @@ class ProgressSnapshotStore:
             parent_stat = os.fstat(parent_fd)
             if not stat.S_ISDIR(parent_stat.st_mode):
                 _protocol_error("progress snapshot parent is not a directory")
+        except BaseException:
+            os.close(parent_fd)
+            raise
+        return parent_fd
+
+    def _open_bound_parent(self) -> int:
+        parent_fd = self._open_parent()
+        try:
+            parent_stat = os.fstat(parent_fd)
+            if (parent_stat.st_dev, parent_stat.st_ino) != self._parent_identity:
+                _protocol_error("progress snapshot parent changed")
         except BaseException:
             os.close(parent_fd)
             raise
@@ -608,8 +639,8 @@ class ProgressSnapshotStore:
             "last_update_age_seconds": 0,
         }
         with self._transition_lock:
-            with self._writer_lock:
-                parent_fd = self._open_parent()
+            with self._writer_lock.lock:
+                parent_fd = self._open_bound_parent()
                 try:
                     self._write_snapshot(snapshot, parent_fd=parent_fd)
                 finally:
@@ -621,8 +652,8 @@ class ProgressSnapshotStore:
         snapshot["schema"] = PROGRESS_SNAPSHOT_SCHEMA
         snapshot["last_update_age_seconds"] = 0
         with self._transition_lock:
-            with self._writer_lock:
-                parent_fd = self._open_parent()
+            with self._writer_lock.lock:
+                parent_fd = self._open_bound_parent()
                 try:
                     self._write_snapshot(
                         snapshot,
@@ -638,8 +669,8 @@ class ProgressSnapshotStore:
         if type(reason_class) is not str or reason_class not in TERMINAL_REASON_CLASSES:
             _protocol_error("terminal snapshot reason class has an invalid value")
         with self._transition_lock:
-            with self._writer_lock:
-                parent_fd = self._open_parent()
+            with self._writer_lock.lock:
+                parent_fd = self._open_bound_parent()
                 try:
                     snapshot, current_stat = self._read_persisted(parent_fd)
                     if snapshot["status"] in TERMINAL_STATUSES:
@@ -657,8 +688,8 @@ class ProgressSnapshotStore:
 
     def read_view(self) -> dict[str, Any]:
         with self._transition_lock:
-            with self._writer_lock:
-                parent_fd = self._open_parent()
+            with self._writer_lock.lock:
+                parent_fd = self._open_bound_parent()
                 try:
                     snapshot, file_stat = self._read_persisted(parent_fd)
                 finally:

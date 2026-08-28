@@ -1,3 +1,4 @@
+import gc
 import json
 import math
 import os
@@ -352,11 +353,10 @@ class TxnMemProgressSnapshotStoreTests(unittest.TestCase):
         actual_parent.mkdir()
         linked_parent = Path(self.temporary_directory.name) / "linked-parent"
         linked_parent.symlink_to(actual_parent, target_is_directory=True)
-        linked_store = progress.ProgressSnapshotStore(
-            linked_parent / "snapshot.json", expected_uid=os.getuid(), expected_gid=os.getgid()
-        )
         with self.assertRaises(ProgressProtocolError):
-            linked_store.write_starting("a" * 64, "b" * 64)
+            progress.ProgressSnapshotStore(
+                linked_parent / "snapshot.json", expected_uid=os.getuid(), expected_gid=os.getgid()
+            )
 
         self.path.write_bytes(b'{"not":"a snapshot"}\n')
         self.path.chmod(0o600)
@@ -555,6 +555,101 @@ class TxnMemProgressSnapshotStoreTests(unittest.TestCase):
         view = self.store.read_view()
         self.assertEqual(view["status"], "blocked")
         self.assertEqual(view["update_sequence"], 1)
+
+    def test_alias_parent_spellings_share_terminal_writer_serialization(self):
+        alias_path = Path("//" + str(self.path).lstrip("/"))
+        parent_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+        primary_parent_fd = os.open(self.path.parent, parent_flags)
+        alias_parent_fd = os.open(alias_path.parent, parent_flags)
+        try:
+            primary_parent_stat = os.fstat(primary_parent_fd)
+            alias_parent_stat = os.fstat(alias_parent_fd)
+        finally:
+            os.close(primary_parent_fd)
+            os.close(alias_parent_fd)
+        self.assertEqual(
+            (primary_parent_stat.st_dev, primary_parent_stat.st_ino),
+            (alias_parent_stat.st_dev, alias_parent_stat.st_ino),
+        )
+
+        alias_store = progress.ProgressSnapshotStore(
+            alias_path, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+        self.store.write_running(self.event())
+        entered_replace = threading.Event()
+        release_replace = threading.Event()
+        running_finished = threading.Event()
+        terminal_errors: list[BaseException] = []
+        running_errors: list[BaseException] = []
+        real_replace = os.replace
+
+        def pause_terminal_replace(source, destination, *args, **kwargs):
+            if threading.current_thread().name == "terminal-writer":
+                entered_replace.set()
+                release_replace.wait(2.0)
+            return real_replace(source, destination, *args, **kwargs)
+
+        def terminal_writer():
+            try:
+                self.store.write_terminal("blocked", "backend_timeout")
+            except BaseException as exc:
+                terminal_errors.append(exc)
+
+        def running_writer():
+            try:
+                alias_store.write_running(self.event(sequence=2))
+            except BaseException as exc:
+                running_errors.append(exc)
+            finally:
+                running_finished.set()
+
+        with mock.patch("txnmem_provenance_progress.os.replace", pause_terminal_replace):
+            terminal_thread = threading.Thread(target=terminal_writer, name="terminal-writer")
+            terminal_thread.start()
+            self.assertTrue(entered_replace.wait(2.0))
+            running_thread = threading.Thread(target=running_writer, name="running-writer")
+            running_thread.start()
+            try:
+                running_finished_before_release = running_finished.wait(0.1)
+            finally:
+                release_replace.set()
+                terminal_thread.join(2.0)
+                running_thread.join(2.0)
+
+        self.assertFalse(running_finished_before_release)
+        self.assertFalse(terminal_thread.is_alive())
+        self.assertFalse(running_thread.is_alive())
+        self.assertEqual(terminal_errors, [])
+        self.assertEqual(len(running_errors), 1)
+        self.assertIsInstance(running_errors[0], ProgressProtocolError)
+        view = self.store.read_view()
+        self.assertEqual(view["status"], "blocked")
+        self.assertEqual(view["update_sequence"], 1)
+
+    def test_parent_rebinding_after_store_construction_fails_closed(self):
+        bound_parent = Path(self.temporary_directory.name) / "bound-parent"
+        bound_parent.mkdir()
+        rebound_path = bound_parent / "formal-progress.json"
+        store = progress.ProgressSnapshotStore(
+            rebound_path, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+        moved_parent = Path(self.temporary_directory.name) / "moved-parent"
+        os.rename(bound_parent, moved_parent)
+        bound_parent.mkdir()
+        with self.assertRaises(ProgressProtocolError):
+            store.write_starting("a" * 64, "b" * 64)
+
+    def test_unused_writer_lock_registry_entry_is_reclaimed(self):
+        initial_keys = set(progress._STORE_LOCKS)
+        transient_path = Path(self.temporary_directory.name) / "transient-progress.json"
+        transient_store = progress.ProgressSnapshotStore(
+            transient_path, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+        added_keys = set(progress._STORE_LOCKS) - initial_keys
+        self.assertEqual(len(added_keys), 1)
+        del transient_store
+        gc.collect()
+        self.assertTrue(added_keys.isdisjoint(progress._STORE_LOCKS))
 
 
 class TxnMemProgressPipeDrainerTests(unittest.TestCase):
