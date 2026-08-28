@@ -181,6 +181,11 @@ _COMMAND_MANIFEST_FIELDS = frozenset(
         "ready_environment_variable",
         "completion_environment_variable",
         "completion_receipt_required",
+        "progress_environment_variable",
+        "progress_binding_environment_variable",
+        "progress_binding_sha256",
+        "progress_channel_required",
+        "backend_timeout_policy",
         "runtime_environment_variable",
         "inherited_environment",
     }
@@ -671,7 +676,7 @@ def _validate_command_manifest(
 ) -> dict[str, Any]:
     if not isinstance(value, Mapping) or set(value) != _COMMAND_MANIFEST_FIELDS:
         raise TopologyAttestationError("command manifest fields do not match schema")
-    if value.get("schema") != "txnmem-provenance-command-manifest-v2":
+    if value.get("schema") != "txnmem-provenance-command-manifest-v3":
         raise TopologyAttestationError("command manifest schema mismatch")
     if value.get("transport") not in _TRANSPORTS:
         raise TopologyAttestationError("command transport is unsupported")
@@ -691,6 +696,7 @@ def _validate_command_manifest(
         "qdrant_endpoint_sha256",
         "neo4j_endpoint_sha256",
         "toxiproxy_endpoint_sha256",
+        "progress_binding_sha256",
     ):
         _exact_hash(value.get(field), f"command {field}")
     qdrant_port = _exact_positive_int(
@@ -744,6 +750,36 @@ def _validate_command_manifest(
         _exact_hash(digest, f"command environment {name}")
     if value.get("secret_environment_variables") != ["TXNMEM_NEO4J_PASSWORD"]:
         raise TopologyAttestationError("command secret environment is not closed")
+    timeout_policy = value.get("backend_timeout_policy")
+    timeout_fields = {
+        "qdrant_request_seconds",
+        "neo4j_connection_seconds",
+        "neo4j_connection_acquisition_seconds",
+        "neo4j_transaction_query_seconds",
+    }
+    if not isinstance(timeout_policy, Mapping) or set(timeout_policy) != timeout_fields:
+        raise TopologyAttestationError("backend timeout policy is not closed")
+    timeout_values = list(timeout_policy.values())
+    if any(
+        type(timeout) not in {int, float}
+        or not math.isfinite(timeout)
+        or timeout <= 0
+        for timeout in timeout_values
+    ) or any(timeout != 30.0 for timeout in timeout_values):
+        raise TopologyAttestationError("backend timeout policy is inconsistent")
+    binding_document = {
+        "schema": "txnmem-provenance-progress-binding-v1",
+        "source_manifest_sha256": value["source_manifest_sha256"],
+        "argv_sha256": value["argv_sha256"],
+        "config_file_sha256": value["config_file_sha256"],
+        "run_id_sha256": value["run_id_sha256"],
+        "candidate_root_sha256": value["candidate_root_sha256"],
+    }
+    if not hmac.compare_digest(
+        value["progress_binding_sha256"],
+        hashlib.sha256(_canonical_bytes(binding_document)).hexdigest(),
+    ):
+        raise TopologyAttestationError("progress binding does not match command")
     if (
         hashed_environment["TXNMEM_PROVENANCE_RUNTIME_SITE"]
         != runtime_snapshot_path_hash
@@ -757,6 +793,11 @@ def _validate_command_manifest(
         or value.get("completion_environment_variable")
         != "TXNMEM_PROVENANCE_COMPLETION_FD"
         or value.get("completion_receipt_required") is not True
+        or value.get("progress_environment_variable")
+        != "TXNMEM_PROVENANCE_PROGRESS_FD"
+        or value.get("progress_binding_environment_variable")
+        != "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256"
+        or value.get("progress_channel_required") is not True
         or value.get("runtime_environment_variable")
         != "TXNMEM_PROVENANCE_RUNTIME_SITE"
         or value.get("inherited_environment") is not False

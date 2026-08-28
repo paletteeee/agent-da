@@ -64,6 +64,12 @@ from txnmem_provenance_performance import (
     validate_environment_attestation,
     validate_matrix_config,
 )
+from txnmem_provenance_progress import (
+    FormalProgressState,
+    ProgressPipeDrainer,
+    ProgressProtocolError,
+    ProgressSnapshotStore,
+)
 from txnmem_topology_attestation import (
     COLLECTOR_ID,
     FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
@@ -117,6 +123,7 @@ _REQUIRED_SOURCE_PATHS = (
     "src/txnmem_provenance_contract.py",
     "src/txnmem_provenance_execution_collector.py",
     "src/txnmem_provenance_performance.py",
+    "src/txnmem_provenance_progress.py",
     "src/txnmem_provenance_runner.py",
     "src/txnmem_topology_attestation.py",
     "src/txnmem_vector_graph_backend.py",
@@ -172,6 +179,8 @@ class _GatedCandidate:
     _release_fd: int | None
     _receipt_fd: int | None
     ready_observed: bool
+    _progress_drainer: ProgressPipeDrainer | None = None
+    _progress_store: ProgressSnapshotStore | None = None
     gate_released_monotonic_ns: int | None = None
     exit_observed_monotonic_ns: int | None = None
 
@@ -196,6 +205,40 @@ class _GatedCandidate:
         if self._receipt_fd is not None:
             os.close(self._receipt_fd)
             self._receipt_fd = None
+        if self._progress_drainer is not None:
+            self._progress_drainer.abort()
+
+    def finish_progress(self, timeout: float) -> dict[str, Any]:
+        if self._progress_drainer is None:
+            raise CollectorError("candidate progress channel is unavailable")
+        try:
+            snapshot = self._progress_drainer.finish(timeout)
+        except ProgressProtocolError as exc:
+            raise CollectorError("candidate progress channel failed") from exc
+        if not isinstance(snapshot, dict):
+            raise CollectorError("candidate progress snapshot is unavailable")
+        return snapshot
+
+    def complete_progress(self) -> dict[str, Any]:
+        if self._progress_store is None:
+            raise CollectorError("candidate progress store is unavailable")
+        try:
+            self._progress_store.write_terminal("completed", "completed")
+            return self._progress_store.read_view()
+        except ProgressProtocolError as exc:
+            raise CollectorError("candidate progress completion failed") from exc
+
+    def block_progress(self) -> None:
+        if self._progress_store is None:
+            return
+        try:
+            view = self._progress_store.read_view()
+            if view["status"] not in {"completed", "blocked", "interrupted"}:
+                self._progress_store.write_terminal(
+                    "blocked", "progress_protocol_failed"
+                )
+        except ProgressProtocolError:
+            pass
 
     def wait_with_receipt(
         self, *, timeout: float | None = None
@@ -1245,8 +1288,24 @@ def _build_formal_child_spec(
         "TXNMEM_PROVENANCE_RUNTIME_SITE": str(runtime_site),
     }
     argv_hash = hashlib.sha256("\0".join(command).encode("utf-8")).hexdigest()
+    progress_binding_document = {
+        "schema": "txnmem-provenance-progress-binding-v1",
+        "source_manifest_sha256": source_hash,
+        "argv_sha256": argv_hash,
+        "config_file_sha256": expected_config_hash,
+        "run_id_sha256": hashlib.sha256(run_id.encode("utf-8")).hexdigest(),
+        "candidate_root_sha256": hashlib.sha256(
+            str(candidate).encode("utf-8")
+        ).hexdigest(),
+    }
+    progress_binding_hash = hashlib.sha256(
+        canonical_json_bytes(progress_binding_document)
+    ).hexdigest()
+    config_document, _config_raw = load_strict_json_document(config)
+    validated_config = validate_matrix_config(config_document, formal=True)
+    request_timeout = float(validated_config["request_timeout_seconds"])
     command_manifest = {
-        "schema": "txnmem-provenance-command-manifest-v2",
+        "schema": "txnmem-provenance-command-manifest-v3",
         "transport": transport,
         "argv_sha256": argv_hash,
         "argv_template": [
@@ -1328,6 +1387,16 @@ def _build_formal_child_spec(
         "ready_environment_variable": "TXNMEM_PROVENANCE_READY_FD",
         "completion_environment_variable": "TXNMEM_PROVENANCE_COMPLETION_FD",
         "completion_receipt_required": True,
+        "progress_environment_variable": "TXNMEM_PROVENANCE_PROGRESS_FD",
+        "progress_binding_environment_variable": "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256",
+        "progress_binding_sha256": progress_binding_hash,
+        "progress_channel_required": True,
+        "backend_timeout_policy": {
+            "qdrant_request_seconds": request_timeout,
+            "neo4j_connection_seconds": request_timeout,
+            "neo4j_connection_acquisition_seconds": request_timeout,
+            "neo4j_transaction_query_seconds": request_timeout,
+        },
         "runtime_environment_variable": "TXNMEM_PROVENANCE_RUNTIME_SITE",
         "inherited_environment": False,
     }
@@ -1347,6 +1416,12 @@ def _start_gated_candidate(
     formal_uid: int | None = None,
     formal_gid: int | None = None,
     require_completion_receipt: bool = False,
+    require_progress: bool = False,
+    progress_binding_sha256: str | None = None,
+    progress_config_sha256: str | None = None,
+    progress_snapshot_path: Path | None = None,
+    progress_expected_uid: int | None = None,
+    progress_expected_gid: int | None = None,
 ) -> _GatedCandidate:
     """Start a child that cannot import project code until the gate is released."""
 
@@ -1369,11 +1444,34 @@ def _start_gated_candidate(
             "TXNMEM_PROVENANCE_START_GATE_FD",
             "TXNMEM_PROVENANCE_READY_FD",
             "TXNMEM_PROVENANCE_COMPLETION_FD",
+            "TXNMEM_PROVENANCE_PROGRESS_FD",
+            "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256",
         )
     ):
         raise CollectorError("candidate gate environment is reserved")
     if (formal_uid is None) != (formal_gid is None):
         raise CollectorError("formal child identity is incomplete")
+    progress_values = (
+        progress_binding_sha256,
+        progress_config_sha256,
+        progress_snapshot_path,
+        progress_expected_uid,
+        progress_expected_gid,
+    )
+    if require_progress:
+        if (
+            not isinstance(progress_snapshot_path, Path)
+            or type(progress_expected_uid) is not int
+            or type(progress_expected_gid) is not int
+        ):
+            raise CollectorError("candidate progress ownership is incomplete")
+        try:
+            _validate_hash(progress_binding_sha256, "progress binding")
+            _validate_hash(progress_config_sha256, "progress config")
+        except CollectorError:
+            raise
+    elif any(value is not None for value in progress_values):
+        raise CollectorError("candidate progress parameters require a channel")
     preexec_fn = None
     if formal_uid is not None and formal_gid is not None:
         if not hasattr(os, "geteuid") or os.geteuid() != 0:
@@ -1387,15 +1485,63 @@ def _start_gated_candidate(
     receipt_write_fd: int | None = None
     if require_completion_receipt:
         receipt_read_fd, receipt_write_fd = os.pipe()
+    progress_read_fd: int | None = None
+    progress_write_fd: int | None = None
+    progress_store: ProgressSnapshotStore | None = None
+    progress_drainer: ProgressPipeDrainer | None = None
+    if require_progress:
+        assert progress_snapshot_path is not None
+        assert progress_expected_uid is not None
+        assert progress_expected_gid is not None
+        assert progress_binding_sha256 is not None
+        assert progress_config_sha256 is not None
+        progress_read_fd, progress_write_fd = os.pipe()
+        try:
+            progress_store = ProgressSnapshotStore(
+                progress_snapshot_path,
+                expected_uid=progress_expected_uid,
+                expected_gid=progress_expected_gid,
+            )
+            progress_store.write_starting(
+                progress_binding_sha256, progress_config_sha256
+            )
+            progress_drainer = ProgressPipeDrainer(
+                progress_read_fd,
+                FormalProgressState(
+                    progress_binding_sha256, progress_config_sha256
+                ),
+                progress_store,
+            )
+        except BaseException:
+            os.close(read_fd)
+            os.close(write_fd)
+            os.close(ready_read_fd)
+            os.close(ready_write_fd)
+            if receipt_read_fd is not None:
+                os.close(receipt_read_fd)
+            if receipt_write_fd is not None:
+                os.close(receipt_write_fd)
+            os.close(progress_read_fd)
+            os.close(progress_write_fd)
+            raise
     child_environment["TXNMEM_PROVENANCE_START_GATE_FD"] = str(read_fd)
     child_environment["TXNMEM_PROVENANCE_READY_FD"] = str(ready_write_fd)
     if receipt_write_fd is not None:
         child_environment["TXNMEM_PROVENANCE_COMPLETION_FD"] = str(
             receipt_write_fd
         )
+    if progress_write_fd is not None:
+        child_environment["TXNMEM_PROVENANCE_PROGRESS_FD"] = str(
+            progress_write_fd
+        )
+        child_environment[
+            "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256"
+        ] = progress_binding_sha256
     inherited_descriptors = [read_fd, ready_write_fd]
     if receipt_write_fd is not None:
         inherited_descriptors.append(receipt_write_fd)
+    if progress_write_fd is not None:
+        inherited_descriptors.append(progress_write_fd)
     try:
         process = subprocess.Popen(
             tuple(command),
@@ -1415,11 +1561,28 @@ def _start_gated_candidate(
             os.close(receipt_read_fd)
         if receipt_write_fd is not None:
             os.close(receipt_write_fd)
+        if progress_read_fd is not None:
+            os.close(progress_read_fd)
+        if progress_write_fd is not None:
+            os.close(progress_write_fd)
         raise
     os.close(read_fd)
     os.close(ready_write_fd)
     if receipt_write_fd is not None:
         os.close(receipt_write_fd)
+    if progress_write_fd is not None:
+        os.close(progress_write_fd)
+    if progress_drainer is not None:
+        try:
+            progress_drainer.start()
+        except BaseException:
+            if receipt_read_fd is not None:
+                os.close(receipt_read_fd)
+            os.close(write_fd)
+            os.close(ready_read_fd)
+            process.terminate()
+            process.wait(timeout=5)
+            raise
     try:
         readable, _, _ = select.select([ready_read_fd], [], [], 5.0)
         token = os.read(ready_read_fd, 1) if readable else b""
@@ -1431,6 +1594,8 @@ def _start_gated_candidate(
         os.close(write_fd)
         if receipt_read_fd is not None:
             os.close(receipt_read_fd)
+        if progress_drainer is not None:
+            progress_drainer.abort()
         if process.poll() is None:
             process.terminate()
             try:
@@ -1447,6 +1612,8 @@ def _start_gated_candidate(
         process=process,
         _release_fd=write_fd,
         _receipt_fd=receipt_read_fd,
+        _progress_drainer=progress_drainer,
+        _progress_store=progress_store,
         ready_observed=True,
     )
 
@@ -4721,6 +4888,14 @@ def collect_formal_execution(
             formal_uid=FORMAL_RUNNER_UID,
             formal_gid=FORMAL_RUNNER_GID,
             require_completion_receipt=True,
+            require_progress=True,
+            progress_binding_sha256=child_spec.command_manifest[
+                "progress_binding_sha256"
+            ],
+            progress_config_sha256=config_hash,
+            progress_snapshot_path=workspace.root / "progress.json",
+            progress_expected_uid=0,
+            progress_expected_gid=0,
         )
         child_process = _observe_formal_child_process(
             child.process.pid,
@@ -4825,7 +5000,30 @@ def collect_formal_execution(
         def run_candidate() -> tuple[int, Mapping[str, Any]]:
             assert child is not None
             child.release()
-            return child.wait_with_receipt()
+            try:
+                exit_code, receipt = child.wait_with_receipt()
+                snapshot = child.finish_progress(2.0)
+            except BaseException:
+                child.block_progress()
+                raise
+            if exit_code != 0:
+                child.block_progress()
+                return exit_code, receipt
+            if (
+                snapshot.get("status") != "running"
+                or snapshot.get("update_sequence") != 450
+                or snapshot.get("completed_repetitions") != 450
+                or snapshot.get("completed_samples") != 14400
+            ):
+                child.block_progress()
+                raise CollectorError(
+                    "candidate progress did not reach formal completion"
+                )
+            terminal = child.complete_progress()
+            if terminal.get("status") != "completed":
+                child.block_progress()
+                raise CollectorError("candidate progress terminal is invalid")
+            return exit_code, receipt
 
         def seal_candidate(
             candidate: Path, receipt: Mapping[str, Any]

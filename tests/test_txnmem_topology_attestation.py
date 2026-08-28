@@ -342,7 +342,7 @@ class TopologyAttestationTests(unittest.TestCase):
             ],
         }
         command_manifest = {
-            "schema": "txnmem-provenance-command-manifest-v2",
+            "schema": "txnmem-provenance-command-manifest-v3",
             "transport": "container_bridge",
             "argv_sha256": "9" * 64,
             "argv_template": [
@@ -437,6 +437,15 @@ class TopologyAttestationTests(unittest.TestCase):
             "ready_environment_variable": "TXNMEM_PROVENANCE_READY_FD",
             "completion_environment_variable": "TXNMEM_PROVENANCE_COMPLETION_FD",
             "completion_receipt_required": True,
+            "progress_environment_variable": "TXNMEM_PROVENANCE_PROGRESS_FD",
+            "progress_binding_environment_variable": "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256",
+            "progress_channel_required": True,
+            "backend_timeout_policy": {
+                "qdrant_request_seconds": 30.0,
+                "neo4j_connection_seconds": 30.0,
+                "neo4j_connection_acquisition_seconds": 30.0,
+                "neo4j_transaction_query_seconds": 30.0,
+            },
             "runtime_environment_variable": "TXNMEM_PROVENANCE_RUNTIME_SITE",
             "inherited_environment": False,
         }
@@ -465,6 +474,17 @@ class TopologyAttestationTests(unittest.TestCase):
                 ("python", "9"),
             )
         ]
+        binding = {
+            "schema": "txnmem-provenance-progress-binding-v1",
+            "source_manifest_sha256": command_manifest["source_manifest_sha256"],
+            "argv_sha256": command_manifest["argv_sha256"],
+            "config_file_sha256": command_manifest["config_file_sha256"],
+            "run_id_sha256": command_manifest["run_id_sha256"],
+            "candidate_root_sha256": command_manifest["candidate_root_sha256"],
+        }
+        command_manifest["progress_binding_sha256"] = hashlib.sha256(
+            json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
         child_process = {
             "pid": 1234,
             "start_identity": "candidate-process:1234:fixture-start",
@@ -1505,6 +1525,45 @@ class TopologyAttestationTests(unittest.TestCase):
                 else:
                     with self.assertRaises(TopologyAttestationError):
                         self._sanitize(launch, completion)
+
+    def test_command_manifest_v3_progress_and_timeout_mutations_fail_closed(self):
+        def mutate_both(mutator):
+            launch, completion = self._documents()
+            for document in (launch, completion):
+                mutator(document["command_manifest"])
+                document["command_sha256"] = hashlib.sha256(
+                    json.dumps(
+                        document["command_manifest"],
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest()
+            return launch, completion
+
+        mutations = (
+            lambda manifest: manifest.update(
+                {"schema": "txnmem-provenance-command-manifest-v2"}
+            ),
+            lambda manifest: manifest.pop("progress_environment_variable"),
+            lambda manifest: manifest.update({"progress_extra": True}),
+            lambda manifest: manifest.update({"progress_binding_sha256": "f" * 64}),
+            lambda manifest: manifest["backend_timeout_policy"].update(
+                {"neo4j_connection_seconds": 31.0}
+            ),
+            lambda manifest: manifest.update(
+                {
+                    "backend_timeout_policy": {
+                        name: 31.0
+                        for name in manifest["backend_timeout_policy"]
+                    }
+                }
+            ),
+        )
+        for index, mutation in enumerate(mutations):
+            with self.subTest(index=index):
+                launch, completion = mutate_both(mutation)
+                with self.assertRaises(TopologyAttestationError):
+                    self._sanitize(launch, completion)
 
     def test_exact_registered_attestation_validates_and_tampering_fails(self):
         sanitized = self._sanitize()

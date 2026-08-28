@@ -857,7 +857,16 @@ def _run_core_experiment(
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    _progress_callback=None,
+    _require_formal_eligibility: bool = False,
+) -> int:
+    if _progress_callback is not None and not callable(_progress_callback):
+        raise TypeError("_progress_callback must be callable or None")
+    if type(_require_formal_eligibility) is not bool:
+        raise TypeError("_require_formal_eligibility must be an exact boolean")
     args = _build_parser().parse_args(argv)
     if args.command == "generate":
         instances = generate_suite(args.workloads, _seed_range(args.seeds))
@@ -1344,6 +1353,13 @@ def main(argv: list[str] | None = None) -> int:
             config_document, config_raw = load_strict_json_document(args.config)
             config = validate_matrix_config(config_document, formal=args.formal)
             cells = expand_matrix(config)
+            total_repetitions = sum(int(cell["repetitions"]) for cell in cells)
+            total_samples = sum(
+                int(cell["repetitions"])
+                * int(cell["operations_per_type"])
+                * 4
+                for cell in cells
+            )
             if args.formal:
                 raise ValueError(
                     "direct formal measurement is disabled; use the attested "
@@ -1422,7 +1438,7 @@ def main(argv: list[str] | None = None) -> int:
 
             failure_stage = "matrix_execution"
             try:
-                for cell in cells:
+                for cell_index, cell in enumerate(cells, start=1):
                     graph = build_layered_dag(
                         int(cell["graph_node_count"]), int(cell["graph_seed"])
                     )
@@ -1438,6 +1454,31 @@ def main(argv: list[str] | None = None) -> int:
                             base_samples
                             + int(snapshot["completed_operation_sample_count"])
                         )
+                        if _progress_callback is not None:
+                            repetition_index = int(
+                                snapshot["completed_repetition_count"]
+                            )
+                            _progress_callback(
+                                {
+                                    "cell_index": cell_index,
+                                    "cell_count": len(cells),
+                                    "graph_size": int(cell["graph_node_count"]),
+                                    "concurrency": int(cell["concurrency"]),
+                                    "repetition_index": repetition_index,
+                                    "repetition_count": int(cell["repetitions"]),
+                                    "completed_repetitions": progress[
+                                        "completed_repetition_count"
+                                    ],
+                                    "total_repetitions": total_repetitions,
+                                    "completed_samples": progress[
+                                        "completed_operation_sample_count"
+                                    ],
+                                    "total_samples": total_samples,
+                                    "update_sequence": progress[
+                                        "completed_repetition_count"
+                                    ],
+                                }
+                            )
 
                     cell_report = run_matrix_cell(
                         backend_factory,

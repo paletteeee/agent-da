@@ -141,6 +141,10 @@ class FormalControllerCleanupTests(unittest.TestCase):
             "src/txnmem_formal_smoke.py",
             controller._REQUIRED_APPROVED_PATHS,
         )
+        self.assertIn(
+            "src/txnmem_provenance_progress.py",
+            controller._REQUIRED_APPROVED_PATHS,
+        )
 
     def test_export_rejects_head_change_from_root_approved_commit(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -537,6 +541,7 @@ class FormalControllerCleanupTests(unittest.TestCase):
         self.assertIn("/usr/bin/mv -f", text)
         self.assertIn('"scripts/run_formal_provenance_smoke.sh"', text)
         self.assertIn('"src/txnmem_formal_smoke.py"', text)
+        self.assertIn('"src/txnmem_provenance_progress.py"', text)
         self.assertNotIn("sshpass", text)
         self.assertNotIn("StrictHostKeyChecking=no", text)
 

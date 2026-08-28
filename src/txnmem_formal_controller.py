@@ -49,6 +49,7 @@ _REQUIRED_APPROVED_PATHS = frozenset(
         "src/txnmem_formal_controller.py",
         "src/txnmem_formal_smoke.py",
         "src/txnmem_provenance_execution_collector.py",
+        "src/txnmem_provenance_progress.py",
         "src/txnmem_provenance_runner.py",
     }
 )

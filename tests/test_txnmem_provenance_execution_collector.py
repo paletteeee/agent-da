@@ -479,7 +479,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
     ):
         runtime_manifest = ProvenanceExecutionCollectorTests._runtime_manifest()
         manifest = {
-            "schema": "txnmem-provenance-command-manifest-v2",
+            "schema": "txnmem-provenance-command-manifest-v3",
             "transport": "local_loopback",
             "argv_sha256": "8" * 64,
             "argv_template": [
@@ -547,9 +547,29 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             "ready_environment_variable": "TXNMEM_PROVENANCE_READY_FD",
             "completion_environment_variable": "TXNMEM_PROVENANCE_COMPLETION_FD",
             "completion_receipt_required": True,
+            "progress_environment_variable": "TXNMEM_PROVENANCE_PROGRESS_FD",
+            "progress_binding_environment_variable": "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256",
+            "progress_channel_required": True,
+            "backend_timeout_policy": {
+                "qdrant_request_seconds": 30.0,
+                "neo4j_connection_seconds": 30.0,
+                "neo4j_connection_acquisition_seconds": 30.0,
+                "neo4j_transaction_query_seconds": 30.0,
+            },
             "runtime_environment_variable": "TXNMEM_PROVENANCE_RUNTIME_SITE",
             "inherited_environment": False,
         }
+        binding = {
+            "schema": "txnmem-provenance-progress-binding-v1",
+            "source_manifest_sha256": manifest["source_manifest_sha256"],
+            "argv_sha256": manifest["argv_sha256"],
+            "config_file_sha256": manifest["config_file_sha256"],
+            "run_id_sha256": manifest["run_id_sha256"],
+            "candidate_root_sha256": manifest["candidate_root_sha256"],
+        }
+        manifest["progress_binding_sha256"] = hashlib.sha256(
+            json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
         return manifest
 
     @staticmethod
@@ -1100,6 +1120,136 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             self.assertEqual(observed, receipt)
+
+    def test_gated_child_progress_pipe_is_collector_owned_and_drained(self):
+        from txnmem_provenance_progress import canonical_progress_line
+
+        binding = "a" * 64
+        config_hash = "b" * 64
+        event = {
+            "schema": "txnmem-provenance-progress-event-v1",
+            "run_binding_sha256": binding,
+            "config_sha256": config_hash,
+            "phase": "measurement",
+            "cell_index": 1,
+            "cell_count": 15,
+            "graph_size": 100,
+            "concurrency": 1,
+            "repetition_index": 1,
+            "repetition_count": 30,
+            "completed_repetitions": 1,
+            "total_repetitions": 450,
+            "completed_samples": 32,
+            "total_samples": 14400,
+            "update_sequence": 1,
+            "status": "running",
+        }
+        line = canonical_progress_line(event)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            candidate = root / "candidate"
+            candidate.mkdir()
+            progress_path = root / "progress.json"
+            script = root / "progress_fixture.py"
+            script.write_text(
+                "\n".join(
+                    [
+                        "import os, sys",
+                        "ready = int(os.environ.pop('TXNMEM_PROVENANCE_READY_FD'))",
+                        "gate = int(os.environ.pop('TXNMEM_PROVENANCE_START_GATE_FD'))",
+                        "progress = int(os.environ.pop('TXNMEM_PROVENANCE_PROGRESS_FD'))",
+                        "os.environ.pop('TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256')",
+                        "os.write(ready, b'R')",
+                        "os.close(ready)",
+                        "token = os.read(gate, 1)",
+                        "os.close(gate)",
+                        "os.write(progress, bytes.fromhex(sys.argv[1]))",
+                        "os.close(progress)",
+                        "raise SystemExit(0 if token == b'G' else 9)",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            child = collector_module._start_gated_candidate(
+                command=(sys.executable, "-I", "-B", str(script), line.hex()),
+                cwd=root,
+                environment={},
+                require_progress=True,
+                progress_binding_sha256=binding,
+                progress_config_sha256=config_hash,
+                progress_snapshot_path=progress_path,
+                progress_expected_uid=os.getuid(),
+                progress_expected_gid=os.getgid(),
+            )
+            try:
+                child.release()
+                self.assertEqual(child.process.wait(timeout=5), 0)
+                snapshot = child.finish_progress(2.0)
+            finally:
+                child.close()
+
+            self.assertEqual(snapshot["status"], "running")
+            self.assertEqual(snapshot["update_sequence"], 1)
+            self.assertEqual(progress_path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(progress_path, root / "progress.json")
+            self.assertFalse(progress_path.is_relative_to(candidate))
+
+            (candidate / "result.json").write_text("{}\n", encoding="utf-8")
+            seal = collector_module._seal_candidate_tree(
+                candidate,
+                expected_owner_uid=os.getuid(),
+                sealed_owner_uid=os.getuid(),
+                sealed_owner_gid=os.getgid(),
+                completion_receipt={"result": "sealed"},
+            )
+            self.assertEqual(seal["file_count"], 1)
+
+    def test_gated_child_rejects_caller_supplied_progress_environment(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            for name in (
+                "TXNMEM_PROVENANCE_PROGRESS_FD",
+                "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256",
+            ):
+                with self.subTest(name=name), self.assertRaisesRegex(
+                    CollectorError, "reserved"
+                ):
+                    collector_module._start_gated_candidate(
+                        command=(sys.executable, "-I", "-B", "unused.py"),
+                        cwd=root,
+                        environment={name: "13"},
+                    )
+
+    def test_gated_child_closes_every_pipe_if_progress_store_setup_fails(self):
+        from txnmem_provenance_progress import ProgressProtocolError
+
+        descriptors = iter(((10, 11), (12, 13), (14, 15)))
+        closed = []
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module.os, "pipe", side_effect=lambda: next(descriptors)
+        ), patch.object(
+            collector_module.os, "close", side_effect=closed.append
+        ), patch.object(
+            collector_module,
+            "ProgressSnapshotStore",
+            side_effect=ProgressProtocolError("fixture setup failure"),
+        ):
+            root = Path(tmp).resolve()
+            with self.assertRaises(ProgressProtocolError):
+                collector_module._start_gated_candidate(
+                    command=(sys.executable, "-I", "-B", "unused.py"),
+                    cwd=root,
+                    environment={},
+                    require_progress=True,
+                    progress_binding_sha256="a" * 64,
+                    progress_config_sha256="b" * 64,
+                    progress_snapshot_path=root / "progress.json",
+                    progress_expected_uid=os.getuid(),
+                    progress_expected_gid=os.getgid(),
+                )
+
+        self.assertEqual(sorted(closed), [10, 11, 12, 13, 14, 15])
 
     def test_child_identity_is_observed_from_proc_not_copied_from_manifest(self):
         with TemporaryDirectory() as tmp:
@@ -2667,6 +2817,196 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     "TXNMEM_PROVENANCE_RUNTIME_SITE", os.environ
                 )
 
+    def test_immutable_runner_emits_one_canonical_safe_progress_line(self):
+        import txnmem_experiment
+        import txnmem_provenance_runner as runner_module
+        from txnmem_provenance_progress import decode_progress_line
+
+        gate_read, gate_write = os.pipe()
+        ready_read, ready_write = os.pipe()
+        completion_read, completion_write = os.pipe()
+        progress_read, progress_write = os.pipe()
+        os.write(gate_write, b"G")
+        os.close(gate_write)
+        binding = "a" * 64
+        config_hash = "b" * 64
+        observed_hooks = []
+
+        def experiment_main(_arguments, **hooks):
+            observed_hooks.append(hooks)
+            hooks["_progress_callback"](
+                {
+                    "cell_index": 1,
+                    "cell_count": 15,
+                    "graph_size": 100,
+                    "concurrency": 1,
+                    "repetition_index": 1,
+                    "repetition_count": 30,
+                    "completed_repetitions": 1,
+                    "total_repetitions": 450,
+                    "completed_samples": 32,
+                    "total_samples": 14400,
+                    "update_sequence": 1,
+                }
+            )
+            return 0
+
+        with TemporaryDirectory() as tmp, patch.dict(
+            os.environ,
+            {
+                "TXNMEM_PROVENANCE_START_GATE_FD": str(gate_read),
+                "TXNMEM_PROVENANCE_READY_FD": str(ready_write),
+                "TXNMEM_PROVENANCE_COMPLETION_FD": str(completion_write),
+                "TXNMEM_PROVENANCE_PROGRESS_FD": str(progress_write),
+                "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256": binding,
+                "TXNMEM_PROVENANCE_RUNTIME_SITE": str(Path(tmp).resolve()),
+            },
+            clear=True,
+        ), patch.object(txnmem_experiment, "main", side_effect=experiment_main), patch(
+            "txnmem_provenance_performance.formal_matrix_config_sha256",
+            return_value=config_hash,
+        ), patch(
+            "txnmem_provenance_performance.candidate_attestation_material",
+            return_value={"result": "sealed"},
+        ):
+            result = runner_module.main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "vector-graph",
+                    "--config",
+                    "/immutable/config.json",
+                    "--run-id",
+                    "runner-progress-fixture",
+                    "--out-dir",
+                    "/candidate",
+                    "--service-url",
+                    "http://127.0.0.1:19000",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(os.read(ready_read, 2), b"R")
+        event = decode_progress_line(os.read(progress_read, 4096))
+        self.assertEqual(event["run_binding_sha256"], binding)
+        self.assertEqual(event["config_sha256"], config_hash)
+        self.assertEqual(event["completed_repetitions"], 1)
+        self.assertEqual(
+            set(event),
+            {
+                "schema", "run_binding_sha256", "config_sha256", "phase",
+                "cell_index", "cell_count", "graph_size", "concurrency",
+                "repetition_index", "repetition_count", "completed_repetitions",
+                "total_repetitions", "completed_samples", "total_samples",
+                "update_sequence", "status",
+            },
+        )
+        self.assertEqual(observed_hooks[0]["_require_formal_eligibility"], True)
+        self.assertTrue(os.read(completion_read, 65536))
+        for descriptor in (ready_read, completion_read, progress_read):
+            os.close(descriptor)
+
+    def test_immutable_runner_progress_channel_fails_closed_before_receipt(self):
+        import txnmem_experiment
+        import txnmem_provenance_runner as runner_module
+
+        def experiment_main(_arguments, **hooks):
+            hooks["_progress_callback"](
+                {
+                    "cell_index": 1, "cell_count": 15, "graph_size": 100,
+                    "concurrency": 1, "repetition_index": 1,
+                    "repetition_count": 30, "completed_repetitions": 1,
+                    "total_repetitions": 450, "completed_samples": 32,
+                    "total_samples": 14400, "update_sequence": 1,
+                }
+            )
+            return 0
+
+        for failure in ("epipe", "short"):
+            with self.subTest(failure=failure), TemporaryDirectory() as tmp:
+                gate_read, gate_write = os.pipe()
+                ready_read, ready_write = os.pipe()
+                completion_read, completion_write = os.pipe()
+                progress_read, progress_write = os.pipe()
+                os.write(gate_write, b"G")
+                os.close(gate_write)
+                if failure == "epipe":
+                    os.close(progress_read)
+                real_write = os.write
+
+                def write(descriptor, payload):
+                    if failure == "short" and descriptor == progress_write:
+                        return 0
+                    return real_write(descriptor, payload)
+
+                with patch.dict(
+                    os.environ,
+                    {
+                        "TXNMEM_PROVENANCE_START_GATE_FD": str(gate_read),
+                        "TXNMEM_PROVENANCE_READY_FD": str(ready_write),
+                        "TXNMEM_PROVENANCE_COMPLETION_FD": str(completion_write),
+                        "TXNMEM_PROVENANCE_PROGRESS_FD": str(progress_write),
+                        "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256": "a" * 64,
+                        "TXNMEM_PROVENANCE_RUNTIME_SITE": str(Path(tmp).resolve()),
+                    },
+                    clear=True,
+                ), patch.object(txnmem_experiment, "main", side_effect=experiment_main), patch.object(
+                    runner_module.os, "write", side_effect=write
+                ), patch(
+                    "txnmem_provenance_performance.formal_matrix_config_sha256",
+                    return_value="b" * 64,
+                ):
+                    result = runner_module.main(
+                        [
+                            "provenance-performance", "--backend", "vector-graph",
+                            "--config", "/immutable/config.json", "--run-id", "x",
+                            "--out-dir", "/candidate", "--service-url",
+                            "http://127.0.0.1:19000",
+                        ]
+                    )
+                self.assertNotEqual(result, 0)
+                self.assertEqual(os.read(completion_read, 1), b"")
+                os.close(ready_read)
+                os.close(completion_read)
+                if failure != "epipe":
+                    os.close(progress_read)
+
+    def test_immutable_runner_rejects_missing_equal_or_malformed_progress_values(self):
+        import txnmem_provenance_runner as runner_module
+
+        cases = (
+            ({}, "missing"),
+            ({"TXNMEM_PROVENANCE_PROGRESS_FD": "13"}, "missing_binding"),
+            ({
+                "TXNMEM_PROVENANCE_PROGRESS_FD": "10",
+                "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256": "a" * 64,
+            }, "equal_fd"),
+            ({
+                "TXNMEM_PROVENANCE_PROGRESS_FD": "010",
+                "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256": "a" * 64,
+            }, "numeric_equal_fd"),
+            ({
+                "TXNMEM_PROVENANCE_PROGRESS_FD": "13",
+                "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256": "A" * 64,
+            }, "malformed_binding"),
+        )
+        with TemporaryDirectory() as tmp:
+            for extra, name in cases:
+                with self.subTest(name=name), patch.dict(
+                    os.environ,
+                    {
+                        "TXNMEM_PROVENANCE_START_GATE_FD": "10",
+                        "TXNMEM_PROVENANCE_READY_FD": "11",
+                        "TXNMEM_PROVENANCE_COMPLETION_FD": "12",
+                        "TXNMEM_PROVENANCE_RUNTIME_SITE": str(Path(tmp).resolve()),
+                        **extra,
+                    },
+                    clear=True,
+                ), patch.object(runner_module.os, "close"):
+                    self.assertEqual(
+                        runner_module.main(["provenance-performance"]), 70
+                    )
+
     def test_formal_child_spec_uses_only_immutable_export_and_redacts_secret(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -2676,7 +3016,13 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             runner = export / "src" / "txnmem_provenance_runner.py"
             runner.write_text("# immutable runner\n", encoding="utf-8")
             config = export / "configs" / "provenance_performance_matrix.json"
-            config.write_text("{}\n", encoding="utf-8")
+            config.write_bytes(
+                (
+                    Path(__file__).resolve().parents[1]
+                    / "configs"
+                    / "provenance_performance_matrix.json"
+                ).read_bytes()
+            )
             runtime_lock = export / "configs" / "provenance_runtime_lock.json"
             runtime_lock.write_bytes(
                 (
@@ -3577,6 +3923,10 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 )
 
     def test_controller_context_is_bound_to_root_approval_manifest_hash(self):
+        self.assertIn(
+            "src/txnmem_provenance_progress.py",
+            collector_module._REQUIRED_SOURCE_PATHS,
+        )
         rows = [
             {"path": path, "blob_sha256": hashlib.sha256(path.encode()).hexdigest()}
             for path in sorted(collector_module._REQUIRED_SOURCE_PATHS)

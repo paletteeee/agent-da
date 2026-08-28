@@ -393,6 +393,123 @@ class TxnMemCliOutputTests(unittest.TestCase):
             },
         )
 
+    def test_provenance_progress_callback_translates_cell_counts_globally(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        events = []
+
+        def run_cell(_factory, graph, **kwargs):
+            callback = kwargs["progress_callback"]
+            for repetition in (1, 2):
+                callback(
+                    {
+                        "completed_repetition_count": repetition,
+                        "completed_operation_sample_count": repetition * 4,
+                    }
+                )
+            return {
+                "graph": {"node_count": 2},
+                "samples": [],
+                "repetitions": [],
+            }
+
+        with TemporaryDirectory() as tmp, patch(
+            "txnmem_provenance_performance.run_matrix_cell", side_effect=run_cell
+        ), patch(
+            "txnmem_provenance_performance.aggregate_matrix", return_value={}
+        ), patch(
+            "txnmem_provenance_performance.publish_provenance_bundle",
+            return_value=Path(tmp) / "published.json",
+        ):
+            root = Path(tmp).resolve()
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "schema": "txnmem-provenance-performance-v2",
+                        "graph_node_counts": [2],
+                        "concurrency_levels": [1, 2],
+                        "repetitions": 2,
+                        "graph_seed": 17,
+                        "operations_per_type": 1,
+                        "bootstrap_repetitions": 10,
+                        "bootstrap_seed": 17,
+                        "request_timeout_seconds": 30.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "memory",
+                    "--config",
+                    str(config),
+                    "--run-id",
+                    "progress-fixture",
+                    "--out-dir",
+                    str(root / "out"),
+                ],
+                _progress_callback=events.append,
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            events[0],
+            {
+                "cell_index": 1,
+                "cell_count": 2,
+                "graph_size": 2,
+                "concurrency": 1,
+                "repetition_index": 1,
+                "repetition_count": 2,
+                "completed_repetitions": 1,
+                "total_repetitions": 4,
+                "completed_samples": 4,
+                "total_samples": 16,
+                "update_sequence": 1,
+            },
+        )
+        self.assertEqual(events[-1]["completed_repetitions"], 4)
+        self.assertEqual(events[-1]["update_sequence"], 4)
+        forbidden = {"run_id", "namespace", "address", "path", "payload"}
+        self.assertFalse(forbidden & set().union(*(event.keys() for event in events)))
+
+    def test_provenance_progress_hooks_are_python_only_and_strictly_typed(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        with self.assertRaises(SystemExit):
+            main(["provenance-performance", "--_progress-callback", "value"])
+        with self.assertRaises(TypeError):
+            main([], _progress_callback="not-callable")
+        with self.assertRaises(TypeError):
+            main([], _require_formal_eligibility=1)
+
+        config = self._small_provenance_config()
+        config["_progress_callback"] = "forbidden"
+        config["_require_formal_eligibility"] = True
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            config_path = root / "config.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            result = main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "memory",
+                    "--config",
+                    str(config_path),
+                    "--run-id",
+                    "hook-config-fixture",
+                    "--out-dir",
+                    str(root / "out"),
+                ]
+            )
+        self.assertEqual(result, 2)
+
     def test_provenance_blocked_report_identifies_pre_execution_stage(self):
         sys.path.insert(0, str(ROOT / "src"))
         from txnmem_experiment import main

@@ -7,6 +7,7 @@ import importlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import urllib.request
 
@@ -128,10 +129,19 @@ def _provenance_smoke_receipt(
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
     gate_value = os.environ.pop("TXNMEM_PROVENANCE_START_GATE_FD", None)
     ready_value = os.environ.pop("TXNMEM_PROVENANCE_READY_FD", None)
     completion_value = os.environ.pop("TXNMEM_PROVENANCE_COMPLETION_FD", None)
+    progress_value = os.environ.pop("TXNMEM_PROVENANCE_PROGRESS_FD", None)
+    progress_binding = os.environ.pop(
+        "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256", None
+    )
     runtime_site = os.environ.pop("TXNMEM_PROVENANCE_RUNTIME_SITE", None)
+    progress_pair_present = progress_value is not None and progress_binding is not None
+    performance_mode = bool(
+        arguments and arguments[0] == "provenance-performance"
+    )
     if (
         gate_value is None
         or not gate_value.isdigit()
@@ -141,14 +151,30 @@ def main(argv: list[str] | None = None) -> int:
         or not completion_value.isdigit()
         or gate_value == ready_value
         or completion_value in {gate_value, ready_value}
+        or (progress_value is None) != (progress_binding is None)
+        or (performance_mode and not progress_pair_present)
+        or (
+            progress_pair_present
+            and (
+                not progress_value.isdigit()
+                or progress_value in {gate_value, ready_value, completion_value}
+                or re.fullmatch(r"[0-9a-f]{64}", progress_binding) is None
+            )
+        )
         or runtime_site is None
         or not os.path.isabs(runtime_site)
         or not os.path.isdir(runtime_site)
     ):
         return 70
+    descriptor_values = [gate_value, ready_value, completion_value]
+    if progress_value is not None:
+        descriptor_values.append(progress_value)
+    if len({int(value) for value in descriptor_values}) != len(descriptor_values):
+        return 70
     gate_fd = int(gate_value)
     ready_fd = int(ready_value)
     completion_fd = int(completion_value)
+    progress_fd = int(progress_value) if progress_pair_present else None
     try:
         if os.write(ready_fd, b"R") != 1:
             return 70
@@ -162,7 +188,6 @@ def main(argv: list[str] | None = None) -> int:
         return 71
 
     try:
-        arguments = list(sys.argv[1:] if argv is None else argv)
         if not arguments or arguments[0] not in {
             "provenance-performance",
             "provenance-smoke",
@@ -193,8 +218,35 @@ def main(argv: list[str] | None = None) -> int:
         ):
             return 72
         from txnmem_experiment import main as experiment_main
+        from txnmem_provenance_performance import formal_matrix_config_sha256
+        from txnmem_provenance_progress import (
+            build_progress_event,
+            canonical_progress_line,
+        )
 
-        result = experiment_main(arguments)
+        config_sha256 = formal_matrix_config_sha256()
+
+        def emit_progress(snapshot: dict) -> None:
+            if progress_fd is None or progress_binding is None:
+                raise RuntimeError("formal progress channel is unavailable")
+            event = build_progress_event(
+                run_binding_sha256=progress_binding,
+                config_sha256=config_sha256,
+                cell_index=snapshot["cell_index"],
+                graph_size=snapshot["graph_size"],
+                concurrency=snapshot["concurrency"],
+                repetition_index=snapshot["repetition_index"],
+                completed_repetitions=snapshot["completed_repetitions"],
+                completed_samples=snapshot["completed_samples"],
+                update_sequence=snapshot["update_sequence"],
+            )
+            _write_all(progress_fd, canonical_progress_line(event))
+
+        result = experiment_main(
+            arguments,
+            _progress_callback=emit_progress,
+            _require_formal_eligibility=True,
+        )
         if type(result) is not int:
             return 73
         if result == 0:
@@ -207,6 +259,8 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, TypeError, ValueError, RuntimeError):
         return 74
     finally:
+        if progress_fd is not None:
+            os.close(progress_fd)
         os.close(completion_fd)
 
 
