@@ -773,6 +773,7 @@ def _remove_smoke_success_report(target: Path) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     progress_invocation = False
+    progress_output_attempted = False
     invalid_invocation = False
     action: str | None = None
     try:
@@ -837,15 +838,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                             pass
                 raise
             if action == "progress":
-                _write_progress_output(result)
+                validated_result = _validate_progress_output(
+                    result,
+                    allow_blocked=False,
+                )
+                progress_output_attempted = True
+                _write_progress_output(validated_result)
                 return 0
             return result
     except BaseException as exc:
         if action == "progress" or progress_invocation:
-            try:
-                _write_progress_output(_blocked_progress_output())
-            except BaseException:
-                pass
+            if not progress_output_attempted:
+                progress_output_attempted = True
+                try:
+                    _write_progress_output(_blocked_progress_output())
+                except BaseException:
+                    pass
             return 64 if invalid_invocation else 2
         if isinstance(exc, (OSError, ValueError, RuntimeError)):
             print(f"formal controller blocked: {type(exc).__name__}", file=sys.stderr)

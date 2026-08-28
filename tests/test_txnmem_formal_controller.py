@@ -471,6 +471,64 @@ class FormalControllerCleanupTests(unittest.TestCase):
             self.assertEqual(stderr.getvalue(), "")
             self.assertEqual(cleanup_observed, [True])
 
+    def test_main_progress_flush_failure_never_appends_a_second_status_record(self):
+        class FlushFailsAfterWrite:
+            def __init__(self):
+                self.parts: list[str] = []
+
+            def write(self, value: str) -> int:
+                self.parts.append(value)
+                return len(value)
+
+            def flush(self) -> None:
+                raise OSError("seeded private flush failure /private/output")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve() / "repository"
+            root.mkdir()
+            export = Path(tmp).resolve() / "source-fixture"
+            export.mkdir()
+            identity = self._identity(export, export.parent)
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=(),
+                manifest={},
+                manifest_sha256="b" * 64,
+            )
+            expected_line = self._progress_line()
+            stdout = FlushFailsAfterWrite()
+            stderr = io.StringIO()
+
+            with patch.object(controller.os, "geteuid", return_value=0), patch.object(
+                controller, "_verify_installed_controller", return_value=approved
+            ), patch.object(
+                controller, "_create_committed_export", return_value=identity
+            ), patch.object(
+                controller, "_dispatch", return_value=expected_line
+            ), patch.object(
+                controller, "_remove_export"
+            ), patch.object(
+                controller.sys, "stdout", stdout
+            ), contextlib.redirect_stderr(stderr):
+                status = controller.main(
+                    [
+                        "--project-root",
+                        str(root),
+                        "progress",
+                        "--run-id",
+                        "private-run",
+                        "--authorization-nonce",
+                        "/private/nonce",
+                    ]
+                )
+
+            observed = "".join(stdout.parts).encode("utf-8")
+            self.assertEqual(status, 2)
+            self.assertEqual(observed, expected_line)
+            self.assertEqual(observed.count(b"\n"), 1)
+            self.assertNotIn(b"formal_progress_unavailable", observed)
+            self.assertEqual(stderr.getvalue(), "")
+
     def test_main_progress_rejects_canonical_json_outside_the_sanitized_closure(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve() / "repository"
