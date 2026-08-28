@@ -3090,6 +3090,125 @@ class ProvenanceAggregationTests(unittest.TestCase):
         self.assertIn(origin[0], traceback_nodes)
         self.assertEqual(unlink_calls, 2)
 
+    def test_directory_fd_adoption_preserves_exact_close_failure_traceback_and_attempts_child_once(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalStore
+
+        class ParentCloseFailure(BaseException):
+            pass
+
+        primary = ParentCloseFailure("parent-close-primary")
+        origin = []
+        close_calls = []
+
+        def close(descriptor):
+            close_calls.append(descriptor)
+            if descriptor == 40:
+                try:
+                    raise primary
+                except BaseException as exc:
+                    origin.append(exc.__traceback__)
+                    raise
+
+        caught = None
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_root", return_value=40
+            ), patch.object(
+                formal_io.os, "open", return_value=41
+            ), patch.object(
+                formal_io.os, "close", side_effect=close
+            ):
+                try:
+                    store.ensure_directory("child")
+                except BaseException as exc:
+                    caught = (exc, exc.__traceback__)
+
+        self.assertIsNotNone(caught)
+        self.assertIs(caught[0], primary)
+        traceback_nodes = []
+        current = caught[1]
+        while current is not None:
+            traceback_nodes.append(current)
+            current = current.tb_next
+        self.assertIn(origin[0], traceback_nodes)
+        self.assertIs(origin[0].tb_frame.f_code, close.__code__)
+        self.assertEqual(close_calls, [40, 41])
+
+    def test_directory_fd_adoption_never_double_closes_reissued_parent_number(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalStore
+
+        class ParentCloseFailure(BaseException):
+            pass
+
+        primary = ParentCloseFailure("parent-close-after-kernel-close")
+        real_close = os.close
+        real_dup2 = os.dup2
+        real_open = os.open
+        close_calls = []
+        reissued_descriptor = None
+        reissued_was_closed = False
+        caught = None
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            store = FormalStore(root)
+            parent_descriptor = real_open(
+                root,
+                os.O_RDONLY | os.O_DIRECTORY,
+            )
+            child_descriptor = real_open(
+                root,
+                os.O_RDONLY | os.O_DIRECTORY,
+            )
+
+            def close(descriptor):
+                nonlocal reissued_descriptor, reissued_was_closed
+                close_calls.append(descriptor)
+                if descriptor == parent_descriptor and reissued_descriptor is None:
+                    real_close(descriptor)
+                    replacement = real_open(os.devnull, os.O_RDONLY)
+                    if replacement != parent_descriptor:
+                        real_dup2(replacement, parent_descriptor)
+                        real_close(replacement)
+                    reissued_descriptor = parent_descriptor
+                    raise primary
+                if descriptor == reissued_descriptor:
+                    reissued_was_closed = True
+                real_close(descriptor)
+
+            try:
+                with patch.object(
+                    store, "_open_root", return_value=parent_descriptor
+                ), patch.object(
+                    formal_io.os, "open", return_value=child_descriptor
+                ), patch.object(
+                    formal_io.os, "close", side_effect=close
+                ):
+                    try:
+                        store.ensure_directory("child")
+                    except BaseException as exc:
+                        caught = exc
+
+                self.assertIs(caught, primary)
+                self.assertEqual(
+                    close_calls,
+                    [parent_descriptor, child_descriptor],
+                )
+                self.assertFalse(reissued_was_closed)
+                os.fstat(reissued_descriptor)
+            finally:
+                if reissued_descriptor is not None:
+                    real_close(reissued_descriptor)
+                else:
+                    for descriptor in (child_descriptor, parent_descriptor):
+                        try:
+                            real_close(descriptor)
+                        except OSError:
+                            pass
+
     def test_formal_postlink_sync_and_descriptor_close_faults_are_observable_once(self):
         import txnmem_formal_io as formal_io
         from txnmem_formal_io import FormalIOError, FormalStore

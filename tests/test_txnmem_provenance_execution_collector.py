@@ -88,6 +88,55 @@ def proxy_payload_sha256(snapshot):
     ).hexdigest()
 
 
+def _copy_locked_runner_import_closure(destination):
+    repository = Path(__file__).resolve().parents[1]
+    source_root = repository / "src"
+    destination.mkdir(mode=0o755)
+    for name, mode in (
+        ("txnmem_provenance_runner.py", 0o555),
+        ("txnmem_provenance_contract.py", 0o444),
+    ):
+        copied = destination / name
+        copied.write_bytes((source_root / name).read_bytes())
+        copied.chmod(mode)
+    destination.chmod(0o555)
+    return destination / "txnmem_provenance_runner.py"
+
+
+def _isolated_contract_resolves_inside_locked_source(locked_source):
+    repository = Path(__file__).resolve().parents[1]
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = str(repository / "src")
+    probe = "\n".join(
+        (
+            "import pathlib, sys",
+            "root = pathlib.Path(sys.argv[1]).resolve()",
+            "sys.path.insert(0, str(root))",
+            "import txnmem_provenance_contract as contract",
+            "actual = pathlib.Path(contract.__file__).resolve().parent",
+            "raise SystemExit(0 if actual == root else 86)",
+        )
+    )
+    completed = subprocess.run(
+        (
+            sys.executable,
+            "-I",
+            "-S",
+            "-B",
+            "-c",
+            probe,
+            str(locked_source),
+        ),
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=5.0,
+        check=False,
+    )
+    return completed.returncode == 0
+
+
 class ProvenanceExecutionCollectorTests(unittest.TestCase):
     AUTHORIZATION_NONCE = b"collector-fixture-authorization-nonce-0001"
 
@@ -2522,7 +2571,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         )
         self.assertNotIn(("pidfd-close", 91), events)
 
-    def test_formal_pidfd_preflight_uses_real_self_syscalls_before_popen(self):
+    def test_formal_pidfd_preflight_call_contract_uses_self_and_closes_once(self):
         close_calls = []
         with patch.object(
             collector_module.sys, "platform", "linux"
@@ -2546,7 +2595,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         pidfd_send.assert_called_once_with(73, 0, None, 0)
         self.assertEqual(close_calls, [73])
 
-    def test_formal_pidfd_preflight_syscall_failures_block_popen_and_close_once(self):
+    def test_formal_pidfd_preflight_call_contract_failures_block_popen_and_close_once(self):
         cases = (
             ("open-enosys", OSError(errno.ENOSYS, "pidfd_open unavailable")),
             ("open-policy", OSError(errno.EPERM, "pidfd_open denied")),
@@ -2608,7 +2657,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     pidfd_send.assert_called_once_with(73, 0, None, 0)
                     self.assertEqual(close_calls, [73])
 
-    def test_formal_pidfd_preflight_rejects_malformed_kernel_results_before_popen(self):
+    def test_formal_pidfd_preflight_call_contract_rejects_malformed_results_before_popen(self):
         cases = (("open", True, None), ("send", 73, 1))
         for case, open_result, send_result in cases:
             with self.subTest(case=case), TemporaryDirectory() as tmp:
@@ -2649,6 +2698,33 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
 
                 popen.assert_not_called()
                 self.assertEqual(close_calls, [] if case == "open" else [73])
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and callable(getattr(os, "pidfd_open", None))
+        and callable(getattr(signal, "pidfd_send_signal", None)),
+        "protected Linux real pidfd syscalls only",
+    )
+    def test_protected_linux_pidfd_preflight_uses_real_kernel_syscalls(self):
+        def pidfd_inventory():
+            observed = []
+            for entry in (Path("/proc") / "self" / "fd").iterdir():
+                try:
+                    target = os.readlink(entry)
+                except FileNotFoundError:
+                    continue
+                if "pidfd" in target:
+                    observed.append((entry.name, target))
+            return tuple(sorted(observed))
+
+        before = pidfd_inventory()
+        collector_module._require_pidfd_support()
+        after = pidfd_inventory()
+
+        self.assertTrue(
+            after == before,
+            "protected Linux pidfd probe changed the process inventory",
+        )
 
     def test_post_popen_leader_pidfd_failure_requires_exit_and_exact_uid_empty(self):
         descriptors = iter(((10, 11), (12, 13)))
@@ -7099,6 +7175,43 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     0,
                 )
 
+    def test_protected_runner_fixture_requires_complete_isolated_import_closure(self):
+        repository = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as tmp:
+            locked_source = Path(tmp).resolve() / "locked-source"
+            runner_copy = _copy_locked_runner_import_closure(locked_source)
+            contract_copy = locked_source / "txnmem_provenance_contract.py"
+            self.assertTrue(
+                runner_copy.read_bytes()
+                == (repository / "src" / runner_copy.name).read_bytes(),
+                "protected runner fixture runner bytes differ",
+            )
+            self.assertTrue(
+                contract_copy.read_bytes()
+                == (repository / "src" / contract_copy.name).read_bytes(),
+                "protected runner fixture contract bytes differ",
+            )
+            self.assertEqual(locked_source.stat().st_mode & 0o222, 0)
+            self.assertEqual(runner_copy.stat().st_mode & 0o222, 0)
+            self.assertEqual(contract_copy.stat().st_mode & 0o222, 0)
+            self.assertTrue(
+                _isolated_contract_resolves_inside_locked_source(locked_source),
+                "isolated contract provenance check failed",
+            )
+
+            runner_only = Path(tmp).resolve() / "runner-only"
+            runner_only.mkdir(mode=0o755)
+            runner_only_copy = runner_only / "txnmem_provenance_runner.py"
+            runner_only_copy.write_bytes(
+                (repository / "src" / runner_only_copy.name).read_bytes()
+            )
+            runner_only_copy.chmod(0o555)
+            runner_only.chmod(0o555)
+            self.assertFalse(
+                _isolated_contract_resolves_inside_locked_source(runner_only),
+                "checkout or installed contract unexpectedly satisfied isolation",
+            )
+
     @unittest.skipUnless(
         sys.platform.startswith("linux")
         and hasattr(os, "geteuid")
@@ -7111,19 +7224,17 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             root.chmod(0o755)
             runtime = root / "runtime"
             runtime.mkdir(mode=0o755)
-            runner_copy = root / "runner.py"
-            runner_copy.write_bytes(
-                (
-                    Path(__file__).resolve().parents[1]
-                    / "src"
-                    / "txnmem_provenance_runner.py"
-                ).read_bytes()
+            locked_source = root / "locked-source"
+            runner_copy = _copy_locked_runner_import_closure(locked_source)
+            self.assertTrue(
+                _isolated_contract_resolves_inside_locked_source(locked_source),
+                "isolated contract provenance check failed",
             )
-            runner_copy.chmod(0o555)
             child = collector_module._start_gated_candidate(
                 command=(
                     sys.executable,
                     "-I",
+                    "-S",
                     "-B",
                     str(runner_copy),
                     "invalid-command",
@@ -7408,11 +7519,12 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             root.chmod(0o755)
             runtime = root / "runtime"
             runtime.mkdir(mode=0o755)
-            runner_copy = root / "runner.py"
-            runner_copy.write_bytes(
-                (repository / "src" / "txnmem_provenance_runner.py").read_bytes()
+            locked_source = root / "locked-source"
+            runner_copy = _copy_locked_runner_import_closure(locked_source)
+            self.assertTrue(
+                _isolated_contract_resolves_inside_locked_source(locked_source),
+                "isolated contract provenance check failed",
             )
-            runner_copy.chmod(0o555)
 
             parent_fixture = root / "parent_fixture.py"
             parent_fixture.write_text(
@@ -7426,7 +7538,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         f"runner = {str(runner_copy)!r}",
                         f"runtime = {str(runtime)!r}",
                         "child = _start_gated_candidate(",
-                        "    command=(sys.executable, '-I', '-B', runner, "
+                        "    command=(sys.executable, '-I', '-S', '-B', runner, "
                         "'invalid-command'),",
                         "    cwd=root,",
                         "    environment={'TXNMEM_PROVENANCE_RUNTIME_SITE': runtime},",
