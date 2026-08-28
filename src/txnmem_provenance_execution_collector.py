@@ -26,6 +26,7 @@ import re
 import secrets
 import select
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -156,6 +157,64 @@ class CollectorError(RuntimeError):
 
 class _MonitorCandidateExited(RuntimeError):
     """Internal signal that continuous sampling reached the child exit boundary."""
+
+
+class _CollectorInterruption(RuntimeError):
+    """The collector was asked to stop through its self-pipe signal latch."""
+
+
+class _SignalLatch:
+    """Latch SIGINT/SIGTERM state and wake select through a nonblocking pipe."""
+
+    def __init__(self) -> None:
+        self._read_fd, self._write_fd = os.pipe()
+        os.set_blocking(self._read_fd, False)
+        os.set_blocking(self._write_fd, False)
+        self._interrupted = threading.Event()
+        self._closed = False
+        self._previous_handlers: dict[int, Any] = {}
+
+    @property
+    def read_fd(self) -> int:
+        if self._closed:
+            raise CollectorError("collector signal latch is closed")
+        return self._read_fd
+
+    @property
+    def interrupted(self) -> bool:
+        return self._interrupted.is_set()
+
+    def trigger(self, _signal_number: int | None = None, _frame: Any = None) -> None:
+        self._interrupted.set()
+        if self._closed:
+            return
+        try:
+            os.write(self._write_fd, b"I")
+        except BlockingIOError:
+            pass
+        except OSError:
+            pass
+
+    def install(self) -> None:
+        if self._closed or self._previous_handlers:
+            raise CollectorError("collector signal latch cannot be installed")
+        for signal_number in (signal.SIGTERM, signal.SIGINT):
+            self._previous_handlers[signal_number] = signal.signal(
+                signal_number, self.trigger
+            )
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        for signal_number, handler in self._previous_handlers.items():
+            signal.signal(signal_number, handler)
+        self._previous_handlers.clear()
+        self._closed = True
+        for descriptor in (self._read_fd, self._write_fd):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
 
 _FINAL_PROGRESS_FIELDS = frozenset(
@@ -312,6 +371,7 @@ class _GatedCandidate:
     _progress_drainer: ProgressPipeDrainer | None = None
     _progress_store: ProgressSnapshotStore | None = None
     _progress_state: FormalProgressState | None = None
+    _bound_start_identity: str | None = None
     gate_released_monotonic_ns: int | None = None
     exit_observed_monotonic_ns: int | None = None
 
@@ -402,8 +462,102 @@ class _GatedCandidate:
             return
         _persist_blocked_progress(self._progress_store)
 
+    def interrupt_progress(self) -> None:
+        if self._progress_store is None:
+            return
+        try:
+            current = self._progress_store.read_view()
+            if current.get("status") in {
+                "blocked",
+                "completed",
+                "interrupted",
+            }:
+                return
+            self._progress_store.write_terminal(
+                "interrupted", "collector_interrupted"
+            )
+            persisted = self._progress_store.read_view()
+        except BaseException:
+            raise CollectorError("candidate progress interruption failed") from None
+        if persisted.get("status") != "interrupted":
+            raise CollectorError("candidate progress interruption failed")
+
+    def bind_process_identity(self, start_identity: str) -> None:
+        expected_prefix = f"candidate:{self.process.pid}:"
+        if (
+            not isinstance(start_identity, str)
+            or not start_identity.startswith(expected_prefix)
+            or not start_identity[len(expected_prefix) :].isdigit()
+        ):
+            raise CollectorError("candidate process identity binding is invalid")
+        if (
+            self._bound_start_identity is not None
+            and self._bound_start_identity != start_identity
+        ):
+            raise CollectorError("candidate process identity binding changed")
+        self._bound_start_identity = start_identity
+
+    def _validate_bound_group(self) -> None:
+        if self._bound_start_identity is None:
+            raise CollectorError("candidate process identity is not bound")
+        observed = _read_process_group_identity(
+            self.process.pid, self.process.args
+        )
+        if (
+            not isinstance(observed, Mapping)
+            or observed.get("pid") != self.process.pid
+            or observed.get("start_identity") != self._bound_start_identity
+            or observed.get("pgid") != self.process.pid
+            or observed.get("sid") != self.process.pid
+        ):
+            raise CollectorError("candidate process identity changed")
+
+    def terminate_validated_group(
+        self, *, term_seconds: float = 5.0, kill_seconds: float = 5.0
+    ) -> None:
+        for value in (term_seconds, kill_seconds):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or float(value) <= 0.0
+            ):
+                raise CollectorError("candidate cleanup timeout is invalid")
+        try:
+            running = self.process.poll() is None
+        except BaseException:
+            raise CollectorError("candidate process exit state is unavailable") from None
+        if not running:
+            self.process.wait(timeout=0)
+            if self.exit_observed_monotonic_ns is None:
+                self.exit_observed_monotonic_ns = time.monotonic_ns()
+            return
+        self._validate_bound_group()
+        try:
+            os.killpg(self.process.pid, signal.SIGTERM)
+        except OSError:
+            raise CollectorError("candidate process-group termination failed") from None
+        try:
+            self.process.wait(timeout=float(term_seconds))
+        except subprocess.TimeoutExpired:
+            self._validate_bound_group()
+            try:
+                os.killpg(self.process.pid, signal.SIGKILL)
+            except OSError:
+                raise CollectorError("candidate process-group kill failed") from None
+            try:
+                self.process.wait(timeout=float(kill_seconds))
+            except BaseException:
+                raise CollectorError("candidate process group did not stop") from None
+        except BaseException:
+            raise CollectorError("candidate process-group termination failed") from None
+        self.exit_observed_monotonic_ns = time.monotonic_ns()
+
     def wait_with_receipt(
-        self, *, timeout: float | None = None
+        self,
+        *,
+        timeout: float | None = None,
+        interrupt_fd: int | None = None,
     ) -> tuple[int, dict[str, Any]]:
         """Wait for exit while draining one bounded canonical completion receipt."""
 
@@ -422,11 +576,18 @@ class _GatedCandidate:
                         raise subprocess.TimeoutExpired(
                             self.process.args, timeout
                         )
-                readable, _, _ = select.select(
-                    [descriptor], [], [], remaining
-                )
+                descriptors = [descriptor]
+                if interrupt_fd is not None:
+                    descriptors.append(interrupt_fd)
+                readable, _, _ = select.select(descriptors, [], [], remaining)
                 if not readable:
                     raise subprocess.TimeoutExpired(self.process.args, timeout)
+                if interrupt_fd is not None and interrupt_fd in readable:
+                    try:
+                        os.read(interrupt_fd, 1)
+                    except BlockingIOError:
+                        pass
+                    raise _CollectorInterruption("collector interruption requested")
                 chunk = os.read(descriptor, 65536 - len(payload) + 1)
                 if not chunk:
                     break
@@ -1639,7 +1800,10 @@ def _start_gated_candidate(
         if not hasattr(os, "geteuid") or os.geteuid() != 0:
             raise CollectorError("formal child launch requires root")
         preexec_fn = functools.partial(
-            _drop_formal_child_privileges, formal_uid, formal_gid
+            _prepare_formal_child_process,
+            os.getpid(),
+            formal_uid,
+            formal_gid,
         )
     owned_descriptors: list[int] = []
 
@@ -1663,6 +1827,31 @@ def _start_gated_candidate(
 
     def stop_process(process: subprocess.Popen[Any]) -> list[BaseException]:
         failures: list[BaseException] = []
+        if formal_uid is not None:
+            if startup_start_identity is None:
+                try:
+                    if process.poll() is None:
+                        raise CollectorError(
+                            "candidate startup process identity is unavailable"
+                        )
+                    process.wait(timeout=0)
+                except BaseException as exc:
+                    failures.append(exc)
+                return failures
+            startup_candidate = _GatedCandidate(
+                process=process,
+                _release_fd=None,
+                _receipt_fd=None,
+                ready_observed=False,
+            )
+            try:
+                startup_candidate.bind_process_identity(startup_start_identity)
+                startup_candidate.terminate_validated_group(
+                    term_seconds=5.0, kill_seconds=5.0
+                )
+            except BaseException as exc:
+                failures.append(exc)
+            return failures
         try:
             running = process.poll() is None
         except BaseException as exc:
@@ -1725,6 +1914,7 @@ def _start_gated_candidate(
     progress_started = False
     drainer_owns_descriptor = False
     process: subprocess.Popen[Any] | None = None
+    startup_start_identity: str | None = None
     try:
         read_fd, write_fd = allocate_pipe()
         ready_read_fd, ready_write_fd = allocate_pipe()
@@ -1784,6 +1974,19 @@ def _start_gated_candidate(
             preexec_fn=preexec_fn,
             start_new_session=True,
         )
+        if formal_uid is not None:
+            observed_group = _read_process_group_identity(
+                process.pid, tuple(command)
+            )
+            if (
+                observed_group.get("pid") != process.pid
+                or observed_group.get("pgid") != process.pid
+                or observed_group.get("sid") != process.pid
+            ):
+                raise CollectorError("candidate startup process identity changed")
+            startup_start_identity = str(
+                observed_group.get("start_identity", "")
+            )
 
         close_owned(read_fd)
         close_owned(ready_write_fd)
@@ -1816,6 +2019,8 @@ def _start_gated_candidate(
             _progress_state=progress_state,
             ready_observed=True,
         )
+        if startup_start_identity is not None:
+            candidate.bind_process_identity(startup_start_identity)
         transfer_owned(write_fd)
         transfer_owned(receipt_read_fd)
         return candidate
@@ -2499,6 +2704,55 @@ def _create_formal_input_staging(
     finally:
         os.close(root_descriptor)
     return root / "inputs"
+
+
+def _set_parent_death_signal(
+    parent_pid: int,
+    *,
+    prctl: Callable[[int, int, int, int, int], int] | None = None,
+    getppid: Callable[[], int] = os.getppid,
+) -> None:
+    """Require Linux to deliver SIGTERM if the registered collector dies."""
+
+    if type(parent_pid) is not int or parent_pid <= 0:
+        raise CollectorError("formal child parent identity is invalid")
+    operation = prctl
+    if operation is None:
+        if platform.system() != "Linux":
+            raise CollectorError("formal parent-death signal requires Linux")
+        try:
+            libc = ctypes.CDLL(None, use_errno=True)
+            raw_prctl = libc.prctl
+            raw_prctl.argtypes = [
+                ctypes.c_int,
+                ctypes.c_ulong,
+                ctypes.c_ulong,
+                ctypes.c_ulong,
+                ctypes.c_ulong,
+            ]
+            raw_prctl.restype = ctypes.c_int
+            operation = raw_prctl
+        except (AttributeError, OSError):
+            raise CollectorError("formal parent-death signal is unavailable") from None
+    try:
+        result = operation(1, signal.SIGTERM, 0, 0, 0)
+    except BaseException:
+        raise CollectorError("formal parent-death signal setup failed") from None
+    if result != 0:
+        raise CollectorError("formal parent-death signal setup failed")
+    try:
+        observed_parent = getppid()
+    except BaseException:
+        raise CollectorError("formal child parent identity is unavailable") from None
+    if observed_parent != parent_pid:
+        raise CollectorError("formal child parent identity changed")
+
+
+def _prepare_formal_child_process(parent_pid: int, uid: int, gid: int) -> None:
+    """Apply the complete formal child setup through one ordered pre-exec hook."""
+
+    _set_parent_death_signal(parent_pid)
+    _drop_formal_child_privileges(uid, gid)
 
 
 def _drop_formal_child_privileges(uid: int, gid: int) -> None:
@@ -3266,6 +3520,12 @@ def _collect_execution_evidence(
             run_result = run_candidate()
         except BaseException as exc:
             run_failure = exc
+    if run_failure is not None:
+        raise run_failure
+    if monitor_failure is not None:
+        raise CollectorError(
+            "formal execution integrity monitor failed"
+        ) from monitor_failure
     if monitor_started:
         try:
             raw_monitor = execution_monitor_finalize()
@@ -3305,8 +3565,6 @@ def _collect_execution_evidence(
         network_guard_deactivate()
     except BaseException as exc:
         cleanup_failure = exc
-    if run_failure is not None:
-        raise run_failure
     if monitor_failure is not None:
         raise CollectorError("formal execution integrity monitor failed") from monitor_failure
     if guard_failure is not None:
@@ -4682,6 +4940,54 @@ def _observe_formal_child_process(
     }
 
 
+def _read_process_group_identity(
+    pid: int,
+    expected_command: Sequence[str],
+    *,
+    proc_root: Path = Path("/proc"),
+) -> dict[str, Any]:
+    """Re-read the exact process, command, group, session, and start identity."""
+
+    if type(pid) is not int or pid <= 0:
+        raise CollectorError("candidate process identity is invalid")
+    command = tuple(expected_command)
+    if not command or any(not isinstance(item, str) or not item for item in command):
+        raise CollectorError("candidate process command is invalid")
+    process_root = proc_root.expanduser().absolute() / str(pid)
+    try:
+        stat_line = (process_root / "stat").read_text(encoding="utf-8").strip()
+        command_line = _read_regular_file_bytes(
+            process_root / "cmdline", "candidate process command line"
+        )
+    except CollectorError:
+        raise
+    except (OSError, UnicodeError):
+        raise CollectorError("candidate process identity is unavailable") from None
+    closing_parenthesis = stat_line.rfind(")")
+    fields = stat_line[closing_parenthesis + 2 :].split()
+    if closing_parenthesis < 0 or len(fields) <= 19:
+        raise CollectorError("candidate process identity is malformed")
+    expected_cmdline = b"\0".join(
+        item.encode("utf-8") for item in command
+    ) + b"\0"
+    if command_line != expected_cmdline:
+        raise CollectorError("candidate command line mismatch")
+    try:
+        pgid = int(fields[2])
+        sid = int(fields[3])
+    except ValueError:
+        raise CollectorError("candidate process identity is malformed") from None
+    start_ticks = fields[19]
+    if not start_ticks.isdigit():
+        raise CollectorError("candidate process identity is malformed")
+    return {
+        "pid": pid,
+        "start_identity": f"candidate:{pid}:{start_ticks}",
+        "pgid": pgid,
+        "sid": sid,
+    }
+
+
 def _formal_uid_processes(
     uid: int, *, proc_root: Path = Path("/proc")
 ) -> dict[int, str]:
@@ -4986,40 +5292,36 @@ def _cleanup_formal_execution_resources(
             execution_monitor.abort()
         except BaseException as exc:
             failures.append(exc)
-    if network_guard is not None and bool(getattr(network_guard, "active", False)):
+    child_stopped = child is None
+    if child is not None:
+        terminate_group = getattr(child, "terminate_validated_group", None)
         try:
-            network_guard.deactivate()
+            if callable(terminate_group):
+                terminate_group(term_seconds=5.0, kill_seconds=5.0)
+                child_stopped = True
+            else:
+                process = getattr(child, "process", None)
+                if process is None or process.poll() is None:
+                    raise CollectorError(
+                        "candidate process identity-bound cleanup is unavailable"
+                    )
+                process.wait(timeout=0)
+                child_stopped = True
         except BaseException as exc:
             failures.append(exc)
-    if child is not None:
         try:
             child.close()
         except BaseException as exc:
             failures.append(exc)
-        process = getattr(child, "process", None)
-        if process is not None:
-            try:
-                running = process.poll() is None
-            except BaseException as exc:
-                failures.append(exc)
-                running = False
-            if running:
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    try:
-                        process.terminate()
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        try:
-                            process.kill()
-                            process.wait(timeout=5)
-                        except BaseException as exc:
-                            failures.append(exc)
-                    except BaseException as exc:
-                        failures.append(exc)
-                except BaseException as exc:
-                    failures.append(exc)
+    if (
+        child_stopped
+        and network_guard is not None
+        and bool(getattr(network_guard, "active", False))
+    ):
+        try:
+            network_guard.deactivate()
+        except BaseException as exc:
+            failures.append(exc)
     return failures
 
 
@@ -5107,7 +5409,9 @@ def collect_formal_execution(
     network_guard: _NftNetworkGuard | None = None
     execution_monitor: _ExecutionIntegrityMonitor | None = None
     frozen_proxy_state: dict[str, Any] | None = None
+    signal_latch = _SignalLatch()
     try:
+        signal_latch.install()
         _require_formal_uid_processes(FORMAL_RUNNER_UID, expected={})
         environment_document = _collect_formal_environment_attestation(
             toxiproxy_url=toxiproxy_url,
@@ -5179,6 +5483,7 @@ def collect_formal_execution(
             expected_uid=FORMAL_RUNNER_UID,
         )
         child_start_identity = str(child_process["start_identity"])
+        child.bind_process_identity(child_start_identity)
         _require_formal_uid_processes(
             FORMAL_RUNNER_UID,
             expected={
@@ -5277,8 +5582,13 @@ def collect_formal_execution(
             assert child is not None
             try:
                 child.release()
-                exit_code, receipt = child.wait_with_receipt()
+                exit_code, receipt = child.wait_with_receipt(
+                    interrupt_fd=signal_latch.read_fd
+                )
                 snapshot = child.finish_progress(2.0)
+            except _CollectorInterruption:
+                child.interrupt_progress()
+                raise
             except BaseException:
                 child.block_progress()
                 raise
@@ -5455,6 +5765,7 @@ def collect_formal_execution(
             network_guard=network_guard,
             child=child,
         )
+        signal_latch.close()
         if cleanup_failures and sys.exc_info()[0] is None:
             if child is not None:
                 child.block_progress()

@@ -1370,6 +1370,104 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
 
         self.assertNotEqual(status, 0)
 
+    def test_runner_sigterm_unwinds_nonzero_without_partial_candidate(self):
+        import txnmem_experiment
+
+        gate_read, gate_write = os.pipe()
+        ready_read, ready_write = os.pipe()
+        receipt_read, receipt_write = os.pipe()
+        progress_read, progress_write = os.pipe()
+        os.write(gate_write, b"G")
+        os.close(gate_write)
+        installed = {}
+        signal_calls = []
+        events = []
+
+        def install_signal(signal_number, handler):
+            signal_calls.append((signal_number, handler))
+            previous = installed.get(signal_number, signal.SIG_DFL)
+            installed[signal_number] = handler
+            return previous
+
+        progress_snapshot = {
+            "cell_index": 1,
+            "cell_count": 15,
+            "graph_size": 100,
+            "concurrency": 1,
+            "repetition_index": 1,
+            "repetition_count": 30,
+            "completed_repetitions": 1,
+            "total_repetitions": 450,
+            "completed_samples": 32,
+            "total_samples": 14400,
+            "update_sequence": 1,
+        }
+
+        def experiment_main(_arguments, **hooks):
+            try:
+                handler = installed.get(signal.SIGTERM)
+                if callable(handler):
+                    handler(signal.SIGTERM, None)
+                hooks["_progress_callback"](progress_snapshot)
+                return 0
+            finally:
+                events.append("clients_closed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_site = Path(tmp).resolve() / "runtime"
+            runtime_site.mkdir()
+            candidate = Path(tmp).resolve() / "candidate"
+            candidate.mkdir()
+            environment = {
+                "TXNMEM_PROVENANCE_START_GATE_FD": str(gate_read),
+                "TXNMEM_PROVENANCE_READY_FD": str(ready_write),
+                "TXNMEM_PROVENANCE_COMPLETION_FD": str(receipt_write),
+                "TXNMEM_PROVENANCE_PROGRESS_FD": str(progress_write),
+                "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256": "a" * 64,
+                "TXNMEM_PROVENANCE_RUNTIME_SITE": str(runtime_site),
+            }
+            with patch.dict(os.environ, environment, clear=True), patch.object(
+                signal, "signal", side_effect=install_signal
+            ), patch.object(
+                txnmem_experiment, "main", side_effect=experiment_main
+            ), patch(
+                "txnmem_provenance_performance.formal_matrix_config_sha256",
+                return_value="b" * 64,
+            ), patch.object(
+                runner,
+                "_candidate_completion_material",
+                return_value={"result": "must-not-publish"},
+            ) as candidate_material:
+                status = runner.main(
+                    [
+                        "provenance-performance",
+                        "--backend",
+                        "vector-graph",
+                        "--config",
+                        "/immutable/config.json",
+                        "--run-id",
+                        "runner-interruption-fixture",
+                        "--out-dir",
+                        str(candidate),
+                        "--service-url",
+                        "http://127.0.0.1:19000",
+                    ]
+                )
+
+            self.assertEqual(list(candidate.iterdir()), [])
+
+        self.assertNotEqual(status, 0)
+        self.assertEqual(events, ["clients_closed"])
+        self.assertEqual(os.read(ready_read, 2), b"R")
+        self.assertEqual(os.read(progress_read, 1), b"")
+        self.assertEqual(os.read(receipt_read, 1), b"")
+        candidate_material.assert_not_called()
+        self.assertGreaterEqual(len(signal_calls), 2)
+        self.assertTrue(callable(signal_calls[0][1]))
+        self.assertIs(signal_calls[-1][1], signal.SIG_DFL)
+        for descriptor in (ready_read, progress_read, receipt_read):
+            os.close(descriptor)
+
     def test_runner_uses_exact_loopback_probes_and_both_must_succeed(self):
         runtime_site = Path("/runtime-fixture")
         with patch.object(

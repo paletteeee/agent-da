@@ -3,6 +3,7 @@ import hashlib
 import inspect
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -1277,6 +1278,159 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(observed, receipt)
 
+    def test_signal_latch_interrupts_receipt_wait_and_cleanup_is_idempotent(self):
+        events = []
+
+        class Drainer:
+            def __init__(self):
+                self.aborted = False
+
+            def abort(self):
+                if not self.aborted:
+                    self.aborted = True
+                    events.append("progress")
+
+        class Monitor:
+            def abort(self):
+                events.append("monitor")
+
+        class Guard:
+            def __init__(self):
+                self.active = True
+
+            def deactivate(self):
+                self.active = False
+                events.append("guard")
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            script = root / "blocked_after_gate.py"
+            script.write_text(
+                "\n".join(
+                    (
+                        "import os, time",
+                        "ready = int(os.environ.pop('TXNMEM_PROVENANCE_READY_FD'))",
+                        "gate = int(os.environ.pop('TXNMEM_PROVENANCE_START_GATE_FD'))",
+                        "receipt = int(os.environ.pop('TXNMEM_PROVENANCE_COMPLETION_FD'))",
+                        "os.write(ready, b'R')",
+                        "os.close(ready)",
+                        "os.read(gate, 1)",
+                        "os.close(gate)",
+                        "time.sleep(0.5)",
+                        "os.close(receipt)",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            child = collector_module._start_gated_candidate(
+                command=(sys.executable, "-I", "-B", str(script)),
+                cwd=root,
+                environment={},
+                require_completion_receipt=True,
+            )
+            real_killpg = os.killpg
+
+            def emergency_cleanup():
+                if child.process.poll() is None:
+                    real_killpg(child.process.pid, signal.SIGKILL)
+                    child.process.wait(timeout=2.0)
+
+            self.addCleanup(emergency_cleanup)
+            child._progress_drainer = Drainer()
+            start_identity = f"candidate:{child.process.pid}:99"
+            child.bind_process_identity(start_identity)
+            guard = Guard()
+            latch = collector_module._SignalLatch()
+            identity = {
+                "pid": child.process.pid,
+                "start_identity": start_identity,
+                "pgid": child.process.pid,
+                "sid": child.process.pid,
+            }
+            child.release()
+            latch.trigger()
+            latch.trigger()
+            try:
+                with self.assertRaises(collector_module._CollectorInterruption):
+                    child.wait_with_receipt(
+                        timeout=2.0, interrupt_fd=latch.read_fd
+                    )
+            finally:
+                with patch.object(
+                    collector_module,
+                    "_read_process_group_identity",
+                    return_value=identity,
+                ), patch.object(
+                    collector_module.os,
+                    "killpg",
+                    side_effect=lambda pgid, sig: (
+                        events.append(("signal", sig)),
+                        real_killpg(pgid, sig),
+                    )[-1],
+                ):
+                    first = collector_module._cleanup_formal_execution_resources(
+                        execution_monitor=Monitor(),
+                        network_guard=guard,
+                        child=child,
+                    )
+                    second = collector_module._cleanup_formal_execution_resources(
+                        execution_monitor=None,
+                        network_guard=guard,
+                        child=child,
+                    )
+                latch.close()
+                latch.close()
+
+        self.assertEqual(first, [])
+        self.assertEqual(second, [])
+        self.assertEqual(
+            events,
+            ["monitor", ("signal", signal.SIGTERM), "progress", "guard"],
+        )
+
+    def test_signal_latch_handler_only_latches_when_pipe_write_fails(self):
+        latch = collector_module._SignalLatch()
+        try:
+            with patch.object(
+                collector_module.os,
+                "write",
+                side_effect=OSError("private-self-pipe-failure"),
+            ):
+                latch.trigger(signal.SIGTERM, None)
+            self.assertIs(latch.interrupted, True)
+        finally:
+            latch.close()
+
+    def test_interrupted_progress_terminal_is_idempotent(self):
+        class Store:
+            def __init__(self):
+                self.status = "running"
+                self.writes = []
+
+            def read_view(self):
+                return {"status": self.status}
+
+            def write_terminal(self, status, reason):
+                self.writes.append((status, reason))
+                self.status = status
+
+        store = Store()
+        child = collector_module._GatedCandidate(
+            process=SimpleNamespace(pid=4242),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _progress_store=store,
+        )
+
+        child.interrupt_progress()
+        child.interrupt_progress()
+
+        self.assertEqual(
+            store.writes, [("interrupted", "collector_interrupted")]
+        )
+
     def test_gated_child_progress_pipe_is_collector_owned_and_drained(self):
         from txnmem_provenance_progress import canonical_progress_line
 
@@ -2452,6 +2606,69 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             collector_module._set_no_new_privileges(
                 prctl=lambda *_arguments: -1
             )
+
+    def test_parent_death_signal_is_set_then_parent_identity_is_rechecked(self):
+        calls = []
+
+        def prctl(option, signal_number, arg3, arg4, arg5):
+            calls.append(("prctl", option, signal_number, arg3, arg4, arg5))
+            return 0
+
+        def getppid():
+            calls.append(("getppid",))
+            return 7001
+
+        collector_module._set_parent_death_signal(
+            7001, prctl=prctl, getppid=getppid
+        )
+
+        self.assertEqual(
+            calls,
+            [
+                ("prctl", 1, signal.SIGTERM, 0, 0, 0),
+                ("getppid",),
+            ],
+        )
+
+    def test_parent_death_signal_fails_closed_for_invalid_or_changed_parent(self):
+        for parent_pid in (0, -1, True, "7001"):
+            with self.subTest(parent_pid=parent_pid), self.assertRaisesRegex(
+                CollectorError, "parent"
+            ):
+                collector_module._set_parent_death_signal(
+                    parent_pid,
+                    prctl=lambda *_arguments: 0,
+                    getppid=lambda: 7001,
+                )
+
+        with self.assertRaisesRegex(CollectorError, "parent"):
+            collector_module._set_parent_death_signal(
+                7001,
+                prctl=lambda *_arguments: 0,
+                getppid=lambda: 7002,
+            )
+        with self.assertRaisesRegex(CollectorError, "parent-death"):
+            collector_module._set_parent_death_signal(
+                7001,
+                prctl=lambda *_arguments: -1,
+                getppid=lambda: 7001,
+            )
+
+    def test_parent_death_signal_requires_available_linux_prctl(self):
+        with patch.object(
+            collector_module.platform, "system", return_value="Darwin"
+        ), self.assertRaisesRegex(CollectorError, "Linux"):
+            collector_module._set_parent_death_signal(7001)
+
+        with patch.object(
+            collector_module.platform, "system", return_value="Linux"
+        ), patch.object(
+            collector_module.ctypes,
+            "CDLL",
+            side_effect=OSError("private-unavailable"),
+        ), self.assertRaisesRegex(CollectorError, "unavailable") as raised:
+            collector_module._set_parent_death_signal(7001)
+        self.assertNotIn("private", str(raised.exception))
 
     def test_external_executable_attestation_binds_root_protected_bytes(self):
         with TemporaryDirectory() as tmp:
@@ -3824,6 +4041,136 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             ],
         )
 
+    def test_formal_child_preexec_sets_parent_death_before_privilege_drop(self):
+        calls = []
+        with patch.object(
+            collector_module,
+            "_set_parent_death_signal",
+            side_effect=lambda parent_pid: calls.append(("parent-death", parent_pid)),
+        ), patch.object(
+            collector_module,
+            "_drop_formal_child_privileges",
+            side_effect=lambda uid, gid: calls.append(("privileges", uid, gid)),
+        ):
+            collector_module._prepare_formal_child_process(7001, 65532, 65532)
+
+        self.assertEqual(
+            calls,
+            [("parent-death", 7001), ("privileges", 65532, 65532)],
+        )
+
+    def test_formal_launch_uses_one_ordered_preexec_function(self):
+        descriptors = iter(((10, 11), (12, 13)))
+        popen_kwargs = {}
+
+        class Process:
+            pid = 4242
+            args = (sys.executable, "-I", "-B", "unused.py")
+
+            def poll(self):
+                return None
+
+        def popen(*_arguments, **kwargs):
+            popen_kwargs.update(kwargs)
+            return Process()
+
+        identity = {
+            "pid": 4242,
+            "start_identity": "candidate:4242:99",
+            "pgid": 4242,
+            "sid": 4242,
+        }
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module.os, "pipe", side_effect=lambda: next(descriptors)
+        ), patch.object(
+            collector_module.os, "close"
+        ), patch.object(
+            collector_module.os, "geteuid", return_value=0
+        ), patch.object(
+            collector_module.os, "getpid", return_value=7001
+        ), patch.object(
+            collector_module.subprocess, "Popen", side_effect=popen
+        ), patch.object(
+            collector_module.select, "select", return_value=([12], [], [])
+        ), patch.object(
+            collector_module.os, "read", return_value=b"R"
+        ), patch.object(
+            collector_module,
+            "_read_process_group_identity",
+            return_value=identity,
+        ) as identity_reader:
+            child = collector_module._start_gated_candidate(
+                command=Process.args,
+                cwd=Path(tmp).resolve(),
+                environment={},
+                formal_uid=65532,
+                formal_gid=65532,
+            )
+            child.close()
+
+        preexec = popen_kwargs["preexec_fn"]
+        self.assertIs(preexec.func, collector_module._prepare_formal_child_process)
+        self.assertEqual(preexec.args, (7001, 65532, 65532))
+        self.assertIs(popen_kwargs["start_new_session"], True)
+        self.assertEqual(child._bound_start_identity, "candidate:4242:99")
+        identity_reader.assert_called_once_with(4242, Process.args)
+
+    def test_formal_startup_cleanup_uses_validated_process_group(self):
+        descriptors = iter(((10, 11), (12, 13)))
+        signals = []
+
+        class Process:
+            pid = 4242
+            args = (sys.executable, "-I", "-B", "unused.py")
+
+            def poll(self):
+                return None
+
+            def wait(self, timeout=None):
+                return -signal.SIGTERM
+
+            def terminate(self):
+                raise AssertionError("unvalidated PID termination is forbidden")
+
+            def kill(self):
+                raise AssertionError("unvalidated PID kill is forbidden")
+
+        identity = {
+            "pid": 4242,
+            "start_identity": "candidate:4242:99",
+            "pgid": 4242,
+            "sid": 4242,
+        }
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module.os, "pipe", side_effect=lambda: next(descriptors)
+        ), patch.object(
+            collector_module.os, "close"
+        ), patch.object(
+            collector_module.os, "geteuid", return_value=0
+        ), patch.object(
+            collector_module.subprocess, "Popen", return_value=Process()
+        ), patch.object(
+            collector_module.select, "select", return_value=([], [], [])
+        ), patch.object(
+            collector_module,
+            "_read_process_group_identity",
+            return_value=identity,
+        ), patch.object(
+            collector_module.os,
+            "killpg",
+            side_effect=lambda pgid, sig: signals.append((pgid, sig)),
+        ):
+            with self.assertRaisesRegex(CollectorError, "readiness"):
+                collector_module._start_gated_candidate(
+                    command=Process.args,
+                    cwd=Path(tmp).resolve(),
+                    environment={},
+                    formal_uid=65532,
+                    formal_gid=65532,
+                )
+
+        self.assertEqual(signals, [(4242, signal.SIGTERM)])
+
     def test_candidate_seal_is_tree_complete_and_receipt_bound(self):
         with TemporaryDirectory() as tmp:
             candidate = Path(tmp).resolve() / "candidate"
@@ -4509,7 +4856,161 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 child_exit_monotonic_ns=child_exit,
             )
 
-    def test_formal_cleanup_attempts_monitor_guard_and_child_independently(self):
+    def test_validated_group_termination_stops_after_successful_term(self):
+        events = []
+
+        class Process:
+            pid = 4242
+            args = ("python", "runner.py")
+
+            def poll(self):
+                return None
+
+            def wait(self, timeout=None):
+                events.append(("wait", timeout))
+                return -signal.SIGTERM
+
+        identity = {
+            "pid": 4242,
+            "start_identity": "candidate:4242:99",
+            "pgid": 4242,
+            "sid": 4242,
+        }
+        child = collector_module._GatedCandidate(
+            process=Process(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+        )
+        child.bind_process_identity("candidate:4242:99")
+        with patch.object(
+            collector_module,
+            "_read_process_group_identity",
+            return_value=identity,
+        ) as identity_reader, patch.object(
+            collector_module.os,
+            "killpg",
+            side_effect=lambda pgid, sig: events.append(("signal", pgid, sig)),
+        ):
+            child.terminate_validated_group()
+
+        self.assertEqual(
+            events,
+            [("signal", 4242, signal.SIGTERM), ("wait", 5.0)],
+        )
+        identity_reader.assert_called_once_with(4242, Process.args)
+
+    def test_validated_group_revalidates_before_bounded_kill(self):
+        events = []
+
+        class Process:
+            pid = 4242
+            args = ("python", "runner.py")
+
+            def __init__(self):
+                self.wait_count = 0
+
+            def poll(self):
+                return None
+
+            def wait(self, timeout=None):
+                self.wait_count += 1
+                events.append(("wait", timeout))
+                if self.wait_count == 1:
+                    raise subprocess.TimeoutExpired(self.args, timeout)
+                return -signal.SIGKILL
+
+        identity = {
+            "pid": 4242,
+            "start_identity": "candidate:4242:99",
+            "pgid": 4242,
+            "sid": 4242,
+        }
+        child = collector_module._GatedCandidate(
+            process=Process(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+        )
+        child.bind_process_identity("candidate:4242:99")
+        with patch.object(
+            collector_module,
+            "_read_process_group_identity",
+            side_effect=[dict(identity), dict(identity)],
+        ) as identity_reader, patch.object(
+            collector_module.os,
+            "killpg",
+            side_effect=lambda pgid, sig: events.append(("signal", pgid, sig)),
+        ):
+            child.terminate_validated_group(term_seconds=5.0, kill_seconds=5.0)
+
+        self.assertEqual(
+            events,
+            [
+                ("signal", 4242, signal.SIGTERM),
+                ("wait", 5.0),
+                ("signal", 4242, signal.SIGKILL),
+                ("wait", 5.0),
+            ],
+        )
+        self.assertEqual(identity_reader.call_count, 2)
+
+    def test_validated_group_identity_mismatch_sends_no_signal(self):
+        valid = {
+            "pid": 4242,
+            "start_identity": "candidate:4242:99",
+            "pgid": 4242,
+            "sid": 4242,
+        }
+        cases = {
+            "pid": {**valid, "pid": 4243},
+            "start": {**valid, "start_identity": "candidate:4242:100"},
+            "pgid": {**valid, "pgid": 4000},
+            "sid": {**valid, "sid": 4000},
+        }
+
+        class Process:
+            pid = 4242
+            args = ("python", "runner.py")
+
+            def poll(self):
+                return None
+
+        for name, observed in cases.items():
+            with self.subTest(name=name):
+                child = collector_module._GatedCandidate(
+                    process=Process(),
+                    _release_fd=None,
+                    _receipt_fd=None,
+                    ready_observed=True,
+                )
+                child.bind_process_identity("candidate:4242:99")
+                with patch.object(
+                    collector_module,
+                    "_read_process_group_identity",
+                    return_value=observed,
+                ), patch.object(collector_module.os, "killpg") as killpg:
+                    with self.assertRaisesRegex(CollectorError, "identity"):
+                        child.terminate_validated_group()
+                killpg.assert_not_called()
+
+        child = collector_module._GatedCandidate(
+            process=Process(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+        )
+        child.bind_process_identity("candidate:4242:99")
+        with patch.object(
+            collector_module,
+            "_read_process_group_identity",
+            side_effect=CollectorError("candidate command line mismatch"),
+        ), patch.object(collector_module.os, "killpg") as killpg:
+            with self.assertRaisesRegex(CollectorError, "command line"):
+                child.terminate_validated_group()
+        killpg.assert_not_called()
+
+    def test_formal_cleanup_is_monitor_child_progress_guard_order(self):
         events = []
 
         class Monitor:
@@ -4524,23 +5025,49 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 events.append("guard")
                 raise RuntimeError("guard cleanup")
 
-        class Process:
-            def poll(self):
-                return 0
-
         class Child:
-            process = Process()
+            def terminate_validated_group(self, *, term_seconds, kill_seconds):
+                if (term_seconds, kill_seconds) != (5.0, 5.0):
+                    raise AssertionError("cleanup grace periods changed")
+                events.append("child")
 
             def close(self):
-                events.append("child")
-                raise RuntimeError("child cleanup")
+                events.append("progress")
 
         failures = collector_module._cleanup_formal_execution_resources(
             execution_monitor=Monitor(), network_guard=Guard(), child=Child()
         )
 
-        self.assertEqual(events, ["monitor", "guard", "child"])
-        self.assertEqual(len(failures), 3)
+        self.assertEqual(events, ["monitor", "child", "progress", "guard"])
+        self.assertEqual(len(failures), 2)
+
+    def test_cleanup_identity_failure_preserves_guard_and_is_hard_failure(self):
+        events = []
+
+        class Guard:
+            active = True
+
+            def deactivate(self):
+                events.append("guard")
+
+        class Child:
+            def terminate_validated_group(self, *, term_seconds, kill_seconds):
+                if (term_seconds, kill_seconds) != (5.0, 5.0):
+                    raise AssertionError("cleanup grace periods changed")
+                events.append("child")
+                raise CollectorError("candidate process identity changed")
+
+            def close(self):
+                events.append("progress")
+
+        guard = Guard()
+        failures = collector_module._cleanup_formal_execution_resources(
+            execution_monitor=None, network_guard=guard, child=Child()
+        )
+
+        self.assertEqual(events, ["child", "progress"])
+        self.assertEqual(len(failures), 1)
+        self.assertIs(guard.active, True)
 
     def test_collector_rejects_output_inside_candidate_and_existing_launch(self):
         with TemporaryDirectory() as tmp:

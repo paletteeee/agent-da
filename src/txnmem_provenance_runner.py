@@ -8,8 +8,14 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import sys
+import threading
 import urllib.request
+
+
+class _RunnerInterruption(RuntimeError):
+    """The protected runner received a termination request."""
 
 
 def _argument_value(arguments: list[str], name: str) -> str:
@@ -187,6 +193,12 @@ def main(argv: list[str] | None = None) -> int:
     if token != b"G":
         return 71
 
+    stop_requested = threading.Event()
+
+    def request_stop(_signal_number, _frame) -> None:
+        stop_requested.set()
+
+    previous_sigterm = signal.signal(signal.SIGTERM, request_stop)
     try:
         if not arguments or arguments[0] not in {
             "provenance-performance",
@@ -205,6 +217,8 @@ def main(argv: list[str] | None = None) -> int:
             material = _provenance_smoke_receipt(
                 runtime_path, neo4j_password
             )
+            if stop_requested.is_set():
+                return 75
             payload = _completion_payload(material)
             if not payload or len(payload) > 65536:
                 return 74
@@ -227,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
         config_sha256 = formal_matrix_config_sha256()
 
         def emit_progress(snapshot: dict) -> None:
+            if stop_requested.is_set():
+                raise _RunnerInterruption("formal runner interruption requested")
             if progress_fd is None or progress_binding is None:
                 raise RuntimeError("formal progress channel is unavailable")
             event = build_progress_event(
@@ -249,6 +265,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         if type(result) is not int:
             return 73
+        if stop_requested.is_set():
+            return 75
         if result == 0:
             material = _candidate_completion_material(arguments)
             payload = _completion_payload(material)
@@ -259,9 +277,12 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, TypeError, ValueError, RuntimeError):
         return 74
     finally:
-        if progress_fd is not None:
-            os.close(progress_fd)
-        os.close(completion_fd)
+        try:
+            if progress_fd is not None:
+                os.close(progress_fd)
+            os.close(completion_fd)
+        finally:
+            signal.signal(signal.SIGTERM, previous_sigterm)
 
 
 if __name__ == "__main__":
