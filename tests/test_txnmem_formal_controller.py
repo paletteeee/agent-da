@@ -548,6 +548,150 @@ class FormalControllerCleanupTests(unittest.TestCase):
                 with self.assertRaises(controller.FormalControllerError):
                     controller._validate_progress_output(payload)
 
+    def test_progress_output_gate_rejects_semantically_impossible_matrix_states(self):
+        valid = json.loads(self._progress_line())
+        cases = (
+            {**valid, "cell_index": 999},
+            {**valid, "completed_repetitions": -1},
+            {**valid, "graph_size": 1000},
+            {**valid, "concurrency": 2},
+            {**valid, "repetition_index": 2},
+            {**valid, "completed_repetitions": 2, "completed_samples": 64},
+            {**valid, "update_sequence": 2},
+            {
+                **valid,
+                "status": "completed",
+                "terminal_reason_class": "completed",
+            },
+        )
+        for document in cases:
+            with self.subTest(document=document):
+                payload = (
+                    json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+                    + b"\n"
+                )
+                with self.assertRaises(controller.FormalControllerError):
+                    controller._validate_progress_output(payload)
+
+    def test_progress_output_gate_requires_exact_zero_state_closure(self):
+        starting = json.loads(self._progress_line())
+        starting.update(
+            {
+                "cell_index": 1,
+                "graph_size": 100,
+                "concurrency": 1,
+                "repetition_index": 0,
+                "completed_repetitions": 0,
+                "completed_samples": 0,
+                "update_sequence": 0,
+                "status": "starting",
+            }
+        )
+        self.assertEqual(
+            controller._validate_progress_output(
+                json.dumps(starting, sort_keys=True, separators=(",", ":")).encode()
+                + b"\n"
+            ),
+            json.dumps(starting, sort_keys=True, separators=(",", ":")).encode()
+            + b"\n",
+        )
+        blocked_zero = {
+            **starting,
+            "status": "blocked",
+            "terminal_reason_class": "formal_eligibility_failed",
+        }
+        blocked_zero_payload = (
+            json.dumps(
+                blocked_zero,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+            + b"\n"
+        )
+        self.assertEqual(
+            controller._validate_progress_output(blocked_zero_payload),
+            blocked_zero_payload,
+        )
+        for document in (
+            {**starting, "cell_index": 2},
+            {**starting, "status": "running"},
+            {
+                **starting,
+                "status": "completed",
+                "terminal_reason_class": "completed",
+            },
+        ):
+            with self.subTest(document=document):
+                payload = (
+                    json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+                    + b"\n"
+                )
+                with self.assertRaises(controller.FormalControllerError):
+                    controller._validate_progress_output(payload)
+
+    def test_progress_output_gate_accepts_only_the_exact_completed_terminal_state(self):
+        completed = json.loads(self._progress_line())
+        completed.update(
+            {
+                "cell_index": 15,
+                "graph_size": 10000,
+                "concurrency": 16,
+                "repetition_index": 30,
+                "completed_repetitions": 450,
+                "completed_samples": 14400,
+                "update_sequence": 450,
+                "status": "completed",
+                "terminal_reason_class": "completed",
+            }
+        )
+        payload = (
+            json.dumps(completed, sort_keys=True, separators=(",", ":")).encode()
+            + b"\n"
+        )
+        self.assertEqual(controller._validate_progress_output(payload), payload)
+
+    def test_main_progress_sanitizes_project_root_expansion_failure(self):
+        raw_failure = "seeded private root /private/project"
+        raw_argument = "~txnmem-definitely-missing-user/private-project"
+        expected_blocked = controller._blocked_progress_output().decode("utf-8")
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        with patch.object(
+            controller.Path,
+            "expanduser",
+            side_effect=RuntimeError(raw_failure),
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            status = controller.main(
+                [
+                    "--project-root",
+                    raw_argument,
+                    "progress",
+                    "--run-id",
+                    "private-run",
+                    "--authorization-nonce",
+                    "/private/nonce",
+                ]
+            )
+
+        self.assertEqual(status, 2)
+        self.assertEqual(stdout.getvalue(), expected_blocked)
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertNotIn(raw_failure, stdout.getvalue())
+        self.assertNotIn(raw_argument, stdout.getvalue())
+
+    def test_invalid_progress_invocation_is_sanitized_by_the_outer_boundary(self):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            status = controller.main(
+                ["--wrong-root-flag", "/private/project", "progress"]
+            )
+
+        self.assertEqual(status, 64)
+        self.assertEqual(stdout.getvalue().encode(), controller._blocked_progress_output())
+        self.assertEqual(stderr.getvalue(), "")
+
     def test_main_progress_failures_emit_only_stable_canonical_blocked_status(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve() / "repository"
@@ -631,6 +775,10 @@ class FormalControllerCleanupTests(unittest.TestCase):
             repository, approved = self._approved_repository(root)
             installed = root / "txnmem_formal_controller.py"
             installed.write_text("# interrupted replacement\n", encoding="utf-8")
+            installed_reader = root / "read_formal_provenance_progress.sh"
+            installed_reader.write_bytes(
+                (repository / "scripts/read_formal_provenance_progress.sh").read_bytes()
+            )
             approval_path = root / "approved_source_manifest.json"
             approval_path.write_bytes(
                 controller._canonical_json_bytes(approved.manifest) + b"\n"
@@ -642,6 +790,8 @@ class FormalControllerCleanupTests(unittest.TestCase):
             with patch.object(
                 controller, "CONTROLLER_INSTALL_PATH", installed
             ), patch.object(
+                controller, "PROGRESS_READER_INSTALL_PATH", installed_reader
+            ), patch.object(
                 controller, "APPROVAL_MANIFEST_PATH", approval_path
             ), patch.object(
                 controller, "__file__", str(installed)
@@ -650,6 +800,40 @@ class FormalControllerCleanupTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(
                     controller.FormalControllerError, "differs"
+                ):
+                    controller._verify_installed_controller(repository)
+
+    def test_installed_progress_reader_must_match_the_approved_committed_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            repository, approved = self._approved_repository(root)
+            installed = root / "txnmem_formal_controller.py"
+            installed.write_bytes(
+                (repository / "src/txnmem_formal_controller.py").read_bytes()
+            )
+            installed_reader = root / "read_formal_provenance_progress.sh"
+            installed_reader.write_text("#!/bin/sh\n# mutable replacement\n", encoding="utf-8")
+            approval_path = root / "approved_source_manifest.json"
+            approval_path.write_bytes(
+                controller._canonical_json_bytes(approved.manifest) + b"\n"
+            )
+
+            def protected(path, *, executable=False):
+                return Path(path).resolve(strict=True)
+
+            with patch.object(
+                controller, "CONTROLLER_INSTALL_PATH", installed
+            ), patch.object(
+                controller, "PROGRESS_READER_INSTALL_PATH", installed_reader
+            ), patch.object(
+                controller, "APPROVAL_MANIFEST_PATH", approval_path
+            ), patch.object(
+                controller, "__file__", str(installed)
+            ), patch.object(
+                controller, "_require_protected_file", side_effect=protected
+            ):
+                with self.assertRaisesRegex(
+                    controller.FormalControllerError, "progress reader differs"
                 ):
                     controller._verify_installed_controller(repository)
 

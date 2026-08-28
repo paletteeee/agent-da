@@ -126,7 +126,10 @@ class RealBackendScriptTests(unittest.TestCase):
         self.assertTrue(wrapper.is_file())
         script = wrapper.read_text(encoding="utf-8")
 
-        self.assertIn("[[ $# -ne 2 ]]", script)
+        self.assertTrue(script.startswith("#!/bin/sh\n"))
+        self.assertIn('reader_install_path=/opt/txnmem-formal-controller/read_formal_provenance_progress.sh', script)
+        self.assertIn('case "$0" in', script)
+        self.assertIn('case "$#" in', script)
         self.assertIn("exec /usr/bin/env -i", script)
         self.assertIn("LANG=C.UTF-8", script)
         self.assertIn("LC_ALL=C.UTF-8", script)
@@ -140,6 +143,11 @@ class RealBackendScriptTests(unittest.TestCase):
             'progress --run-id "$1" --authorization-nonce "$2"',
             script,
         )
+        self.assertNotIn("#!/usr/bin/env bash", script)
+        self.assertNotIn("[[", script)
+        pre_sanitization = script.split("exec /usr/bin/env -i", 1)[0]
+        for forbidden_before_sanitization in ("[", "echo ", "printf ", "$PATH"):
+            self.assertNotIn(forbidden_before_sanitization, pre_sanitization)
         for forbidden in (
             "TXNMEM_NEO4J_PASSWORD",
             "neo4j",
@@ -155,21 +163,28 @@ class RealBackendScriptTests(unittest.TestCase):
 
         seeded_run = "seeded-private-run-id"
         seeded_nonce = "/seeded/private/authorization.nonce"
-        invalid = subprocess.run(
-            ["/bin/bash", str(wrapper), seeded_run, seeded_nonce, "extra"],
-            cwd=ROOT,
-            env={
-                "LANG": "C.UTF-8",
-                "LC_ALL": "C.UTF-8",
-                "HOSTILE_SECRET": "must-not-survive",
-            },
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(invalid.returncode, 64)
-        self.assertNotIn(seeded_run, invalid.stdout + invalid.stderr)
-        self.assertNotIn(seeded_nonce, invalid.stdout + invalid.stderr)
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "startup-environment-ran"
+            startup = Path(tmp) / "startup.sh"
+            startup.write_text(f"/usr/bin/touch {marker}\n", encoding="utf-8")
+            invalid = subprocess.run(
+                [str(wrapper), seeded_run, seeded_nonce, "extra"],
+                cwd=ROOT,
+                env={
+                    "LANG": "C.UTF-8",
+                    "LC_ALL": "C.UTF-8",
+                    "BASH_ENV": str(startup),
+                    "ENV": str(startup),
+                    "HOSTILE_SECRET": "must-not-survive",
+                },
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(invalid.returncode, 0)
+            self.assertFalse(marker.exists())
+            self.assertNotIn(seeded_run, invalid.stdout + invalid.stderr)
+            self.assertNotIn(seeded_nonce, invalid.stdout + invalid.stderr)
 
     def test_installer_registers_the_exact_progress_wrapper_bytes(self):
         installer = ROOT / "scripts" / "install_formal_provenance_runtime.sh"
@@ -180,7 +195,7 @@ class RealBackendScriptTests(unittest.TestCase):
             self.fail(f"installer embedded source exporter is unavailable: {type(exc).__name__}")
 
         wrapper_relative = "scripts/read_formal_provenance_progress.sh"
-        wrapper_bytes = b"#!/usr/bin/env bash\n# exact committed wrapper fixture\n"
+        wrapper_bytes = b"#!/bin/sh\n# exact committed wrapper fixture\n"
         controller_required = {
             "configs/provenance_performance_matrix.json",
             "configs/provenance_runtime_lock.json",
@@ -265,6 +280,23 @@ class RealBackendScriptTests(unittest.TestCase):
             self.assertEqual(
                 rows[wrapper_relative], hashlib.sha256(wrapper_bytes).hexdigest()
             )
+            self.assertEqual(
+                (staging / "read_formal_provenance_progress.sh").read_bytes(),
+                wrapper_bytes,
+            )
+
+        self.assertIn(
+            'progress_reader_target="$controller_dir/read_formal_provenance_progress.sh"',
+            installer_text,
+        )
+        self.assertIn(
+            '"$staging/read_formal_provenance_progress.sh" "$progress_reader_new"',
+            installer_text,
+        )
+        self.assertIn(
+            '/usr/bin/mv -f "$progress_reader_new" "$progress_reader_target"',
+            installer_text,
+        )
 
     def test_cross_host_wrapper_adds_smoke_without_removing_existing_actions(self):
         script = (

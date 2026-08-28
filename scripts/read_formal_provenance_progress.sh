@@ -1,10 +1,16 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
-if [[ $# -ne 2 ]]; then
-  echo "usage: read_formal_provenance_progress.sh RUN_ID AUTHORIZATION_NONCE" >&2
-  exit 64
-fi
+reader_install_path=/opt/txnmem-formal-controller/read_formal_provenance_progress.sh
+case "$0" in
+  "$reader_install_path") ;;
+  *) exit 77 ;;
+esac
+
+case "$#" in
+  2) ;;
+  *) exit 64 ;;
+esac
 
 exec /usr/bin/env -i \
   LANG=C.UTF-8 \

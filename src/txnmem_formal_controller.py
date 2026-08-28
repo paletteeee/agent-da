@@ -25,6 +25,9 @@ from typing import Any, Mapping, Sequence
 CONTROLLER_INSTALL_PATH = Path(
     "/opt/txnmem-formal-controller/txnmem_formal_controller.py"
 )
+PROGRESS_READER_INSTALL_PATH = Path(
+    "/opt/txnmem-formal-controller/read_formal_provenance_progress.sh"
+)
 APPROVAL_MANIFEST_PATH = Path(
     "/opt/txnmem-formal-controller/approved_source_manifest.json"
 )
@@ -82,6 +85,11 @@ _PROGRESS_TERMINAL_REASON_CLASSES = frozenset(
         "collector_interrupted",
         "resource_cleanup_failed",
     }
+)
+_PROGRESS_FORMAL_MATRIX_CELLS = tuple(
+    (graph_size, concurrency)
+    for graph_size in (100, 1000, 10000)
+    for concurrency in (1, 2, 4, 8, 16)
 )
 _PROGRESS_BLOCKED_DOCUMENT = {
     "blocked_class": "formal_progress_unavailable",
@@ -212,6 +220,58 @@ def _validate_progress_output(value: Any, *, allow_blocked: bool = True) -> byte
         if document.get("terminal_reason_class") not in _PROGRESS_TERMINAL_REASON_CLASSES:
             raise FormalControllerError("formal progress output is invalid")
     elif "terminal_reason_class" in document:
+        raise FormalControllerError("formal progress output is invalid")
+
+    if (
+        document["cell_count"] != len(_PROGRESS_FORMAL_MATRIX_CELLS)
+        or document["repetition_count"] != 30
+        or document["total_repetitions"] != 450
+        or document["total_samples"] != 14400
+    ):
+        raise FormalControllerError("formal progress output is invalid")
+
+    sequence = document["update_sequence"]
+    if sequence == 0:
+        zero_state = {
+            "cell_index": 1,
+            "graph_size": 100,
+            "concurrency": 1,
+            "repetition_index": 0,
+            "completed_repetitions": 0,
+            "completed_samples": 0,
+        }
+        if (
+            status == "running"
+            or status == "completed"
+            or any(document[name] != expected for name, expected in zero_state.items())
+        ):
+            raise FormalControllerError("formal progress output is invalid")
+    else:
+        if status == "starting" or not 1 <= sequence <= 450:
+            raise FormalControllerError("formal progress output is invalid")
+        expected_cell_index = (sequence - 1) // 30 + 1
+        expected_repetition_index = (sequence - 1) % 30 + 1
+        expected_graph_size, expected_concurrency = _PROGRESS_FORMAL_MATRIX_CELLS[
+            expected_cell_index - 1
+        ]
+        expected_values = {
+            "cell_index": expected_cell_index,
+            "graph_size": expected_graph_size,
+            "concurrency": expected_concurrency,
+            "repetition_index": expected_repetition_index,
+            "completed_repetitions": sequence,
+            "completed_samples": sequence * 32,
+        }
+        if any(
+            document[name] != expected for name, expected in expected_values.items()
+        ):
+            raise FormalControllerError("formal progress output is invalid")
+
+    terminal_reason = document.get("terminal_reason_class")
+    if status == "completed":
+        if sequence != 450 or terminal_reason != "completed":
+            raise FormalControllerError("formal progress output is invalid")
+    elif terminal_reason == "completed":
         raise FormalControllerError("formal progress output is invalid")
     return value
 
@@ -369,6 +429,10 @@ def _verify_installed_controller(project_root: Path) -> _ApprovedSource:
     if Path(__file__).resolve() != CONTROLLER_INSTALL_PATH:
         raise FormalControllerError("formal controller is not running from its install path")
     installed = _require_protected_file(CONTROLLER_INSTALL_PATH)
+    installed_reader = _require_protected_file(
+        PROGRESS_READER_INSTALL_PATH,
+        executable=True,
+    )
     approved = _load_approved_source()
     commit = str(_git(project_root, "rev-parse", "HEAD", text=True)).strip()
     if commit != approved.commit:
@@ -386,6 +450,23 @@ def _verify_installed_controller(project_root: Path) -> _ApprovedSource:
         or _sha256(installed.read_bytes()) != approved_hash
     ):
         raise FormalControllerError("installed controller differs from committed bytes")
+    committed_reader = bytes(
+        _git(
+            project_root,
+            "show",
+            f"{approved.commit}:scripts/read_formal_provenance_progress.sh",
+        )
+    )
+    approved_reader_hash = dict(approved.files)[
+        "scripts/read_formal_provenance_progress.sh"
+    ]
+    if (
+        _sha256(committed_reader) != approved_reader_hash
+        or _sha256(installed_reader.read_bytes()) != approved_reader_hash
+    ):
+        raise FormalControllerError(
+            "installed progress reader differs from committed bytes"
+        )
     return approved
 
 
@@ -691,18 +772,21 @@ def _remove_smoke_success_report(target: Path) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    arguments = list(sys.argv[1:] if argv is None else argv)
-    progress_invocation = len(arguments) >= 3 and arguments[2] == "progress"
-    if len(arguments) < 3 or arguments[0] != "--project-root":
-        if progress_invocation:
-            _write_progress_output(_blocked_progress_output())
-        else:
-            print("formal controller blocked: invalid invocation", file=sys.stderr)
-        return 64
-    project_root = Path(arguments[1]).expanduser().absolute()
-    action = arguments[2]
-    forwarded = arguments[3:]
+    progress_invocation = False
+    invalid_invocation = False
+    action: str | None = None
     try:
+        arguments = list(sys.argv[1:] if argv is None else argv)
+        progress_invocation = len(arguments) >= 3 and arguments[2] == "progress"
+        if len(arguments) < 3 or arguments[0] != "--project-root":
+            invalid_invocation = True
+            if progress_invocation:
+                raise FormalControllerError("formal progress invocation is invalid")
+            print("formal controller blocked: invalid invocation", file=sys.stderr)
+            return 64
+        action = arguments[2]
+        forwarded = arguments[3:]
+        project_root = Path(arguments[1]).expanduser().absolute()
         if os.geteuid() != 0:
             raise FormalControllerError("formal controller requires root")
         project_root = project_root.resolve(strict=True)
@@ -757,12 +841,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 0
             return result
     except BaseException as exc:
-        if action == "progress":
+        if action == "progress" or progress_invocation:
             try:
                 _write_progress_output(_blocked_progress_output())
             except BaseException:
                 pass
-            return 2
+            return 64 if invalid_invocation else 2
         if isinstance(exc, (OSError, ValueError, RuntimeError)):
             print(f"formal controller blocked: {type(exc).__name__}", file=sys.stderr)
             return 2

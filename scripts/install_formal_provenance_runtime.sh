@@ -33,6 +33,7 @@ project_argument="$1"
 approved_commit="$2"
 controller_dir=/opt/txnmem-formal-controller
 controller_target="$controller_dir/txnmem_formal_controller.py"
+progress_reader_target="$controller_dir/read_formal_provenance_progress.sh"
 approval_target="$controller_dir/approved_source_manifest.json"
 runtime_root=/opt/txnmem-formal-runtime
 wheel_dir="$runtime_root/wheels"
@@ -44,6 +45,7 @@ runner_gid=65532
 
 required_executables=(
   /bin/bash
+  /bin/sh
   /usr/bin/chmod
   /usr/bin/docker
   /usr/bin/env
@@ -202,12 +204,16 @@ manifest = {
 (staging / "txnmem_formal_controller.py").write_bytes(
     payloads["src/txnmem_formal_controller.py"]
 )
+(staging / "read_formal_provenance_progress.sh").write_bytes(
+    payloads["scripts/read_formal_provenance_progress.sh"]
+)
 (staging / "provenance_runtime_lock.json").write_bytes(
     payloads["configs/provenance_runtime_lock.json"]
 )
 for path in (
     staging / "approved_source_manifest.json",
     staging / "txnmem_formal_controller.py",
+    staging / "read_formal_provenance_progress.sh",
     staging / "provenance_runtime_lock.json",
 ):
     with path.open("rb") as stream:
@@ -295,15 +301,19 @@ fi
 
 generation=${staging##*/}
 controller_new="$controller_dir/.txnmem_formal_controller.$approved_commit.$generation.new"
+progress_reader_new="$controller_dir/.read_formal_provenance_progress.$approved_commit.$generation.new"
 approval_new="$controller_dir/.approved_source_manifest.$approved_commit.$generation.new"
 /usr/bin/install -o root -g root -m 0555 \
   "$staging/txnmem_formal_controller.py" "$controller_new"
+/usr/bin/install -o root -g root -m 0555 \
+  "$staging/read_formal_provenance_progress.sh" "$progress_reader_new"
 /usr/bin/install -o root -g root -m 0444 \
   "$staging/approved_source_manifest.json" "$approval_new"
-# Each rename is atomic; any interruption between them leaves a hash mismatch
+# Each rename is atomic; any interruption between them leaves a byte mismatch
 # that makes the controller fail closed rather than trusting a mixed generation.
 /usr/bin/mv -f "$approval_new" "$approval_target"
 /usr/bin/mv -f "$controller_new" "$controller_target"
+/usr/bin/mv -f "$progress_reader_new" "$progress_reader_target"
 
 /usr/bin/chmod 0755 "$wheel_dir"
 /usr/bin/find "$wheel_dir" -mindepth 1 -delete
