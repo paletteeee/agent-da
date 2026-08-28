@@ -697,10 +697,15 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
 
             def candidate_sealer(candidate, receipt):
                 self.assertIn("launch_write", events)
+                self.assertEqual(candidate_events, ["complete"])
                 candidate_events.append("seal")
                 self.assertEqual(candidate, candidate_root)
                 self.assertEqual(receipt, material)
                 return candidate_seal
+
+            def progress_completer():
+                candidate_events.append("complete")
+                return {"status": "completed"}
 
             def guard_activate():
                 events.extend(["guard_activate", "route_rearm", "baseline_b"])
@@ -789,6 +794,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     external_tool_identity_loader=external_tool_loader,
                     runtime_identity_loader=runtime_loader,
                     candidate_material_loader=material_loader,
+                    progress_completer=progress_completer,
                 )
 
             launch_raw = launch_path.read_bytes()
@@ -817,7 +823,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 "completion_write",
             ],
         )
-        self.assertEqual(candidate_events, ["seal", "material"])
+        self.assertEqual(candidate_events, ["complete", "seal", "material"])
         self.assertEqual(result, (launch_path, completion_path))
         self.assertEqual(
             set(launch),
@@ -1250,6 +1256,330 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 )
 
         self.assertEqual(sorted(closed), [10, 11, 12, 13, 14, 15])
+
+    def test_gated_child_popen_failure_terminalizes_durable_starting_snapshot(self):
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module.subprocess,
+            "Popen",
+            side_effect=OSError("password=private-popen"),
+        ):
+            root = Path(tmp).resolve()
+            progress_path = root / "progress.json"
+            with self.assertRaises(OSError):
+                collector_module._start_gated_candidate(
+                    command=(sys.executable, "-I", "-B", "unused.py"),
+                    cwd=root,
+                    environment={},
+                    require_completion_receipt=True,
+                    require_progress=True,
+                    progress_binding_sha256="a" * 64,
+                    progress_config_sha256="b" * 64,
+                    progress_snapshot_path=progress_path,
+                    progress_expected_uid=os.getuid(),
+                    progress_expected_gid=os.getgid(),
+                )
+
+            snapshot = json.loads(progress_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(snapshot["status"], "blocked")
+        self.assertEqual(snapshot["terminal_reason_class"], "progress_protocol_failed")
+
+    def test_gated_child_drainer_setup_failure_terminalizes_starting_snapshot(self):
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module,
+            "ProgressPipeDrainer",
+            side_effect=RuntimeError("token=private-setup"),
+        ):
+            root = Path(tmp).resolve()
+            progress_path = root / "progress.json"
+            with self.assertRaises(RuntimeError):
+                collector_module._start_gated_candidate(
+                    command=(sys.executable, "-I", "-B", "unused.py"),
+                    cwd=root,
+                    environment={},
+                    require_progress=True,
+                    progress_binding_sha256="a" * 64,
+                    progress_config_sha256="b" * 64,
+                    progress_snapshot_path=progress_path,
+                    progress_expected_uid=os.getuid(),
+                    progress_expected_gid=os.getgid(),
+                )
+
+            snapshot = json.loads(progress_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(snapshot["status"], "blocked")
+
+    def test_gated_child_drainer_start_failure_terminalizes_starting_snapshot(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            script = root / "ready_then_wait.py"
+            script.write_text(
+                "\n".join(
+                    (
+                        "import os",
+                        "ready = int(os.environ.pop('TXNMEM_PROVENANCE_READY_FD'))",
+                        "gate = int(os.environ.pop('TXNMEM_PROVENANCE_START_GATE_FD'))",
+                        "os.write(ready, b'R')",
+                        "os.close(ready)",
+                        "os.read(gate, 1)",
+                        "os.close(gate)",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            progress_path = root / "progress.json"
+            with patch.object(
+                collector_module.ProgressPipeDrainer,
+                "start",
+                side_effect=RuntimeError("secret=private-drainer"),
+            ), self.assertRaises(RuntimeError):
+                collector_module._start_gated_candidate(
+                    command=(sys.executable, "-I", "-B", str(script)),
+                    cwd=root,
+                    environment={},
+                    require_progress=True,
+                    progress_binding_sha256="a" * 64,
+                    progress_config_sha256="b" * 64,
+                    progress_snapshot_path=progress_path,
+                    progress_expected_uid=os.getuid(),
+                    progress_expected_gid=os.getgid(),
+                )
+
+            snapshot = json.loads(progress_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(snapshot["status"], "blocked")
+
+    def test_gated_child_readiness_failure_terminalizes_starting_snapshot(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            script = root / "never_ready.py"
+            script.write_text("raise SystemExit(0)\n", encoding="utf-8")
+            progress_path = root / "progress.json"
+            with self.assertRaisesRegex(CollectorError, "readiness"):
+                collector_module._start_gated_candidate(
+                    command=(sys.executable, "-I", "-B", str(script)),
+                    cwd=root,
+                    environment={},
+                    require_progress=True,
+                    progress_binding_sha256="a" * 64,
+                    progress_config_sha256="b" * 64,
+                    progress_snapshot_path=progress_path,
+                    progress_expected_uid=os.getuid(),
+                    progress_expected_gid=os.getgid(),
+                )
+
+            snapshot = json.loads(progress_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(snapshot["status"], "blocked")
+
+    def test_gated_child_gate_write_failure_terminalizes_progress(self):
+        for failure in ("epipe", "short"):
+            with self.subTest(failure=failure), TemporaryDirectory() as tmp:
+                root = Path(tmp).resolve()
+                script = root / "ready_gate.py"
+                script.write_text(
+                    "\n".join(
+                        (
+                            "import os",
+                            "ready = int(os.environ.pop('TXNMEM_PROVENANCE_READY_FD'))",
+                            "gate = int(os.environ.pop('TXNMEM_PROVENANCE_START_GATE_FD'))",
+                            "os.write(ready, b'R')",
+                            "os.close(ready)",
+                            "os.read(gate, 1)",
+                            "os.close(gate)",
+                        )
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                progress_path = root / "progress.json"
+                child = collector_module._start_gated_candidate(
+                    command=(sys.executable, "-I", "-B", str(script)),
+                    cwd=root,
+                    environment={},
+                    require_progress=True,
+                    progress_binding_sha256="a" * 64,
+                    progress_config_sha256="b" * 64,
+                    progress_snapshot_path=progress_path,
+                    progress_expected_uid=os.getuid(),
+                    progress_expected_gid=os.getgid(),
+                )
+                release_fd = child._release_fd
+                real_write = os.write
+
+                def gate_write(descriptor, payload):
+                    if descriptor == release_fd:
+                        if failure == "epipe":
+                            raise BrokenPipeError("password=private-gate")
+                        return 0
+                    return real_write(descriptor, payload)
+
+                try:
+                    with patch.object(
+                        collector_module.os, "write", side_effect=gate_write
+                    ), self.assertRaises((BrokenPipeError, CollectorError)):
+                        child.release()
+                finally:
+                    child.close()
+                    child.process.wait(timeout=5)
+
+                snapshot = json.loads(progress_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(snapshot["status"], "blocked")
+
+    def test_semantically_invalid_canonical_receipt_blocks_final_progress(self):
+        from txnmem_provenance_progress import (
+            ProgressSnapshotStore,
+            build_progress_event,
+        )
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            progress_path = root / "progress.json"
+            store = ProgressSnapshotStore(
+                progress_path,
+                expected_uid=os.getuid(),
+                expected_gid=os.getgid(),
+            )
+            store.write_starting("a" * 64, "b" * 64)
+            store.write_running(
+                build_progress_event(
+                    run_binding_sha256="a" * 64,
+                    config_sha256="b" * 64,
+                    cell_index=15,
+                    graph_size=10000,
+                    concurrency=16,
+                    repetition_index=30,
+                    completed_repetitions=450,
+                    completed_samples=14400,
+                    update_sequence=450,
+                )
+            )
+            child = collector_module._GatedCandidate(
+                process=SimpleNamespace(),
+                _release_fd=None,
+                _receipt_fd=None,
+                ready_observed=True,
+                _progress_store=store,
+            )
+            invalid_receipt = {
+                "schema": "txnmem-provenance-candidate-attestation-material-v1",
+                "candidate_bundle_id": "diagnostic-vector_graph-" + "1" * 16 + "-" + "2" * 16,
+                "run_id_sha256": "2" * 64,
+                "config_sha256": "f" * 64,
+                "config_file_sha256": "3" * 64,
+                "workload_sha256": "4" * 64,
+                "environment_attestation_sha256": "5" * 64,
+                "evidence_manifest_sha256": "6" * 64,
+                "matrix_cell_count": 15,
+                "repetition_count": 450,
+                "operation_sample_count": 14400,
+                "observed_service_versions": {
+                    "qdrant": "1.15.4",
+                    "neo4j": "5.26.0",
+                    "toxiproxy": "2.9.0",
+                },
+                "candidate_operation_samples_sha256": "7" * 64,
+                "candidate_repetitions_sha256": "8" * 64,
+            }
+            with self.assertRaises(CollectorError):
+                collector_module._validate_candidate_receipt_for_sealing(
+                    invalid_receipt,
+                    expected_candidate_id=invalid_receipt["candidate_bundle_id"],
+                    expected_run_hash="2" * 64,
+                    expected_config_hash="1" * 64,
+                    expected_config_file_hash="3" * 64,
+                    expected_workload_hash="4" * 64,
+                    expected_environment_hash="5" * 64,
+                    progress_blocker=child.block_progress,
+                )
+            snapshot = store.read_view()
+
+        self.assertEqual(snapshot["status"], "blocked")
+        self.assertEqual(snapshot["update_sequence"], 450)
+
+    def test_blocked_progress_persistence_failure_is_sanitized_and_observable(self):
+        class FailingStore:
+            def read_view(self):
+                return {"status": "running"}
+
+            def write_terminal(self, _status, _reason):
+                raise RuntimeError("password=private-block-write")
+
+        child = collector_module._GatedCandidate(
+            process=SimpleNamespace(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _progress_store=FailingStore(),
+        )
+
+        with self.assertRaises(CollectorError) as raised:
+            child.block_progress()
+
+        self.assertIn("progress blocking failed", str(raised.exception))
+        self.assertNotIn("private", str(raised.exception))
+
+    def test_repeated_block_and_close_preserve_earlier_blocked_terminal(self):
+        class BlockedStore:
+            def __init__(self):
+                self.write_count = 0
+
+            def read_view(self):
+                return {"status": "blocked"}
+
+            def write_terminal(self, _status, _reason):
+                self.write_count += 1
+                raise AssertionError("illegal second terminal transition")
+
+        store = BlockedStore()
+        child = collector_module._GatedCandidate(
+            process=SimpleNamespace(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _progress_store=store,
+        )
+
+        child.block_progress()
+        child.block_progress()
+        child.close()
+
+        self.assertEqual(store.write_count, 0)
+
+    def test_pipe_allocation_failure_closes_every_earlier_descriptor_once(self):
+        outcomes = iter(((10, 11), (12, 13), (14, 15)))
+        closed = []
+
+        def allocate_pipe():
+            try:
+                return next(outcomes)
+            except StopIteration:
+                raise OSError("EMFILE password=private-allocation") from None
+
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module.os, "pipe", side_effect=allocate_pipe
+        ), patch.object(
+            collector_module.os, "close", side_effect=closed.append
+        ):
+            root = Path(tmp).resolve()
+            with self.assertRaises(OSError):
+                collector_module._start_gated_candidate(
+                    command=(sys.executable, "-I", "-B", "unused.py"),
+                    cwd=root,
+                    environment={},
+                    require_completion_receipt=True,
+                    require_progress=True,
+                    progress_binding_sha256="a" * 64,
+                    progress_config_sha256="b" * 64,
+                    progress_snapshot_path=root / "progress.json",
+                    progress_expected_uid=os.getuid(),
+                    progress_expected_gid=os.getgid(),
+                )
+
+        self.assertEqual(sorted(closed), [10, 11, 12, 13, 14, 15])
+        self.assertEqual(len(closed), len(set(closed)))
 
     def test_child_identity_is_observed_from_proc_not_copied_from_manifest(self):
         with TemporaryDirectory() as tmp:

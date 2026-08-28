@@ -157,6 +157,34 @@ class _MonitorCandidateExited(RuntimeError):
     """Internal signal that continuous sampling reached the child exit boundary."""
 
 
+def _persist_blocked_progress(store: ProgressSnapshotStore) -> dict[str, Any]:
+    """Persist one safe blocked terminal without exposing storage failures."""
+
+    try:
+        current = store.read_view()
+    except BaseException:
+        raise CollectorError("candidate progress blocking failed") from None
+    if current.get("status") in {"blocked", "completed", "interrupted"}:
+        return current
+    try:
+        store.write_terminal("blocked", "progress_protocol_failed")
+    except BaseException:
+        try:
+            persisted = store.read_view()
+        except BaseException:
+            persisted = None
+        if isinstance(persisted, Mapping) and persisted.get("status") == "blocked":
+            return dict(persisted)
+        raise CollectorError("candidate progress blocking failed") from None
+    try:
+        persisted = store.read_view()
+    except BaseException:
+        raise CollectorError("candidate progress blocking failed") from None
+    if persisted.get("status") != "blocked":
+        raise CollectorError("candidate progress blocking failed")
+    return dict(persisted)
+
+
 @dataclass(frozen=True)
 class _FormalChildSpec:
     command: tuple[str, ...]
@@ -195,6 +223,9 @@ class _GatedCandidate:
             if written != 1:
                 raise CollectorError("candidate launch gate write was incomplete")
             self.gate_released_monotonic_ns = release_started
+        except BaseException:
+            self.block_progress()
+            raise
         finally:
             os.close(descriptor)
 
@@ -223,22 +254,24 @@ class _GatedCandidate:
         if self._progress_store is None:
             raise CollectorError("candidate progress store is unavailable")
         try:
+            current = self._progress_store.read_view()
+            if current.get("status") == "completed":
+                return current
+            if current.get("status") in {"blocked", "interrupted"}:
+                raise CollectorError(
+                    "candidate progress terminal conflicts with completion"
+                )
             self._progress_store.write_terminal("completed", "completed")
             return self._progress_store.read_view()
-        except ProgressProtocolError as exc:
-            raise CollectorError("candidate progress completion failed") from exc
+        except CollectorError:
+            raise
+        except BaseException:
+            raise CollectorError("candidate progress completion failed") from None
 
     def block_progress(self) -> None:
         if self._progress_store is None:
             return
-        try:
-            view = self._progress_store.read_view()
-            if view["status"] not in {"completed", "blocked", "interrupted"}:
-                self._progress_store.write_terminal(
-                    "blocked", "progress_protocol_failed"
-                )
-        except ProgressProtocolError:
-            pass
+        _persist_blocked_progress(self._progress_store)
 
     def wait_with_receipt(
         self, *, timeout: float | None = None
@@ -1479,123 +1512,24 @@ def _start_gated_candidate(
         preexec_fn = functools.partial(
             _drop_formal_child_privileges, formal_uid, formal_gid
         )
-    read_fd, write_fd = os.pipe()
-    ready_read_fd, ready_write_fd = os.pipe()
-    receipt_read_fd: int | None = None
-    receipt_write_fd: int | None = None
-    if require_completion_receipt:
-        receipt_read_fd, receipt_write_fd = os.pipe()
-    progress_read_fd: int | None = None
-    progress_write_fd: int | None = None
-    progress_store: ProgressSnapshotStore | None = None
-    progress_drainer: ProgressPipeDrainer | None = None
-    if require_progress:
-        assert progress_snapshot_path is not None
-        assert progress_expected_uid is not None
-        assert progress_expected_gid is not None
-        assert progress_binding_sha256 is not None
-        assert progress_config_sha256 is not None
-        progress_read_fd, progress_write_fd = os.pipe()
-        try:
-            progress_store = ProgressSnapshotStore(
-                progress_snapshot_path,
-                expected_uid=progress_expected_uid,
-                expected_gid=progress_expected_gid,
-            )
-            progress_store.write_starting(
-                progress_binding_sha256, progress_config_sha256
-            )
-            progress_drainer = ProgressPipeDrainer(
-                progress_read_fd,
-                FormalProgressState(
-                    progress_binding_sha256, progress_config_sha256
-                ),
-                progress_store,
-            )
-        except BaseException:
-            os.close(read_fd)
-            os.close(write_fd)
-            os.close(ready_read_fd)
-            os.close(ready_write_fd)
-            if receipt_read_fd is not None:
-                os.close(receipt_read_fd)
-            if receipt_write_fd is not None:
-                os.close(receipt_write_fd)
-            os.close(progress_read_fd)
-            os.close(progress_write_fd)
-            raise
-    child_environment["TXNMEM_PROVENANCE_START_GATE_FD"] = str(read_fd)
-    child_environment["TXNMEM_PROVENANCE_READY_FD"] = str(ready_write_fd)
-    if receipt_write_fd is not None:
-        child_environment["TXNMEM_PROVENANCE_COMPLETION_FD"] = str(
-            receipt_write_fd
-        )
-    if progress_write_fd is not None:
-        child_environment["TXNMEM_PROVENANCE_PROGRESS_FD"] = str(
-            progress_write_fd
-        )
-        child_environment[
-            "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256"
-        ] = progress_binding_sha256
-    inherited_descriptors = [read_fd, ready_write_fd]
-    if receipt_write_fd is not None:
-        inherited_descriptors.append(receipt_write_fd)
-    if progress_write_fd is not None:
-        inherited_descriptors.append(progress_write_fd)
-    try:
-        process = subprocess.Popen(
-            tuple(command),
-            cwd=working_directory,
-            env=child_environment,
-            close_fds=True,
-            pass_fds=tuple(inherited_descriptors),
-            preexec_fn=preexec_fn,
-            start_new_session=True,
-        )
-    except BaseException:
-        os.close(read_fd)
-        os.close(write_fd)
-        os.close(ready_read_fd)
-        os.close(ready_write_fd)
-        if receipt_read_fd is not None:
-            os.close(receipt_read_fd)
-        if receipt_write_fd is not None:
-            os.close(receipt_write_fd)
-        if progress_read_fd is not None:
-            os.close(progress_read_fd)
-        if progress_write_fd is not None:
-            os.close(progress_write_fd)
-        raise
-    os.close(read_fd)
-    os.close(ready_write_fd)
-    if receipt_write_fd is not None:
-        os.close(receipt_write_fd)
-    if progress_write_fd is not None:
-        os.close(progress_write_fd)
-    if progress_drainer is not None:
-        try:
-            progress_drainer.start()
-        except BaseException:
-            if receipt_read_fd is not None:
-                os.close(receipt_read_fd)
-            os.close(write_fd)
-            os.close(ready_read_fd)
-            process.terminate()
-            process.wait(timeout=5)
-            raise
-    try:
-        readable, _, _ = select.select([ready_read_fd], [], [], 5.0)
-        token = os.read(ready_read_fd, 1) if readable else b""
-        if token != b"R" or process.poll() is not None:
-            raise CollectorError(
-                "candidate readiness handshake failed before launch attestation"
-            )
-    except BaseException:
-        os.close(write_fd)
-        if receipt_read_fd is not None:
-            os.close(receipt_read_fd)
-        if progress_drainer is not None:
-            progress_drainer.abort()
+    owned_descriptors: list[int] = []
+
+    def allocate_pipe() -> tuple[int, int]:
+        pair = os.pipe()
+        owned_descriptors.extend(pair)
+        return pair
+
+    def close_owned(descriptor: int | None) -> None:
+        if descriptor is None or descriptor not in owned_descriptors:
+            return
+        os.close(descriptor)
+        owned_descriptors.remove(descriptor)
+
+    def transfer_owned(descriptor: int | None) -> None:
+        if descriptor is not None and descriptor in owned_descriptors:
+            owned_descriptors.remove(descriptor)
+
+    def stop_process(process: subprocess.Popen[Any]) -> None:
         if process.poll() is None:
             process.terminate()
             try:
@@ -1605,17 +1539,125 @@ def _start_gated_candidate(
                 process.wait(timeout=5)
         else:
             process.wait()
+
+    read_fd: int | None = None
+    write_fd: int | None = None
+    ready_read_fd: int | None = None
+    ready_write_fd: int | None = None
+    receipt_read_fd: int | None = None
+    receipt_write_fd: int | None = None
+    progress_read_fd: int | None = None
+    progress_write_fd: int | None = None
+    progress_store: ProgressSnapshotStore | None = None
+    progress_drainer: ProgressPipeDrainer | None = None
+    progress_started = False
+    drainer_owns_descriptor = False
+    process: subprocess.Popen[Any] | None = None
+    try:
+        read_fd, write_fd = allocate_pipe()
+        ready_read_fd, ready_write_fd = allocate_pipe()
+        if require_completion_receipt:
+            receipt_read_fd, receipt_write_fd = allocate_pipe()
+        if require_progress:
+            assert progress_snapshot_path is not None
+            assert progress_expected_uid is not None
+            assert progress_expected_gid is not None
+            assert progress_binding_sha256 is not None
+            assert progress_config_sha256 is not None
+            progress_read_fd, progress_write_fd = allocate_pipe()
+            progress_store = ProgressSnapshotStore(
+                progress_snapshot_path,
+                expected_uid=progress_expected_uid,
+                expected_gid=progress_expected_gid,
+            )
+            progress_store.write_starting(
+                progress_binding_sha256, progress_config_sha256
+            )
+            progress_started = True
+            progress_drainer = ProgressPipeDrainer(
+                progress_read_fd,
+                FormalProgressState(
+                    progress_binding_sha256, progress_config_sha256
+                ),
+                progress_store,
+            )
+
+        assert read_fd is not None
+        assert write_fd is not None
+        assert ready_read_fd is not None
+        assert ready_write_fd is not None
+        child_environment["TXNMEM_PROVENANCE_START_GATE_FD"] = str(read_fd)
+        child_environment["TXNMEM_PROVENANCE_READY_FD"] = str(ready_write_fd)
+        if receipt_write_fd is not None:
+            child_environment["TXNMEM_PROVENANCE_COMPLETION_FD"] = str(
+                receipt_write_fd
+            )
+        if progress_write_fd is not None:
+            child_environment["TXNMEM_PROVENANCE_PROGRESS_FD"] = str(
+                progress_write_fd
+            )
+            child_environment[
+                "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256"
+            ] = progress_binding_sha256
+        inherited_descriptors = [read_fd, ready_write_fd]
+        if receipt_write_fd is not None:
+            inherited_descriptors.append(receipt_write_fd)
+        if progress_write_fd is not None:
+            inherited_descriptors.append(progress_write_fd)
+        process = subprocess.Popen(
+            tuple(command),
+            cwd=working_directory,
+            env=child_environment,
+            close_fds=True,
+            pass_fds=tuple(inherited_descriptors),
+            preexec_fn=preexec_fn,
+            start_new_session=True,
+        )
+
+        close_owned(read_fd)
+        close_owned(ready_write_fd)
+        close_owned(receipt_write_fd)
+        close_owned(progress_write_fd)
+        if progress_drainer is not None:
+            try:
+                progress_drainer.start()
+            except BaseException:
+                progress_drainer.abort()
+                transfer_owned(progress_read_fd)
+                drainer_owns_descriptor = True
+                raise
+            transfer_owned(progress_read_fd)
+            drainer_owns_descriptor = True
+
+        readable, _, _ = select.select([ready_read_fd], [], [], 5.0)
+        token = os.read(ready_read_fd, 1) if readable else b""
+        if token != b"R" or process.poll() is not None:
+            raise CollectorError(
+                "candidate readiness handshake failed before launch attestation"
+            )
+        close_owned(ready_read_fd)
+        candidate = _GatedCandidate(
+            process=process,
+            _release_fd=write_fd,
+            _receipt_fd=receipt_read_fd,
+            _progress_drainer=progress_drainer,
+            _progress_store=progress_store,
+            ready_observed=True,
+        )
+        transfer_owned(write_fd)
+        transfer_owned(receipt_read_fd)
+        return candidate
+    except BaseException:
+        if progress_drainer is not None and drainer_owns_descriptor:
+            progress_drainer.abort()
+        if process is not None:
+            stop_process(process)
+        if progress_started and progress_store is not None:
+            _persist_blocked_progress(progress_store)
         raise
     finally:
-        os.close(ready_read_fd)
-    return _GatedCandidate(
-        process=process,
-        _release_fd=write_fd,
-        _receipt_fd=receipt_read_fd,
-        _progress_drainer=progress_drainer,
-        _progress_store=progress_store,
-        ready_observed=True,
-    )
+        for descriptor in tuple(reversed(owned_descriptors)):
+            close_owned(descriptor)
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -2791,6 +2833,35 @@ def _validate_candidate_material(
     return dict(material)
 
 
+def _validate_candidate_receipt_for_sealing(
+    receipt: Any,
+    *,
+    expected_candidate_id: str,
+    expected_run_hash: str,
+    expected_config_hash: str,
+    expected_config_file_hash: str,
+    expected_workload_hash: str,
+    expected_environment_hash: str,
+    progress_blocker: Callable[[], None] | None = None,
+) -> dict[str, Any]:
+    """Validate the decoded receipt before sealing and block on any mismatch."""
+
+    try:
+        return _validate_candidate_material(
+            receipt,
+            expected_candidate_id=expected_candidate_id,
+            expected_run_hash=expected_run_hash,
+            expected_config_hash=expected_config_hash,
+            expected_config_file_hash=expected_config_file_hash,
+            expected_workload_hash=expected_workload_hash,
+            expected_environment_hash=expected_environment_hash,
+        )
+    except BaseException:
+        if progress_blocker is not None:
+            progress_blocker()
+        raise
+
+
 def _collect_execution_evidence(
     *,
     project_root: Path,
@@ -2818,6 +2889,8 @@ def _collect_execution_evidence(
     external_tool_identity_loader: Callable[[], Sequence[Mapping[str, Any]]],
     runtime_identity_loader: Callable[[], Mapping[str, Any]],
     candidate_material_loader: Callable[[Path, str], Mapping[str, Any]],
+    progress_blocker: Callable[[], None] | None = None,
+    progress_completer: Callable[[], Mapping[str, Any]] | None = None,
 ) -> tuple[Path, Path]:
     """Write launch before execution and completion after exact candidate validation."""
 
@@ -3075,7 +3148,7 @@ def _collect_execution_evidence(
     candidate_seal: dict[str, Any]
     receipt_material: dict[str, Any] | None = None
     if exit_code == 0:
-        receipt_material = _validate_candidate_material(
+        receipt_material = _validate_candidate_receipt_for_sealing(
             raw_receipt,
             expected_candidate_id=candidate_id,
             expected_run_hash=run_hash,
@@ -3083,7 +3156,24 @@ def _collect_execution_evidence(
             expected_config_file_hash=config_file_hash,
             expected_workload_hash=workload_hash,
             expected_environment_hash=environment_hash,
+            progress_blocker=progress_blocker,
         )
+        if progress_completer is not None:
+            try:
+                terminal = progress_completer()
+                if (
+                    not isinstance(terminal, Mapping)
+                    or terminal.get("status") != "completed"
+                ):
+                    raise CollectorError("candidate progress terminal is invalid")
+            except CollectorError:
+                if progress_blocker is not None:
+                    progress_blocker()
+                raise
+            except BaseException:
+                if progress_blocker is not None:
+                    progress_blocker()
+                raise CollectorError("candidate progress completion failed") from None
         try:
             candidate_seal, _sanitized_seal = _validate_candidate_seal(
                 candidate_sealer(candidate_root, receipt_material),
@@ -4999,8 +5089,8 @@ def collect_formal_execution(
 
         def run_candidate() -> tuple[int, Mapping[str, Any]]:
             assert child is not None
-            child.release()
             try:
+                child.release()
                 exit_code, receipt = child.wait_with_receipt()
                 snapshot = child.finish_progress(2.0)
             except BaseException:
@@ -5019,10 +5109,6 @@ def collect_formal_execution(
                 raise CollectorError(
                     "candidate progress did not reach formal completion"
                 )
-            terminal = child.complete_progress()
-            if terminal.get("status") != "completed":
-                child.block_progress()
-                raise CollectorError("candidate progress terminal is invalid")
             return exit_code, receipt
 
         def seal_candidate(
@@ -5170,7 +5256,13 @@ def collect_formal_execution(
             external_tool_identity_loader=external_tool_identity,
             runtime_identity_loader=runtime_identity,
             candidate_material_loader=candidate_attestation_material,
+            progress_blocker=child.block_progress,
+            progress_completer=child.complete_progress,
         )
+    except BaseException:
+        if child is not None:
+            child.block_progress()
+        raise
     finally:
         cleanup_failures = _cleanup_formal_execution_resources(
             execution_monitor=execution_monitor,
@@ -5178,6 +5270,8 @@ def collect_formal_execution(
             child=child,
         )
         if cleanup_failures and sys.exc_info()[0] is None:
+            if child is not None:
+                child.block_progress()
             raise CollectorError("formal execution resource cleanup failed") from cleanup_failures[0]
         # The source/runtime/input snapshot and candidate remain under the
         # protected formal run inode so promotion can re-attest exact bytes.
