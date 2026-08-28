@@ -458,6 +458,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
             ("neo4j", "password"),
             notifications_min_severity="OFF",
             migrate_legacy=False,
+            request_timeout_seconds=30.0,
         )
         self.assertEqual(len(constructed), 2)
         self.assertTrue(

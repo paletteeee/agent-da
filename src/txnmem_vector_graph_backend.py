@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import threading
 import time
 from contextlib import contextmanager
@@ -309,9 +310,10 @@ class _Neo4jBoltClient:
         *,
         notifications_min_severity: str | None = None,
         migrate_legacy: bool = True,
+        request_timeout_seconds: float = 15.0,
     ):
         try:
-            from neo4j import GraphDatabase
+            from neo4j import GraphDatabase, Query
         except ImportError as exc:  # pragma: no cover - exercised on remote host
             raise RuntimeError("neo4j driver is required for the real graph backend") from exc
         # Managed transactions retry callbacks implicitly.  Formal latency and
@@ -321,11 +323,21 @@ class _Neo4jBoltClient:
             raise ValueError("unsupported Neo4j notification severity policy")
         if type(migrate_legacy) is not bool:
             raise ValueError("migrate_legacy must be a boolean")
+        if (
+            type(request_timeout_seconds) not in (int, float)
+            or not math.isfinite(request_timeout_seconds)
+            or request_timeout_seconds <= 0.0
+        ):
+            raise ValueError("request_timeout_seconds must be a positive finite number")
         self.notifications_min_severity = notifications_min_severity
+        self.request_timeout_seconds = request_timeout_seconds
+        self._Query = Query
         self._identity_lock_coordinator = _IdentityLockCoordinator()
         driver_config: dict[str, Any] = {
             "auth": tuple(auth),
             "max_transaction_retry_time": self.max_transaction_retry_time_seconds,
+            "connection_timeout": self.request_timeout_seconds,
+            "connection_acquisition_timeout": self.request_timeout_seconds,
         }
         if self.notifications_min_severity is not None:
             driver_config["notifications_min_severity"] = (
@@ -334,13 +346,23 @@ class _Neo4jBoltClient:
         self.driver = GraphDatabase.driver(str(uri), **driver_config)
         self._initialize_schema(migrate_legacy=migrate_legacy)
 
+    def timeout_policy(self) -> dict[str, float]:
+        return {
+            "connection_seconds": self.request_timeout_seconds,
+            "connection_acquisition_seconds": self.request_timeout_seconds,
+            "transaction_query_seconds": self.request_timeout_seconds,
+        }
+
+    def _bounded_query(self, text: str):
+        return self._Query(text, timeout=self.request_timeout_seconds)
+
     def _execute_write_once(self, work: Callable[[Any], Any]) -> Any:
         """Execute exactly one explicit transaction without driver callback retry."""
 
         if not callable(work):
             raise ValueError("Neo4j transaction work must be callable")
         with self.driver.session() as session:
-            transaction = session.begin_transaction()
+            transaction = session.begin_transaction(timeout=self.request_timeout_seconds)
             try:
                 result = work(transaction)
                 transaction.commit()
@@ -544,18 +566,18 @@ class _Neo4jBoltClient:
         if migrate_legacy:
             self._execute_write_once(migrate)
         with self.driver.session() as session:
-            session.run(
+            session.run(self._bounded_query(
                 "CREATE CONSTRAINT memory_identity_unique IF NOT EXISTS "
                 "FOR (m:MemoryIdentity) REQUIRE (m.namespace, m.memory_id) IS UNIQUE"
-            ).consume()
-            session.run(
+            )).consume()
+            session.run(self._bounded_query(
                 "DROP CONSTRAINT memory_write_claim_unique IF EXISTS"
-            ).consume()
-            session.run(
+            )).consume()
+            session.run(self._bounded_query(
                 "CREATE CONSTRAINT memory_write_claim_unique IF NOT EXISTS "
                 "FOR (c:MemoryWriteClaim) REQUIRE "
                 "(c.namespace, c.memory_id, c.base_version, c.final_version) IS UNIQUE"
-            ).consume()
+            )).consume()
 
     @staticmethod
     def _legacy_is_canonical(candidate: Mapping[str, Any]) -> bool:
@@ -861,9 +883,10 @@ class _Neo4jBoltClient:
         self, namespace, txn_id, idempotency_key
     ):
         with self.driver.session() as session:
-            session.run(
+            session.run(self._bounded_query(
                 "MATCH (c:MemoryWriteClaim {namespace:$namespace, txn_id:$txn_id}) "
                 "DELETE c",
+            ),
                 namespace=namespace,
                 txn_id=txn_id,
             ).consume()
@@ -874,7 +897,7 @@ class _Neo4jBoltClient:
         txn_id = payload.get("txn_id")
         if txn_id is not None:
             with self.driver.session() as session:
-                session.run(
+                session.run(self._bounded_query(
                     "MERGE (m:TxnMemory {namespace:$namespace, memory_id:$memory_id, "
                     "txn_id:$txn_id, sequence:$sequence, record_kind:$record_kind}) "
                     "SET m.status=$status, m.target_status=$target_status, "
@@ -883,6 +906,7 @@ class _Neo4jBoltClient:
                     "m.staged_state_hash=$staged_state_hash, "
                     "m.operation=$operation, m.agent_id=$agent_id, m.scope=$scope, "
                     "m.derived_from=$source_ids, m.supersedes_id=$supersedes_id",
+                ),
                     namespace=namespace,
                     memory_id=memory_id,
                     txn_id=txn_id,
@@ -900,11 +924,12 @@ class _Neo4jBoltClient:
                     source_ids=list(source_ids),
                     supersedes_id=supersedes_id,
                 ).consume()
-                session.run(
+                session.run(self._bounded_query(
                     "MATCH (m:TxnMemory {namespace:$namespace, txn_id:$txn_id, "
                     "memory_id:$memory_id, sequence:$sequence, record_kind:$record_kind}) "
                     "OPTIONAL MATCH (m)-[r:DERIVED_FROM|SUPERSEDES {txn_id:$txn_id}]->() "
                     "DELETE r",
+                ),
                     namespace=namespace,
                     txn_id=txn_id,
                     memory_id=memory_id,
@@ -912,12 +937,13 @@ class _Neo4jBoltClient:
                     record_kind=payload["record_kind"],
                 ).consume()
                 for source_id in source_ids:
-                    session.run(
+                    session.run(self._bounded_query(
                         "MATCH (m:TxnMemory {namespace:$namespace, txn_id:$txn_id, "
                         "memory_id:$memory_id, sequence:$sequence, record_kind:$record_kind}) "
                         "MERGE (s:MemoryIdentity {namespace:$namespace, memory_id:$source_id}) "
                         "MERGE (m)-[r:DERIVED_FROM {namespace:$namespace, txn_id:$txn_id, source_id:$source_id, "
                         "target_id:$memory_id}]->(s) SET r.status=$status",
+                    ),
                         namespace=namespace,
                         txn_id=txn_id,
                         memory_id=memory_id,
@@ -927,12 +953,13 @@ class _Neo4jBoltClient:
                         status=payload["status"],
                     ).consume()
                 if supersedes_id:
-                    session.run(
+                    session.run(self._bounded_query(
                         "MATCH (m:TxnMemory {namespace:$namespace, txn_id:$txn_id, "
                         "memory_id:$memory_id, sequence:$sequence, record_kind:$record_kind}) "
                         "MERGE (o:MemoryIdentity {namespace:$namespace, memory_id:$old_id}) "
                         "MERGE (m)-[r:SUPERSEDES {namespace:$namespace, txn_id:$txn_id, source_id:$memory_id, "
                         "target_id:$old_id}]->(o) SET r.status=$status",
+                    ),
                         namespace=namespace,
                         txn_id=txn_id,
                         memory_id=memory_id,
@@ -943,36 +970,40 @@ class _Neo4jBoltClient:
                     ).consume()
             return
         with self.driver.session() as session:
-            session.run(
+            session.run(self._bounded_query(
                 "MERGE (m:MemoryIdentity {namespace:$namespace, memory_id:$memory_id}) "
                 "SET m:Memory, m.canonical=true, m.status=$status, m.version=$version",
+            ),
                 namespace=namespace,
                 memory_id=memory_id,
                 status=payload.get("status", "active"),
                 version=int(payload.get("version", 1)),
             ).consume()
-            session.run(
+            session.run(self._bounded_query(
                 "MATCH (m:MemoryIdentity {namespace:$namespace, memory_id:$memory_id}) "
                 "OPTIONAL MATCH (m)-[r:DERIVED_FROM|SUPERSEDES]->() DELETE r",
+            ),
                 namespace=namespace,
                 memory_id=memory_id,
             ).consume()
             for source_id in source_ids:
-                session.run(
+                session.run(self._bounded_query(
                     "MATCH (m:MemoryIdentity {namespace:$namespace, memory_id:$memory_id}) "
                     "MERGE (s:MemoryIdentity {namespace:$namespace, memory_id:$source_id}) "
                     "MERGE (m)-[r:DERIVED_FROM]->(s) "
                     "SET r.namespace=$namespace",
+                ),
                     namespace=namespace,
                     source_id=source_id,
                     memory_id=memory_id,
                 ).consume()
             if supersedes_id:
-                session.run(
+                session.run(self._bounded_query(
                     "MATCH (m:MemoryIdentity {namespace:$namespace, memory_id:$memory_id}) "
                     "MERGE (o:MemoryIdentity {namespace:$namespace, memory_id:$old_id}) "
                     "MERGE (m)-[r:SUPERSEDES]->(o) "
                     "SET r.namespace=$namespace",
+                ),
                     namespace=namespace,
                     memory_id=memory_id,
                     old_id=supersedes_id,
@@ -1164,9 +1195,10 @@ class _Neo4jBoltClient:
 
     def update_status(self, namespace, memory_id, status, idempotency_key, version=None):
         with self.driver.session() as session:
-            session.run(
+            session.run(self._bounded_query(
                 "MATCH (m:Memory {namespace:$namespace, memory_id:$memory_id}) "
                 "SET m.status=$status, m.version=coalesce($version, m.version)",
+            ),
                 namespace=namespace,
                 memory_id=memory_id,
                 status=status,
@@ -1175,8 +1207,9 @@ class _Neo4jBoltClient:
 
     def delete_memory(self, namespace, memory_id, idempotency_key):
         with self.driver.session() as session:
-            session.run(
+            session.run(self._bounded_query(
                 "MATCH (m:Memory {namespace:$namespace, memory_id:$memory_id}) DETACH DELETE m",
+            ),
                 namespace=namespace,
                 memory_id=memory_id,
             ).consume()
@@ -1185,7 +1218,7 @@ class _Neo4jBoltClient:
         """Read the persisted node and provenance edges after fault recovery."""
 
         with self.driver.session() as session:
-            record = session.run(
+            record = session.run(self._bounded_query(
                 "MATCH (m:MemoryIdentity:Memory {namespace:$namespace, memory_id:$memory_id}) "
                 "WHERE coalesce(m.canonical, true) "
                 "OPTIONAL MATCH (m)-[:DERIVED_FROM]->(s:MemoryIdentity {namespace:$namespace}) "
@@ -1195,6 +1228,7 @@ class _Neo4jBoltClient:
                 "head(collect(DISTINCT o.memory_id)) AS supersedes_id, "
                 "m.canonical_state_hash AS state_hash, "
                 "m.canonical_operation_id AS operation_id",
+            ),
                 namespace=namespace,
                 memory_id=memory_id,
             ).single()
@@ -1220,7 +1254,7 @@ class _Neo4jBoltClient:
             raise ValueError("namespace scan limit must be a positive integer")
         try:
             with self.driver.session() as session:
-                records = session.run(
+                records = session.run(self._bounded_query(
                     "MATCH (m:MemoryIdentity:Memory {namespace:$namespace}) "
                     "WHERE coalesce(m.canonical, true) "
                     "OPTIONAL MATCH (m)-[:DERIVED_FROM]->"
@@ -1228,6 +1262,7 @@ class _Neo4jBoltClient:
                     "RETURN m.memory_id AS memory_id, m.status AS status, "
                     "collect(DISTINCT s.memory_id) AS source_ids "
                     "ORDER BY memory_id LIMIT $limit",
+                ),
                     namespace=namespace,
                     limit=limit,
                 )
@@ -1253,10 +1288,11 @@ class _Neo4jBoltClient:
             with self.driver.session() as session:
                 nodes = [
                     dict(record.get("payload") or {})
-                    for record in session.run(
+                    for record in session.run(self._bounded_query(
                         "MATCH (m:TxnMemory {namespace:$namespace, txn_id:$txn_id}) "
                         "RETURN properties(m) AS payload "
                         "ORDER BY m.sequence, m.record_kind, m.memory_id",
+                    ),
                         namespace=namespace,
                         txn_id=txn_id,
                     )
@@ -1269,12 +1305,13 @@ class _Neo4jBoltClient:
                         "target_id": str(record.get("target_id")),
                         "status": str(record.get("status")),
                     }
-                    for record in session.run(
+                    for record in session.run(self._bounded_query(
                         "MATCH ()-[r]->() WHERE r.namespace=$namespace AND r.txn_id=$txn_id "
                         "RETURN r.txn_id AS txn_id, type(r) AS kind, "
                         "r.source_id AS source_id, r.target_id AS target_id, "
                         "r.status AS status "
                         "ORDER BY kind, source_id, target_id",
+                    ),
                         namespace=namespace,
                         txn_id=txn_id,
                     )
@@ -1286,9 +1323,10 @@ class _Neo4jBoltClient:
     def retrieve_txn_ids_by_memory(self, namespace, memory_id):
         try:
             with self.driver.session() as session:
-                record = session.run(
+                record = session.run(self._bounded_query(
                     "MATCH (m:TxnMemory {namespace:$namespace, memory_id:$memory_id}) "
                     "RETURN collect(DISTINCT m.txn_id) AS txn_ids",
+                ),
                     namespace=namespace,
                     memory_id=memory_id,
                 ).single()
@@ -1305,19 +1343,20 @@ class _Neo4jBoltClient:
 
     def delete_many_by_txn(self, namespace, txn_id, idempotency_key):
         with self.driver.session() as session:
-            session.run(
+            session.run(self._bounded_query(
                 "MATCH (m:TxnMemory {namespace:$namespace, txn_id:$txn_id}) "
                 "DETACH DELETE m",
+            ),
                 namespace=namespace,
                 txn_id=txn_id,
             ).consume()
 
     def healthcheck(self):
         with self.driver.session() as session:
-            record = session.run(
+            record = session.run(self._bounded_query(
                 "CALL dbms.components() YIELD versions "
                 "RETURN 1 AS ok, versions[0] AS version"
-            ).single()
+            )).single()
         return {
             "available": bool(record and record.get("ok") == 1),
             "version": record.get("version") if record else None,
@@ -1360,7 +1399,11 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         self.qdrant = qdrant_client or _QdrantHTTPClient(
             self.qdrant_url, timeout_seconds=request_timeout_seconds
         )
-        self.neo4j = neo4j_client or _Neo4jBoltClient(self.neo4j_uri, self.neo4j_auth)
+        self.neo4j = neo4j_client or _Neo4jBoltClient(
+            self.neo4j_uri,
+            self.neo4j_auth,
+            request_timeout_seconds=request_timeout_seconds,
+        )
         self.neo4j_max_transaction_retry_time_seconds = getattr(
             self.neo4j, "max_transaction_retry_time_seconds", None
         )

@@ -37,6 +37,20 @@ from txnmem_task_transaction import TaskTransactionError, TaskTransactionGateway
 from txnmem_transaction_journal import TransactionJournal
 
 
+class _TestNeo4jQuery(str):
+    def __new__(cls, text, *, timeout):
+        query = super().__new__(cls, text)
+        query.timeout = timeout
+        return query
+
+
+# Unit tests that exercise client methods directly intentionally bypass the
+# optional Neo4j import.  Give those bare instances a query representation
+# compatible with the driver boundary.
+_Neo4jBoltClient._Query = _TestNeo4jQuery
+_Neo4jBoltClient.request_timeout_seconds = 15.0
+
+
 class _FakeQdrant:
     def __init__(self):
         self.points = {}
@@ -685,7 +699,7 @@ class _MigrationDriver:
             def close(self):
                 return None
 
-        def begin_transaction(self):
+        def begin_transaction(self, *, timeout):
             return self._ExplicitTransaction(self.driver)
 
         def run(self, query, **_parameters):
@@ -783,8 +797,44 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
 
     def test_neo4j_driver_and_writes_disable_implicit_retry(self):
         observed = {}
+        observed_queries = []
+        observed_transaction_timeout = []
+        test_case = self
+
+        class Result:
+            def consume(self):
+                return None
+
+        class Transaction:
+            def commit(self):
+                return None
+
+            def rollback(self):
+                return None
+
+            def close(self):
+                return None
+
+        class Session:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def run(self, query, **_parameters):
+                observed_queries.append(query)
+                return Result()
+
+            def begin_transaction(self, *, timeout):
+                observed_transaction_timeout.append(timeout)
+                return Transaction()
 
         class Driver:
+            def session(self):
+                return Session()
+
+        class Query(_TestNeo4jQuery):
             pass
 
         class GraphDatabase:
@@ -795,19 +845,33 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
 
         module = ModuleType("neo4j")
         module.GraphDatabase = GraphDatabase
-        with patch.dict(sys.modules, {"neo4j": module}), patch.object(
-            _Neo4jBoltClient, "_initialize_schema"
-        ):
+        module.Query = Query
+        with patch.dict(sys.modules, {"neo4j": module}):
             client = _Neo4jBoltClient(
                 "bolt://proxy",
                 ("neo4j", "secret"),
                 notifications_min_severity="OFF",
+                migrate_legacy=False,
+                request_timeout_seconds=30.0,
             )
+            self.assertEqual(client._execute_write_once(lambda _tx: "ok"), "ok")
 
         self.assertEqual(observed["max_transaction_retry_time"], 0.0)
+        self.assertEqual(observed["connection_timeout"], 30.0)
+        self.assertEqual(observed["connection_acquisition_timeout"], 30.0)
         self.assertEqual(observed["notifications_min_severity"], "OFF")
         self.assertEqual(client.max_transaction_retry_time_seconds, 0.0)
         self.assertEqual(client.notifications_min_severity, "OFF")
+        self.assertEqual(observed_transaction_timeout, [30.0])
+        self.assertTrue(all(query.timeout == 30.0 for query in observed_queries))
+        self.assertEqual(
+            client.timeout_policy(),
+            {
+                "connection_seconds": 30.0,
+                "connection_acquisition_seconds": 30.0,
+                "transaction_query_seconds": 30.0,
+            },
+        )
 
         observed.clear()
         with patch.dict(sys.modules, {"neo4j": module}), patch.object(
@@ -838,7 +902,8 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             def __exit__(self, *_args):
                 return None
 
-            def begin_transaction(self):
+            def begin_transaction(self, *, timeout):
+                test_case.assertEqual(timeout, 15.0)
                 events.append("begin")
                 return Transaction()
 
@@ -860,6 +925,43 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
                 lambda _tx: (_ for _ in ()).throw(RuntimeError("transient"))
             )
         self.assertEqual(events, ["begin", "rollback", "close"])
+
+    def test_neo4j_constructor_rejects_nonfinite_or_nonpositive_timeout(self):
+        module = ModuleType("neo4j")
+        module.GraphDatabase = object()
+        module.Query = _TestNeo4jQuery
+        with patch.dict(sys.modules, {"neo4j": module}):
+            for timeout in (True, 0.0, -1.0, float("nan"), float("inf")):
+                with self.subTest(timeout=timeout):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "request_timeout_seconds must be a positive finite number",
+                    ):
+                        _Neo4jBoltClient(
+                            "bolt://proxy",
+                            ("neo4j", "secret"),
+                            request_timeout_seconds=timeout,
+                        )
+
+    def test_vector_graph_backend_passes_exact_timeout_to_owned_neo4j_client(self):
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient"
+        ), patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient"
+        ) as neo4j_constructor:
+            VectorGraphMemoryBackend(
+                "namespace",
+                "http://qdrant",
+                "bolt://neo4j",
+                ("neo4j", "secret"),
+                request_timeout_seconds=30.0,
+            )
+
+        neo4j_constructor.assert_called_once_with(
+            "bolt://neo4j",
+            ("neo4j", "secret"),
+            request_timeout_seconds=30.0,
+        )
 
     def test_neo4j_performance_initialization_skips_legacy_scan_but_installs_constraints(self):
         events = []
@@ -893,6 +995,7 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
 
         module = ModuleType("neo4j")
         module.GraphDatabase = GraphDatabase
+        module.Query = _TestNeo4jQuery
         with patch.dict(sys.modules, {"neo4j": module}):
             _Neo4jBoltClient(
                 "bolt://proxy",
@@ -948,6 +1051,7 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
 
         module = ModuleType("neo4j")
         module.GraphDatabase = GraphDatabase
+        module.Query = _TestNeo4jQuery
         with patch.dict(sys.modules, {"neo4j": module}), patch.object(
             _Neo4jBoltClient, "_initialize_schema"
         ):

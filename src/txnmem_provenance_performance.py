@@ -1971,7 +1971,7 @@ class _ReusableVectorGraphBackendFactory:
         self.qdrant_url = str(qdrant_url)
         self.neo4j_uri = str(neo4j_uri)
         self.neo4j_auth = tuple(str(item) for item in neo4j_auth)
-        self.request_timeout_seconds = float(request_timeout_seconds)
+        self.request_timeout_seconds = request_timeout_seconds
         self.attestation = copy.deepcopy(dict(environment_attestation))
         self.qdrant = _QdrantHTTPClient(
             self.qdrant_url,
@@ -1984,6 +1984,7 @@ class _ReusableVectorGraphBackendFactory:
             self.neo4j_auth,
             notifications_min_severity="OFF",
             migrate_legacy=False,
+            request_timeout_seconds=self.request_timeout_seconds,
         )
         self._closed = False
         self._close_lock = threading.Lock()
@@ -2043,7 +2044,7 @@ def make_vector_graph_backend_factory(
         neo4j_uri=neo4j_uri,
         neo4j_auth=neo4j_auth,
         environment_attestation=environment_attestation,
-        request_timeout_seconds=float(request_timeout_seconds),
+        request_timeout_seconds=request_timeout_seconds,
     )
 
 
