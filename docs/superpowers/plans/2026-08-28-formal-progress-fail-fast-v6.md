@@ -551,8 +551,8 @@ Test the shell script text for `/usr/bin/env -i`, the protected controller path,
 Mock the real-service boundaries but keep the actual progress protocol. Require the smoke orchestration to run four isolated child scenarios:
 
 1. normal: a two-repetition prefix of the first formal cell produces sequences 1 and 2;
-2. ineligible: first repetition blocks before a completed event;
-3. timeout: a bounded backend operation returns blocked within configured smoke timeout plus cleanup grace;
+2. ineligible: the first repetition uses `isolation_verified=False` and blocks before a completed event;
+3. timeout: a smoke-only 1.0-second request limit plus a 2.0-second injected delay returns blocked within 6.0 seconds before process cleanup;
 4. interrupt: termination leaves child/controller/guard counts zero and no candidate files.
 
 Assert the v2 receipt contains only booleans, fixed schema, and safe counts. Each scenario must use a separate smoke identity and never be accepted by the formal promotion validator.
@@ -571,7 +571,7 @@ The shell wrapper must isolate environment to `LANG`, `LC_ALL`, and `PYTHONDONTW
 
 - [ ] **Step 5: Implement protected real-service smoke scenarios**
 
-Reuse the existing root health, topology, route, guard, and immutable-runner setup. Run the normal two-repetition scenario first and validate sequences. For timeout, use a smoke-only finite timeout smaller than the injected delay; do not alter formal config. For interruption, signal the validated process group through collector cleanup rather than directly killing a PID. Always stop the child before guard deactivation.
+Reuse the existing root health, topology, route, guard, and immutable-runner setup. Run graph size 100, concurrency 1, and exactly two repetitions for the normal prefix, then validate sequences 1 and 2. For timeout, use a smoke-only 1.0-second request limit and a 2.0-second Toxiproxy delay, require blocked state within 6.0 seconds, and do not alter the formal 30-second config. For interruption, signal the validated process group after the starting snapshot and active-guard proof, using the fixed 5-second SIGTERM and 5-second SIGKILL grace periods from Task 6 rather than directly killing a PID. Always stop the child before guard deactivation.
 
 Write receipt `txnmem-provenance-formal-smoke-v2` only if all booleans are true. The smoke output remains diagnostic and outside candidate/promotion directories.
 
