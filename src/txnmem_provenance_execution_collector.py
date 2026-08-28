@@ -66,6 +66,7 @@ from txnmem_provenance_performance import (
 )
 from txnmem_provenance_progress import (
     FormalProgressState,
+    PROGRESS_SNAPSHOT_SCHEMA,
     ProgressPipeDrainer,
     ProgressProtocolError,
     ProgressSnapshotStore,
@@ -157,6 +158,95 @@ class _MonitorCandidateExited(RuntimeError):
     """Internal signal that continuous sampling reached the child exit boundary."""
 
 
+_FINAL_PROGRESS_FIELDS = frozenset(
+    {
+        "schema",
+        "run_binding_sha256",
+        "config_sha256",
+        "phase",
+        "cell_index",
+        "cell_count",
+        "graph_size",
+        "concurrency",
+        "repetition_index",
+        "repetition_count",
+        "completed_repetitions",
+        "total_repetitions",
+        "completed_samples",
+        "total_samples",
+        "update_sequence",
+        "status",
+        "last_update_age_seconds",
+    }
+)
+_FINAL_TERMINAL_PROGRESS_FIELDS = _FINAL_PROGRESS_FIELDS | {
+    "terminal_reason_class"
+}
+
+
+def _expected_final_running_progress(
+    progress_state: FormalProgressState,
+    last_update_age_seconds: int,
+) -> dict[str, Any]:
+    return {
+        "schema": PROGRESS_SNAPSHOT_SCHEMA,
+        "run_binding_sha256": progress_state.run_binding_sha256,
+        "config_sha256": progress_state.config_sha256,
+        "phase": "measurement",
+        "cell_index": 15,
+        "cell_count": 15,
+        "graph_size": 10000,
+        "concurrency": 16,
+        "repetition_index": 30,
+        "repetition_count": 30,
+        "completed_repetitions": 450,
+        "total_repetitions": 450,
+        "completed_samples": 14400,
+        "total_samples": 14400,
+        "update_sequence": 450,
+        "status": "running",
+        "last_update_age_seconds": last_update_age_seconds,
+    }
+
+
+def _validate_final_running_progress(
+    value: Any,
+    progress_state: FormalProgressState,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise CollectorError("candidate progress completion state is invalid")
+    current = dict(value)
+    age = current.get("last_update_age_seconds")
+    if (
+        set(current) != _FINAL_PROGRESS_FIELDS
+        or type(age) is not int
+        or age < 0
+        or current != _expected_final_running_progress(progress_state, age)
+    ):
+        raise CollectorError("candidate progress completion state is invalid")
+    return current
+
+
+def _completed_progress_matches(
+    value: Any,
+    expected: Mapping[str, Any],
+) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    persisted = dict(value)
+    age = persisted.get("last_update_age_seconds")
+    if (
+        set(persisted) != _FINAL_TERMINAL_PROGRESS_FIELDS
+        or set(expected) != _FINAL_TERMINAL_PROGRESS_FIELDS
+        or type(age) is not int
+        or age < 0
+    ):
+        return False
+    comparison = dict(expected)
+    comparison["last_update_age_seconds"] = age
+    return persisted == comparison
+
+
 def _persist_blocked_progress(store: ProgressSnapshotStore) -> dict[str, Any]:
     """Persist one safe blocked terminal without exposing storage failures."""
 
@@ -209,6 +299,7 @@ class _GatedCandidate:
     ready_observed: bool
     _progress_drainer: ProgressPipeDrainer | None = None
     _progress_store: ProgressSnapshotStore | None = None
+    _progress_state: FormalProgressState | None = None
     gate_released_monotonic_ns: int | None = None
     exit_observed_monotonic_ns: int | None = None
 
@@ -253,25 +344,32 @@ class _GatedCandidate:
     def complete_progress(self) -> dict[str, Any]:
         if self._progress_store is None:
             raise CollectorError("candidate progress store is unavailable")
+        if not isinstance(self._progress_state, FormalProgressState):
+            raise CollectorError("candidate progress completion state is invalid")
         try:
             current = self._progress_store.read_view()
         except BaseException:
             raise CollectorError("candidate progress completion failed") from None
-        if (
-            current.get("update_sequence") != 450
-            or current.get("completed_repetitions") != 450
-            or current.get("completed_samples") != 14400
-        ):
-            raise CollectorError("candidate progress completion state is invalid")
         if current.get("status") == "completed":
-            if current.get("terminal_reason_class") != "completed":
+            age = current.get("last_update_age_seconds")
+            if type(age) is not int or age < 0:
                 raise CollectorError(
                     "candidate progress completion state is invalid"
                 )
-            return current
-        if current.get("status") != "running":
-            raise CollectorError("candidate progress completion state is invalid")
-        terminal = dict(current)
+            expected = _expected_final_running_progress(
+                self._progress_state, age
+            )
+            expected["status"] = "completed"
+            expected["terminal_reason_class"] = "completed"
+            if not _completed_progress_matches(current, expected):
+                raise CollectorError(
+                    "candidate progress completion state is invalid"
+                )
+            return dict(current)
+        running = _validate_final_running_progress(
+            current, self._progress_state
+        )
+        terminal = dict(running)
         terminal["status"] = "completed"
         terminal["terminal_reason_class"] = "completed"
         terminal["last_update_age_seconds"] = 0
@@ -282,19 +380,7 @@ class _GatedCandidate:
                 persisted = self._progress_store.read_view()
             except BaseException:
                 persisted = None
-            if (
-                isinstance(persisted, Mapping)
-                and persisted.get("status") == "completed"
-                and persisted.get("terminal_reason_class") == "completed"
-                and persisted.get("update_sequence") == 450
-                and persisted.get("completed_repetitions") == 450
-                and persisted.get("completed_samples") == 14400
-                and all(
-                    key in {"status", "last_update_age_seconds"}
-                    or persisted.get(key) == value
-                    for key, value in current.items()
-                )
-            ):
+            if _completed_progress_matches(persisted, terminal):
                 return dict(persisted)
             raise CollectorError("candidate progress completion failed") from None
         return terminal
@@ -1553,8 +1639,11 @@ def _start_gated_candidate(
     def close_owned(descriptor: int | None) -> None:
         if descriptor is None or descriptor not in owned_descriptors:
             return
-        os.close(descriptor)
         owned_descriptors.remove(descriptor)
+        try:
+            os.close(descriptor)
+        except BaseException:
+            raise CollectorError("candidate startup cleanup failed") from None
 
     def transfer_owned(descriptor: int | None) -> None:
         if descriptor is not None and descriptor in owned_descriptors:
@@ -1619,6 +1708,7 @@ def _start_gated_candidate(
     progress_read_fd: int | None = None
     progress_write_fd: int | None = None
     progress_store: ProgressSnapshotStore | None = None
+    progress_state: FormalProgressState | None = None
     progress_drainer: ProgressPipeDrainer | None = None
     progress_started = False
     drainer_owns_descriptor = False
@@ -1644,12 +1734,11 @@ def _start_gated_candidate(
                 progress_binding_sha256, progress_config_sha256
             )
             progress_started = True
+            progress_state = FormalProgressState(
+                progress_binding_sha256, progress_config_sha256
+            )
             progress_drainer = ProgressPipeDrainer(
-                progress_read_fd,
-                FormalProgressState(
-                    progress_binding_sha256, progress_config_sha256
-                ),
-                progress_store,
+                progress_read_fd, progress_state, progress_store
             )
 
         assert read_fd is not None
@@ -1712,6 +1801,7 @@ def _start_gated_candidate(
             _receipt_fd=receipt_read_fd,
             _progress_drainer=progress_drainer,
             _progress_store=progress_store,
+            _progress_state=progress_state,
             ready_observed=True,
         )
         transfer_owned(write_fd)

@@ -1004,13 +1004,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     self.snapshot["terminal_reason_class"] = reason
 
             store = Store()
-            child = collector_module._GatedCandidate(
-                process=SimpleNamespace(),
-                _release_fd=None,
-                _receipt_fd=None,
-                ready_observed=True,
-                _progress_store=store,
-            )
+            child = self._candidate_with_progress_store(store)
 
             def collect_until_sealer_failure():
                 try:
@@ -1412,6 +1406,48 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 )
 
         self.assertEqual(sorted(closed), [10, 11, 12, 13, 14, 15])
+
+    def test_gated_child_never_retries_an_ambiguous_owned_fd_close(self):
+        descriptors = iter(((10, 11), (12, 13)))
+        close_attempts = []
+        reused_descriptor_closed = False
+
+        class Process:
+            def poll(self):
+                return 0
+
+            def wait(self, timeout=None):
+                return 0
+
+        def close_descriptor(descriptor):
+            nonlocal reused_descriptor_closed
+            close_attempts.append(descriptor)
+            if descriptor == 10 and close_attempts.count(10) == 1:
+                raise InterruptedError("password=private-ambiguous-close")
+            if descriptor == 10:
+                reused_descriptor_closed = True
+
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module.os, "pipe", side_effect=lambda: next(descriptors)
+        ), patch.object(
+            collector_module.os, "close", side_effect=close_descriptor
+        ), patch.object(
+            collector_module.subprocess, "Popen", return_value=Process()
+        ):
+            root = Path(tmp).resolve()
+            with self.assertRaises(BaseException) as raised:
+                collector_module._start_gated_candidate(
+                    command=(sys.executable, "-I", "-B", "unused.py"),
+                    cwd=root,
+                    environment={},
+                )
+
+        self.assertIsInstance(raised.exception, CollectorError)
+        self.assertIn("startup cleanup failed", str(raised.exception))
+        self.assertNotIn("private", str(raised.exception))
+        self.assertEqual(close_attempts.count(10), 1)
+        self.assertFalse(reused_descriptor_closed)
+        self.assertEqual(sorted(close_attempts), [10, 11, 12, 13])
 
     def test_gated_child_popen_failure_terminalizes_durable_starting_snapshot(self):
         with TemporaryDirectory() as tmp, patch.object(
@@ -1871,15 +1907,44 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertNotIn("private", str(raised.exception))
 
     @staticmethod
-    def _final_running_progress_snapshot():
+    def _final_running_progress_snapshot(
+        *, run_binding_sha256="a" * 64, config_sha256="b" * 64
+    ):
         return {
-            "run_binding_sha256": "a" * 64,
-            "config_sha256": "b" * 64,
+            "schema": "txnmem-provenance-progress-snapshot-v1",
+            "run_binding_sha256": run_binding_sha256,
+            "config_sha256": config_sha256,
+            "phase": "measurement",
+            "cell_index": 15,
+            "cell_count": 15,
+            "graph_size": 10000,
+            "concurrency": 16,
+            "repetition_index": 30,
+            "repetition_count": 30,
+            "total_repetitions": 450,
             "status": "running",
             "update_sequence": 450,
             "completed_repetitions": 450,
             "completed_samples": 14400,
+            "total_samples": 14400,
+            "last_update_age_seconds": 0,
         }
+
+    @staticmethod
+    def _candidate_with_progress_store(
+        store, *, run_binding_sha256="a" * 64, config_sha256="b" * 64
+    ):
+        child = collector_module._GatedCandidate(
+            process=SimpleNamespace(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _progress_store=store,
+        )
+        child._progress_state = collector_module.FormalProgressState(
+            run_binding_sha256, config_sha256
+        )
+        return child
 
     def test_completed_write_is_the_final_normal_path_store_operation(self):
         class Store:
@@ -1899,13 +1964,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
 
         store = Store()
         store._snapshot = self._final_running_progress_snapshot()
-        child = collector_module._GatedCandidate(
-            process=SimpleNamespace(),
-            _release_fd=None,
-            _receipt_fd=None,
-            ready_observed=True,
-            _progress_store=store,
-        )
+        child = self._candidate_with_progress_store(store)
 
         terminal = child.complete_progress()
 
@@ -1936,13 +1995,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 return ProvenanceExecutionCollectorTests._final_running_progress_snapshot()
 
         store = Store()
-        child = collector_module._GatedCandidate(
-            process=SimpleNamespace(),
-            _release_fd=None,
-            _receipt_fd=None,
-            ready_observed=True,
-            _progress_store=store,
-        )
+        child = self._candidate_with_progress_store(store)
 
         terminal = child.complete_progress()
 
@@ -1962,13 +2015,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 raise RuntimeError("password=private-uncommitted-write")
 
         store = Store()
-        child = collector_module._GatedCandidate(
-            process=SimpleNamespace(),
-            _release_fd=None,
-            _receipt_fd=None,
-            ready_observed=True,
-            _progress_store=store,
-        )
+        child = self._candidate_with_progress_store(store)
 
         with self.assertRaises(CollectorError) as raised:
             child.complete_progress()
@@ -1996,13 +2043,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             def write_terminal(self, _status, _reason):
                 raise RuntimeError("password=private-ambiguous-write")
 
-        child = collector_module._GatedCandidate(
-            process=SimpleNamespace(),
-            _release_fd=None,
-            _receipt_fd=None,
-            ready_observed=True,
-            _progress_store=Store(),
-        )
+        child = self._candidate_with_progress_store(Store())
 
         with self.assertRaises(CollectorError) as raised:
             child.complete_progress()
@@ -2025,18 +2066,142 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     read_view=lambda: snapshot,
                     write_terminal=lambda *args: writes.append(args),
                 )
-                child = collector_module._GatedCandidate(
-                    process=SimpleNamespace(),
-                    _release_fd=None,
-                    _receipt_fd=None,
-                    ready_observed=True,
-                    _progress_store=store,
-                )
+                child = self._candidate_with_progress_store(store)
 
                 with self.assertRaisesRegex(CollectorError, "completion"):
                     child.complete_progress()
 
                 self.assertEqual(writes, [])
+
+    def test_completion_requires_exact_trusted_running_snapshot_closure(self):
+        mutations = (
+            ("truncated", lambda view: view.pop("schema")),
+            ("extra", lambda view: view.__setitem__("run_id", "private-run")),
+            (
+                "wrong_binding",
+                lambda view: view.__setitem__("run_binding_sha256", "c" * 64),
+            ),
+            (
+                "wrong_config",
+                lambda view: view.__setitem__("config_sha256", "d" * 64),
+            ),
+            (
+                "wrong_schema",
+                lambda view: view.__setitem__("schema", "progress-snapshot-v0"),
+            ),
+            ("wrong_phase", lambda view: view.__setitem__("phase", "setup")),
+            ("wrong_cell", lambda view: view.__setitem__("cell_index", 14)),
+            ("wrong_cell_count", lambda view: view.__setitem__("cell_count", 14)),
+            ("wrong_graph", lambda view: view.__setitem__("graph_size", 1000)),
+            ("wrong_concurrency", lambda view: view.__setitem__("concurrency", 8)),
+            (
+                "wrong_repetition",
+                lambda view: view.__setitem__("repetition_index", 29),
+            ),
+            (
+                "wrong_repetition_count",
+                lambda view: view.__setitem__("repetition_count", 29),
+            ),
+            (
+                "wrong_total_repetitions",
+                lambda view: view.__setitem__("total_repetitions", 449),
+            ),
+            (
+                "wrong_total_samples",
+                lambda view: view.__setitem__("total_samples", 14399),
+            ),
+            (
+                "terminal_reason_on_running",
+                lambda view: view.__setitem__("terminal_reason_class", "completed"),
+            ),
+            (
+                "negative_age",
+                lambda view: view.__setitem__("last_update_age_seconds", -1),
+            ),
+            (
+                "boolean_age",
+                lambda view: view.__setitem__("last_update_age_seconds", True),
+            ),
+        )
+        for label, mutate in mutations:
+            with self.subTest(label=label):
+                snapshot = self._final_running_progress_snapshot()
+                mutate(snapshot)
+                writes = []
+                store = SimpleNamespace(
+                    read_view=lambda: snapshot,
+                    write_terminal=lambda *args: writes.append(args),
+                )
+                child = self._candidate_with_progress_store(store)
+
+                with self.assertRaisesRegex(CollectorError, "completion"):
+                    child.complete_progress()
+
+                self.assertEqual(writes, [])
+
+    def test_completion_requires_candidate_trusted_progress_state(self):
+        writes = []
+        store = SimpleNamespace(
+            read_view=self._final_running_progress_snapshot,
+            write_terminal=lambda *args: writes.append(args),
+        )
+        child = collector_module._GatedCandidate(
+            process=SimpleNamespace(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _progress_store=store,
+        )
+
+        with self.assertRaisesRegex(CollectorError, "completion"):
+            child.complete_progress()
+
+        self.assertEqual(writes, [])
+
+    def test_ambiguous_completed_write_requires_exact_terminal_closure(self):
+        mutations = (
+            ("extra", lambda view: view.__setitem__("extra", "private-extra")),
+            ("missing", lambda view: view.pop("last_update_age_seconds")),
+            ("changed", lambda view: view.__setitem__("graph_size", 1000)),
+            (
+                "negative_age",
+                lambda view: view.__setitem__("last_update_age_seconds", -1),
+            ),
+            (
+                "boolean_age",
+                lambda view: view.__setitem__("last_update_age_seconds", True),
+            ),
+            (
+                "float_age",
+                lambda view: view.__setitem__("last_update_age_seconds", 0.0),
+            ),
+        )
+        for label, mutate in mutations:
+            with self.subTest(label=label):
+                running = self._final_running_progress_snapshot()
+                terminal = dict(running)
+                terminal["status"] = "completed"
+                terminal["terminal_reason_class"] = "completed"
+                mutate(terminal)
+
+                class Store:
+                    def __init__(self):
+                        self.read_count = 0
+
+                    def read_view(self):
+                        self.read_count += 1
+                        return dict(running if self.read_count == 1 else terminal)
+
+                    def write_terminal(self, _status, _reason):
+                        raise RuntimeError("password=private-ambiguous-write")
+
+                child = self._candidate_with_progress_store(Store())
+
+                with self.assertRaises(CollectorError) as raised:
+                    child.complete_progress()
+
+                self.assertIn("completion failed", str(raised.exception))
+                self.assertNotIn("private", str(raised.exception))
 
     def test_repeated_block_and_close_preserve_earlier_blocked_terminal(self):
         class BlockedStore:
