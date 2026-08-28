@@ -2405,7 +2405,10 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertLess(uid_index, events.index(("fd-close", 16)))
         self.assertEqual(events.count(("pidfd-close", 91)), 1)
 
-    def test_startup_identity_absence_proof_failure_retains_cleanup_ownership(self):
+    def test_startup_identity_absence_proof_failure_hands_off_without_cleanup(self):
+        class SupervisorHandoff(BaseException):
+            pass
+
         descriptors = iter(((10, 11), (12, 13), (14, 15), (16, 17)))
         events = []
 
@@ -2484,8 +2487,12 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             side_effect=lambda descriptor: events.append(
                 ("pidfd-close", descriptor)
             ),
-        ):
-            with self.assertRaisesRegex(CollectorError, "startup"):
+        ), patch.object(
+            collector_module,
+            "_formal_startup_fail_stop",
+            side_effect=SupervisorHandoff("supervisor-handoff"),
+        ) as fail_stop:
+            with self.assertRaises(SupervisorHandoff):
                 collector_module._start_gated_candidate(
                     command=Process.args,
                     cwd=Path(tmp).resolve(),
@@ -2501,6 +2508,8 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     progress_expected_gid=0,
                 )
 
+        fail_stop.assert_called_once_with()
+
         self.assertEqual(
             events[:3],
             [("fd-close", 11), ("wait", 5.0), ("uid-proof", {})],
@@ -2508,10 +2517,282 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertNotIn("blocked-progress", events)
         self.assertNotIn("drainer-abort", events)
         self.assertEqual(
-            [event for event in events if event[0] == "fd-close"],
-            [("fd-close", 11)],
+            sorted(event[1] for event in events if event[0] == "fd-close"),
+            list(range(10, 18)),
         )
         self.assertNotIn(("pidfd-close", 91), events)
+
+    def test_formal_pidfd_preflight_uses_real_self_syscalls_before_popen(self):
+        close_calls = []
+        with patch.object(
+            collector_module.sys, "platform", "linux"
+        ), patch.object(
+            collector_module.os, "getpid", return_value=7001
+        ), patch.object(
+            collector_module.os, "pidfd_open", return_value=73, create=True
+        ) as pidfd_open, patch.object(
+            collector_module.signal,
+            "pidfd_send_signal",
+            return_value=None,
+            create=True,
+        ) as pidfd_send, patch.object(
+            collector_module.os,
+            "close",
+            side_effect=lambda descriptor: close_calls.append(descriptor),
+        ):
+            collector_module._require_pidfd_support()
+
+        pidfd_open.assert_called_once_with(7001, 0)
+        pidfd_send.assert_called_once_with(73, 0, None, 0)
+        self.assertEqual(close_calls, [73])
+
+    def test_formal_pidfd_preflight_syscall_failures_block_popen_and_close_once(self):
+        cases = (
+            ("open-enosys", OSError(errno.ENOSYS, "pidfd_open unavailable")),
+            ("open-policy", OSError(errno.EPERM, "pidfd_open denied")),
+            ("send-einval", OSError(errno.EINVAL, "pidfd signal unavailable")),
+            ("send-policy", OSError(errno.EPERM, "pidfd signal denied")),
+        )
+        for case, failure in cases:
+            with self.subTest(case=case), TemporaryDirectory() as tmp:
+                close_calls = []
+                real_close = os.close
+
+                def observed_close(descriptor):
+                    close_calls.append(descriptor)
+                    if descriptor != 73:
+                        real_close(descriptor)
+
+                open_failure = failure if case.startswith("open-") else None
+                send_failure = failure if case.startswith("send-") else None
+                with patch.object(
+                    collector_module.sys, "platform", "linux"
+                ), patch.object(
+                    collector_module.os, "geteuid", return_value=0
+                ), patch.object(
+                    collector_module.os, "getpid", return_value=7001
+                ), patch.object(
+                    collector_module.os,
+                    "pidfd_open",
+                    side_effect=open_failure,
+                    return_value=73,
+                    create=True,
+                ) as pidfd_open, patch.object(
+                    collector_module.signal,
+                    "pidfd_send_signal",
+                    side_effect=send_failure,
+                    return_value=None,
+                    create=True,
+                ) as pidfd_send, patch.object(
+                    collector_module.os, "close", side_effect=observed_close
+                ), patch.object(
+                    collector_module.subprocess,
+                    "Popen",
+                    side_effect=AssertionError("Popen must not run"),
+                ) as popen:
+                    with self.assertRaisesRegex(CollectorError, "pidfd"):
+                        collector_module._start_gated_candidate(
+                            command=(sys.executable, "-I", "-B", "unused.py"),
+                            cwd=Path(tmp).resolve(),
+                            environment={},
+                            formal_uid=65532,
+                            formal_gid=65532,
+                        )
+
+                popen.assert_not_called()
+                pidfd_open.assert_called_once_with(7001, 0)
+                if case.startswith("open-"):
+                    pidfd_send.assert_not_called()
+                    self.assertEqual(close_calls, [])
+                else:
+                    pidfd_send.assert_called_once_with(73, 0, None, 0)
+                    self.assertEqual(close_calls, [73])
+
+    def test_formal_pidfd_preflight_rejects_malformed_kernel_results_before_popen(self):
+        cases = (("open", True, None), ("send", 73, 1))
+        for case, open_result, send_result in cases:
+            with self.subTest(case=case), TemporaryDirectory() as tmp:
+                close_calls = []
+                with patch.object(
+                    collector_module.sys, "platform", "linux"
+                ), patch.object(
+                    collector_module.os, "geteuid", return_value=0
+                ), patch.object(
+                    collector_module.os, "getpid", return_value=7001
+                ), patch.object(
+                    collector_module.os,
+                    "pidfd_open",
+                    return_value=open_result,
+                    create=True,
+                ), patch.object(
+                    collector_module.signal,
+                    "pidfd_send_signal",
+                    return_value=send_result,
+                    create=True,
+                ), patch.object(
+                    collector_module.os,
+                    "close",
+                    side_effect=lambda descriptor: close_calls.append(descriptor),
+                ), patch.object(
+                    collector_module.subprocess,
+                    "Popen",
+                    side_effect=AssertionError("Popen must not run"),
+                ) as popen:
+                    with self.assertRaisesRegex(CollectorError, "pidfd"):
+                        collector_module._start_gated_candidate(
+                            command=(sys.executable, "-I", "-B", "unused.py"),
+                            cwd=Path(tmp).resolve(),
+                            environment={},
+                            formal_uid=65532,
+                            formal_gid=65532,
+                        )
+
+                popen.assert_not_called()
+                self.assertEqual(close_calls, [] if case == "open" else [73])
+
+    def test_post_popen_leader_pidfd_failure_requires_exit_and_exact_uid_empty(self):
+        descriptors = iter(((10, 11), (12, 13)))
+        events = []
+
+        class Process:
+            pid = 4242
+            args = (sys.executable, "-I", "-B", "unused.py")
+
+            def wait(self, timeout=None):
+                events.append(("wait", timeout))
+                return 70
+
+            def terminate(self):
+                raise AssertionError("raw PID terminate is forbidden")
+
+            def kill(self):
+                raise AssertionError("raw PID kill is forbidden")
+
+        def close_descriptor(descriptor):
+            events.append(("close", descriptor))
+
+        def prove_uid_empty(_uid, *, expected):
+            events.append(("uid", expected))
+            return {}
+
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module.os, "pipe", side_effect=lambda: next(descriptors)
+        ), patch.object(
+            collector_module.os, "close", side_effect=close_descriptor
+        ), patch.object(
+            collector_module.os, "geteuid", return_value=0
+        ), patch.object(
+            collector_module, "_require_pidfd_support", return_value=None
+        ), patch.object(
+            collector_module.subprocess, "Popen", return_value=Process()
+        ) as popen, patch.object(
+            collector_module,
+            "_pidfd_open",
+            side_effect=OSError("leader-pidfd-acquisition-failed"),
+        ), patch.object(
+            collector_module,
+            "_require_formal_uid_processes",
+            side_effect=prove_uid_empty,
+        ), patch.object(
+            collector_module.os, "kill"
+        ) as raw_kill, patch.object(
+            collector_module.os, "killpg"
+        ) as raw_killpg:
+            with self.assertRaisesRegex(OSError, "leader-pidfd"):
+                collector_module._start_gated_candidate(
+                    command=Process.args,
+                    cwd=Path(tmp).resolve(),
+                    environment={},
+                    formal_uid=65532,
+                    formal_gid=65532,
+                )
+
+        popen.assert_called_once()
+        self.assertLess(events.index(("close", 11)), events.index(("wait", 5.0)))
+        self.assertLess(events.index(("wait", 5.0)), events.index(("uid", {})))
+        raw_kill.assert_not_called()
+        raw_killpg.assert_not_called()
+
+    def test_post_popen_leader_pidfd_failure_fail_stops_when_absence_is_unproven(self):
+        class SupervisorHandoff(BaseException):
+            pass
+
+        for case in ("wait-unproven", "uid-unproven"):
+            with self.subTest(case=case), TemporaryDirectory() as tmp:
+                descriptors = iter(((10, 11), (12, 13)))
+                events = []
+
+                class Process:
+                    pid = 4242
+                    args = (sys.executable, "-I", "-B", "unused.py")
+
+                    def wait(self, timeout=None):
+                        events.append(("wait", timeout))
+                        if case == "wait-unproven":
+                            raise RuntimeError("child exit is unproven")
+                        return 70
+
+                    def terminate(self):
+                        raise AssertionError("raw PID terminate is forbidden")
+
+                    def kill(self):
+                        raise AssertionError("raw PID kill is forbidden")
+
+                def prove_uid(_uid, *, expected):
+                    events.append(("uid", expected))
+                    if case == "uid-unproven":
+                        raise CollectorError("dedicated UID absence is unproven")
+                    return {}
+
+                with patch.object(
+                    collector_module.os,
+                    "pipe",
+                    side_effect=lambda: next(descriptors),
+                ), patch.object(
+                    collector_module.os,
+                    "close",
+                    side_effect=lambda descriptor: events.append(
+                        ("close", descriptor)
+                    ),
+                ), patch.object(
+                    collector_module.os, "geteuid", return_value=0
+                ), patch.object(
+                    collector_module, "_require_pidfd_support", return_value=None
+                ), patch.object(
+                    collector_module.subprocess, "Popen", return_value=Process()
+                ), patch.object(
+                    collector_module,
+                    "_pidfd_open",
+                    side_effect=OSError("leader-pidfd-acquisition-failed"),
+                ), patch.object(
+                    collector_module,
+                    "_require_formal_uid_processes",
+                    side_effect=prove_uid,
+                ), patch.object(
+                    collector_module,
+                    "_formal_startup_fail_stop",
+                    side_effect=SupervisorHandoff("supervisor-handoff"),
+                    create=True,
+                ) as fail_stop, patch.object(
+                    collector_module.os, "kill"
+                ) as raw_kill, patch.object(
+                    collector_module.os, "killpg"
+                ) as raw_killpg:
+                    with self.assertRaises(SupervisorHandoff):
+                        collector_module._start_gated_candidate(
+                            command=Process.args,
+                            cwd=Path(tmp).resolve(),
+                            environment={},
+                            formal_uid=65532,
+                            formal_gid=65532,
+                        )
+
+                fail_stop.assert_called_once_with()
+                self.assertLess(
+                    events.index(("close", 11)), events.index(("wait", 5.0))
+                )
+                raw_kill.assert_not_called()
+                raw_killpg.assert_not_called()
 
     def test_formal_startup_fails_before_popen_without_pidfd_primitives(self):
         with TemporaryDirectory() as tmp, patch.object(
@@ -6672,6 +6953,140 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         sys.platform.startswith("linux")
         and hasattr(os, "geteuid")
         and os.geteuid() == 0,
+        "protected Linux root post-Popen pidfd handoff only",
+    )
+    def test_protected_linux_post_popen_pidfd_failure_fail_stops_and_clears_uid(self):
+        collector_module._require_pidfd_support()
+        collector_module._require_formal_uid_processes(
+            collector_module.FORMAL_RUNNER_UID,
+            expected={},
+        )
+
+        def exact_pidfd_kill(pid):
+            try:
+                descriptor = collector_module._pidfd_open(pid)
+            except ProcessLookupError:
+                return
+            try:
+                collector_module._pidfd_send_signal(descriptor, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            finally:
+                collector_module._pidfd_close(descriptor)
+
+        repository = Path(__file__).resolve().parents[1]
+        isolated_environment = {
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "PYTHONPATH": str(repository / "src"),
+        }
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            root.chmod(0o755)
+            hung_child = root / "hung_before_gate.py"
+            hung_child.write_text(
+                "import ctypes\nctypes.PyDLL(None).sleep(60)\n",
+                encoding="utf-8",
+            )
+            hung_child.chmod(0o555)
+            parent_fixture = root / "leader_pidfd_failure_parent.py"
+            parent_fixture.write_text(
+                "\n".join(
+                    (
+                        "import os, sys",
+                        "import txnmem_provenance_execution_collector as collector",
+                        f"root = {str(root)!r}",
+                        f"hung_child = {str(hung_child)!r}",
+                        "def fail_leader_pidfd(pid):",
+                        "    print(pid, flush=True)",
+                        "    raise OSError('injected leader pidfd acquisition failure')",
+                        "collector._pidfd_open = fail_leader_pidfd",
+                        "collector._start_gated_candidate(",
+                        "    command=(sys.executable, '-I', '-B', hung_child),",
+                        "    cwd=collector.Path(root),",
+                        "    environment={},",
+                        "    formal_uid=collector.FORMAL_RUNNER_UID,",
+                        "    formal_gid=collector.FORMAL_RUNNER_GID,",
+                        ")",
+                        "raise SystemExit(99)",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            parent_fixture.chmod(0o555)
+
+            libc = collector_module.ctypes.CDLL(None, use_errno=True)
+            prctl = libc.prctl
+            prctl.argtypes = [
+                collector_module.ctypes.c_int,
+                collector_module.ctypes.c_ulong,
+                collector_module.ctypes.c_ulong,
+                collector_module.ctypes.c_ulong,
+                collector_module.ctypes.c_ulong,
+            ]
+            prctl.restype = collector_module.ctypes.c_int
+            prior_subreaper = collector_module.ctypes.c_int(0)
+            self.assertEqual(
+                prctl(37, collector_module.ctypes.addressof(prior_subreaper), 0, 0, 0),
+                0,
+            )
+            self.assertEqual(prctl(36, 1, 0, 0, 0), 0)
+            parent = None
+            child_pid = None
+            child_waited = False
+            try:
+                parent = subprocess.Popen(
+                    (sys.executable, "-B", str(parent_fixture)),
+                    cwd=root,
+                    env=isolated_environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                raw_pid = parent.stdout.readline()
+                if not raw_pid:
+                    parent.wait(timeout=20.0)
+                    self.fail(parent.stderr.read().decode("utf-8", errors="replace"))
+                child_pid = int(raw_pid)
+                self.assertEqual(parent.wait(timeout=20.0), os.EX_SOFTWARE)
+                deadline = time.monotonic() + 5.0
+                while time.monotonic() < deadline:
+                    waited_pid, status = os.waitpid(child_pid, os.WNOHANG)
+                    if waited_pid == child_pid:
+                        child_waited = True
+                        self.assertTrue(os.WIFSIGNALED(status))
+                        self.assertEqual(os.WTERMSIG(status), signal.SIGKILL)
+                        break
+                    time.sleep(0.01)
+                self.assertTrue(child_waited)
+                collector_module._require_formal_uid_processes(
+                    collector_module.FORMAL_RUNNER_UID,
+                    expected={},
+                )
+            finally:
+                if parent is not None and parent.poll() is None:
+                    exact_pidfd_kill(parent.pid)
+                    parent.wait(timeout=5.0)
+                if child_pid is not None and not child_waited:
+                    exact_pidfd_kill(child_pid)
+                    deadline = time.monotonic() + 5.0
+                    while time.monotonic() < deadline:
+                        try:
+                            waited_pid, _status = os.waitpid(child_pid, os.WNOHANG)
+                        except ChildProcessError:
+                            break
+                        if waited_pid == child_pid:
+                            break
+                        time.sleep(0.01)
+                self.assertEqual(
+                    prctl(36, int(prior_subreaper.value), 0, 0, 0),
+                    0,
+                )
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and hasattr(os, "geteuid")
+        and os.geteuid() == 0,
         "protected Linux root only",
     )
     def test_protected_linux_preexec_mask_and_dedicated_uid_are_exact(self):
@@ -6788,9 +7203,9 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         sys.platform.startswith("linux")
         and hasattr(os, "geteuid")
         and os.geteuid() == 0,
-        "protected Linux root integrated lifecycle only",
+        "protected Linux root component probes only",
     )
-    def test_protected_linux_integrated_root_drop_parent_death_pidfd_guard_pointer_zero_residue(self):
+    def test_protected_linux_component_probes_root_drop_parent_death_pidfd_guard_pointer(self):
         collector_module._require_pidfd_support()
         nft_path = Path(collector_module._FORMAL_NFT_EXECUTABLE)
         self.assertTrue(nft_path.is_file(), "protected Linux nft is unavailable")
@@ -7114,11 +7529,11 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         "'schema': 'txnmem-integrated-pointer-v1'}",
                         "def before_link():",
                         "    if phase == 'before-link': os.kill(os.getpid(), signal.SIGKILL)",
-                        "real_link = formal_io.os.link",
+                        "real_link = formal_io._link_anonymous_inode",
                         "def link_then_kill(*args, **kwargs):",
                         "    real_link(*args, **kwargs)",
                         "    os.kill(os.getpid(), signal.SIGKILL)",
-                        "if phase == 'after-link': formal_io.os.link = link_then_kill",
+                        "if phase == 'after-link': formal_io._link_anonymous_inode = link_then_kill",
                         "store._publish_json_exclusive('bundles', 'pointer.json', "
                         "payload=payload, _precommit_check=before_link)",
                         "(root / 'receipt.json').write_bytes("

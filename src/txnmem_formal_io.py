@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import json
 import math
 import os
@@ -18,6 +20,87 @@ from txnmem_benchmark_manifests import _canonical_hash, shard_manifest
 
 class FormalIOError(ValueError):
     """A formal artifact is ambiguous, stale, incomplete, or unsafe."""
+
+
+_AT_FDCWD = -100
+_AT_SYMLINK_FOLLOW = 0x400
+_AT_EMPTY_PATH = 0x1000
+
+
+def _open_anonymous_inode(parent_descriptor: int) -> int:
+    """Create one private unnamed regular inode in the parent filesystem."""
+
+    anonymous_flag = getattr(os, "O_TMPFILE", None)
+    if type(anonymous_flag) is not int or anonymous_flag <= 0:
+        raise OSError(errno.EOPNOTSUPP, "O_TMPFILE is unavailable")
+    return os.open(
+        ".",
+        os.O_RDWR | anonymous_flag | getattr(os, "O_CLOEXEC", 0),
+        0o600,
+        dir_fd=parent_descriptor,
+    )
+
+
+def _call_linkat(
+    source_descriptor: int,
+    source_path: bytes,
+    parent_descriptor: int,
+    name: str,
+    flags: int,
+) -> None:
+    try:
+        linkat = ctypes.CDLL(None, use_errno=True).linkat
+    except (AttributeError, OSError) as exc:
+        raise OSError(errno.ENOSYS, "linkat is unavailable") from exc
+    linkat.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+    ]
+    linkat.restype = ctypes.c_int
+    if linkat(
+        source_descriptor,
+        source_path,
+        parent_descriptor,
+        os.fsencode(name),
+        flags,
+    ) != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number), name)
+
+
+def _link_anonymous_inode(
+    descriptor: int, parent_descriptor: int, name: str
+) -> None:
+    """Link exactly the open anonymous inode to one no-replace final name."""
+
+    try:
+        _call_linkat(
+            descriptor,
+            b"",
+            parent_descriptor,
+            name,
+            _AT_EMPTY_PATH,
+        )
+        return
+    except OSError as exc:
+        if exc.errno not in {
+            errno.EACCES,
+            errno.EINVAL,
+            errno.ENOENT,
+            errno.EOPNOTSUPP,
+            errno.EPERM,
+        }:
+            raise
+    _call_linkat(
+        _AT_FDCWD,
+        os.fsencode(f"/proc/self/fd/{descriptor}"),
+        parent_descriptor,
+        name,
+        _AT_SYMLINK_FOLLOW,
+    )
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -316,11 +399,14 @@ class FormalStore:
         *parts: str,
         payload: Any,
         _precommit_check: Callable[[], None] | None = None,
+        _allow_named_fallback: bool = False,
     ) -> None:
-        """Publish complete JSON with one same-directory no-replace link."""
+        """Publish complete JSON through one open anonymous inode."""
 
         if _precommit_check is not None and not callable(_precommit_check):
             raise TypeError("private publication precommit check must be callable")
+        if type(_allow_named_fallback) is not bool:
+            raise TypeError("private publication fallback policy must be a boolean")
         try:
             encoded = (
                 json.dumps(
@@ -335,8 +421,116 @@ class FormalStore:
         except (TypeError, ValueError) as exc:
             raise FormalIOError("formal payload is not valid JSON") from exc
 
+        if _allow_named_fallback:
+            self._publish_json_named_compatibility(
+                parts,
+                encoded,
+                _precommit_check=_precommit_check,
+            )
+            return
+
         parent, name = self._open_parent(parts, create=True)
-        temporary_name = f".{name}.{secrets.token_hex(16)}.tmp"
+        descriptor: int | None = None
+        primary_failure: BaseException | None = None
+        primary_traceback = None
+        cleanup_failures: list[BaseException] = []
+        try:
+            try:
+                descriptor = _open_anonymous_inode(parent)
+                metadata = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_nlink != 0
+                    or stat.S_IMODE(metadata.st_mode) != 0o600
+                ):
+                    raise FormalIOError(
+                        "private publication anonymous inode is unsafe"
+                    )
+                offset = 0
+                while offset < len(encoded):
+                    written = os.write(descriptor, encoded[offset:])
+                    if type(written) is not int or written <= 0:
+                        raise OSError("short publication write")
+                    offset += written
+                os.fsync(descriptor)
+                metadata = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_nlink != 0
+                    or metadata.st_size != len(encoded)
+                    or stat.S_IMODE(metadata.st_mode) != 0o600
+                ):
+                    raise FormalIOError(
+                        "private publication anonymous inode changed"
+                    )
+            except FormalIOError:
+                raise
+            except OSError as exc:
+                raise FormalIOError(
+                    "cannot materialize private publication anonymous inode"
+                ) from exc
+
+            try:
+                if _precommit_check is not None:
+                    _precommit_check()
+                _link_anonymous_inode(descriptor, parent, name)
+            except FileExistsError as exc:
+                raise FormalIOError(
+                    f"refusing to overwrite existing formal file: {self.path(*parts)}"
+                ) from exc
+            except OSError as exc:
+                raise FormalIOError(
+                    f"cannot publish formal file: {self.path(*parts)}"
+                ) from exc
+            try:
+                metadata = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_nlink != 1
+                    or metadata.st_size != len(encoded)
+                    or stat.S_IMODE(metadata.st_mode) != 0o600
+                ):
+                    raise FormalIOError(
+                        "published formal inode identity changed"
+                    )
+                os.fsync(parent)
+            except OSError as exc:
+                raise FormalIOError(
+                    f"cannot synchronize formal file: {self.path(*parts)}"
+                ) from exc
+        except BaseException as exc:
+            primary_failure = exc
+            primary_traceback = exc.__traceback__
+        finally:
+            if descriptor is not None:
+                closing_descriptor = descriptor
+                descriptor = None
+                try:
+                    os.close(closing_descriptor)
+                except BaseException as exc:
+                    cleanup_failures.append(exc)
+            try:
+                os.close(parent)
+            except BaseException as exc:
+                cleanup_failures.append(exc)
+
+        if primary_failure is not None:
+            raise primary_failure.with_traceback(primary_traceback)
+        if cleanup_failures:
+            raise FormalIOError("formal publication cleanup failed") from cleanup_failures[0]
+
+    def _publish_json_named_compatibility(
+        self,
+        parts: Sequence[str],
+        encoded: bytes,
+        *,
+        _precommit_check: Callable[[], None] | None,
+    ) -> None:
+        """Retain the historical named staging path for non-formal output."""
+
+        normalized = self._validate_parts(parts)
+        temporary_name = f".{normalized[-1]}.{secrets.token_hex(16)}.tmp"
+        parent, name = self._open_parent(normalized, create=True)
         descriptor: int | None = None
         temporary_created = False
         primary_failure: BaseException | None = None
@@ -365,7 +559,7 @@ class FormalStore:
                     or stat.S_IMODE(metadata.st_mode) != 0o600
                 ):
                     raise FormalIOError(
-                        "private publication temporary file is unsafe"
+                        "private compatibility temporary file is unsafe"
                     )
                 offset = 0
                 while offset < len(encoded):
@@ -381,20 +575,20 @@ class FormalStore:
                     or metadata.st_size != len(encoded)
                 ):
                     raise FormalIOError(
-                        "private publication temporary file changed"
+                        "private compatibility temporary file changed"
                     )
                 closing_descriptor = descriptor
                 descriptor = None
                 os.close(closing_descriptor)
             except FileExistsError as exc:
                 raise FormalIOError(
-                    "private publication temporary file already exists"
+                    "private compatibility temporary file already exists"
                 ) from exc
             except FormalIOError:
                 raise
             except OSError as exc:
                 raise FormalIOError(
-                    "cannot materialize private publication temporary file"
+                    "cannot materialize private compatibility temporary file"
                 ) from exc
 
             try:
@@ -413,13 +607,13 @@ class FormalStore:
                 ) from exc
             except OSError as exc:
                 raise FormalIOError(
-                    f"cannot publish formal file: {self.path(*parts)}"
+                    f"cannot publish compatibility file: {self.path(*parts)}"
                 ) from exc
             try:
                 os.fsync(parent)
             except OSError as exc:
                 raise FormalIOError(
-                    f"cannot synchronize formal file: {self.path(*parts)}"
+                    f"cannot synchronize compatibility file: {self.path(*parts)}"
                 ) from exc
         except BaseException as exc:
             primary_failure = exc
@@ -449,7 +643,84 @@ class FormalStore:
         if primary_failure is not None:
             raise primary_failure.with_traceback(primary_traceback)
         if cleanup_failures:
-            raise FormalIOError("formal publication cleanup failed") from cleanup_failures[0]
+            raise FormalIOError(
+                "compatibility publication cleanup failed"
+            ) from cleanup_failures[0]
+
+    def _require_fd_bound_publication_support(self, *directory_parts: str) -> None:
+        """Probe O_TMPFILE plus fd-bound link semantics without named staging."""
+
+        probe_name = ".txnmem-fd-bound-publication-preflight"
+        if directory_parts:
+            parent, _name = self._open_parent(
+                (*directory_parts, probe_name), create=False
+            )
+        else:
+            parent = self._open_root()
+        descriptor: int | None = None
+        linked = False
+        primary_failure: BaseException | None = None
+        primary_traceback = None
+        cleanup_failures: list[BaseException] = []
+        try:
+            descriptor = _open_anonymous_inode(parent)
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 0
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+            ):
+                raise FormalIOError("fd-bound publication preflight inode is unsafe")
+            probe = b"txnmem-fd-bound-publication-preflight\n"
+            written = os.write(descriptor, probe)
+            if type(written) is not int or written != len(probe):
+                raise OSError("short publication preflight write")
+            os.fsync(descriptor)
+            _link_anonymous_inode(descriptor, parent, probe_name)
+            linked = True
+            metadata = os.fstat(descriptor)
+            if metadata.st_nlink != 1 or metadata.st_size != len(probe):
+                raise FormalIOError("fd-bound publication preflight identity changed")
+            os.unlink(probe_name, dir_fd=parent)
+            linked = False
+            os.fsync(parent)
+        except BaseException as exc:
+            if isinstance(exc, FormalIOError):
+                primary_failure = exc
+            else:
+                primary_failure = FormalIOError(
+                    "fd-bound publication support is unavailable"
+                )
+                primary_failure.__cause__ = exc
+            primary_traceback = primary_failure.__traceback__
+        finally:
+            if linked:
+                try:
+                    os.unlink(probe_name, dir_fd=parent)
+                except BaseException as exc:
+                    cleanup_failures.append(exc)
+                try:
+                    os.fsync(parent)
+                except BaseException as exc:
+                    cleanup_failures.append(exc)
+            if descriptor is not None:
+                closing_descriptor = descriptor
+                descriptor = None
+                try:
+                    os.close(closing_descriptor)
+                except BaseException as exc:
+                    cleanup_failures.append(exc)
+            try:
+                os.close(parent)
+            except BaseException as exc:
+                cleanup_failures.append(exc)
+
+        if primary_failure is not None:
+            raise primary_failure.with_traceback(primary_traceback)
+        if cleanup_failures:
+            raise FormalIOError(
+                "fd-bound publication preflight cleanup failed"
+            ) from cleanup_failures[0]
 
     @contextmanager
     def open_text_exclusive(self, *parts: str):

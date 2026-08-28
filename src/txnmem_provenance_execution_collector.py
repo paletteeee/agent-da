@@ -164,38 +164,79 @@ class _CollectorInterruption(RuntimeError):
     """The collector was asked to stop through its self-pipe signal latch."""
 
 
-def _require_pidfd_support() -> None:
-    """Fail closed unless the formal Linux pidfd signal boundary is available."""
-
+def _pidfd_primitives() -> tuple[Callable[[int, int], int], Callable[..., Any]]:
     if (
         not sys.platform.startswith("linux")
         or not callable(getattr(os, "pidfd_open", None))
         or not callable(getattr(signal, "pidfd_send_signal", None))
     ):
         raise CollectorError("formal pidfd support is unavailable")
+    return os.pidfd_open, signal.pidfd_send_signal
+
+
+def _require_pidfd_support() -> None:
+    """Prove the running kernel accepts the exact formal pidfd contract."""
+
+    descriptor: int | None = None
+    primary_failure: BaseException | None = None
+    close_failure: BaseException | None = None
+    try:
+        pidfd_open, pidfd_send_signal = _pidfd_primitives()
+        descriptor = pidfd_open(os.getpid(), 0)
+        if type(descriptor) is not int or descriptor < 0:
+            descriptor = None
+            raise CollectorError("formal pidfd probe returned an invalid descriptor")
+        result = pidfd_send_signal(descriptor, 0, None, 0)
+        if result is not None:
+            raise CollectorError("formal pidfd signal probe returned an invalid result")
+    except BaseException as exc:
+        primary_failure = exc
+    finally:
+        if descriptor is not None:
+            closing_descriptor = descriptor
+            descriptor = None
+            try:
+                os.close(closing_descriptor)
+            except BaseException as exc:
+                close_failure = exc
+    if primary_failure is not None:
+        if isinstance(primary_failure, CollectorError):
+            raise primary_failure
+        raise CollectorError("formal pidfd syscall probe failed") from primary_failure
+    if close_failure is not None:
+        raise CollectorError("formal pidfd probe cleanup failed") from close_failure
 
 
 def _pidfd_open(pid: int) -> int:
-    _require_pidfd_support()
+    pidfd_open, _pidfd_send = _pidfd_primitives()
     if type(pid) is not int or pid <= 0:
         raise CollectorError("formal pidfd target is invalid")
-    descriptor = os.pidfd_open(pid, 0)
+    descriptor = pidfd_open(pid, 0)
     if type(descriptor) is not int or descriptor < 0:
         raise CollectorError("formal pidfd open returned an invalid descriptor")
     return descriptor
 
 
 def _pidfd_send_signal(descriptor: int, signal_number: int) -> None:
-    _require_pidfd_support()
+    _pidfd_open_call, pidfd_send_signal = _pidfd_primitives()
     if type(descriptor) is not int or descriptor < 0:
         raise CollectorError("formal pidfd descriptor is invalid")
-    signal.pidfd_send_signal(descriptor, signal_number, None, 0)
+    result = pidfd_send_signal(descriptor, signal_number, None, 0)
+    if result is not None:
+        raise CollectorError("formal pidfd signal returned an invalid result")
 
 
 def _pidfd_close(descriptor: int) -> None:
     if type(descriptor) is not int or descriptor < 0:
         raise CollectorError("formal pidfd descriptor is invalid")
     os.close(descriptor)
+
+
+def _formal_startup_fail_stop() -> None:
+    """Trigger the protected supervisor/PDEATHSIG boundary without PID fallback."""
+
+    os._exit(os.EX_SOFTWARE)
+    raise CollectorError("formal startup fail-stop returned unexpectedly")
 
 
 class _SignalLatch:
@@ -2219,8 +2260,10 @@ def _start_gated_candidate(
         failures: list[BaseException] = []
         if formal_uid is not None:
             if startup_start_identity is None:
+                child_exit_proven = False
                 try:
                     process.wait(timeout=5.0)
+                    child_exit_proven = True
                 except subprocess.TimeoutExpired:
                     if startup_leader_pidfd is None:
                         failures.append(
@@ -2244,18 +2287,25 @@ def _start_gated_candidate(
                             failures.append(exc)
                     try:
                         process.wait(timeout=5.0)
+                        child_exit_proven = True
                     except BaseException as exc:
                         failures.append(exc)
                 except BaseException as exc:
                     failures.append(exc)
+                uid_empty_proven = False
                 try:
                     _require_formal_uid_processes(formal_uid, expected={})
                 except BaseException as exc:
                     failures.append(exc)
                 else:
+                    uid_empty_proven = True
+                if child_exit_proven and uid_empty_proven:
                     startup_absence_proven = True
-                if startup_absence_proven is not True:
-                    return failures
+                else:
+                    _formal_startup_fail_stop()
+                    raise CollectorError(
+                        "formal startup fail-stop returned unexpectedly"
+                    )
                 failures.extend(close_startup_leader_pidfd())
                 return failures
             startup_candidate = _GatedCandidate(
@@ -5948,6 +5998,7 @@ def collect_formal_execution(
     workspace = _prepare_formal_run_workspace(run_hash, nonce_hash)
     if workspace.candidate != derived_candidate:
         raise CollectorError("formal candidate derivation is inconsistent")
+    FormalStore(workspace.candidate)._require_fd_bound_publication_support()
     _preflight_external_outputs(
         root, workspace.candidate, launch_path, completion_path
     )

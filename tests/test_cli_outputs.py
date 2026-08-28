@@ -536,6 +536,7 @@ class TxnMemCliOutputTests(unittest.TestCase):
             *parts,
             payload,
             _precommit_check=None,
+            _allow_named_fallback=False,
         ):
             if len(parts) == 2 and parts[0] == "bundles":
                 if _precommit_check is not None:
@@ -546,6 +547,7 @@ class TxnMemCliOutputTests(unittest.TestCase):
                 *parts,
                 payload=payload,
                 _precommit_check=_precommit_check,
+                _allow_named_fallback=_allow_named_fallback,
             )
 
         with TemporaryDirectory() as tmp:

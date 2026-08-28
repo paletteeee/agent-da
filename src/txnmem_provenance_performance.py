@@ -2514,6 +2514,7 @@ def publish_provenance_bundle(
         f"{bundle_id}.json",
         payload=pointer,
         _precommit_check=_precommit_check,
+        _allow_named_fallback=scope != "formal",
     )
     return store.path(
         "bundle_objects", object_id, "results", "provenance_performance.json"
