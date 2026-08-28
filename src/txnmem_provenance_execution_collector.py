@@ -255,18 +255,49 @@ class _GatedCandidate:
             raise CollectorError("candidate progress store is unavailable")
         try:
             current = self._progress_store.read_view()
-            if current.get("status") == "completed":
-                return current
-            if current.get("status") in {"blocked", "interrupted"}:
-                raise CollectorError(
-                    "candidate progress terminal conflicts with completion"
-                )
-            self._progress_store.write_terminal("completed", "completed")
-            return self._progress_store.read_view()
-        except CollectorError:
-            raise
         except BaseException:
             raise CollectorError("candidate progress completion failed") from None
+        if (
+            current.get("update_sequence") != 450
+            or current.get("completed_repetitions") != 450
+            or current.get("completed_samples") != 14400
+        ):
+            raise CollectorError("candidate progress completion state is invalid")
+        if current.get("status") == "completed":
+            if current.get("terminal_reason_class") != "completed":
+                raise CollectorError(
+                    "candidate progress completion state is invalid"
+                )
+            return current
+        if current.get("status") != "running":
+            raise CollectorError("candidate progress completion state is invalid")
+        terminal = dict(current)
+        terminal["status"] = "completed"
+        terminal["terminal_reason_class"] = "completed"
+        terminal["last_update_age_seconds"] = 0
+        try:
+            self._progress_store.write_terminal("completed", "completed")
+        except BaseException:
+            try:
+                persisted = self._progress_store.read_view()
+            except BaseException:
+                persisted = None
+            if (
+                isinstance(persisted, Mapping)
+                and persisted.get("status") == "completed"
+                and persisted.get("terminal_reason_class") == "completed"
+                and persisted.get("update_sequence") == 450
+                and persisted.get("completed_repetitions") == 450
+                and persisted.get("completed_samples") == 14400
+                and all(
+                    key in {"status", "last_update_age_seconds"}
+                    or persisted.get(key) == value
+                    for key, value in current.items()
+                )
+            ):
+                return dict(persisted)
+            raise CollectorError("candidate progress completion failed") from None
+        return terminal
 
     def block_progress(self) -> None:
         if self._progress_store is None:
@@ -1529,16 +1560,55 @@ def _start_gated_candidate(
         if descriptor is not None and descriptor in owned_descriptors:
             owned_descriptors.remove(descriptor)
 
-    def stop_process(process: subprocess.Popen[Any]) -> None:
-        if process.poll() is None:
-            process.terminate()
+    def stop_process(process: subprocess.Popen[Any]) -> list[BaseException]:
+        failures: list[BaseException] = []
+        try:
+            running = process.poll() is None
+        except BaseException as exc:
+            failures.append(exc)
+            running = True
+        if running:
+            try:
+                process.terminate()
+            except BaseException as exc:
+                failures.append(exc)
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+                try:
+                    process.kill()
+                except BaseException as exc:
+                    failures.append(exc)
+                try:
+                    process.wait(timeout=5)
+                except BaseException as exc:
+                    failures.append(exc)
+            except BaseException as exc:
+                failures.append(exc)
+                try:
+                    process.kill()
+                except BaseException as kill_exc:
+                    failures.append(kill_exc)
+                try:
+                    process.wait(timeout=5)
+                except BaseException as wait_exc:
+                    failures.append(wait_exc)
         else:
-            process.wait()
+            try:
+                process.wait()
+            except BaseException as exc:
+                failures.append(exc)
+        return failures
+
+    def close_remaining_owned() -> list[BaseException]:
+        failures: list[BaseException] = []
+        for descriptor in tuple(reversed(owned_descriptors)):
+            owned_descriptors.remove(descriptor)
+            try:
+                os.close(descriptor)
+            except BaseException as exc:
+                failures.append(exc)
+        return failures
 
     read_fd: int | None = None
     write_fd: int | None = None
@@ -1648,16 +1718,30 @@ def _start_gated_candidate(
         transfer_owned(receipt_read_fd)
         return candidate
     except BaseException:
+        cleanup_failures: list[BaseException] = []
         if progress_drainer is not None and drainer_owns_descriptor:
-            progress_drainer.abort()
+            try:
+                progress_drainer.abort()
+            except BaseException as exc:
+                cleanup_failures.append(exc)
         if process is not None:
-            stop_process(process)
+            cleanup_failures.extend(stop_process(process))
+        blocking_failure: BaseException | None = None
         if progress_started and progress_store is not None:
-            _persist_blocked_progress(progress_store)
+            try:
+                _persist_blocked_progress(progress_store)
+            except BaseException as exc:
+                blocking_failure = exc
+        cleanup_failures.extend(close_remaining_owned())
+        if blocking_failure is not None:
+            raise blocking_failure from None
+        if cleanup_failures:
+            raise CollectorError("candidate startup cleanup failed") from None
         raise
     finally:
-        for descriptor in tuple(reversed(owned_descriptors)):
-            close_owned(descriptor)
+        close_failures = close_remaining_owned()
+        if close_failures:
+            raise CollectorError("candidate startup cleanup failed") from None
 
 
 def _is_within(path: Path, root: Path) -> bool:

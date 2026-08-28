@@ -927,6 +927,162 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertEqual(launch_mode, 0o600)
         self.assertEqual(completion_mode, 0o600)
 
+    def test_sealer_failure_preserves_completed_execution_without_publication(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            project = root / "project"
+            project.mkdir()
+            candidate = root / "candidate"
+            candidate.mkdir()
+            private = root / "private"
+            private.mkdir(mode=0o700)
+            launch = private / "launch.json"
+            completion = private / "completion.json"
+            run_id = "sealer-failure-fixture"
+            run_hash = hashlib.sha256(run_id.encode("utf-8")).hexdigest()
+            config_hash = "1" * 64
+            candidate_id = (
+                "diagnostic-vector_graph-"
+                + config_hash[:16]
+                + "-"
+                + run_hash[:16]
+            )
+            source_identity = self._source_identity()
+            command_manifest = self._command_manifest(
+                run_hash=run_hash,
+                config_file_hash="2" * 64,
+                environment_hash="4" * 64,
+                source_identity=source_identity,
+            )
+            material = {
+                "schema": "txnmem-provenance-candidate-attestation-material-v1",
+                "candidate_bundle_id": candidate_id,
+                "run_id_sha256": run_hash,
+                "config_sha256": config_hash,
+                "config_file_sha256": "2" * 64,
+                "workload_sha256": "3" * 64,
+                "environment_attestation_sha256": "4" * 64,
+                "evidence_manifest_sha256": "5" * 64,
+                "matrix_cell_count": 15,
+                "repetition_count": 450,
+                "operation_sample_count": 14400,
+                "observed_service_versions": {
+                    "qdrant": "1.15.4",
+                    "neo4j": "5.26.0",
+                    "toxiproxy": "2.9.0",
+                },
+                "candidate_operation_samples_sha256": "6" * 64,
+                "candidate_repetitions_sha256": "7" * 64,
+            }
+            baseline_a = proxy_snapshot(
+                "baseline_a",
+                qdrant=(11, 13, 17, 19),
+                neo4j=(23, 29, 31, 37),
+            )
+            baseline_b = proxy_snapshot(
+                "baseline_b",
+                qdrant=(11, 13, 17, 19),
+                neo4j=(23, 29, 31, 37),
+            )
+            final = proxy_snapshot(
+                "final",
+                qdrant=(21, 33, 47, 69),
+                neo4j=(73, 89, 101, 127),
+            )
+
+            class Store:
+                def __init__(self):
+                    self.snapshot = (
+                        ProvenanceExecutionCollectorTests._final_running_progress_snapshot()
+                    )
+
+                def read_view(self):
+                    return dict(self.snapshot)
+
+                def write_terminal(self, status, reason):
+                    self.snapshot["status"] = status
+                    self.snapshot["terminal_reason_class"] = reason
+
+            store = Store()
+            child = collector_module._GatedCandidate(
+                process=SimpleNamespace(),
+                _release_fd=None,
+                _receipt_fd=None,
+                ready_observed=True,
+                _progress_store=store,
+            )
+
+            def collect_until_sealer_failure():
+                try:
+                    _collect_execution_evidence(
+                        project_root=project,
+                        candidate_root=candidate,
+                        launch_path=launch,
+                        completion_path=completion,
+                        run_id=run_id,
+                        transport="local_loopback",
+                        config_sha256=config_hash,
+                        config_file_sha256="2" * 64,
+                        workload_sha256="3" * 64,
+                        environment_attestation_sha256="4" * 64,
+                        command_manifest=command_manifest,
+                        child_process=self._child_process(command_manifest),
+                        authorization_nonce=self.AUTHORIZATION_NONCE,
+                        network_guard_activate=lambda: {
+                            "network_guard": self._network_guard(),
+                            "proxy_routes": copy.deepcopy(PROXY_ROUTES),
+                            "proxy_counters": baseline_b,
+                            "route_rearmed": True,
+                        },
+                        network_guard_finalize=lambda: {
+                            "network_guard": self._network_guard(),
+                            "proxy_routes": copy.deepcopy(PROXY_ROUTES),
+                            "proxy_counters": final,
+                        },
+                        network_guard_deactivate=lambda: None,
+                        execution_monitor_start=lambda: None,
+                        execution_monitor_finalize=lambda: self._execution_monitor(),
+                        run_candidate=lambda: (0, material),
+                        candidate_sealer=lambda *_args: (_ for _ in ()).throw(
+                            CollectorError("sanitized sealer failure")
+                        ),
+                        topology_probe=lambda _phase: self._snapshot(baseline_a),
+                        source_identity_loader=lambda _root: source_identity,
+                        external_tool_identity_loader=lambda: copy.deepcopy(
+                            command_manifest["external_tools"]
+                        ),
+                        runtime_identity_loader=lambda: copy.deepcopy(
+                            command_manifest["runtime_manifest"]
+                        ),
+                        candidate_material_loader=lambda *_args: self.fail(
+                            "candidate material must not be loaded after sealer failure"
+                        ),
+                        progress_blocker=child.block_progress,
+                        progress_completer=child.complete_progress,
+                    )
+                except BaseException:
+                    child.block_progress()
+                    raise
+
+            with patch.dict(
+                FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
+                {
+                    run_hash: hashlib.sha256(
+                        self.AUTHORIZATION_NONCE
+                    ).hexdigest()
+                },
+                clear=True,
+            ), self.assertRaisesRegex(CollectorError, "sealer"):
+                collect_until_sealer_failure()
+
+            terminal = store.read_view()
+            launch_exists = launch.is_file()
+            completion_exists = completion.exists()
+
+        self.assertEqual(terminal["status"], "completed")
+        self.assertTrue(launch_exists)
+        self.assertFalse(completion_exists)
+
     def test_attribution_boundary_failure_deactivates_guard_before_launch(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -1284,6 +1440,199 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         self.assertEqual(snapshot["status"], "blocked")
         self.assertEqual(snapshot["terminal_reason_class"], "progress_protocol_failed")
 
+    def _assert_startup_process_cleanup_failure(self, failing_operation):
+        descriptors = iter(((10, 11), (12, 13), (14, 15), (16, 17)))
+        closed = []
+        process_calls = []
+
+        class Store:
+            def __init__(self, *_args, **_kwargs):
+                self.status = None
+                self.write_attempts = 0
+
+            def write_starting(self, _binding, _config):
+                self.status = "starting"
+
+            def read_view(self):
+                return {"status": self.status}
+
+            def write_terminal(self, status, reason):
+                self.write_attempts += 1
+                self.status = status
+                self.reason = reason
+
+        class Drainer:
+            def __init__(self, descriptor, _state, _store):
+                self.descriptor = descriptor
+                self.aborted = False
+
+            def start(self):
+                return None
+
+            def abort(self):
+                if not self.aborted:
+                    self.aborted = True
+                    os.close(self.descriptor)
+
+        class Process:
+            def __init__(self):
+                self.wait_count = 0
+
+            def poll(self):
+                process_calls.append("poll")
+                return None
+
+            def terminate(self):
+                process_calls.append("terminate")
+                if failing_operation == "terminate":
+                    raise RuntimeError("password=private-terminate")
+
+            def wait(self, timeout=None):
+                self.wait_count += 1
+                process_calls.append(f"wait-{self.wait_count}")
+                if self.wait_count == 1 and failing_operation == "wait":
+                    raise RuntimeError("password=private-wait")
+                if self.wait_count == 1 and failing_operation in {"kill", "second_wait"}:
+                    raise subprocess.TimeoutExpired("private-child", timeout)
+                if self.wait_count == 2 and failing_operation == "second_wait":
+                    raise RuntimeError("password=private-second-wait")
+                return 0
+
+            def kill(self):
+                process_calls.append("kill")
+                if failing_operation == "kill":
+                    raise RuntimeError("password=private-kill")
+
+        store = Store()
+        process = Process()
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module.os, "pipe", side_effect=lambda: next(descriptors)
+        ), patch.object(
+            collector_module.os, "close", side_effect=closed.append
+        ), patch.object(
+            collector_module, "ProgressSnapshotStore", return_value=store
+        ), patch.object(
+            collector_module, "ProgressPipeDrainer", Drainer
+        ), patch.object(
+            collector_module.subprocess, "Popen", return_value=process
+        ), patch.object(
+            collector_module.select, "select", return_value=([], [], [])
+        ):
+            root = Path(tmp).resolve()
+            with self.assertRaises(CollectorError) as raised:
+                collector_module._start_gated_candidate(
+                    command=(sys.executable, "-I", "-B", "unused.py"),
+                    cwd=root,
+                    environment={},
+                    require_completion_receipt=True,
+                    require_progress=True,
+                    progress_binding_sha256="a" * 64,
+                    progress_config_sha256="b" * 64,
+                    progress_snapshot_path=root / "progress.json",
+                    progress_expected_uid=os.getuid(),
+                    progress_expected_gid=os.getgid(),
+                )
+
+        self.assertEqual(store.status, "blocked")
+        self.assertEqual(store.reason, "progress_protocol_failed")
+        self.assertEqual(store.write_attempts, 1)
+        self.assertEqual(sorted(closed), list(range(10, 18)))
+        self.assertEqual(len(closed), len(set(closed)))
+        self.assertIn("startup cleanup failed", str(raised.exception))
+        self.assertNotIn("private", str(raised.exception))
+        return process_calls
+
+    def test_startup_terminate_failure_cannot_preempt_blocked_persistence(self):
+        calls = self._assert_startup_process_cleanup_failure("terminate")
+        self.assertEqual(calls, ["poll", "terminate", "wait-1"])
+
+    def test_startup_wait_failure_cannot_preempt_blocked_persistence(self):
+        calls = self._assert_startup_process_cleanup_failure("wait")
+        self.assertEqual(calls, ["poll", "terminate", "wait-1", "kill", "wait-2"])
+
+    def test_startup_kill_failure_cannot_preempt_blocked_persistence(self):
+        calls = self._assert_startup_process_cleanup_failure("kill")
+        self.assertEqual(calls, ["poll", "terminate", "wait-1", "kill", "wait-2"])
+
+    def test_startup_second_wait_failure_cannot_preempt_blocked_persistence(self):
+        calls = self._assert_startup_process_cleanup_failure("second_wait")
+        self.assertEqual(calls, ["poll", "terminate", "wait-1", "kill", "wait-2"])
+
+    def test_startup_block_failure_dominates_process_cleanup_failure(self):
+        descriptors = iter(((20, 21), (22, 23), (24, 25)))
+        closed = []
+
+        class Store:
+            def __init__(self, *_args, **_kwargs):
+                self.status = None
+                self.write_attempts = 0
+
+            def write_starting(self, _binding, _config):
+                self.status = "starting"
+
+            def read_view(self):
+                return {"status": self.status}
+
+            def write_terminal(self, _status, _reason):
+                self.write_attempts += 1
+                raise RuntimeError("password=private-block-write")
+
+        class Process:
+            def poll(self):
+                return None
+
+            def terminate(self):
+                raise RuntimeError("password=private-terminate")
+
+            def wait(self, timeout=None):
+                return 0
+
+        class Drainer:
+            def __init__(self, descriptor, _state, _store):
+                self.descriptor = descriptor
+                self.aborted = False
+
+            def start(self):
+                return None
+
+            def abort(self):
+                if not self.aborted:
+                    self.aborted = True
+                    os.close(self.descriptor)
+
+        store = Store()
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module.os, "pipe", side_effect=lambda: next(descriptors)
+        ), patch.object(
+            collector_module.os, "close", side_effect=closed.append
+        ), patch.object(
+            collector_module, "ProgressSnapshotStore", return_value=store
+        ), patch.object(
+            collector_module, "ProgressPipeDrainer", Drainer
+        ), patch.object(
+            collector_module.subprocess, "Popen", return_value=Process()
+        ), patch.object(
+            collector_module.select, "select", return_value=([], [], [])
+        ):
+            root = Path(tmp).resolve()
+            with self.assertRaises(CollectorError) as raised:
+                collector_module._start_gated_candidate(
+                    command=(sys.executable, "-I", "-B", "unused.py"),
+                    cwd=root,
+                    environment={},
+                    require_progress=True,
+                    progress_binding_sha256="a" * 64,
+                    progress_config_sha256="b" * 64,
+                    progress_snapshot_path=root / "progress.json",
+                    progress_expected_uid=os.getuid(),
+                    progress_expected_gid=os.getgid(),
+                )
+
+        self.assertEqual(store.write_attempts, 1)
+        self.assertEqual(sorted(closed), list(range(20, 26)))
+        self.assertIn("progress blocking failed", str(raised.exception))
+        self.assertNotIn("private", str(raised.exception))
+
     def test_gated_child_drainer_setup_failure_terminalizes_starting_snapshot(self):
         with TemporaryDirectory() as tmp, patch.object(
             collector_module,
@@ -1520,6 +1869,174 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
 
         self.assertIn("progress blocking failed", str(raised.exception))
         self.assertNotIn("private", str(raised.exception))
+
+    @staticmethod
+    def _final_running_progress_snapshot():
+        return {
+            "run_binding_sha256": "a" * 64,
+            "config_sha256": "b" * 64,
+            "status": "running",
+            "update_sequence": 450,
+            "completed_repetitions": 450,
+            "completed_samples": 14400,
+        }
+
+    def test_completed_write_is_the_final_normal_path_store_operation(self):
+        class Store:
+            def __init__(self):
+                self.read_count = 0
+                self.write_count = 0
+
+            def read_view(self):
+                self.read_count += 1
+                if self.read_count > 1:
+                    raise RuntimeError("password=private-post-completion-read")
+                return self._snapshot
+
+            def write_terminal(self, status, reason):
+                self.write_count += 1
+                self.written = (status, reason)
+
+        store = Store()
+        store._snapshot = self._final_running_progress_snapshot()
+        child = collector_module._GatedCandidate(
+            process=SimpleNamespace(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _progress_store=store,
+        )
+
+        terminal = child.complete_progress()
+
+        self.assertEqual(terminal["status"], "completed")
+        self.assertEqual(store.read_count, 1)
+        self.assertEqual(store.write_count, 1)
+        self.assertEqual(store.written, ("completed", "completed"))
+
+    def test_ambiguous_completed_write_is_verified_as_committed(self):
+        class Store:
+            def __init__(self):
+                self.status = "running"
+                self.read_count = 0
+
+            def read_view(self):
+                self.read_count += 1
+                snapshot = self._snapshot()
+                snapshot["status"] = self.status
+                if self.status == "completed":
+                    snapshot["terminal_reason_class"] = "completed"
+                return snapshot
+
+            def write_terminal(self, _status, _reason):
+                self.status = "completed"
+                raise RuntimeError("password=private-ambiguous-write")
+
+            def _snapshot(self):
+                return ProvenanceExecutionCollectorTests._final_running_progress_snapshot()
+
+        store = Store()
+        child = collector_module._GatedCandidate(
+            process=SimpleNamespace(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _progress_store=store,
+        )
+
+        terminal = child.complete_progress()
+
+        self.assertEqual(terminal["status"], "completed")
+        self.assertEqual(store.read_count, 2)
+
+    def test_ambiguous_completed_write_rejects_observed_nonterminal(self):
+        class Store:
+            def __init__(self):
+                self.read_count = 0
+
+            def read_view(self):
+                self.read_count += 1
+                return ProvenanceExecutionCollectorTests._final_running_progress_snapshot()
+
+            def write_terminal(self, _status, _reason):
+                raise RuntimeError("password=private-uncommitted-write")
+
+        store = Store()
+        child = collector_module._GatedCandidate(
+            process=SimpleNamespace(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _progress_store=store,
+        )
+
+        with self.assertRaises(CollectorError) as raised:
+            child.complete_progress()
+
+        self.assertEqual(store.read_count, 2)
+        self.assertIn("progress completion failed", str(raised.exception))
+        self.assertNotIn("private", str(raised.exception))
+
+    def test_ambiguous_completed_write_rejects_different_execution_snapshot(self):
+        class Store:
+            def __init__(self):
+                self.read_count = 0
+
+            def read_view(self):
+                self.read_count += 1
+                snapshot = (
+                    ProvenanceExecutionCollectorTests._final_running_progress_snapshot()
+                )
+                if self.read_count == 2:
+                    snapshot["status"] = "completed"
+                    snapshot["terminal_reason_class"] = "completed"
+                    snapshot["run_binding_sha256"] = "c" * 64
+                return snapshot
+
+            def write_terminal(self, _status, _reason):
+                raise RuntimeError("password=private-ambiguous-write")
+
+        child = collector_module._GatedCandidate(
+            process=SimpleNamespace(),
+            _release_fd=None,
+            _receipt_fd=None,
+            ready_observed=True,
+            _progress_store=Store(),
+        )
+
+        with self.assertRaises(CollectorError) as raised:
+            child.complete_progress()
+
+        self.assertIn("progress completion failed", str(raised.exception))
+        self.assertNotIn("private", str(raised.exception))
+
+    def test_completion_rejects_inexact_counts_before_terminal_write(self):
+        for field, value in (
+            ("status", "starting"),
+            ("update_sequence", 449),
+            ("completed_repetitions", 449),
+            ("completed_samples", 14399),
+        ):
+            with self.subTest(field=field):
+                snapshot = self._final_running_progress_snapshot()
+                snapshot[field] = value
+                writes = []
+                store = SimpleNamespace(
+                    read_view=lambda: snapshot,
+                    write_terminal=lambda *args: writes.append(args),
+                )
+                child = collector_module._GatedCandidate(
+                    process=SimpleNamespace(),
+                    _release_fd=None,
+                    _receipt_fd=None,
+                    ready_observed=True,
+                    _progress_store=store,
+                )
+
+                with self.assertRaisesRegex(CollectorError, "completion"):
+                    child.complete_progress()
+
+                self.assertEqual(writes, [])
 
     def test_repeated_block_and_close_preserve_earlier_blocked_terminal(self):
         class BlockedStore:
