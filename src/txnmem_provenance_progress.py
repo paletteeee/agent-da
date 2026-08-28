@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import secrets
 import select
 import stat
 import threading
@@ -319,6 +320,8 @@ def _validate_snapshot(snapshot: Mapping[str, Any], *, persisted: bool = False) 
         if status == "running" or any(normalized.get(name) != value for name, value in zero_values.items()):
             _protocol_error("snapshot starting counts are invalid")
     else:
+        if status == "starting":
+            _protocol_error("positive progress snapshot cannot be starting")
         _validate_event(event_like)
     return copy.deepcopy(normalized)
 
@@ -386,8 +389,6 @@ class FormalProgressState:
 class ProgressSnapshotStore:
     """Persist a sanitized formal-progress snapshot using one directory-owned replace."""
 
-    _TEMPORARY_NAME = ".txnmem-progress-snapshot.tmp"
-
     def __init__(self, path: Path, *, expected_uid: int, expected_gid: int) -> None:
         if not isinstance(path, Path) or not path.name or path.name in {".", ".."}:
             _protocol_error("progress snapshot path must name a file")
@@ -399,6 +400,7 @@ class ProgressSnapshotStore:
         self._target_name = path.name
         self._expected_uid = expected_uid
         self._expected_gid = expected_gid
+        self._transition_lock = threading.Lock()
 
     def _open_parent(self) -> int:
         flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -506,25 +508,37 @@ class ProgressSnapshotStore:
                 _protocol_error("progress snapshot write was incomplete")
             written += count
 
-    def _write_snapshot(self, snapshot: Mapping[str, Any]) -> None:
+    def _write_snapshot(
+        self,
+        snapshot: Mapping[str, Any],
+        *,
+        parent_fd: int,
+        expected_identity: tuple[int, int] | None = None,
+        reject_terminal_predecessor: bool = False,
+    ) -> None:
         normalized = _validate_snapshot(snapshot, persisted=True)
         payload = canonical_snapshot_line(normalized)
-        parent_fd = self._open_parent()
         temporary_fd: int | None = None
         temporary_stat: os.stat_result | None = None
-        temporary_created = False
-        replaced = False
+        temporary_name = ".txnmem-progress-snapshot-" + secrets.token_hex(16) + ".tmp"
         try:
-            if self._stat_target(parent_fd) is not None:
-                self._read_persisted(parent_fd)
+            existing = self._stat_target(parent_fd)
+            if existing is not None:
+                existing_snapshot, existing_stat = self._read_persisted(parent_fd)
+                existing_identity = (existing_stat.st_dev, existing_stat.st_ino)
+                if expected_identity is not None and existing_identity != expected_identity:
+                    _protocol_error("progress snapshot changed before replacement")
+                if reject_terminal_predecessor and existing_snapshot["status"] in TERMINAL_STATUSES:
+                    _protocol_error("terminal progress snapshot cannot resume running")
+            elif expected_identity is not None:
+                _protocol_error("progress snapshot changed before replacement")
             try:
                 temporary_fd = os.open(
-                    self._TEMPORARY_NAME,
+                    temporary_name,
                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
                     0o600,
                     dir_fd=parent_fd,
                 )
-                temporary_created = True
                 temporary_stat = os.fstat(temporary_fd)
             except OSError as exc:
                 raise ProgressProtocolError("progress snapshot temporary file cannot be created") from exc
@@ -541,14 +555,13 @@ class ProgressSnapshotStore:
                 temporary_fd = None
             try:
                 os.replace(
-                    self._TEMPORARY_NAME,
+                    temporary_name,
                     self._target_name,
                     src_dir_fd=parent_fd,
                     dst_dir_fd=parent_fd,
                 )
             except OSError as exc:
                 raise ProgressProtocolError("progress snapshot atomic replace failed") from exc
-            replaced = True
             replaced_stat = self._stat_target(parent_fd)
             if replaced_stat is None or (replaced_stat.st_dev, replaced_stat.st_ino) != (
                 temporary_stat.st_dev,
@@ -562,79 +575,81 @@ class ProgressSnapshotStore:
         finally:
             if temporary_fd is not None:
                 os.close(temporary_fd)
-            if temporary_created and not replaced and temporary_stat is not None:
-                try:
-                    current_temporary_stat = os.stat(
-                        self._TEMPORARY_NAME,
-                        dir_fd=parent_fd,
-                        follow_symlinks=False,
-                    )
-                    if (current_temporary_stat.st_dev, current_temporary_stat.st_ino) == (
-                        temporary_stat.st_dev,
-                        temporary_stat.st_ino,
-                    ):
-                        os.unlink(self._TEMPORARY_NAME, dir_fd=parent_fd)
-                except FileNotFoundError:
-                    pass
-                except OSError:
-                    pass
-            os.close(parent_fd)
 
     def write_starting(self, run_binding_sha256: str, config_sha256: str) -> None:
         _validate_hash("run_binding_sha256", run_binding_sha256)
         _validate_hash("config_sha256", config_sha256)
-        self._write_snapshot(
-            {
-                "schema": PROGRESS_SNAPSHOT_SCHEMA,
-                "run_binding_sha256": run_binding_sha256,
-                "config_sha256": config_sha256,
-                "phase": "measurement",
-                "cell_index": 1,
-                "cell_count": 15,
-                "graph_size": 100,
-                "concurrency": 1,
-                "repetition_index": 0,
-                "repetition_count": 30,
-                "completed_repetitions": 0,
-                "total_repetitions": 450,
-                "completed_samples": 0,
-                "total_samples": 14400,
-                "update_sequence": 0,
-                "status": "starting",
-                "last_update_age_seconds": 0,
-            }
-        )
+        snapshot = {
+            "schema": PROGRESS_SNAPSHOT_SCHEMA,
+            "run_binding_sha256": run_binding_sha256,
+            "config_sha256": config_sha256,
+            "phase": "measurement",
+            "cell_index": 1,
+            "cell_count": 15,
+            "graph_size": 100,
+            "concurrency": 1,
+            "repetition_index": 0,
+            "repetition_count": 30,
+            "completed_repetitions": 0,
+            "total_repetitions": 450,
+            "completed_samples": 0,
+            "total_samples": 14400,
+            "update_sequence": 0,
+            "status": "starting",
+            "last_update_age_seconds": 0,
+        }
+        with self._transition_lock:
+            parent_fd = self._open_parent()
+            try:
+                self._write_snapshot(snapshot, parent_fd=parent_fd)
+            finally:
+                os.close(parent_fd)
 
     def write_running(self, event: Mapping[str, Any]) -> None:
         normalized = _validate_event(event)
         snapshot = dict(normalized)
         snapshot["schema"] = PROGRESS_SNAPSHOT_SCHEMA
         snapshot["last_update_age_seconds"] = 0
-        self._write_snapshot(snapshot)
+        with self._transition_lock:
+            parent_fd = self._open_parent()
+            try:
+                self._write_snapshot(
+                    snapshot,
+                    parent_fd=parent_fd,
+                    reject_terminal_predecessor=True,
+                )
+            finally:
+                os.close(parent_fd)
 
     def write_terminal(self, status: str, reason_class: str) -> None:
         if type(status) is not str or status not in TERMINAL_STATUSES:
             _protocol_error("terminal snapshot status has an invalid value")
         if type(reason_class) is not str or reason_class not in TERMINAL_REASON_CLASSES:
             _protocol_error("terminal snapshot reason class has an invalid value")
-        parent_fd = self._open_parent()
-        try:
-            snapshot, _ = self._read_persisted(parent_fd)
-        finally:
-            os.close(parent_fd)
-        if snapshot["status"] in TERMINAL_STATUSES:
-            _protocol_error("terminal progress snapshot cannot transition again")
-        snapshot["status"] = status
-        snapshot["terminal_reason_class"] = reason_class
-        snapshot["last_update_age_seconds"] = 0
-        self._write_snapshot(snapshot)
+        with self._transition_lock:
+            parent_fd = self._open_parent()
+            try:
+                snapshot, current_stat = self._read_persisted(parent_fd)
+                if snapshot["status"] in TERMINAL_STATUSES:
+                    _protocol_error("terminal progress snapshot cannot transition again")
+                snapshot["status"] = status
+                snapshot["terminal_reason_class"] = reason_class
+                snapshot["last_update_age_seconds"] = 0
+                self._write_snapshot(
+                    snapshot,
+                    parent_fd=parent_fd,
+                    expected_identity=(current_stat.st_dev, current_stat.st_ino),
+                )
+            finally:
+                os.close(parent_fd)
 
     def read_view(self) -> dict[str, Any]:
-        parent_fd = self._open_parent()
-        try:
-            snapshot, file_stat = self._read_persisted(parent_fd)
-        finally:
-            os.close(parent_fd)
+        with self._transition_lock:
+            parent_fd = self._open_parent()
+            try:
+                snapshot, file_stat = self._read_persisted(parent_fd)
+            finally:
+                os.close(parent_fd)
         view = dict(snapshot)
         view["last_update_age_seconds"] = max(0, math.floor(time.time() - file_stat.st_mtime))
         return copy.deepcopy(view)
@@ -686,11 +701,21 @@ class ProgressPipeDrainer:
 
     def start(self) -> None:
         with self._lock:
+            if self._failure is not None:
+                raise self._failure
             if self._thread is not None:
                 return
             thread = threading.Thread(target=self._drain, name="formal-progress-drainer", daemon=True)
             self._thread = thread
-        thread.start()
+        try:
+            thread.start()
+        except Exception:
+            failure = ProgressProtocolError("progress drainer could not start")
+            with self._lock:
+                self._thread = None
+                self._failure = failure
+            self._close_descriptor()
+            raise failure from None
 
     def _drain(self) -> None:
         record = bytearray()
@@ -728,6 +753,9 @@ class ProgressPipeDrainer:
         except ProgressProtocolError as exc:
             with self._lock:
                 self._failure = exc
+        except Exception:
+            with self._lock:
+                self._failure = ProgressProtocolError("progress drainer worker failed")
         finally:
             self._close_descriptor()
             self._stopped.set()

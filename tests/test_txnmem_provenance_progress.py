@@ -3,6 +3,7 @@ import math
 import os
 import stat
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -271,18 +272,20 @@ class TxnMemProgressSnapshotStoreTests(unittest.TestCase):
 
     def test_replace_failure_never_unlinks_a_replaced_temporary_file(self):
         self.store.write_running(self.event())
-        temporary_path = self.path.parent / progress.ProgressSnapshotStore._TEMPORARY_NAME
+        temporary_paths: list[Path] = []
 
-        def replace_after_temporary_substitution(*_args, **_kwargs):
+        def replace_after_temporary_substitution(source, *_args, **_kwargs):
+            temporary_path = self.path.parent / source
             temporary_path.unlink()
             temporary_path.write_bytes(b"unrelated")
             temporary_path.chmod(0o600)
+            temporary_paths.append(temporary_path)
             raise OSError("replace")
 
         with mock.patch("txnmem_provenance_progress.os.replace", replace_after_temporary_substitution):
             with self.assertRaises(ProgressProtocolError):
                 self.store.write_running(self.event(sequence=2))
-        self.assertEqual(temporary_path.read_bytes(), b"unrelated")
+        self.assertEqual(temporary_paths[0].read_bytes(), b"unrelated")
 
     def test_starting_snapshot_and_read_view_have_only_sanitized_fields(self):
         self.store.write_starting("a" * 64, "b" * 64)
@@ -370,6 +373,108 @@ class TxnMemProgressSnapshotStoreTests(unittest.TestCase):
         self.path.chmod(0o600)
         with self.assertRaises(ProgressProtocolError):
             self.store.read_view()
+
+    def test_canonical_snapshot_rejects_positive_starting_counts(self):
+        snapshot = dict(self.event())
+        snapshot["schema"] = progress.PROGRESS_SNAPSHOT_SCHEMA
+        snapshot["status"] = "starting"
+        snapshot["last_update_age_seconds"] = 0
+        with self.assertRaises(ProgressProtocolError):
+            progress.canonical_snapshot_line(snapshot)
+
+    def test_persisted_snapshot_rejects_positive_starting_counts(self):
+        snapshot = dict(self.event())
+        snapshot["schema"] = progress.PROGRESS_SNAPSHOT_SCHEMA
+        snapshot["status"] = "starting"
+        snapshot["last_update_age_seconds"] = 0
+        self.path.write_bytes(
+            json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        )
+        self.path.chmod(0o600)
+        with self.assertRaises(ProgressProtocolError):
+            self.store.read_view()
+
+    def test_failed_replace_never_deletes_a_substitution_after_cleanup_inspection(self):
+        self.store.write_running(self.event())
+        real_stat = os.stat
+        temporary_name: list[str] = []
+        inspected = threading.Event()
+
+        def substitute_temporary() -> None:
+            temporary_path = self.path.parent / temporary_name[0]
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+            temporary_path.write_bytes(b"unrelated")
+            temporary_path.chmod(0o600)
+
+        def replace_failure(source, *_args, **_kwargs):
+            temporary_name.append(source)
+            raise OSError("replace")
+
+        def stat_then_substitute(path, *args, **kwargs):
+            result = real_stat(path, *args, **kwargs)
+            if temporary_name and path == temporary_name[0] and not inspected.is_set():
+                inspected.set()
+                substitute_temporary()
+            return result
+
+        with mock.patch("txnmem_provenance_progress.os.replace", replace_failure), mock.patch(
+            "txnmem_provenance_progress.os.stat", stat_then_substitute
+        ):
+            with self.assertRaises(ProgressProtocolError):
+                self.store.write_running(self.event(sequence=2))
+        if not inspected.is_set():
+            substitute_temporary()
+        self.assertEqual((self.path.parent / temporary_name[0]).read_bytes(), b"unrelated")
+
+    def test_terminal_transition_serializes_a_concurrent_running_write(self):
+        self.store.write_running(self.event())
+        entered_terminal_read = threading.Event()
+        release_terminal_read = threading.Event()
+        terminal_errors: list[BaseException] = []
+        running_errors: list[BaseException] = []
+        original_read = self.store._read_persisted
+
+        def pause_terminal_read(parent_fd):
+            result = original_read(parent_fd)
+            if threading.current_thread().name == "terminal-writer" and not entered_terminal_read.is_set():
+                entered_terminal_read.set()
+                release_terminal_read.wait(2.0)
+            return result
+
+        def terminal_writer():
+            try:
+                self.store.write_terminal("blocked", "backend_timeout")
+            except BaseException as exc:
+                terminal_errors.append(exc)
+
+        def running_writer():
+            try:
+                self.store.write_running(self.event(sequence=2))
+            except BaseException as exc:
+                running_errors.append(exc)
+
+        with mock.patch.object(self.store, "_read_persisted", side_effect=pause_terminal_read):
+            terminal_thread = threading.Thread(target=terminal_writer, name="terminal-writer")
+            terminal_thread.start()
+            self.assertTrue(entered_terminal_read.wait(2.0))
+            running_thread = threading.Thread(target=running_writer, name="running-writer")
+            running_thread.start()
+            time.sleep(0.05)
+            release_terminal_read.set()
+            terminal_thread.join(2.0)
+            running_thread.join(2.0)
+
+        self.assertFalse(terminal_thread.is_alive())
+        self.assertFalse(running_thread.is_alive())
+        self.assertEqual(terminal_errors, [])
+        self.assertEqual(len(running_errors), 1)
+        self.assertIsInstance(running_errors[0], ProgressProtocolError)
+        view = self.store.read_view()
+        self.assertEqual(view["status"], "blocked")
+        self.assertEqual(view["update_sequence"], 1)
 
     def test_terminal_status_and_reason_are_restricted(self):
         self.store.write_starting("a" * 64, "b" * 64)
@@ -479,6 +584,58 @@ class TxnMemProgressPipeDrainerTests(unittest.TestCase):
         self._close_writer()
         self.assertIsNone(drainer.finish(2.0))
         self.assertIsNone(drainer.failure)
+        self.assertFalse(drainer.thread.is_alive())
+
+    def test_unexpected_store_exception_is_sanitized_and_fails_closed(self):
+        drainer = progress.ProgressPipeDrainer(self.reader, self.state, self.store)
+        with mock.patch.object(self.store, "write_running", side_effect=ValueError()):
+            drainer.start()
+            self._write_and_close(canonical_progress_line(self.event(1)))
+            with self.assertRaises(ProgressProtocolError) as raised:
+                drainer.finish(2.0)
+        self.assertIs(drainer.failure, raised.exception)
+        self.assertEqual(str(raised.exception), "progress drainer worker failed")
+        self.assertFalse(drainer.thread.is_alive())
+
+    def test_start_failure_closes_descriptor_and_retains_sanitized_failure(self):
+        drainer = progress.ProgressPipeDrainer(self.reader, self.state, self.store)
+        with mock.patch("txnmem_provenance_progress.threading.Thread.start", side_effect=RuntimeError()):
+            with self.assertRaises(ProgressProtocolError) as raised:
+                drainer.start()
+        self.assertIs(drainer.failure, raised.exception)
+        self.assertEqual(str(raised.exception), "progress drainer could not start")
+        with self.assertRaises(ProgressProtocolError):
+            _ = drainer.thread
+        with self.assertRaises(OSError):
+            os.fstat(self.reader)
+
+    def test_finish_timeout_is_bounded_then_daemon_exits_after_blocked_store_releases(self):
+        entered_store = threading.Event()
+        release_store = threading.Event()
+        original_write_running = self.store.write_running
+
+        def blocked_write_running(event):
+            entered_store.set()
+            self.assertTrue(release_store.wait(2.0))
+            return original_write_running(event)
+
+        drainer = progress.ProgressPipeDrainer(self.reader, self.state, self.store)
+        with mock.patch.object(self.store, "write_running", side_effect=blocked_write_running):
+            drainer.start()
+            os.write(self.writer, canonical_progress_line(self.event(1)))
+            self.assertTrue(entered_store.wait(2.0))
+            started = time.monotonic()
+            with self.assertRaisesRegex(ProgressProtocolError, "progress drainer did not stop"):
+                drainer.finish(0.1)
+            self.assertLess(time.monotonic() - started, 0.5)
+            with self.assertRaises(OSError):
+                os.fstat(self.reader)
+            self.assertTrue(drainer.thread.is_alive())
+            release_store.set()
+            self._close_writer()
+            snapshot = drainer.finish(2.0)
+
+        self.assertEqual(snapshot["update_sequence"], 1)
         self.assertFalse(drainer.thread.is_alive())
 
 
