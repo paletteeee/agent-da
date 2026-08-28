@@ -1488,6 +1488,7 @@ def main(
                         operations_per_type=int(cell["operations_per_type"]),
                         run_id=args.run_id,
                         formal=args.formal,
+                        require_formal_eligibility=_require_formal_eligibility,
                         environment_attestation=(
                             environment if args.backend == "vector-graph" else None
                         ),

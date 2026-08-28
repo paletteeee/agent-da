@@ -398,8 +398,12 @@ class TxnMemCliOutputTests(unittest.TestCase):
         from txnmem_experiment import main
 
         events = []
+        formal_eligibility_requirements = []
 
         def run_cell(_factory, graph, **kwargs):
+            formal_eligibility_requirements.append(
+                kwargs["require_formal_eligibility"]
+            )
             callback = kwargs["progress_callback"]
             for repetition in (1, 2):
                 callback(
@@ -453,9 +457,11 @@ class TxnMemCliOutputTests(unittest.TestCase):
                     str(root / "out"),
                 ],
                 _progress_callback=events.append,
+                _require_formal_eligibility=True,
             )
 
         self.assertEqual(result, 0)
+        self.assertEqual(formal_eligibility_requirements, [True, True])
         self.assertEqual(
             events[0],
             {

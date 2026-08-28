@@ -815,6 +815,7 @@ def run_matrix_cell(
     operations_per_type: int = 8,
     run_id: str,
     formal: bool = False,
+    require_formal_eligibility: bool = False,
     environment_attestation: Mapping[str, Any]
     | Callable[[Any], Mapping[str, Any]]
     | None = None,
@@ -833,6 +834,9 @@ def run_matrix_cell(
         raise ValueError("run_id must be a non-empty string")
     if type(formal) is not bool:
         raise ValueError("formal must be a boolean")
+    if type(require_formal_eligibility) is not bool:
+        raise ValueError("require_formal_eligibility must be a boolean")
+    enforce_formal_eligibility = formal or require_formal_eligibility
     plan = _operation_plan(graph, operations_per_type)
     expected_nodes, expected_edges, expected_statuses = _expected_final_graph(graph, plan)
     all_samples: list[dict[str, Any]] = []
@@ -869,11 +873,11 @@ def run_matrix_cell(
                 environment["isolation_verified"]
                 and environment["co_tenant_load_detected"] is False
             )
-            if formal and not services_available:
+            if enforce_formal_eligibility and not services_available:
                 raise ProvenancePerformanceError(
                     "formal run requires available Qdrant and Neo4j health checks"
                 )
-            if formal and not isolation_valid:
+            if enforce_formal_eligibility and not isolation_valid:
                 raise ProvenancePerformanceError(
                     "formal run requires verified isolation without co-tenant load"
                 )
@@ -887,7 +891,7 @@ def run_matrix_cell(
                 and empty_inventory.get("graph_sha256") == empty_hash
                 and empty_inventory.get("status_counts") == {}
             )
-            if formal and not namespace_empty:
+            if enforce_formal_eligibility and not namespace_empty:
                 raise ProvenancePerformanceError(
                     "formal run requires a new empty namespace"
                 )
@@ -904,7 +908,7 @@ def run_matrix_cell(
                 graph.edges,
                 {"active": graph.node_count},
             )
-            if formal and not preload_closed:
+            if enforce_formal_eligibility and not preload_closed:
                 raise ProvenancePerformanceError(
                     "preloaded graph count, status, or hash mismatch"
                 )
@@ -937,11 +941,11 @@ def run_matrix_cell(
 
             retries_before = retry_metric()
             retry_metric_valid = retries_before is not None
-            if formal and not retry_policy_valid:
+            if enforce_formal_eligibility and not retry_policy_valid:
                 raise ProvenancePerformanceError(
                     "formal run requires attested zero retry at both backend and driver"
                 )
-            if formal and not retry_metric_valid:
+            if enforce_formal_eligibility and not retry_metric_valid:
                 raise ProvenancePerformanceError(
                     "formal run requires an exact backend retry metric"
                 )
@@ -1097,7 +1101,7 @@ def run_matrix_cell(
                 "preload_inventory": preload_inventory,
                 "final_inventory": final_inventory,
             }
-            if formal and not eligible:
+            if enforce_formal_eligibility and not eligible:
                 raise ProvenancePerformanceError(
                     "formal repetition has failures or non-closed persistent state"
                 )

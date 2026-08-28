@@ -373,6 +373,116 @@ class ProvenanceMatrixTests(unittest.TestCase):
             ],
         )
 
+    def test_protected_diagnostic_stops_at_first_ineligible_repetition(self):
+        created = []
+        snapshots = []
+
+        def factory(namespace):
+            created.append(namespace)
+            return _FixtureBackend(namespace, isolated=False)
+
+        with self.assertRaisesRegex(
+            ProvenancePerformanceError,
+            "verified isolation",
+        ):
+            run_matrix_cell(
+                factory,
+                build_layered_dag(2, seed=17),
+                concurrency=1,
+                repetitions=3,
+                operations_per_type=1,
+                run_id="protected-first-ineligible",
+                formal=False,
+                require_formal_eligibility=True,
+                progress_callback=snapshots.append,
+            )
+
+        self.assertEqual(len(created), 1)
+        self.assertEqual(snapshots, [])
+
+    def test_protected_diagnostic_stops_after_completed_repetitions(self):
+        created = []
+        snapshots = []
+
+        def factory(namespace):
+            created.append(namespace)
+            return _FixtureBackend(namespace, isolated=len(created) != 3)
+
+        with self.assertRaisesRegex(
+            ProvenancePerformanceError,
+            "verified isolation",
+        ):
+            run_matrix_cell(
+                factory,
+                build_layered_dag(2, seed=17),
+                concurrency=1,
+                repetitions=4,
+                operations_per_type=1,
+                run_id="protected-third-ineligible",
+                formal=False,
+                require_formal_eligibility=True,
+                progress_callback=snapshots.append,
+            )
+
+        self.assertEqual(len(created), 3)
+        self.assertEqual(
+            snapshots,
+            [
+                {
+                    "cell_id": "n2-c1",
+                    "completed_repetition_count": 1,
+                    "completed_operation_sample_count": 4,
+                },
+                {
+                    "cell_id": "n2-c1",
+                    "completed_repetition_count": 2,
+                    "completed_operation_sample_count": 8,
+                },
+            ],
+        )
+
+    def test_diagnostic_mode_retains_formally_ineligible_repetitions(self):
+        created = []
+
+        def factory(namespace):
+            created.append(namespace)
+            return _FixtureBackend(namespace, isolated=len(created) != 3)
+
+        report = run_matrix_cell(
+            factory,
+            build_layered_dag(2, seed=17),
+            concurrency=1,
+            repetitions=3,
+            operations_per_type=1,
+            run_id="diagnostic-third-ineligible",
+            formal=False,
+            require_formal_eligibility=False,
+        )
+
+        self.assertFalse(report["formal_requested"])
+        self.assertEqual(len(created), 3)
+        self.assertEqual(len(report["repetitions"]), 3)
+        self.assertFalse(report["repetitions"][2]["eligible_for_formal"])
+
+    def test_require_formal_eligibility_requires_an_exact_boolean(self):
+        graph = build_layered_dag(2, seed=17)
+
+        for value in (0, 1, "true", None):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "require_formal_eligibility must be a boolean",
+                ):
+                    run_matrix_cell(
+                        lambda namespace: _FixtureBackend(namespace),
+                        graph,
+                        concurrency=1,
+                        repetitions=1,
+                        operations_per_type=1,
+                        run_id="invalid-require-formal-eligibility",
+                        require_formal_eligibility=value,
+                    )
+
     def test_real_backend_preload_uses_fixed_layered_parallelism_and_accounts_repair(self):
         class ParallelPreloadBackend:
             supports_parallel_provenance_preload = True
