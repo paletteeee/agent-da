@@ -209,6 +209,29 @@ def _expected_final_running_progress(
     }
 
 
+def _exact_progress_mapping_matches(
+    value: Any,
+    expected: Mapping[str, Any],
+    expected_fields: frozenset[str],
+) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    actual = dict(value)
+    if set(actual) != expected_fields or set(expected) != expected_fields:
+        return False
+    age = actual["last_update_age_seconds"]
+    if type(age) is not int or age < 0:
+        return False
+    return all(
+        key == "last_update_age_seconds"
+        or (
+            type(actual[key]) is type(expected_value)
+            and actual[key] == expected_value
+        )
+        for key, expected_value in expected.items()
+    )
+
+
 def _validate_final_running_progress(
     value: Any,
     progress_state: FormalProgressState,
@@ -217,11 +240,9 @@ def _validate_final_running_progress(
         raise CollectorError("candidate progress completion state is invalid")
     current = dict(value)
     age = current.get("last_update_age_seconds")
-    if (
-        set(current) != _FINAL_PROGRESS_FIELDS
-        or type(age) is not int
-        or age < 0
-        or current != _expected_final_running_progress(progress_state, age)
+    expected = _expected_final_running_progress(progress_state, age)
+    if not _exact_progress_mapping_matches(
+        current, expected, _FINAL_PROGRESS_FIELDS
     ):
         raise CollectorError("candidate progress completion state is invalid")
     return current
@@ -233,18 +254,9 @@ def _completed_progress_matches(
 ) -> bool:
     if not isinstance(value, Mapping):
         return False
-    persisted = dict(value)
-    age = persisted.get("last_update_age_seconds")
-    if (
-        set(persisted) != _FINAL_TERMINAL_PROGRESS_FIELDS
-        or set(expected) != _FINAL_TERMINAL_PROGRESS_FIELDS
-        or type(age) is not int
-        or age < 0
-    ):
-        return False
-    comparison = dict(expected)
-    comparison["last_update_age_seconds"] = age
-    return persisted == comparison
+    return _exact_progress_mapping_matches(
+        value, expected, _FINAL_TERMINAL_PROGRESS_FIELDS
+    )
 
 
 def _persist_blocked_progress(store: ProgressSnapshotStore) -> dict[str, Any]:

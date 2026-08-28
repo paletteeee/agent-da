@@ -2139,6 +2139,43 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
 
                 self.assertEqual(writes, [])
 
+    def test_completion_rejects_type_confused_numeric_running_fields(self):
+        numeric_values = {
+            "cell_index": 15,
+            "cell_count": 15,
+            "graph_size": 10000,
+            "concurrency": 16,
+            "repetition_index": 30,
+            "repetition_count": 30,
+            "completed_repetitions": 450,
+            "total_repetitions": 450,
+            "completed_samples": 14400,
+            "total_samples": 14400,
+            "update_sequence": 450,
+            "last_update_age_seconds": 0,
+        }
+        substitutions = [
+            (field, float(value)) for field, value in numeric_values.items()
+        ] + [
+            ("cell_index", True),
+            ("last_update_age_seconds", False),
+        ]
+        for field, substitution in substitutions:
+            with self.subTest(field=field, substitution=repr(substitution)):
+                snapshot = self._final_running_progress_snapshot()
+                snapshot[field] = substitution
+                writes = []
+                store = SimpleNamespace(
+                    read_view=lambda: snapshot,
+                    write_terminal=lambda *args: writes.append(args),
+                )
+                child = self._candidate_with_progress_store(store)
+
+                with self.assertRaisesRegex(CollectorError, "completion"):
+                    child.complete_progress()
+
+                self.assertEqual(writes, [])
+
     def test_completion_requires_candidate_trusted_progress_state(self):
         writes = []
         store = SimpleNamespace(
@@ -2183,6 +2220,54 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 terminal["status"] = "completed"
                 terminal["terminal_reason_class"] = "completed"
                 mutate(terminal)
+
+                class Store:
+                    def __init__(self):
+                        self.read_count = 0
+
+                    def read_view(self):
+                        self.read_count += 1
+                        return dict(running if self.read_count == 1 else terminal)
+
+                    def write_terminal(self, _status, _reason):
+                        raise RuntimeError("password=private-ambiguous-write")
+
+                child = self._candidate_with_progress_store(Store())
+
+                with self.assertRaises(CollectorError) as raised:
+                    child.complete_progress()
+
+                self.assertIn("completion failed", str(raised.exception))
+                self.assertNotIn("private", str(raised.exception))
+
+    def test_ambiguous_completed_write_rejects_type_confused_numeric_fields(self):
+        numeric_values = {
+            "cell_index": 15,
+            "cell_count": 15,
+            "graph_size": 10000,
+            "concurrency": 16,
+            "repetition_index": 30,
+            "repetition_count": 30,
+            "completed_repetitions": 450,
+            "total_repetitions": 450,
+            "completed_samples": 14400,
+            "total_samples": 14400,
+            "update_sequence": 450,
+            "last_update_age_seconds": 0,
+        }
+        substitutions = [
+            (field, float(value)) for field, value in numeric_values.items()
+        ] + [
+            ("cell_index", True),
+            ("last_update_age_seconds", False),
+        ]
+        for field, substitution in substitutions:
+            with self.subTest(field=field, substitution=repr(substitution)):
+                running = self._final_running_progress_snapshot()
+                terminal = dict(running)
+                terminal["status"] = "completed"
+                terminal["terminal_reason_class"] = "completed"
+                terminal[field] = substitution
 
                 class Store:
                     def __init__(self):
