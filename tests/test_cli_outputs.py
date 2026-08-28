@@ -527,6 +527,14 @@ class TxnMemCliOutputTests(unittest.TestCase):
         sys.path.insert(0, str(ROOT / "src"))
         import txnmem_experiment
         from txnmem_experiment import main
+        from txnmem_formal_io import FormalStore
+
+        real_write = FormalStore.write_json_exclusive
+
+        def fail_pointer_write(store, *parts, payload):
+            if len(parts) == 2 and parts[0] == "bundles":
+                raise RuntimeError("primary-publication-failure")
+            return real_write(store, *parts, payload=payload)
 
         with TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -536,9 +544,10 @@ class TxnMemCliOutputTests(unittest.TestCase):
             )
             out_dir = root / "out"
             out_dir.mkdir()
-            with patch(
-                "txnmem_provenance_performance.publish_provenance_bundle",
-                side_effect=RuntimeError("primary-publication-failure"),
+            with patch.object(
+                FormalStore,
+                "write_json_exclusive",
+                new=fail_pointer_write,
             ), patch.object(
                 txnmem_experiment.signal,
                 "pthread_sigmask",
@@ -643,6 +652,111 @@ class TxnMemCliOutputTests(unittest.TestCase):
                 )
 
         self.assertIs(factory.closed, True)
+        blocked_writer.assert_not_called()
+
+    def test_runner_interruption_survives_backend_factory_close_failure(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+        from txnmem_provenance_runner import _RunnerInterruption
+
+        class Factory:
+            def close(self):
+                raise RuntimeError("private-backend-close-failure")
+
+        def run_cell(_factory, _graph, **_kwargs):
+            raise _RunnerInterruption("primary-runner-interruption")
+
+        with TemporaryDirectory() as tmp, patch.dict(
+            "os.environ",
+            {"TXNMEM_NEO4J_PASSWORD": "runtime-only"},
+            clear=False,
+        ), patch(
+            "txnmem_provenance_performance.make_vector_graph_backend_factory",
+            return_value=Factory(),
+        ), patch(
+            "txnmem_provenance_performance.run_matrix_cell",
+            side_effect=run_cell,
+        ), patch(
+            "txnmem_provenance_performance.write_provenance_blocked_report"
+        ) as blocked_writer:
+            root = Path(tmp).resolve()
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(self._small_provenance_config()), encoding="utf-8"
+            )
+            attestation = root / "environment.json"
+            attestation.write_text(
+                json.dumps(self._provenance_environment()), encoding="utf-8"
+            )
+
+            with self.assertRaisesRegex(
+                _RunnerInterruption, "primary-runner-interruption"
+            ):
+                main(
+                    [
+                        "provenance-performance",
+                        "--backend",
+                        "vector-graph",
+                        "--config",
+                        str(config),
+                        "--run-id",
+                        "interruption-close-failure-fixture",
+                        "--environment-attestation",
+                        str(attestation),
+                        "--out-dir",
+                        str(root / "out"),
+                    ],
+                    _require_formal_eligibility=True,
+                )
+
+        blocked_writer.assert_not_called()
+
+    def test_latched_interruption_preempts_generic_blocked_writer(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+        from txnmem_provenance_runner import _RunnerInterruption
+
+        latched = False
+
+        def run_cell(_factory, _graph, **_kwargs):
+            nonlocal latched
+            latched = True
+            raise RuntimeError("ordinary-matrix-failure")
+
+        def interruption_check():
+            if latched:
+                raise _RunnerInterruption("latched-before-blocked-writer")
+
+        with TemporaryDirectory() as tmp, patch(
+            "txnmem_provenance_performance.run_matrix_cell",
+            side_effect=run_cell,
+        ), patch(
+            "txnmem_provenance_performance.write_provenance_blocked_report"
+        ) as blocked_writer:
+            root = Path(tmp).resolve()
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(self._small_provenance_config()), encoding="utf-8"
+            )
+
+            with self.assertRaisesRegex(
+                _RunnerInterruption, "latched-before-blocked-writer"
+            ):
+                main(
+                    [
+                        "provenance-performance",
+                        "--backend",
+                        "memory",
+                        "--config",
+                        str(config),
+                        "--run-id",
+                        "latched-blocker-fixture",
+                        "--out-dir",
+                        str(root / "out"),
+                    ],
+                    _interruption_check=interruption_check,
+                )
+
         blocked_writer.assert_not_called()
 
     def test_provenance_blocked_report_identifies_pre_execution_stage(self):

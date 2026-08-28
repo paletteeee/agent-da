@@ -20,7 +20,7 @@ import txnmem_formal_smoke as smoke
 import txnmem_provenance_execution_collector as collector
 import txnmem_provenance_performance as performance
 import txnmem_provenance_runner as runner
-from txnmem_formal_io import canonical_json_bytes
+from txnmem_formal_io import FormalStore, canonical_json_bytes
 from txnmem_toxiproxy_metrics import parse_toxiproxy_byte_counters
 
 
@@ -1296,6 +1296,27 @@ class FormalSmokeProbeTests(unittest.TestCase):
 
 
 class ProvenanceSmokeRunnerTests(unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self._runner_previous_mask = None
+        if hasattr(signal, "pthread_sigmask") and hasattr(signal, "sigwait"):
+            self._runner_previous_mask = signal.pthread_sigmask(
+                signal.SIG_SETMASK, {signal.SIGTERM}
+            )
+            if signal.SIGTERM in signal.sigpending():
+                signal.sigwait({signal.SIGTERM})
+
+    def tearDown(self):
+        try:
+            if self._runner_previous_mask is not None:
+                if signal.SIGTERM in signal.sigpending():
+                    signal.sigwait({signal.SIGTERM})
+                signal.pthread_sigmask(
+                    signal.SIG_SETMASK, self._runner_previous_mask
+                )
+        finally:
+            super().tearDown()
+
     def _run_publication_signal_scenario(self, scenario):
         import txnmem_experiment
         import txnmem_provenance_progress
@@ -1303,6 +1324,7 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
         if scenario not in {
             "progress_callback",
             "before_publication",
+            "during_staging",
             "during_commit",
             "after_commit_before_receipt",
         }:
@@ -1318,6 +1340,7 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
         real_experiment_main = txnmem_experiment.main
         real_aggregate = performance.aggregate_matrix
         real_publish = performance.publish_provenance_bundle
+        real_store_write = FormalStore.write_json_exclusive
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -1377,12 +1400,37 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
                 return result
 
             def publish_wrapper(*args, **kwargs):
-                result = real_publish(*args, **kwargs)
                 if scenario == "during_commit":
-                    current_mask = signal.pthread_sigmask(
-                        signal.SIG_BLOCK, set()
-                    )
-                    mask_observations.append(signal.SIGTERM in current_mask)
+                    real_precommit = kwargs.get("_precommit_check")
+
+                    def internal_precommit():
+                        if real_precommit is None:
+                            raise AssertionError(
+                                "experiment omitted publisher precommit gate"
+                            )
+                        real_precommit()
+                        current_mask = signal.pthread_sigmask(
+                            signal.SIG_BLOCK, set()
+                        )
+                        mask_observations.append(
+                            signal.SIGTERM in current_mask
+                        )
+                        send_sigterm_once()
+
+                    kwargs["_precommit_check"] = internal_precommit
+                return real_publish(*args, **kwargs)
+
+            def observed_store_write(store, *parts, payload):
+                result = real_store_write(store, *parts, payload=payload)
+                if (
+                    scenario == "during_staging"
+                    and parts[-1] == "COMPLETED.json"
+                ):
+                    send_sigterm_once()
+                if (
+                    scenario == "after_commit_before_receipt"
+                    and parts == ("bundles", f"{report_bundle_id[0]}.json")
+                ):
                     send_sigterm_once()
                 return result
 
@@ -1398,9 +1446,13 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
                 pointer = json.loads(pointers[0].read_text(encoding="utf-8"))
                 if pointer.get("publication_status") != "complete":
                     raise AssertionError("candidate pointer is incomplete")
-                if scenario == "after_commit_before_receipt":
-                    send_sigterm_once()
                 return {"result": "complete"}
+
+            report_bundle_id = [None]
+
+            def remember_bundle_id(*args, **kwargs):
+                report_bundle_id[0] = kwargs["bundle_id"]
+                return publish_wrapper(*args, **kwargs)
 
             with patch.dict(os.environ, environment, clear=True), patch.object(
                 txnmem_experiment, "main", side_effect=experiment_entry
@@ -1409,7 +1461,11 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
             ), patch.object(
                 performance,
                 "publish_provenance_bundle",
-                side_effect=publish_wrapper,
+                side_effect=remember_bundle_id,
+            ), patch.object(
+                FormalStore,
+                "write_json_exclusive",
+                new=observed_store_write,
             ), patch.object(
                 txnmem_provenance_progress,
                 "build_progress_event",
@@ -1468,6 +1524,16 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
         self.assertEqual(pointers, [])
         self.assertEqual(receipt, b"")
 
+    def test_signal_during_staging_before_precommit_leaves_no_pointer_or_receipt(self):
+        status, ready, receipt, pointers, _masks = (
+            self._run_publication_signal_scenario("during_staging")
+        )
+
+        self.assertEqual(ready, b"R")
+        self.assertNotEqual(status, 0)
+        self.assertEqual(pointers, [])
+        self.assertEqual(receipt, b"")
+
     @unittest.skipUnless(
         hasattr(signal, "pthread_sigmask"), "POSIX signal masks only"
     )
@@ -1496,46 +1562,83 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
         self.assertEqual(pointers[0]["publication_status"], "complete")
         self.assertEqual(receipt, canonical_json_bytes({"result": "complete"}))
 
-    def test_runner_watchdog_hard_exits_after_cooperative_grace(self):
-        watchdog_type = getattr(runner, "_RunnerTerminationWatchdog", None)
-        self.assertIsNotNone(watchdog_type)
-        if watchdog_type is None:
-            return
-        hard_exit_called = threading.Event()
-        hard_exit_codes = []
-
-        def hard_exit(code):
-            hard_exit_codes.append(code)
-            hard_exit_called.set()
-
-        watchdog = watchdog_type(grace_seconds=0.01, hard_exit=hard_exit)
-        try:
-            watchdog.start()
-            watchdog.request_stop(signal.SIGTERM, None)
-            self.assertTrue(hard_exit_called.wait(1.0))
-        finally:
-            watchdog.finish()
-
-        self.assertEqual(hard_exit_codes, [75])
-        self.assertIs(type(watchdog.stop_requested), bool)
-
-    def test_runner_cooperative_finish_cancels_watchdog_hard_exit(self):
-        watchdog_type = getattr(runner, "_RunnerTerminationWatchdog", None)
-        self.assertIsNotNone(watchdog_type)
-        if watchdog_type is None:
-            return
-        hard_exit_codes = []
-        watchdog = watchdog_type(
-            grace_seconds=1.0, hard_exit=hard_exit_codes.append
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"), "protected Linux publication gate"
+    )
+    def test_protected_linux_publication_gate_never_mismatches_pointer_and_receipt(self):
+        cases = (
+            ("during_staging", False),
+            ("during_commit", True),
+            ("after_commit_before_receipt", True),
         )
+        for scenario, committed in cases:
+            with self.subTest(scenario=scenario):
+                status, ready, receipt, pointers, _masks = (
+                    self._run_publication_signal_scenario(scenario)
+                )
+                self.assertEqual(ready, b"R")
+                if committed:
+                    self.assertEqual(status, 0)
+                    self.assertEqual(len(pointers), 1)
+                    self.assertEqual(
+                        receipt,
+                        canonical_json_bytes({"result": "complete"}),
+                    )
+                else:
+                    self.assertNotEqual(status, 0)
+                    self.assertEqual(pointers, [])
+                    self.assertEqual(receipt, b"")
+                if signal.SIGTERM in signal.sigpending():
+                    signal.sigwait({signal.SIGTERM})
 
-        watchdog.start()
-        watchdog.request_stop(signal.SIGTERM, None)
-        watchdog.finish()
+    def test_runner_cooperative_stop_has_no_thread_or_hard_exit_claim(self):
+        state_type = getattr(runner, "_RunnerTerminationState", None)
+        self.assertIsNotNone(state_type)
+        if state_type is None:
+            return
+        state = state_type()
 
-        self.assertEqual(hard_exit_codes, [])
+        state.request_stop()
+
+        self.assertIs(type(state.stop_requested), bool)
+        self.assertNotIn("thread", vars(state))
+        self.assertNotIn("_thread", vars(state))
+        self.assertNotIn("hard_exit", vars(state))
+        self.assertNotIn("_hard_exit", vars(state))
         with self.assertRaises(runner._RunnerInterruption):
-            watchdog.raise_if_requested()
+            state.raise_if_requested()
+
+    def test_runner_pending_sigterm_is_detected_only_at_safe_boundary(self):
+        state_type = getattr(runner, "_RunnerTerminationState", None)
+        self.assertIsNotNone(state_type)
+        if state_type is None:
+            return
+        state = state_type()
+
+        with patch.object(
+            runner.signal, "sigpending", return_value={signal.SIGTERM}
+        ), self.assertRaises(runner._RunnerInterruption):
+            state.raise_if_requested()
+
+        self.assertIs(state.stop_requested, True)
+
+    def test_runner_requires_exact_blocked_sigterm_mask(self):
+        checker = getattr(runner, "_require_controlled_sigterm_mask", None)
+        self.assertIsNotNone(checker)
+        if checker is None:
+            return
+        accepted = ({signal.SIGTERM},)
+        rejected = (set(), {signal.SIGINT}, {signal.SIGTERM, signal.SIGINT})
+        for observed in accepted:
+            with self.subTest(observed=observed), patch.object(
+                runner.signal, "pthread_sigmask", return_value=observed
+            ):
+                checker()
+        for observed in rejected:
+            with self.subTest(observed=observed), patch.object(
+                runner.signal, "pthread_sigmask", return_value=observed
+            ), self.assertRaisesRegex(RuntimeError, "signal mask"):
+                checker()
 
     def test_runner_cleanup_attempts_all_and_preserves_interruption(self):
         import txnmem_experiment
@@ -1554,22 +1657,7 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
             "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256": "a" * 64,
         }
         cleanup_calls = []
-        signal_calls = []
         real_close = os.close
-
-        class Watchdog:
-            def start(self):
-                cleanup_calls.append("watchdog-start")
-
-            def request_stop(self, _signal_number=None, _frame=None):
-                return None
-
-            def raise_if_requested(self):
-                return None
-
-            def finish(self):
-                cleanup_calls.append("watchdog-finish")
-                raise OSError("private-watchdog-cleanup-failure")
 
         def close_descriptor(descriptor):
             cleanup_calls.append(("close", descriptor))
@@ -1577,23 +1665,13 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
                 raise OSError("private-runner-fd-cleanup-failure")
             real_close(descriptor)
 
-        def install_or_restore(signal_number, handler):
-            signal_calls.append((signal_number, handler))
-            if len(signal_calls) == 1:
-                return signal.SIG_DFL
-            raise OSError("private-runner-handler-restore-failure")
-
         with tempfile.TemporaryDirectory() as tmp:
             runtime_site = Path(tmp).resolve() / "runtime"
             runtime_site.mkdir()
             environment["TXNMEM_PROVENANCE_RUNTIME_SITE"] = str(runtime_site)
             try:
                 with patch.dict(os.environ, environment, clear=True), patch.object(
-                    runner, "_RunnerTerminationWatchdog", return_value=Watchdog()
-                ), patch.object(
                     runner.os, "close", side_effect=close_descriptor
-                ), patch.object(
-                    runner.signal, "signal", side_effect=install_or_restore
                 ), patch.object(
                     txnmem_experiment,
                     "main",
@@ -1630,9 +1708,6 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
         self.assertEqual(status, 75)
         self.assertIn(("close", progress_write), cleanup_calls)
         self.assertIn(("close", receipt_write), cleanup_calls)
-        self.assertIn("watchdog-finish", cleanup_calls)
-        self.assertEqual(len(signal_calls), 2)
-        self.assertIs(signal_calls[-1][1], signal.SIG_DFL)
 
     @contextlib.contextmanager
     def _runner_descriptors(self, runtime_site: Path):
@@ -1718,15 +1793,8 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
         progress_read, progress_write = os.pipe()
         os.write(gate_write, b"G")
         os.close(gate_write)
-        installed = {}
-        signal_calls = []
         events = []
-
-        def install_signal(signal_number, handler):
-            signal_calls.append((signal_number, handler))
-            previous = installed.get(signal_number, signal.SIG_DFL)
-            installed[signal_number] = handler
-            return previous
+        termination_state = runner._RunnerTerminationState()
 
         progress_snapshot = {
             "cell_index": 1,
@@ -1744,9 +1812,7 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
 
         def experiment_main(_arguments, **hooks):
             try:
-                handler = installed.get(signal.SIGTERM)
-                if callable(handler):
-                    handler(signal.SIGTERM, None)
+                termination_state.request_stop()
                 hooks["_progress_callback"](progress_snapshot)
                 return 0
             finally:
@@ -1766,7 +1832,9 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
                 "TXNMEM_PROVENANCE_RUNTIME_SITE": str(runtime_site),
             }
             with patch.dict(os.environ, environment, clear=True), patch.object(
-                signal, "signal", side_effect=install_signal
+                runner,
+                "_RunnerTerminationState",
+                return_value=termination_state,
             ), patch.object(
                 txnmem_experiment, "main", side_effect=experiment_main
             ), patch(
@@ -1801,9 +1869,7 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
         self.assertEqual(os.read(progress_read, 1), b"")
         self.assertEqual(os.read(receipt_read, 1), b"")
         candidate_material.assert_not_called()
-        self.assertGreaterEqual(len(signal_calls), 2)
-        self.assertTrue(callable(signal_calls[0][1]))
-        self.assertIs(signal_calls[-1][1], signal.SIG_DFL)
+        self.assertIs(termination_state.stop_requested, True)
         for descriptor in (ready_read, progress_read, receipt_read):
             os.close(descriptor)
 

@@ -1446,6 +1446,9 @@ def main(
                 )
 
             failure_stage = "matrix_execution"
+            matrix_failure: BaseException | None = None
+            matrix_traceback = None
+            backend_cleanup_failure: BaseException | None = None
             try:
                 for cell_index, cell in enumerate(cells, start=1):
                     graph = build_layered_dag(
@@ -1505,10 +1508,20 @@ def main(
                     )
                     cell_reports.append(cell_report)
                     progress["completed_cell_count"] += 1
+            except BaseException as exc:
+                matrix_failure = exc
+                matrix_traceback = exc.__traceback__
             finally:
                 close_backend_factory = getattr(backend_factory, "close", None)
                 if callable(close_backend_factory):
-                    close_backend_factory()
+                    try:
+                        close_backend_factory()
+                    except BaseException as exc:
+                        backend_cleanup_failure = exc
+            if matrix_failure is not None:
+                raise matrix_failure.with_traceback(matrix_traceback)
+            if backend_cleanup_failure is not None:
+                raise RuntimeError("backend factory cleanup failed") from None
             check_interruption()
             operation_samples = [
                 row for report in cell_reports for row in report["samples"]
@@ -1576,13 +1589,16 @@ def main(
                 publication_committed = False
                 publication_failure: BaseException | None = None
                 publication_traceback = None
-                try:
+
+                def publication_precommit_check() -> None:
                     if signal.SIGTERM in signal.sigpending():
                         check_interruption()
                         raise RuntimeError(
                             "interruption preceded publication commit"
                         )
                     check_interruption()
+
+                try:
                     output_path = publish_provenance_bundle(
                         args.out_dir,
                         bundle_id=bundle_id,
@@ -1590,6 +1606,7 @@ def main(
                         repetitions=repetition_rows,
                         report=report,
                         topology_attestation=topology_attestation,
+                        _precommit_check=publication_precommit_check,
                     )
                     publication_committed = True
                 except BaseException as exc:
@@ -1606,6 +1623,7 @@ def main(
                         publication_traceback
                     )
         except Exception as exc:
+            check_interruption()
             failure_provenance = _safe_failure_provenance(exc)
             blocked = {
                 "schema": "txnmem-provenance-performance-blocked-v3",

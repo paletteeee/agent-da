@@ -356,6 +356,19 @@ def _persist_blocked_progress(store: ProgressSnapshotStore) -> dict[str, Any]:
     return dict(persisted)
 
 
+def _attempt_progress_blocker(
+    progress_blocker: Callable[[], None] | None,
+) -> None:
+    """Attempt secondary progress cleanup without replacing a primary failure."""
+
+    if progress_blocker is None:
+        return
+    try:
+        progress_blocker()
+    except BaseException:
+        pass
+
+
 @dataclass(frozen=True)
 class _FormalChildSpec:
     command: tuple[str, ...]
@@ -623,6 +636,15 @@ class _GatedCandidate:
             )
         return members
 
+    def _require_stable_formal_group_inventory(self) -> dict[int, str]:
+        first = self._formal_group_members()
+        second = self._formal_group_members()
+        if first != second:
+            raise CollectorError(
+                "candidate surviving process-group identity changed"
+            )
+        return second
+
     def terminate_validated_group(
         self, *, term_seconds: float = 5.0, kill_seconds: float = 5.0
     ) -> None:
@@ -643,6 +665,7 @@ class _GatedCandidate:
                 ) from None
             if running:
                 self._validate_bound_group()
+                self._require_stable_formal_group_inventory()
                 try:
                     os.killpg(self.process.pid, signal.SIGTERM)
                 except OSError:
@@ -652,8 +675,12 @@ class _GatedCandidate:
             if self._wait_for_formal_quiescence(float(term_seconds)):
                 self.exit_observed_monotonic_ns = time.monotonic_ns()
                 return
-            self._validate_surviving_formal_group()
-            self._validate_surviving_formal_group()
+            first_survivors = self._validate_surviving_formal_group()
+            second_survivors = self._validate_surviving_formal_group()
+            if first_survivors != second_survivors:
+                raise CollectorError(
+                    "candidate surviving process-group identity changed"
+                )
             try:
                 os.killpg(self.process.pid, signal.SIGKILL)
             except OSError:
@@ -2042,11 +2069,12 @@ def _start_gated_candidate(
         if formal_uid is not None:
             if startup_start_identity is None:
                 try:
-                    if process.poll() is None:
-                        raise CollectorError(
-                            "candidate startup process identity is unavailable"
-                        )
-                    process.wait(timeout=0)
+                    process.wait(timeout=5.0)
+                except BaseException as exc:
+                    failures.append(exc)
+                    return failures
+                try:
+                    _require_formal_uid_processes(formal_uid, expected={})
                 except BaseException as exc:
                     failures.append(exc)
                 return failures
@@ -2241,6 +2269,11 @@ def _start_gated_candidate(
     except BaseException:
         cleanup_failures: list[BaseException] = []
         if process is not None:
+            if formal_uid is not None and startup_start_identity is None:
+                try:
+                    close_owned(write_fd)
+                except BaseException as exc:
+                    cleanup_failures.append(exc)
             cleanup_failures.extend(stop_process(process))
         if progress_drainer is not None and drainer_owns_descriptor:
             try:
@@ -2931,7 +2964,7 @@ def _set_parent_death_signal(
     prctl: Callable[[int, int, int, int, int], int] | None = None,
     getppid: Callable[[], int] = os.getppid,
 ) -> None:
-    """Require Linux to deliver SIGTERM if the registered collector dies."""
+    """Require Linux to kill the child if the registered collector dies."""
 
     if type(parent_pid) is not int or parent_pid <= 0:
         raise CollectorError("formal child parent identity is invalid")
@@ -2954,7 +2987,7 @@ def _set_parent_death_signal(
         except (AttributeError, OSError):
             raise CollectorError("formal parent-death signal is unavailable") from None
     try:
-        result = operation(1, signal.SIGTERM, 0, 0, 0)
+        result = operation(1, signal.SIGKILL, 0, 0, 0)
     except BaseException:
         raise CollectorError("formal parent-death signal setup failed") from None
     if result != 0:
@@ -2970,7 +3003,7 @@ def _set_parent_death_signal(
         result = operation(2, ctypes.addressof(observed_signal), 0, 0, 0)
     except BaseException:
         raise CollectorError("formal parent-death signal query failed") from None
-    if result != 0 or observed_signal.value != signal.SIGTERM:
+    if result != 0 or observed_signal.value != signal.SIGKILL:
         raise CollectorError("formal parent-death signal verification failed")
 
 
@@ -2983,6 +3016,12 @@ def _prepare_formal_child_process(parent_pid: int, uid: int, gid: int) -> None:
         raise CollectorError(
             "formal child signal disposition reset failed"
         ) from None
+    if not hasattr(signal, "pthread_sigmask"):
+        raise CollectorError("formal child signal mask is unavailable")
+    try:
+        signal.pthread_sigmask(signal.SIG_SETMASK, {signal.SIGTERM})
+    except BaseException:
+        raise CollectorError("formal child signal mask setup failed") from None
     _set_parent_death_signal(parent_pid)
     _drop_formal_child_privileges(uid, gid)
     _set_parent_death_signal(parent_pid)
@@ -3530,8 +3569,7 @@ def _validate_candidate_receipt_for_sealing(
             expected_environment_hash=expected_environment_hash,
         )
     except BaseException:
-        if progress_blocker is not None:
-            progress_blocker()
+        _attempt_progress_blocker(progress_blocker)
         raise
 
 
@@ -3861,12 +3899,10 @@ def _collect_execution_evidence(
                 ):
                     raise CollectorError("candidate progress terminal is invalid")
             except CollectorError:
-                if progress_blocker is not None:
-                    progress_blocker()
+                _attempt_progress_blocker(progress_blocker)
                 raise
             except BaseException:
-                if progress_blocker is not None:
-                    progress_blocker()
+                _attempt_progress_blocker(progress_blocker)
                 raise CollectorError("candidate progress completion failed") from None
         try:
             check_interruption()
@@ -5583,6 +5619,18 @@ def _read_private_authorization_nonce(path: Path, project_root: Path) -> bytes:
         raise CollectorError(str(exc)) from exc
 
 
+def _deactivate_guard_after_quiescence(*, child: Any, network_guard: Any) -> None:
+    if child is None:
+        _require_formal_uid_processes(FORMAL_RUNNER_UID, expected={})
+        network_guard.deactivate()
+        return
+    require_quiescence = getattr(child, "require_quiescence", None)
+    if not callable(require_quiescence):
+        raise CollectorError("candidate quiescence proof is unavailable")
+    require_quiescence()
+    network_guard.deactivate()
+
+
 def _cleanup_formal_execution_resources(
     *,
     execution_monitor: Any,
@@ -5627,7 +5675,9 @@ def _cleanup_formal_execution_resources(
         and bool(getattr(network_guard, "active", False))
     ):
         try:
-            network_guard.deactivate()
+            _deactivate_guard_after_quiescence(
+                child=child, network_guard=network_guard
+            )
         except BaseException as exc:
             failures.append(exc)
     return failures
@@ -5899,10 +5949,13 @@ def collect_formal_execution(
                 )
                 snapshot = child.finish_progress(2.0)
             except _CollectorInterruption:
-                child.interrupt_progress()
+                try:
+                    child.interrupt_progress()
+                except BaseException:
+                    pass
                 raise
             except BaseException:
-                child.block_progress()
+                _attempt_progress_blocker(child.block_progress)
                 raise
             if exit_code != 0:
                 child.block_progress()
@@ -5998,8 +6051,11 @@ def collect_formal_execution(
             }
 
         def deactivate_network_guard() -> None:
+            assert child is not None
             assert network_guard is not None
-            network_guard.deactivate()
+            _deactivate_guard_after_quiescence(
+                child=child, network_guard=network_guard
+            )
 
         def start_execution_monitor() -> None:
             assert execution_monitor is not None

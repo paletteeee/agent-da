@@ -2398,11 +2398,14 @@ def publish_provenance_bundle(
     repetitions: Sequence[Mapping[str, Any]],
     report: Mapping[str, Any],
     topology_attestation: Mapping[str, Any] | None = None,
+    _precommit_check: Callable[[], None] | None = None,
 ) -> Path:
     """Write an immutable object, then atomically publish one exclusive pointer."""
 
     from txnmem_formal_io import FormalIOError
 
+    if _precommit_check is not None and not callable(_precommit_check):
+        raise TypeError("private publication precommit check must be callable")
     sample_bytes = _jsonl_bytes(operation_samples)
     repetition_bytes = _jsonl_bytes(repetitions)
     report_payload = copy.deepcopy(dict(report))
@@ -2506,6 +2509,8 @@ def publish_provenance_bundle(
         ).hexdigest(),
         "publication_status": "complete",
     }
+    if _precommit_check is not None:
+        _precommit_check()
     store.write_json_exclusive(
         "bundles", f"{bundle_id}.json", payload=pointer
     )

@@ -5,14 +5,11 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
-import math
 import os
 from pathlib import Path
 import re
-import select
 import signal
 import sys
-import threading
 import urllib.request
 
 
@@ -20,88 +17,36 @@ class _RunnerInterruption(BaseException):
     """The protected runner received a termination request."""
 
 
-class _RunnerTerminationWatchdog:
-    """Bound cooperative SIGTERM handling with a hard-exit fallback."""
+class _RunnerTerminationState:
+    """Cooperative pending-SIGTERM state; the collector owns hard bounds."""
 
-    def __init__(
-        self,
-        *,
-        grace_seconds: float = 5.0,
-        hard_exit=os._exit,
-    ) -> None:
-        if (
-            isinstance(grace_seconds, bool)
-            or not isinstance(grace_seconds, (int, float))
-            or not math.isfinite(float(grace_seconds))
-            or float(grace_seconds) <= 0.0
-        ):
-            raise ValueError("runner watchdog grace is invalid")
-        if not callable(hard_exit):
-            raise TypeError("runner watchdog hard exit must be callable")
-        self.grace_seconds = float(grace_seconds)
-        self._hard_exit = hard_exit
-        self._read_fd, self._write_fd = os.pipe()
-        os.set_blocking(self._read_fd, False)
-        os.set_blocking(self._write_fd, False)
+    def __init__(self) -> None:
         self.stop_requested = False
-        self._finished = threading.Event()
-        self._started = False
-        self._closed = False
-        self._thread = threading.Thread(
-            target=self._watch,
-            name="txnmem-runner-termination-watchdog",
-            daemon=True,
-        )
-
-    def start(self) -> None:
-        if self._closed or self._started:
-            raise RuntimeError("runner watchdog cannot be started")
-        self._started = True
-        self._thread.start()
 
     def request_stop(self, _signal_number=None, _frame=None) -> None:
         self.stop_requested = True
-        if self._closed:
-            return
-        try:
-            os.write(self._write_fd, b"T")
-        except (BlockingIOError, OSError):
-            pass
 
     def raise_if_requested(self) -> None:
+        try:
+            if signal.SIGTERM in signal.sigpending():
+                self.stop_requested = True
+        except BaseException:
+            raise RuntimeError("runner pending signal state is unavailable") from None
         if self.stop_requested:
             raise _RunnerInterruption("formal runner interruption requested")
 
-    def _watch(self) -> None:
-        while not self.stop_requested:
-            if self._finished.is_set():
-                return
-            try:
-                readable, _, _ = select.select(
-                    [self._read_fd], [], [], 0.05
-                )
-            except (OSError, ValueError):
-                readable = []
-            if readable:
-                try:
-                    os.read(self._read_fd, 4096)
-                except (BlockingIOError, OSError):
-                    pass
-        if not self._finished.wait(self.grace_seconds):
-            self._hard_exit(75)
 
-    def finish(self) -> None:
-        if self._closed:
-            return
-        self._finished.set()
-        if self._started and threading.current_thread() is not self._thread:
-            self._thread.join(timeout=self.grace_seconds + 0.25)
-        self._closed = True
-        for descriptor in (self._read_fd, self._write_fd):
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
+def _require_controlled_sigterm_mask() -> None:
+    """Verify the exact pre-exec mask inherited by every runner thread."""
+
+    if not hasattr(signal, "pthread_sigmask") or not hasattr(signal, "sigpending"):
+        raise RuntimeError("runner signal mask support is unavailable")
+    try:
+        observed = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+    except BaseException:
+        raise RuntimeError("runner signal mask is unavailable") from None
+    if observed != {signal.SIGTERM}:
+        raise RuntimeError("runner signal mask is not exact")
 
 
 def _argument_value(arguments: list[str], name: str) -> str:
@@ -224,8 +169,6 @@ def _cleanup_runner_resources(
     *,
     progress_fd: int | None,
     completion_fd: int,
-    watchdog: _RunnerTerminationWatchdog,
-    previous_sigterm,
 ) -> list[BaseException]:
     """Attempt every runner cleanup operation exactly once."""
 
@@ -236,15 +179,6 @@ def _cleanup_runner_resources(
     for descriptor in descriptors:
         try:
             os.close(descriptor)
-        except BaseException as exc:
-            failures.append(exc)
-    try:
-        watchdog.finish()
-    except BaseException as exc:
-        failures.append(exc)
-    if previous_sigterm is not None:
-        try:
-            signal.signal(signal.SIGTERM, previous_sigterm)
         except BaseException as exc:
             failures.append(exc)
     return failures
@@ -298,6 +232,10 @@ def main(argv: list[str] | None = None) -> int:
     completion_fd = int(completion_value)
     progress_fd = int(progress_value) if progress_pair_present else None
     try:
+        _require_controlled_sigterm_mask()
+    except RuntimeError:
+        return 70
+    try:
         if os.write(ready_fd, b"R") != 1:
             return 70
     finally:
@@ -309,12 +247,9 @@ def main(argv: list[str] | None = None) -> int:
     if token != b"G":
         return 71
 
-    watchdog = _RunnerTerminationWatchdog()
-    previous_sigterm = None
+    termination_state = _RunnerTerminationState()
     primary_failure: BaseException | None = None
     try:
-        watchdog.start()
-        previous_sigterm = signal.signal(signal.SIGTERM, watchdog.request_stop)
         if not arguments or arguments[0] not in {
             "provenance-performance",
             "provenance-smoke",
@@ -332,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
             material = _provenance_smoke_receipt(
                 runtime_path, neo4j_password
             )
-            watchdog.raise_if_requested()
+            termination_state.raise_if_requested()
             payload = _completion_payload(material)
             if not payload or len(payload) > 65536:
                 return 74
@@ -355,7 +290,7 @@ def main(argv: list[str] | None = None) -> int:
         config_sha256 = formal_matrix_config_sha256()
 
         def emit_progress(snapshot: dict) -> None:
-            watchdog.raise_if_requested()
+            termination_state.raise_if_requested()
             if progress_fd is None or progress_binding is None:
                 raise RuntimeError("formal progress channel is unavailable")
             event = build_progress_event(
@@ -375,12 +310,12 @@ def main(argv: list[str] | None = None) -> int:
             arguments,
             _progress_callback=emit_progress,
             _require_formal_eligibility=True,
-            _interruption_check=watchdog.raise_if_requested,
+            _interruption_check=termination_state.raise_if_requested,
         )
         if type(result) is not int:
             return 73
         if result != 0:
-            watchdog.raise_if_requested()
+            termination_state.raise_if_requested()
         if result == 0:
             material = _candidate_completion_material(arguments)
             payload = _completion_payload(material)
@@ -399,8 +334,6 @@ def main(argv: list[str] | None = None) -> int:
         cleanup_failures = _cleanup_runner_resources(
             progress_fd=progress_fd,
             completion_fd=completion_fd,
-            watchdog=watchdog,
-            previous_sigterm=previous_sigterm,
         )
         if cleanup_failures and active_failure is None:
             raise RuntimeError("formal runner cleanup failed") from None

@@ -1,5 +1,6 @@
 import copy
 import hashlib
+import inspect
 import json
 import math
 import threading
@@ -1390,6 +1391,60 @@ class ProvenanceAggregationTests(unittest.TestCase):
             formal=True,
         )
 
+    def _diagnostic_publication_fixture(self):
+        config = self._small_formal_config()
+        graph = build_layered_dag(10, seed=17)
+        cell_report = run_matrix_cell(
+            lambda namespace: _FixtureBackend(namespace),
+            graph,
+            concurrency=1,
+            repetitions=2,
+            operations_per_type=1,
+            run_id="publisher-precommit-fixture",
+            formal=False,
+        )
+        samples = list(cell_report["samples"])
+        repetitions = list(cell_report["repetitions"])
+        config_hash = hashlib.sha256(
+            provenance_module._canonical_json_bytes(config)
+        ).hexdigest()
+        bundle_id = provenance_bundle_id(
+            config_sha256=config_hash,
+            run_id_sha256=cell_report["run_id_sha256"],
+            formal=False,
+            backend="vector-graph",
+        )
+        report = {
+            "schema": "txnmem-provenance-performance-report-v1",
+            "backend": "vector-graph",
+            "formal_requested": False,
+            "bundle_id": bundle_id,
+            "publication_status": "complete",
+            "production_backend_claim": False,
+            "config": copy.deepcopy(config),
+            "config_sha256": config_hash,
+            "config_file_sha256": "e" * 64,
+            "run_id_sha256": cell_report["run_id_sha256"],
+            "matrix_cell_count": 1,
+            "repetition_count": len(repetitions),
+            "operation_sample_count": len(samples),
+            "operation_samples_sha256": provenance_module.canonical_jsonl_sha256(
+                samples
+            ),
+            "repetitions_sha256": provenance_module.canonical_jsonl_sha256(
+                repetitions
+            ),
+            "graphs": [graph.metadata()],
+            "aggregate": aggregate_matrix(
+                cell_report,
+                bootstrap_repetitions=100,
+                seed=17,
+                require_formal=False,
+            ),
+            "topology_attestation_sha256": None,
+        }
+        return bundle_id, samples, repetitions, report
+
     def _report(self):
         samples = [
             {
@@ -1844,6 +1899,87 @@ class ProvenanceAggregationTests(unittest.TestCase):
                     topology_attestation=None,
                 )
             self.assertFalse((Path(tmp) / "bundles" / f"{bundle_id}.json").exists())
+
+    def test_real_publisher_precommit_hook_is_the_atomic_pointer_gate(self):
+        parameters = inspect.signature(publish_provenance_bundle).parameters
+        self.assertIn("_precommit_check", parameters)
+        if "_precommit_check" not in parameters:
+            return
+        from txnmem_formal_io import FormalStore
+
+        bundle_id, samples, repetitions, report = (
+            self._diagnostic_publication_fixture()
+        )
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def fail_at_precommit():
+                objects = list((root / "bundle_objects").iterdir())
+                self.assertEqual(len(objects), 1)
+                self.assertTrue((objects[0] / "COMPLETED.json").is_file())
+                self.assertFalse(
+                    (root / "bundles" / f"{bundle_id}.json").exists()
+                )
+                raise RuntimeError("precommit-interruption")
+
+            with self.assertRaisesRegex(RuntimeError, "precommit-interruption"):
+                publish_provenance_bundle(
+                    root,
+                    bundle_id=bundle_id,
+                    operation_samples=samples,
+                    repetitions=repetitions,
+                    report=report,
+                    _precommit_check=fail_at_precommit,
+                )
+
+            self.assertFalse(
+                (root / "bundles" / f"{bundle_id}.json").exists()
+            )
+
+        bundle_id, samples, repetitions, report = (
+            self._diagnostic_publication_fixture()
+        )
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events = []
+            real_write = FormalStore.write_json_exclusive
+
+            def observed_write(store, *parts, payload):
+                if parts == ("bundles", f"{bundle_id}.json"):
+                    events.append("pointer")
+                return real_write(store, *parts, payload=payload)
+
+            with patch.object(
+                FormalStore,
+                "write_json_exclusive",
+                new=observed_write,
+            ):
+                publish_provenance_bundle(
+                    root,
+                    bundle_id=bundle_id,
+                    operation_samples=samples,
+                    repetitions=repetitions,
+                    report=report,
+                    _precommit_check=lambda: events.append("precommit"),
+                )
+
+            self.assertEqual(events, ["precommit", "pointer"])
+
+        bundle_id, samples, repetitions, report = (
+            self._diagnostic_publication_fixture()
+        )
+        with TemporaryDirectory() as tmp:
+            with self.assertRaises(TypeError):
+                publish_provenance_bundle(
+                    tmp,
+                    bundle_id=bundle_id,
+                    operation_samples=samples,
+                    repetitions=repetitions,
+                    report=report,
+                    _precommit_check="forbidden",
+                )
+            self.assertFalse((Path(tmp) / "bundle_objects").exists())
 
     def test_formal_named_bundle_cannot_dispatch_to_diagnostic_validator(self):
         config_hash = formal_matrix_config_sha256()
