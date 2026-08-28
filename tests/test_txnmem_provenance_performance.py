@@ -470,6 +470,40 @@ class ProvenanceMatrixTests(unittest.TestCase):
         self.assertTrue(all(call[1]["close_clients"] is False for call in constructed))
         self.assertEqual(shared_neo4j.close_count, 1)
 
+    def test_vector_graph_factory_rejects_invalid_timeout_before_client_construction(self):
+        class TimeoutSubclass(float):
+            pass
+
+        invalid_timeouts = (
+            True,
+            0.0,
+            -1.0,
+            float("nan"),
+            float("inf"),
+            TimeoutSubclass(30.0),
+        )
+        environment = _FixtureBackend("factory-timeout").performance_environment()
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient"
+        ) as qdrant_constructor, patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient"
+        ) as neo4j_constructor:
+            for timeout in invalid_timeouts:
+                with self.subTest(timeout=timeout):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "request_timeout_seconds",
+                    ):
+                        provenance_module.make_vector_graph_backend_factory(
+                            qdrant_url="http://qdrant",
+                            neo4j_uri="bolt://neo4j",
+                            neo4j_auth=("neo4j", "password"),
+                            environment_attestation=environment,
+                            request_timeout_seconds=timeout,
+                        )
+        qdrant_constructor.assert_not_called()
+        neo4j_constructor.assert_not_called()
+
     def test_vector_graph_factory_close_failure_remains_retryable(self):
         class SharedNeo4j:
             def __init__(self):

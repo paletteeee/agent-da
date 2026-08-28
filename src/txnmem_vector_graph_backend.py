@@ -1396,6 +1396,12 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         self.qdrant_url = str(qdrant_url)
         self.neo4j_uri = str(neo4j_uri)
         self.neo4j_auth = tuple(str(item) for item in neo4j_auth)
+        if (
+            type(request_timeout_seconds) not in (int, float)
+            or not math.isfinite(request_timeout_seconds)
+            or request_timeout_seconds <= 0.0
+        ):
+            raise ValueError("request_timeout_seconds must be a positive finite number")
         self.qdrant = qdrant_client or _QdrantHTTPClient(
             self.qdrant_url, timeout_seconds=request_timeout_seconds
         )

@@ -963,6 +963,42 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             request_timeout_seconds=30.0,
         )
 
+    def test_vector_graph_backend_rejects_invalid_timeout_before_client_construction(self):
+        class TimeoutSubclass(float):
+            pass
+
+        invalid_timeouts = (
+            True,
+            0.0,
+            -1.0,
+            float("nan"),
+            float("inf"),
+            TimeoutSubclass(30.0),
+        )
+        for qdrant_client, neo4j_client in ((None, None), (object(), object())):
+            with self.subTest(injected=qdrant_client is not None), patch(
+                "txnmem_vector_graph_backend._QdrantHTTPClient"
+            ) as qdrant_constructor, patch(
+                "txnmem_vector_graph_backend._Neo4jBoltClient"
+            ) as neo4j_constructor:
+                for timeout in invalid_timeouts:
+                    with self.subTest(timeout=timeout):
+                        with self.assertRaisesRegex(
+                            ValueError,
+                            "request_timeout_seconds",
+                        ):
+                            VectorGraphMemoryBackend(
+                                "namespace",
+                                "http://qdrant",
+                                "bolt://neo4j",
+                                ("neo4j", "secret"),
+                                qdrant_client=qdrant_client,
+                                neo4j_client=neo4j_client,
+                                request_timeout_seconds=timeout,
+                            )
+                qdrant_constructor.assert_not_called()
+                neo4j_constructor.assert_not_called()
+
     def test_neo4j_performance_initialization_skips_legacy_scan_but_installs_constraints(self):
         events = []
 

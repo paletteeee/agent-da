@@ -2032,12 +2032,11 @@ def make_vector_graph_backend_factory(
     """Create a zero-retry real-backend factory for unbiased operation timing."""
 
     if (
-        isinstance(request_timeout_seconds, bool)
-        or not isinstance(request_timeout_seconds, (int, float))
-        or not math.isfinite(float(request_timeout_seconds))
-        or float(request_timeout_seconds) <= 0.0
+        type(request_timeout_seconds) not in (int, float)
+        or not math.isfinite(request_timeout_seconds)
+        or request_timeout_seconds <= 0.0
     ):
-        raise ValueError("request_timeout_seconds must be positive and finite")
+        raise ValueError("request_timeout_seconds must be a positive finite number")
     validate_environment_attestation(environment_attestation)
     return _ReusableVectorGraphBackendFactory(
         qdrant_url=qdrant_url,
