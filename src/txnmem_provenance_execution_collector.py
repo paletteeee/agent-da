@@ -170,7 +170,7 @@ class _SignalLatch:
         self._read_fd, self._write_fd = os.pipe()
         os.set_blocking(self._read_fd, False)
         os.set_blocking(self._write_fd, False)
-        self._interrupted = threading.Event()
+        self._interrupted = False
         self._closed = False
         self._previous_handlers: dict[int, Any] = {}
 
@@ -182,10 +182,14 @@ class _SignalLatch:
 
     @property
     def interrupted(self) -> bool:
-        return self._interrupted.is_set()
+        return self._interrupted
+
+    def raise_if_interrupted(self) -> None:
+        if self._interrupted:
+            raise _CollectorInterruption("collector interruption requested")
 
     def trigger(self, _signal_number: int | None = None, _frame: Any = None) -> None:
-        self._interrupted.set()
+        self._interrupted = True
         if self._closed:
             return
         try:
@@ -203,18 +207,24 @@ class _SignalLatch:
                 signal_number, self.trigger
             )
 
-    def close(self) -> None:
+    def close(self) -> list[BaseException]:
         if self._closed:
-            return
-        for signal_number, handler in self._previous_handlers.items():
-            signal.signal(signal_number, handler)
-        self._previous_handlers.clear()
+            return []
         self._closed = True
+        previous_handlers = tuple(self._previous_handlers.items())
+        self._previous_handlers.clear()
+        failures: list[BaseException] = []
+        for signal_number, handler in previous_handlers:
+            try:
+                signal.signal(signal_number, handler)
+            except BaseException as exc:
+                failures.append(exc)
         for descriptor in (self._read_fd, self._write_fd):
             try:
                 os.close(descriptor)
-            except OSError:
-                pass
+            except BaseException as exc:
+                failures.append(exc)
+        return failures
 
 
 _FINAL_PROGRESS_FIELDS = frozenset(
@@ -372,6 +382,7 @@ class _GatedCandidate:
     _progress_store: ProgressSnapshotStore | None = None
     _progress_state: FormalProgressState | None = None
     _bound_start_identity: str | None = None
+    _formal_uid: int | None = None
     gate_released_monotonic_ns: int | None = None
     exit_observed_monotonic_ns: int | None = None
 
@@ -381,26 +392,55 @@ class _GatedCandidate:
         descriptor = self._release_fd
         self._release_fd = None
         release_started = time.monotonic_ns()
+        primary_failure: BaseException | None = None
+        primary_traceback = None
+        cleanup_failures: list[BaseException] = []
         try:
             written = os.write(descriptor, b"G")
             if written != 1:
                 raise CollectorError("candidate launch gate write was incomplete")
             self.gate_released_monotonic_ns = release_started
-        except BaseException:
-            self.block_progress()
-            raise
-        finally:
+        except BaseException as exc:
+            primary_failure = exc
+            primary_traceback = exc.__traceback__
+            try:
+                self.block_progress()
+            except BaseException as cleanup_exc:
+                cleanup_failures.append(cleanup_exc)
+        try:
             os.close(descriptor)
+        except BaseException as exc:
+            cleanup_failures.append(exc)
+        if primary_failure is not None:
+            raise primary_failure.with_traceback(primary_traceback)
+        if cleanup_failures:
+            raise CollectorError("candidate launch gate cleanup failed") from None
 
     def close(self) -> None:
+        failures: list[BaseException] = []
         if self._release_fd is not None:
-            os.close(self._release_fd)
+            descriptor = self._release_fd
             self._release_fd = None
+            try:
+                os.close(descriptor)
+            except BaseException as exc:
+                failures.append(exc)
         if self._receipt_fd is not None:
-            os.close(self._receipt_fd)
+            descriptor = self._receipt_fd
             self._receipt_fd = None
+            try:
+                os.close(descriptor)
+            except BaseException as exc:
+                failures.append(exc)
         if self._progress_drainer is not None:
-            self._progress_drainer.abort()
+            progress_drainer = self._progress_drainer
+            self._progress_drainer = None
+            try:
+                progress_drainer.abort()
+            except BaseException as exc:
+                failures.append(exc)
+        if failures:
+            raise CollectorError("candidate descriptor cleanup failed") from None
 
     def finish_progress(self, timeout: float) -> dict[str, Any]:
         if self._progress_drainer is None:
@@ -512,6 +552,77 @@ class _GatedCandidate:
         ):
             raise CollectorError("candidate process identity changed")
 
+    def _formal_group_members(self) -> dict[int, str]:
+        if self._formal_uid is None:
+            return {}
+        group_members = _process_group_members(
+            self.process.pid, self.process.pid
+        )
+        uid_processes = _formal_uid_processes(self._formal_uid)
+        if group_members != uid_processes:
+            raise CollectorError(
+                "candidate process-group and UID quiescence identity changed"
+            )
+        return group_members
+
+    def _require_formal_quiescence(self) -> None:
+        if self._formal_uid is None:
+            return
+        try:
+            leader_running = self.process.poll() is None
+        except BaseException:
+            raise CollectorError(
+                "candidate process exit state is unavailable"
+            ) from None
+        members = self._formal_group_members()
+        if members or leader_running:
+            raise CollectorError(
+                "candidate process-group and UID quiescence was not proven"
+            )
+        try:
+            self.process.wait(timeout=0)
+        except BaseException:
+            raise CollectorError(
+                "candidate process-group and UID quiescence was not proven"
+            ) from None
+
+    def require_quiescence(self) -> None:
+        self._require_formal_quiescence()
+
+    def _wait_for_formal_quiescence(self, timeout_seconds: float) -> bool:
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            try:
+                leader_running = self.process.poll() is None
+            except BaseException:
+                raise CollectorError(
+                    "candidate process exit state is unavailable"
+                ) from None
+            members = self._formal_group_members()
+            if not members and not leader_running:
+                self._require_formal_quiescence()
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                return False
+            time.sleep(min(0.01, remaining))
+
+    def _validate_surviving_formal_group(self) -> dict[int, str]:
+        members = self._formal_group_members()
+        if not members or self._bound_start_identity is None:
+            raise CollectorError(
+                "candidate surviving process-group identity is unavailable"
+            )
+        leader_start = self._bound_start_identity.rsplit(":", 1)[-1]
+        if not leader_start.isdigit() or any(
+            not start.isdigit() or int(start) < int(leader_start)
+            for start in members.values()
+        ):
+            raise CollectorError(
+                "candidate surviving process-group identity changed"
+            )
+        return members
+
     def terminate_validated_group(
         self, *, term_seconds: float = 5.0, kill_seconds: float = 5.0
     ) -> None:
@@ -523,6 +634,36 @@ class _GatedCandidate:
                 or float(value) <= 0.0
             ):
                 raise CollectorError("candidate cleanup timeout is invalid")
+        if self._formal_uid is not None:
+            try:
+                running = self.process.poll() is None
+            except BaseException:
+                raise CollectorError(
+                    "candidate process exit state is unavailable"
+                ) from None
+            if running:
+                self._validate_bound_group()
+                try:
+                    os.killpg(self.process.pid, signal.SIGTERM)
+                except OSError:
+                    raise CollectorError(
+                        "candidate process-group termination failed"
+                    ) from None
+            if self._wait_for_formal_quiescence(float(term_seconds)):
+                self.exit_observed_monotonic_ns = time.monotonic_ns()
+                return
+            self._validate_surviving_formal_group()
+            self._validate_surviving_formal_group()
+            try:
+                os.killpg(self.process.pid, signal.SIGKILL)
+            except OSError:
+                raise CollectorError("candidate process-group kill failed") from None
+            if not self._wait_for_formal_quiescence(float(kill_seconds)):
+                raise CollectorError(
+                    "candidate process-group and UID quiescence was not proven"
+                )
+            self.exit_observed_monotonic_ns = time.monotonic_ns()
+            return
         try:
             running = self.process.poll() is None
         except BaseException:
@@ -557,18 +698,26 @@ class _GatedCandidate:
         self,
         *,
         timeout: float | None = None,
+        interrupt_latch: _SignalLatch | None = None,
         interrupt_fd: int | None = None,
     ) -> tuple[int, dict[str, Any]]:
         """Wait for exit while draining one bounded canonical completion receipt."""
 
         if self._receipt_fd is None:
             raise CollectorError("candidate completion receipt is unavailable")
+        if interrupt_latch is not None and interrupt_fd is not None:
+            raise CollectorError("candidate interruption channel is ambiguous")
+        if interrupt_latch is not None:
+            interrupt_latch.raise_if_interrupted()
+            interrupt_fd = interrupt_latch.read_fd
         descriptor = self._receipt_fd
         self._receipt_fd = None
         deadline = None if timeout is None else time.monotonic() + timeout
         payload = bytearray()
         try:
             while True:
+                if interrupt_latch is not None:
+                    interrupt_latch.raise_if_interrupted()
                 remaining = None
                 if deadline is not None:
                     remaining = max(0.0, deadline - time.monotonic())
@@ -579,31 +728,94 @@ class _GatedCandidate:
                 descriptors = [descriptor]
                 if interrupt_fd is not None:
                     descriptors.append(interrupt_fd)
-                readable, _, _ = select.select(descriptors, [], [], remaining)
+                select_timeout = remaining
+                if interrupt_latch is not None:
+                    select_timeout = (
+                        0.05 if remaining is None else min(0.05, remaining)
+                    )
+                try:
+                    readable, _, _ = select.select(
+                        descriptors, [], [], select_timeout
+                    )
+                except InterruptedError:
+                    if interrupt_latch is not None:
+                        interrupt_latch.raise_if_interrupted()
+                    continue
                 if not readable:
+                    if interrupt_latch is not None:
+                        interrupt_latch.raise_if_interrupted()
+                        if deadline is None or time.monotonic() < deadline:
+                            continue
                     raise subprocess.TimeoutExpired(self.process.args, timeout)
                 if interrupt_fd is not None and interrupt_fd in readable:
                     try:
-                        os.read(interrupt_fd, 1)
+                        wakeup = os.read(interrupt_fd, 4096)
                     except BlockingIOError:
-                        pass
-                    raise _CollectorInterruption("collector interruption requested")
-                chunk = os.read(descriptor, 65536 - len(payload) + 1)
+                        wakeup = None
+                    except InterruptedError:
+                        wakeup = None
+                    if wakeup == b"":
+                        raise CollectorError(
+                            "collector signal latch channel closed"
+                        )
+                    if interrupt_latch is not None:
+                        interrupt_latch.raise_if_interrupted()
+                    else:
+                        raise _CollectorInterruption(
+                            "collector interruption requested"
+                        )
+                if descriptor not in readable:
+                    continue
+                if interrupt_latch is not None:
+                    interrupt_latch.raise_if_interrupted()
+                try:
+                    chunk = os.read(descriptor, 65536 - len(payload) + 1)
+                except InterruptedError:
+                    continue
+                if interrupt_latch is not None:
+                    interrupt_latch.raise_if_interrupted()
                 if not chunk:
                     break
                 payload.extend(chunk)
                 if len(payload) > 65536:
                     raise CollectorError("candidate completion receipt is oversized")
-            exit_code = self.process.wait(
-                timeout=(
+            while True:
+                if interrupt_latch is not None:
+                    interrupt_latch.raise_if_interrupted()
+                remaining = (
                     None
                     if deadline is None
                     else max(0.0, deadline - time.monotonic())
                 )
-            )
+                if remaining == 0.0:
+                    raise subprocess.TimeoutExpired(self.process.args, timeout)
+                wait_timeout = remaining
+                if interrupt_latch is not None:
+                    wait_timeout = (
+                        0.05 if remaining is None else min(0.05, remaining)
+                    )
+                try:
+                    exit_code = self.process.wait(timeout=wait_timeout)
+                    break
+                except subprocess.TimeoutExpired:
+                    if interrupt_latch is None:
+                        raise
+                    interrupt_latch.raise_if_interrupted()
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise subprocess.TimeoutExpired(self.process.args, timeout)
+            if interrupt_latch is not None:
+                interrupt_latch.raise_if_interrupted()
             self.exit_observed_monotonic_ns = time.monotonic_ns()
         finally:
-            os.close(descriptor)
+            primary_failure = sys.exc_info()[1]
+            try:
+                os.close(descriptor)
+            except BaseException:
+                if primary_failure is None:
+                    raise CollectorError(
+                        "candidate receipt descriptor cleanup failed"
+                    ) from None
+        self._require_formal_quiescence()
         if exit_code != 0 and not payload:
             return exit_code, {}
         return exit_code, _decode_completion_receipt(bytes(payload))
@@ -1843,6 +2055,7 @@ def _start_gated_candidate(
                 _release_fd=None,
                 _receipt_fd=None,
                 ready_observed=False,
+                _formal_uid=formal_uid,
             )
             try:
                 startup_candidate.bind_process_identity(startup_start_identity)
@@ -2018,6 +2231,7 @@ def _start_gated_candidate(
             _progress_store=progress_store,
             _progress_state=progress_state,
             ready_observed=True,
+            _formal_uid=formal_uid,
         )
         if startup_start_identity is not None:
             candidate.bind_process_identity(startup_start_identity)
@@ -2026,28 +2240,33 @@ def _start_gated_candidate(
         return candidate
     except BaseException:
         cleanup_failures: list[BaseException] = []
+        if process is not None:
+            cleanup_failures.extend(stop_process(process))
         if progress_drainer is not None and drainer_owns_descriptor:
             try:
                 progress_drainer.abort()
             except BaseException as exc:
                 cleanup_failures.append(exc)
-        if process is not None:
-            cleanup_failures.extend(stop_process(process))
         blocking_failure: BaseException | None = None
         if progress_started and progress_store is not None:
             try:
                 _persist_blocked_progress(progress_store)
             except BaseException as exc:
                 blocking_failure = exc
-        cleanup_failures.extend(close_remaining_owned())
+        descriptor_failures = close_remaining_owned()
         if blocking_failure is not None:
             raise blocking_failure from None
         if cleanup_failures:
             raise CollectorError("candidate startup cleanup failed") from None
+        # Descriptor restoration is secondary to the startup failure that made
+        # cleanup necessary. Every owned descriptor has still been attempted.
+        if descriptor_failures:
+            raise
         raise
     finally:
+        primary_failure = sys.exc_info()[1]
         close_failures = close_remaining_owned()
-        if close_failures:
+        if close_failures and primary_failure is None:
             raise CollectorError("candidate startup cleanup failed") from None
 
 
@@ -2746,13 +2965,27 @@ def _set_parent_death_signal(
         raise CollectorError("formal child parent identity is unavailable") from None
     if observed_parent != parent_pid:
         raise CollectorError("formal child parent identity changed")
+    observed_signal = ctypes.c_int(0)
+    try:
+        result = operation(2, ctypes.addressof(observed_signal), 0, 0, 0)
+    except BaseException:
+        raise CollectorError("formal parent-death signal query failed") from None
+    if result != 0 or observed_signal.value != signal.SIGTERM:
+        raise CollectorError("formal parent-death signal verification failed")
 
 
 def _prepare_formal_child_process(parent_pid: int, uid: int, gid: int) -> None:
     """Apply the complete formal child setup through one ordered pre-exec hook."""
 
+    try:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    except BaseException:
+        raise CollectorError(
+            "formal child signal disposition reset failed"
+        ) from None
     _set_parent_death_signal(parent_pid)
     _drop_formal_child_privileges(uid, gid)
+    _set_parent_death_signal(parent_pid)
 
 
 def _drop_formal_child_privileges(uid: int, gid: int) -> None:
@@ -3331,8 +3564,18 @@ def _collect_execution_evidence(
     candidate_material_loader: Callable[[Path, str], Mapping[str, Any]],
     progress_blocker: Callable[[], None] | None = None,
     progress_completer: Callable[[], Mapping[str, Any]] | None = None,
+    interruption_check: Callable[[], None] | None = None,
 ) -> tuple[Path, Path]:
     """Write launch before execution and completion after exact candidate validation."""
+
+    if interruption_check is not None and not callable(interruption_check):
+        raise CollectorError("collector interruption check is invalid")
+
+    def check_interruption() -> None:
+        if interruption_check is not None:
+            interruption_check()
+
+    check_interruption()
 
     if not isinstance(run_id, str) or not run_id:
         raise CollectorError("run_id must be non-empty")
@@ -3395,6 +3638,7 @@ def _collect_execution_evidence(
     command_hash = hashlib.sha256(
         canonical_json_bytes(validated_command)
     ).hexdigest()
+    check_interruption()
     (
         roles_before,
         proxy_routes_before,
@@ -3407,6 +3651,7 @@ def _collect_execution_evidence(
         )
     except ToxiproxyMetricsError as exc:
         raise CollectorError("formal baseline A proxy counters are invalid") from exc
+    check_interruption()
     try:
         raw_activation = network_guard_activate()
         if (
@@ -3485,18 +3730,14 @@ def _collect_execution_evidence(
         launch["authorization_proof_sha256"] = execution_authorization_proof(
             authorization_nonce, launch
         )
+        check_interruption()
         launch_store.write_json_exclusive(
             launch_name, payload=launch, mode=0o600
         )
         launch_raw = launch_store.load_bytes(launch_name)
         launch_hash = hashlib.sha256(launch_raw).hexdigest()
+        check_interruption()
     except BaseException:
-        try:
-            network_guard_deactivate()
-        except BaseException as cleanup_exc:
-            raise CollectorError(
-                "formal network guard cleanup failed"
-            ) from cleanup_exc
         raise
 
     run_failure: BaseException | None = None
@@ -3510,6 +3751,7 @@ def _collect_execution_evidence(
     monitor_failure: BaseException | None = None
     guard_failure: BaseException | None = None
     cleanup_failure: BaseException | None = None
+    check_interruption()
     try:
         execution_monitor_start()
         monitor_started = True
@@ -3517,7 +3759,9 @@ def _collect_execution_evidence(
         monitor_failure = exc
     if monitor_failure is None:
         try:
+            check_interruption()
             run_result = run_candidate()
+            check_interruption()
         except BaseException as exc:
             run_failure = exc
     if run_failure is not None:
@@ -3528,12 +3772,14 @@ def _collect_execution_evidence(
         ) from monitor_failure
     if monitor_started:
         try:
+            check_interruption()
             raw_monitor = execution_monitor_finalize()
             _validate_execution_monitor_attestation(raw_monitor)
             monitor_after = dict(raw_monitor)
         except BaseException as exc:
             monitor_failure = exc
     try:
+        check_interruption()
         raw_finalization = network_guard_finalize()
         if (
             not isinstance(raw_finalization, Mapping)
@@ -3561,6 +3807,7 @@ def _collect_execution_evidence(
         )
     except BaseException as exc:
         guard_failure = exc
+    check_interruption()
     try:
         network_guard_deactivate()
     except BaseException as exc:
@@ -3571,6 +3818,7 @@ def _collect_execution_evidence(
         raise CollectorError("formal network guard finalization failed") from guard_failure
     if cleanup_failure is not None:
         raise CollectorError("formal network guard cleanup failed") from cleanup_failure
+    check_interruption()
     if guard_after != network_guard_before:
         raise CollectorError("formal network guard changed during execution")
     if (
@@ -3592,6 +3840,7 @@ def _collect_execution_evidence(
     candidate_seal: dict[str, Any]
     receipt_material: dict[str, Any] | None = None
     if exit_code == 0:
+        check_interruption()
         receipt_material = _validate_candidate_receipt_for_sealing(
             raw_receipt,
             expected_candidate_id=candidate_id,
@@ -3604,6 +3853,7 @@ def _collect_execution_evidence(
         )
         if progress_completer is not None:
             try:
+                check_interruption()
                 terminal = progress_completer()
                 if (
                     not isinstance(terminal, Mapping)
@@ -3619,6 +3869,7 @@ def _collect_execution_evidence(
                     progress_blocker()
                 raise CollectorError("candidate progress completion failed") from None
         try:
+            check_interruption()
             candidate_seal, _sanitized_seal = _validate_candidate_seal(
                 candidate_sealer(candidate_root, receipt_material),
                 expected_completion_receipt_sha256=hashlib.sha256(
@@ -3637,6 +3888,7 @@ def _collect_execution_evidence(
             "tree_sha256": "0" * 64,
             "completion_receipt_sha256": "0" * 64,
         }
+    check_interruption()
     source_after = _source_identity_fields(source_identity_loader(project_root))
     if source_after != source_before:
         raise CollectorError("formal source identity changed during execution")
@@ -3651,6 +3903,7 @@ def _collect_execution_evidence(
         raise CollectorError("formal runtime snapshot changed during execution")
     if external_tools_after != external_tools_before:
         raise CollectorError("formal external tool closure changed during execution")
+    check_interruption()
     (
         roles_after,
         proxy_routes_after,
@@ -3665,6 +3918,7 @@ def _collect_execution_evidence(
         raise CollectorError("formal final proxy counters changed after capture")
     material: dict[str, Any]
     if exit_code == 0:
+        check_interruption()
         material = _validate_candidate_material(
             candidate_material_loader(candidate_root, candidate_id),
             expected_candidate_id=candidate_id,
@@ -3730,6 +3984,7 @@ def _collect_execution_evidence(
     completion["authorization_proof_sha256"] = execution_authorization_proof(
         authorization_nonce, completion
     )
+    check_interruption()
     completion_store.write_json_exclusive(
         completion_name, payload=completion, mode=0o600
     )
@@ -4988,6 +5243,56 @@ def _read_process_group_identity(
     }
 
 
+def _process_group_members(
+    pgid: int,
+    sid: int,
+    *,
+    proc_root: Path = Path("/proc"),
+) -> dict[int, str]:
+    """Return the exact surviving membership of one bound group/session."""
+
+    if type(pgid) is not int or pgid <= 0 or type(sid) is not int or sid <= 0:
+        raise CollectorError("candidate process-group identity is invalid")
+    root = proc_root.expanduser().absolute()
+    if not root.is_dir():
+        raise CollectorError("Linux process inventory is unavailable")
+    try:
+        entries = sorted(
+            (entry for entry in root.iterdir() if entry.name.isdigit()),
+            key=lambda entry: int(entry.name),
+        )
+    except OSError as exc:
+        raise CollectorError("cannot enumerate Linux process inventory") from exc
+    members: dict[int, str] = {}
+    for process in entries:
+        try:
+            stat_line = (process / "stat").read_text(
+                encoding="utf-8"
+            ).strip()
+        except FileNotFoundError:
+            continue
+        except (OSError, UnicodeError) as exc:
+            raise CollectorError("cannot inspect Linux process identity") from exc
+        closing_parenthesis = stat_line.rfind(")")
+        fields = stat_line[closing_parenthesis + 2 :].split()
+        if closing_parenthesis < 0 or len(fields) <= 19:
+            raise CollectorError("Linux process identity is malformed")
+        try:
+            observed_pgid = int(fields[2])
+            observed_sid = int(fields[3])
+        except ValueError:
+            raise CollectorError("Linux process identity is malformed") from None
+        if observed_pgid != pgid and observed_sid != sid:
+            continue
+        if observed_pgid != pgid or observed_sid != sid:
+            raise CollectorError("candidate process-group identity is ambiguous")
+        start_ticks = fields[19]
+        if not start_ticks.isdigit():
+            raise CollectorError("Linux process start identity is malformed")
+        members[int(process.name)] = start_ticks
+    return members
+
+
 def _formal_uid_processes(
     uid: int, *, proc_root: Path = Path("/proc")
 ) -> dict[int, str]:
@@ -5298,6 +5603,9 @@ def _cleanup_formal_execution_resources(
         try:
             if callable(terminate_group):
                 terminate_group(term_seconds=5.0, kill_seconds=5.0)
+                require_quiescence = getattr(child, "require_quiescence", None)
+                if callable(require_quiescence):
+                    require_quiescence()
                 child_stopped = True
             else:
                 process = getattr(child, "process", None)
@@ -5412,6 +5720,7 @@ def collect_formal_execution(
     signal_latch = _SignalLatch()
     try:
         signal_latch.install()
+        signal_latch.raise_if_interrupted()
         _require_formal_uid_processes(FORMAL_RUNNER_UID, expected={})
         environment_document = _collect_formal_environment_attestation(
             toxiproxy_url=toxiproxy_url,
@@ -5436,6 +5745,7 @@ def collect_formal_execution(
             require_protected_wheels=True,
         )
         input_tree_manifest = _publish_formal_input_tree(private_parent)
+        signal_latch.raise_if_interrupted()
         external_tools = _attest_formal_external_tools(python_executable)
         child_spec = _build_formal_child_spec(
             source_export=source_export,
@@ -5461,6 +5771,7 @@ def collect_formal_execution(
             runtime_owner_gid=FORMAL_RUNNER_GID,
         )
         _require_formal_uid_processes(FORMAL_RUNNER_UID, expected={})
+        signal_latch.raise_if_interrupted()
         child = _start_gated_candidate(
             command=child_spec.command,
             cwd=child_spec.cwd,
@@ -5484,6 +5795,7 @@ def collect_formal_execution(
         )
         child_start_identity = str(child_process["start_identity"])
         child.bind_process_identity(child_start_identity)
+        signal_latch.raise_if_interrupted()
         _require_formal_uid_processes(
             FORMAL_RUNNER_UID,
             expected={
@@ -5583,7 +5895,7 @@ def collect_formal_execution(
             try:
                 child.release()
                 exit_code, receipt = child.wait_with_receipt(
-                    interrupt_fd=signal_latch.read_fd
+                    interrupt_latch=signal_latch
                 )
                 snapshot = child.finish_progress(2.0)
             except _CollectorInterruption:
@@ -5754,22 +6066,41 @@ def collect_formal_execution(
             candidate_material_loader=candidate_attestation_material,
             progress_blocker=child.block_progress,
             progress_completer=child.complete_progress,
+            interruption_check=signal_latch.raise_if_interrupted,
         )
     except BaseException:
         if child is not None:
-            child.block_progress()
+            try:
+                child.block_progress()
+            except BaseException:
+                pass
         raise
     finally:
-        cleanup_failures = _cleanup_formal_execution_resources(
-            execution_monitor=execution_monitor,
-            network_guard=network_guard,
-            child=child,
-        )
-        signal_latch.close()
-        if cleanup_failures and sys.exc_info()[0] is None:
+        primary_failure = sys.exc_info()[1]
+        cleanup_failures: list[BaseException] = []
+        try:
+            cleanup_failures.extend(
+                _cleanup_formal_execution_resources(
+                    execution_monitor=execution_monitor,
+                    network_guard=network_guard,
+                    child=child,
+                )
+            )
+        except BaseException as exc:
+            cleanup_failures.append(exc)
+        try:
+            cleanup_failures.extend(signal_latch.close())
+        except BaseException as exc:
+            cleanup_failures.append(exc)
+        if cleanup_failures and primary_failure is None:
             if child is not None:
-                child.block_progress()
-            raise CollectorError("formal execution resource cleanup failed") from cleanup_failures[0]
+                try:
+                    child.block_progress()
+                except BaseException as exc:
+                    cleanup_failures.append(exc)
+            raise CollectorError(
+                "formal execution resource cleanup failed"
+            ) from cleanup_failures[0]
         # The source/runtime/input snapshot and candidate remain under the
         # protected formal run inode so promotion can re-attest exact bytes.
 

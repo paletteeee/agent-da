@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 from collections import Counter
 from importlib.metadata import PackageNotFoundError, version as package_version
@@ -862,11 +863,19 @@ def main(
     *,
     _progress_callback=None,
     _require_formal_eligibility: bool = False,
+    _interruption_check=None,
 ) -> int:
     if _progress_callback is not None and not callable(_progress_callback):
         raise TypeError("_progress_callback must be callable or None")
     if type(_require_formal_eligibility) is not bool:
         raise TypeError("_require_formal_eligibility must be an exact boolean")
+    if _interruption_check is not None and not callable(_interruption_check):
+        raise TypeError("_interruption_check must be callable or None")
+
+    def check_interruption() -> None:
+        if _interruption_check is not None:
+            _interruption_check()
+
     args = _build_parser().parse_args(argv)
     if args.command == "generate":
         instances = generate_suite(args.workloads, _seed_range(args.seeds))
@@ -1500,6 +1509,7 @@ def main(
                 close_backend_factory = getattr(backend_factory, "close", None)
                 if callable(close_backend_factory):
                     close_backend_factory()
+            check_interruption()
             operation_samples = [
                 row for report in cell_reports for row in report["samples"]
             ]
@@ -1543,14 +1553,58 @@ def main(
                     else None
                 ),
             }
-            output_path = publish_provenance_bundle(
-                args.out_dir,
-                bundle_id=bundle_id,
-                operation_samples=operation_samples,
-                repetitions=repetition_rows,
-                report=report,
-                topology_attestation=topology_attestation,
-            )
+            check_interruption()
+            if _interruption_check is None:
+                output_path = publish_provenance_bundle(
+                    args.out_dir,
+                    bundle_id=bundle_id,
+                    operation_samples=operation_samples,
+                    repetitions=repetition_rows,
+                    report=report,
+                    topology_attestation=topology_attestation,
+                )
+            else:
+                if not hasattr(signal, "pthread_sigmask") or not hasattr(
+                    signal, "sigpending"
+                ):
+                    raise RuntimeError(
+                        "protected publication requires POSIX signal masking"
+                    )
+                previous_mask = signal.pthread_sigmask(
+                    signal.SIG_BLOCK, {signal.SIGTERM}
+                )
+                publication_committed = False
+                publication_failure: BaseException | None = None
+                publication_traceback = None
+                try:
+                    if signal.SIGTERM in signal.sigpending():
+                        check_interruption()
+                        raise RuntimeError(
+                            "interruption preceded publication commit"
+                        )
+                    check_interruption()
+                    output_path = publish_provenance_bundle(
+                        args.out_dir,
+                        bundle_id=bundle_id,
+                        operation_samples=operation_samples,
+                        repetitions=repetition_rows,
+                        report=report,
+                        topology_attestation=topology_attestation,
+                    )
+                    publication_committed = True
+                except BaseException as exc:
+                    publication_failure = exc
+                    publication_traceback = exc.__traceback__
+                try:
+                    signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+                except BaseException as exc:
+                    if publication_failure is None and not publication_committed:
+                        publication_failure = exc
+                        publication_traceback = exc.__traceback__
+                if publication_failure is not None:
+                    raise publication_failure.with_traceback(
+                        publication_traceback
+                    )
         except Exception as exc:
             failure_provenance = _safe_failure_provenance(exc)
             blocked = {

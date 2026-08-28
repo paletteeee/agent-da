@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -1295,6 +1296,344 @@ class FormalSmokeProbeTests(unittest.TestCase):
 
 
 class ProvenanceSmokeRunnerTests(unittest.TestCase):
+    def _run_publication_signal_scenario(self, scenario):
+        import txnmem_experiment
+        import txnmem_provenance_progress
+
+        if scenario not in {
+            "progress_callback",
+            "before_publication",
+            "during_commit",
+            "after_commit_before_receipt",
+        }:
+            raise AssertionError("unknown publication signal scenario")
+        gate_read, gate_write = os.pipe()
+        ready_read, ready_write = os.pipe()
+        receipt_read, receipt_write = os.pipe()
+        progress_read, progress_write = os.pipe()
+        os.write(gate_write, b"G")
+        os.close(gate_write)
+        signal_sent = False
+        mask_observations = []
+        real_experiment_main = txnmem_experiment.main
+        real_aggregate = performance.aggregate_matrix
+        real_publish = performance.publish_provenance_bundle
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            runtime_site = root / "runtime"
+            runtime_site.mkdir()
+            candidate = root / "candidate"
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "schema": "txnmem-provenance-performance-v2",
+                        "graph_node_counts": [2],
+                        "concurrency_levels": [1],
+                        "repetitions": 1,
+                        "graph_seed": 17,
+                        "operations_per_type": 1,
+                        "bootstrap_repetitions": 10,
+                        "bootstrap_seed": 17,
+                        "request_timeout_seconds": 30.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            environment = {
+                "TXNMEM_PROVENANCE_START_GATE_FD": str(gate_read),
+                "TXNMEM_PROVENANCE_READY_FD": str(ready_write),
+                "TXNMEM_PROVENANCE_COMPLETION_FD": str(receipt_write),
+                "TXNMEM_PROVENANCE_PROGRESS_FD": str(progress_write),
+                "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256": "a" * 64,
+                "TXNMEM_PROVENANCE_RUNTIME_SITE": str(runtime_site),
+            }
+
+            def send_sigterm_once():
+                nonlocal signal_sent
+                if not signal_sent:
+                    signal_sent = True
+                    os.kill(os.getpid(), signal.SIGTERM)
+
+            def experiment_entry(arguments, **hooks):
+                converted = list(arguments)
+                backend_index = converted.index("--backend") + 1
+                converted[backend_index] = "memory"
+                private_hooks = {
+                    "_progress_callback": hooks["_progress_callback"],
+                    "_require_formal_eligibility": False,
+                }
+                if "_interruption_check" in hooks:
+                    private_hooks["_interruption_check"] = hooks[
+                        "_interruption_check"
+                    ]
+                return real_experiment_main(converted, **private_hooks)
+
+            def aggregate_wrapper(*args, **kwargs):
+                result = real_aggregate(*args, **kwargs)
+                if scenario == "before_publication":
+                    send_sigterm_once()
+                return result
+
+            def publish_wrapper(*args, **kwargs):
+                result = real_publish(*args, **kwargs)
+                if scenario == "during_commit":
+                    current_mask = signal.pthread_sigmask(
+                        signal.SIG_BLOCK, set()
+                    )
+                    mask_observations.append(signal.SIGTERM in current_mask)
+                    send_sigterm_once()
+                return result
+
+            def build_progress_event(**_kwargs):
+                if scenario == "progress_callback":
+                    send_sigterm_once()
+                return {"schema": "test-only-progress"}
+
+            def completion_material(_arguments):
+                pointers = sorted((candidate / "bundles").glob("*.json"))
+                if len(pointers) != 1:
+                    raise AssertionError("complete candidate pointer is unavailable")
+                pointer = json.loads(pointers[0].read_text(encoding="utf-8"))
+                if pointer.get("publication_status") != "complete":
+                    raise AssertionError("candidate pointer is incomplete")
+                if scenario == "after_commit_before_receipt":
+                    send_sigterm_once()
+                return {"result": "complete"}
+
+            with patch.dict(os.environ, environment, clear=True), patch.object(
+                txnmem_experiment, "main", side_effect=experiment_entry
+            ), patch.object(
+                performance, "aggregate_matrix", side_effect=aggregate_wrapper
+            ), patch.object(
+                performance,
+                "publish_provenance_bundle",
+                side_effect=publish_wrapper,
+            ), patch.object(
+                txnmem_provenance_progress,
+                "build_progress_event",
+                side_effect=build_progress_event,
+            ), patch.object(
+                txnmem_provenance_progress,
+                "canonical_progress_line",
+                return_value=b"{}\n",
+            ), patch.object(
+                runner,
+                "_candidate_completion_material",
+                side_effect=completion_material,
+            ):
+                status = runner.main(
+                    [
+                        "provenance-performance",
+                        "--backend",
+                        "vector-graph",
+                        "--config",
+                        str(config),
+                        "--run-id",
+                        f"publication-{scenario}",
+                        "--out-dir",
+                        str(candidate),
+                    ]
+                )
+            ready = os.read(ready_read, 2)
+            receipt = os.read(receipt_read, 65537)
+            pointer_paths = sorted((candidate / "bundles").glob("*.json"))
+            pointers = [
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in pointer_paths
+            ]
+
+        for descriptor in (ready_read, receipt_read, progress_read):
+            os.close(descriptor)
+        return status, ready, receipt, pointers, mask_observations
+
+    def test_signal_before_publication_leaves_no_pointer_or_receipt(self):
+        status, ready, receipt, pointers, _masks = (
+            self._run_publication_signal_scenario("before_publication")
+        )
+
+        self.assertEqual(ready, b"R")
+        self.assertNotEqual(status, 0)
+        self.assertEqual(pointers, [])
+        self.assertEqual(receipt, b"")
+
+    def test_progress_callback_signal_leaves_no_pointer_or_receipt(self):
+        status, ready, receipt, pointers, _masks = (
+            self._run_publication_signal_scenario("progress_callback")
+        )
+
+        self.assertEqual(ready, b"R")
+        self.assertNotEqual(status, 0)
+        self.assertEqual(pointers, [])
+        self.assertEqual(receipt, b"")
+
+    @unittest.skipUnless(
+        hasattr(signal, "pthread_sigmask"), "POSIX signal masks only"
+    )
+    def test_signal_during_guarded_commit_publishes_pointer_and_receipt(self):
+        status, ready, receipt, pointers, masks = (
+            self._run_publication_signal_scenario("during_commit")
+        )
+
+        self.assertEqual(ready, b"R")
+        self.assertEqual(status, 0)
+        self.assertEqual(len(pointers), 1)
+        self.assertEqual(pointers[0]["publication_status"], "complete")
+        self.assertEqual(receipt, canonical_json_bytes({"result": "complete"}))
+        self.assertEqual(masks, [True])
+
+    def test_signal_after_commit_before_receipt_keeps_complete_transaction(self):
+        status, ready, receipt, pointers, _masks = (
+            self._run_publication_signal_scenario(
+                "after_commit_before_receipt"
+            )
+        )
+
+        self.assertEqual(ready, b"R")
+        self.assertEqual(status, 0)
+        self.assertEqual(len(pointers), 1)
+        self.assertEqual(pointers[0]["publication_status"], "complete")
+        self.assertEqual(receipt, canonical_json_bytes({"result": "complete"}))
+
+    def test_runner_watchdog_hard_exits_after_cooperative_grace(self):
+        watchdog_type = getattr(runner, "_RunnerTerminationWatchdog", None)
+        self.assertIsNotNone(watchdog_type)
+        if watchdog_type is None:
+            return
+        hard_exit_called = threading.Event()
+        hard_exit_codes = []
+
+        def hard_exit(code):
+            hard_exit_codes.append(code)
+            hard_exit_called.set()
+
+        watchdog = watchdog_type(grace_seconds=0.01, hard_exit=hard_exit)
+        try:
+            watchdog.start()
+            watchdog.request_stop(signal.SIGTERM, None)
+            self.assertTrue(hard_exit_called.wait(1.0))
+        finally:
+            watchdog.finish()
+
+        self.assertEqual(hard_exit_codes, [75])
+        self.assertIs(type(watchdog.stop_requested), bool)
+
+    def test_runner_cooperative_finish_cancels_watchdog_hard_exit(self):
+        watchdog_type = getattr(runner, "_RunnerTerminationWatchdog", None)
+        self.assertIsNotNone(watchdog_type)
+        if watchdog_type is None:
+            return
+        hard_exit_codes = []
+        watchdog = watchdog_type(
+            grace_seconds=1.0, hard_exit=hard_exit_codes.append
+        )
+
+        watchdog.start()
+        watchdog.request_stop(signal.SIGTERM, None)
+        watchdog.finish()
+
+        self.assertEqual(hard_exit_codes, [])
+        with self.assertRaises(runner._RunnerInterruption):
+            watchdog.raise_if_requested()
+
+    def test_runner_cleanup_attempts_all_and_preserves_interruption(self):
+        import txnmem_experiment
+
+        gate_read, gate_write = os.pipe()
+        ready_read, ready_write = os.pipe()
+        receipt_read, receipt_write = os.pipe()
+        progress_read, progress_write = os.pipe()
+        os.write(gate_write, b"G")
+        os.close(gate_write)
+        environment = {
+            "TXNMEM_PROVENANCE_START_GATE_FD": str(gate_read),
+            "TXNMEM_PROVENANCE_READY_FD": str(ready_write),
+            "TXNMEM_PROVENANCE_COMPLETION_FD": str(receipt_write),
+            "TXNMEM_PROVENANCE_PROGRESS_FD": str(progress_write),
+            "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256": "a" * 64,
+        }
+        cleanup_calls = []
+        signal_calls = []
+        real_close = os.close
+
+        class Watchdog:
+            def start(self):
+                cleanup_calls.append("watchdog-start")
+
+            def request_stop(self, _signal_number=None, _frame=None):
+                return None
+
+            def raise_if_requested(self):
+                return None
+
+            def finish(self):
+                cleanup_calls.append("watchdog-finish")
+                raise OSError("private-watchdog-cleanup-failure")
+
+        def close_descriptor(descriptor):
+            cleanup_calls.append(("close", descriptor))
+            if descriptor in {progress_write, receipt_write}:
+                raise OSError("private-runner-fd-cleanup-failure")
+            real_close(descriptor)
+
+        def install_or_restore(signal_number, handler):
+            signal_calls.append((signal_number, handler))
+            if len(signal_calls) == 1:
+                return signal.SIG_DFL
+            raise OSError("private-runner-handler-restore-failure")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_site = Path(tmp).resolve() / "runtime"
+            runtime_site.mkdir()
+            environment["TXNMEM_PROVENANCE_RUNTIME_SITE"] = str(runtime_site)
+            try:
+                with patch.dict(os.environ, environment, clear=True), patch.object(
+                    runner, "_RunnerTerminationWatchdog", return_value=Watchdog()
+                ), patch.object(
+                    runner.os, "close", side_effect=close_descriptor
+                ), patch.object(
+                    runner.signal, "signal", side_effect=install_or_restore
+                ), patch.object(
+                    txnmem_experiment,
+                    "main",
+                    side_effect=runner._RunnerInterruption(
+                        "primary-runner-interruption"
+                    ),
+                ):
+                    try:
+                        status = runner.main(
+                            [
+                                "provenance-performance",
+                                "--backend",
+                                "vector-graph",
+                            ]
+                        )
+                    except BaseException as exc:
+                        self.fail(
+                            "runner cleanup masked interruption: "
+                            f"{type(exc).__name__}"
+                        )
+            finally:
+                for descriptor in (
+                    ready_read,
+                    receipt_read,
+                    receipt_write,
+                    progress_read,
+                    progress_write,
+                ):
+                    try:
+                        real_close(descriptor)
+                    except OSError:
+                        pass
+
+        self.assertEqual(status, 75)
+        self.assertIn(("close", progress_write), cleanup_calls)
+        self.assertIn(("close", receipt_write), cleanup_calls)
+        self.assertIn("watchdog-finish", cleanup_calls)
+        self.assertEqual(len(signal_calls), 2)
+        self.assertIs(signal_calls[-1][1], signal.SIG_DFL)
+
     @contextlib.contextmanager
     def _runner_descriptors(self, runtime_site: Path):
         gate_read, gate_write = os.pipe()
