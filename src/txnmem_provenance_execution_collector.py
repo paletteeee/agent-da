@@ -2941,6 +2941,7 @@ class _NftNetworkGuard:
     executable: Path = Path(_FORMAL_NFT_EXECUTABLE)
     active: bool = False
     _expected_snapshot: dict[str, Any] | None = None
+    _integrated_owner_pid: int | None = None
 
     def _run(
         self,
@@ -3045,7 +3046,35 @@ class _NftNetworkGuard:
             ).hexdigest(),
         }
 
+    def _activate_retaining_table(self) -> dict[str, Any]:
+        if self.active or self.table_name in self._table_names():
+            raise CollectorError("formal nftables guard already exists")
+        batch = _nft_guard_batch(
+            self.table_name,
+            runner_uid=self.runner_uid,
+            backend_ipv4_subnet=self.backend_ipv4_subnet,
+            ingress_ipv4_subnet=self.ingress_ipv4_subnet,
+            backend_bridge_interface=self.backend_bridge_interface,
+            ingress_bridge_interface=self.ingress_bridge_interface,
+            toxiproxy_ingress_ipv4=self.toxiproxy_ingress_ipv4,
+        )
+        self._run(("--check", "-f", "-"), stdin=batch)
+        self._run(("-f", "-"), stdin=batch)
+        self.active = True
+        try:
+            self._expected_snapshot = self.snapshot()
+        except BaseException:
+            self.active = True
+            raise
+        return dict(self._expected_snapshot)
+
     def activate(self) -> dict[str, Any]:
+        if self._integrated_owner_pid is not None:
+            if os.getpid() != self._integrated_owner_pid:
+                raise CollectorError(
+                    "integrated lifecycle guard activation owner changed"
+                )
+            return self._activate_retaining_table()
         if self.active or self.table_name in self._table_names():
             raise CollectorError("formal nftables guard already exists")
         batch = _nft_guard_batch(
@@ -3106,6 +3135,13 @@ class _NftNetworkGuard:
         return snapshot
 
     def deactivate(self) -> None:
+        if (
+            self._integrated_owner_pid is not None
+            and os.getpid() != self._integrated_owner_pid
+        ):
+            raise CollectorError(
+                "integrated lifecycle guard removal owner changed"
+            )
         if not self.active:
             return
         try:
@@ -6508,6 +6544,29 @@ class _IntegratedLifecycleGuardOwner:
             raise CollectorError(
                 "integrated lifecycle guard owner is invalid"
             )
+        existing_owner = getattr(self.guard, "_integrated_owner_pid", None)
+        if existing_owner not in {None, self.owner_pid}:
+            raise CollectorError(
+                "integrated lifecycle guard owner changed"
+            )
+        setattr(self.guard, "_integrated_owner_pid", self.owner_pid)
+
+    def activate_retaining_table(self) -> dict[str, Any]:
+        if os.getpid() != self.owner_pid:
+            raise CollectorError(
+                "integrated lifecycle guard activation owner changed"
+            )
+        activate = getattr(self.guard, "activate", None)
+        if not callable(activate):
+            raise CollectorError(
+                "integrated lifecycle guard activation is unavailable"
+            )
+        result = activate()
+        if not isinstance(result, Mapping):
+            raise CollectorError(
+                "integrated lifecycle guard activation is invalid"
+            )
+        return dict(result)
 
     def deactivate_after_quiescence(
         self, quiescence_check: Callable[[], None]
@@ -6603,32 +6662,42 @@ def _receive_integrated_lifecycle_worker_state(
         )
     previous_timeout = channel.gettimeout()
     received_fds: list[int] = []
+    primary_failure: BaseException | None = None
+    primary_traceback = None
+    normalized: dict[str, Any] | None = None
+    transferred_descriptor: int | None = None
     try:
-        channel.settimeout(float(timeout))
-        flags = getattr(socket, "MSG_CMSG_CLOEXEC", 0)
-        payload, ancillary, message_flags, _address = channel.recvmsg(
-            4096,
-            socket.CMSG_SPACE(array.array("i").itemsize),
-            flags,
-        )
+        try:
+            channel.settimeout(float(timeout))
+            flags = getattr(socket, "MSG_CMSG_CLOEXEC", 0)
+            payload, ancillary, message_flags, _address = channel.recvmsg(
+                4096,
+                socket.CMSG_SPACE(array.array("i").itemsize),
+                flags,
+            )
+        except (OSError, TimeoutError):
+            raise CollectorError(
+                "integrated lifecycle worker state is unavailable"
+            ) from None
+
+        integer_size = array.array("i").itemsize
         for level, kind, data in ancillary:
             if level != socket.SOL_SOCKET or kind != socket.SCM_RIGHTS:
                 continue
             values = array.array("i")
-            usable = len(data) - (len(data) % values.itemsize)
+            usable = len(data) - (len(data) % integer_size)
             values.frombytes(data[:usable])
             received_fds.extend(int(value) for value in values)
-    except (OSError, TimeoutError):
-        raise CollectorError(
-            "integrated lifecycle worker state is unavailable"
-        ) from None
-    finally:
-        channel.settimeout(previous_timeout)
-    try:
+
         if (
             not payload
             or len(payload) > 4096
             or message_flags & getattr(socket, "MSG_CTRUNC", 0)
+            or message_flags & getattr(socket, "MSG_TRUNC", 0)
+            or len(ancillary) != 1
+            or ancillary[0][0] != socket.SOL_SOCKET
+            or ancillary[0][1] != socket.SCM_RIGHTS
+            or len(ancillary[0][2]) != integer_size
             or len(received_fds) != 1
         ):
             raise CollectorError(
@@ -6642,16 +6711,46 @@ def _receive_integrated_lifecycle_worker_state(
             raise CollectorError(
                 "integrated lifecycle worker state is invalid"
             )
-        descriptor = received_fds[-1]
-        os.set_inheritable(descriptor, False)
-        received_fds.pop()
-        return normalized, descriptor
+        os.set_inheritable(received_fds[0], False)
+    except BaseException as exc:
+        primary_failure = exc
+        primary_traceback = exc.__traceback__
     finally:
+        try:
+            channel.settimeout(previous_timeout)
+        except BaseException as exc:
+            if primary_failure is None:
+                try:
+                    raise CollectorError(
+                        "integrated lifecycle worker timeout restoration failed"
+                    ) from exc
+                except CollectorError as normalized_timeout_failure:
+                    primary_failure = normalized_timeout_failure
+                    primary_traceback = (
+                        normalized_timeout_failure.__traceback__
+                    )
+        if primary_failure is None:
+            transferred_descriptor = received_fds.pop()
+        close_failure: BaseException | None = None
         for descriptor in received_fds:
             try:
                 os.close(descriptor)
-            except OSError:
-                pass
+            except BaseException as exc:
+                if close_failure is None:
+                    close_failure = exc
+        if primary_failure is None and close_failure is not None:
+            try:
+                raise CollectorError(
+                    "integrated lifecycle worker descriptor cleanup failed"
+                ) from close_failure
+            except CollectorError as normalized_close_failure:
+                primary_failure = normalized_close_failure
+                primary_traceback = normalized_close_failure.__traceback__
+    if primary_failure is not None:
+        raise primary_failure.with_traceback(primary_traceback)
+    if normalized is None or transferred_descriptor is None:
+        raise CollectorError("integrated lifecycle worker state is invalid")
+    return normalized, transferred_descriptor
 
 
 def _read_integrated_lifecycle_absent_receipt(
@@ -6854,85 +6953,187 @@ def _inspect_integrated_lifecycle_tree_fd(
     }
 
 
-def _delete_integrated_lifecycle_tree_fd(
-    directory_fd: int, manifest: Mapping[str, Any]
-) -> None:
-    current = os.fstat(directory_fd)
-    if (
-        not stat.S_ISDIR(current.st_mode)
-        or int(current.st_dev) != manifest.get("device")
-        or int(current.st_ino) != manifest.get("inode")
-        or int(current.st_uid) != manifest.get("owner_uid")
-    ):
+def _integrated_lifecycle_manifest_identity_matches(
+    metadata: os.stat_result,
+    manifest: Mapping[str, Any],
+) -> bool:
+    kind = manifest.get("kind")
+    return bool(
+        (
+            (kind == "directory" and stat.S_ISDIR(metadata.st_mode))
+            or (kind == "file" and stat.S_ISREG(metadata.st_mode))
+        )
+        and int(metadata.st_dev) == manifest.get("device")
+        and int(metadata.st_ino) == manifest.get("inode")
+        and int(metadata.st_uid) == manifest.get("owner_uid")
+    )
+
+
+def _quarantine_integrated_lifecycle_entry(
+    source_fd: int,
+    source_name: str,
+    manifest: Mapping[str, Any],
+    bound_fd: int,
+    quarantine_fd: int,
+    quarantine_sequence: list[int],
+) -> str:
+    bound = os.fstat(bound_fd)
+    if not _integrated_lifecycle_manifest_identity_matches(bound, manifest):
         raise CollectorError(
             "integrated lifecycle cleanup identity changed"
         )
-    os.fchmod(directory_fd, 0o700)
+    quarantine_name = f"entry-{quarantine_sequence[0]:016x}"
+    quarantine_sequence[0] += 1
+    try:
+        os.stat(
+            quarantine_name,
+            dir_fd=quarantine_fd,
+            follow_symlinks=False,
+        )
+    except FileNotFoundError:
+        pass
+    except OSError:
+        raise CollectorError(
+            "integrated lifecycle cleanup quarantine inspection failed"
+        ) from None
+    else:
+        raise CollectorError(
+            "integrated lifecycle cleanup quarantine collision"
+        )
+    try:
+        os.rename(
+            source_name,
+            quarantine_name,
+            src_dir_fd=source_fd,
+            dst_dir_fd=quarantine_fd,
+        )
+    except OSError:
+        raise CollectorError(
+            "integrated lifecycle cleanup quarantine failed"
+        ) from None
+    try:
+        detached = os.stat(
+            quarantine_name,
+            dir_fd=quarantine_fd,
+            follow_symlinks=False,
+        )
+    except OSError:
+        raise CollectorError(
+            "integrated lifecycle cleanup detached identity is unavailable"
+        ) from None
+    rebound = os.fstat(bound_fd)
+    if (
+        not _integrated_lifecycle_manifest_identity_matches(
+            detached, manifest
+        )
+        or not _integrated_lifecycle_manifest_identity_matches(
+            rebound, manifest
+        )
+        or int(detached.st_dev) != int(rebound.st_dev)
+        or int(detached.st_ino) != int(rebound.st_ino)
+    ):
+        raise CollectorError(
+            "integrated lifecycle cleanup detached identity changed"
+        )
+    return quarantine_name
+
+
+def _delete_integrated_lifecycle_tree_fd(
+    directory_fd: int,
+    manifest: Mapping[str, Any],
+    *,
+    quarantine_fd: int,
+    quarantine_sequence: list[int],
+) -> None:
+    current = os.fstat(directory_fd)
+    if not _integrated_lifecycle_manifest_identity_matches(
+        current, manifest
+    ) or manifest.get("kind") != "directory":
+        raise CollectorError(
+            "integrated lifecycle cleanup identity changed"
+        )
+    primary_failure: BaseException | None = None
+    primary_traceback = None
+
+    def record_failure(exc: BaseException) -> None:
+        nonlocal primary_failure, primary_traceback
+        if primary_failure is None:
+            primary_failure = exc
+            primary_traceback = exc.__traceback__
+
+    try:
+        os.fchmod(directory_fd, 0o700)
+    except BaseException as exc:
+        record_failure(exc)
     for child in manifest.get("children", []):
-        name = child["name"]
-        metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-        if (
-            int(metadata.st_dev) != child["device"]
-            or int(metadata.st_ino) != child["inode"]
-            or int(metadata.st_uid) != child["owner_uid"]
-        ):
-            raise CollectorError(
-                "integrated lifecycle cleanup identity changed"
-            )
-        if child["kind"] == "directory":
-            child_fd = os.open(
+        child_fd: int | None = None
+        try:
+            name = child["name"]
+            metadata = os.stat(
                 name,
-                os.O_RDONLY
-                | getattr(os, "O_DIRECTORY", 0)
-                | getattr(os, "O_NOFOLLOW", 0)
-                | getattr(os, "O_CLOEXEC", 0),
                 dir_fd=directory_fd,
+                follow_symlinks=False,
             )
-            try:
-                _delete_integrated_lifecycle_tree_fd(child_fd, child)
-                metadata = os.stat(
-                    name, dir_fd=directory_fd, follow_symlinks=False
+            if not _integrated_lifecycle_manifest_identity_matches(
+                metadata, child
+            ):
+                raise CollectorError(
+                    "integrated lifecycle cleanup identity changed"
                 )
-                opened = os.fstat(child_fd)
-                if (
-                    not stat.S_ISDIR(metadata.st_mode)
-                    or int(metadata.st_dev) != child["device"]
-                    or int(metadata.st_ino) != child["inode"]
-                    or int(opened.st_dev) != child["device"]
-                    or int(opened.st_ino) != child["inode"]
-                ):
-                    raise CollectorError(
-                        "integrated lifecycle cleanup identity changed"
-                    )
-                os.rmdir(name, dir_fd=directory_fd)
-            finally:
-                os.close(child_fd)
-        elif child["kind"] == "file":
-            file_fd = os.open(
-                name,
+            child_kind = child.get("kind")
+            if child_kind not in {"directory", "file"}:
+                raise CollectorError(
+                    "integrated lifecycle cleanup manifest is invalid"
+                )
+            flags = (
                 os.O_RDONLY
                 | getattr(os, "O_NOFOLLOW", 0)
-                | getattr(os, "O_CLOEXEC", 0),
-                dir_fd=directory_fd,
+                | getattr(os, "O_CLOEXEC", 0)
             )
-            try:
-                opened = os.fstat(file_fd)
-                if (
-                    not stat.S_ISREG(opened.st_mode)
-                    or int(opened.st_dev) != child["device"]
-                    or int(opened.st_ino) != child["inode"]
-                    or int(opened.st_uid) != child["owner_uid"]
-                ):
-                    raise CollectorError(
-                        "integrated lifecycle cleanup identity changed"
+            if child_kind == "directory":
+                flags |= getattr(os, "O_DIRECTORY", 0)
+            child_fd = os.open(name, flags, dir_fd=directory_fd)
+            quarantine_name = _quarantine_integrated_lifecycle_entry(
+                directory_fd,
+                name,
+                child,
+                child_fd,
+                quarantine_fd,
+                quarantine_sequence,
+            )
+            if child_kind == "directory":
+                recursive_failure: BaseException | None = None
+                try:
+                    _delete_integrated_lifecycle_tree_fd(
+                        child_fd,
+                        child,
+                        quarantine_fd=quarantine_fd,
+                        quarantine_sequence=quarantine_sequence,
                     )
-                os.unlink(name, dir_fd=directory_fd)
-            finally:
-                os.close(file_fd)
-        else:
-            raise CollectorError(
-                "integrated lifecycle cleanup manifest is invalid"
-            )
+                except BaseException as exc:
+                    recursive_failure = exc
+                    record_failure(exc)
+                try:
+                    os.rmdir(quarantine_name, dir_fd=quarantine_fd)
+                except BaseException as exc:
+                    record_failure(exc)
+                if recursive_failure is not None:
+                    continue
+            else:
+                try:
+                    os.unlink(quarantine_name, dir_fd=quarantine_fd)
+                except BaseException as exc:
+                    record_failure(exc)
+        except BaseException as exc:
+            record_failure(exc)
+        finally:
+            if child_fd is not None:
+                try:
+                    os.close(child_fd)
+                except BaseException as exc:
+                    record_failure(exc)
+    if primary_failure is not None:
+        raise primary_failure.with_traceback(primary_traceback)
 
 
 def _remove_integrated_lifecycle_tree(
@@ -6977,6 +7178,14 @@ def _remove_integrated_lifecycle_tree(
         or any(part in {"", ".", ".."} for part in runner_owned_relative.parts)
     ):
         raise CollectorError("integrated lifecycle cleanup identity is invalid")
+    parent_fd: int | None = None
+    root_fd: int | None = None
+    quarantine_fd: int | None = None
+    quarantine_name = f".txnmem-cleanup-{secrets.token_hex(16)}"
+    quarantine_created = False
+    primary_failure: BaseException | None = None
+    primary_traceback = None
+    cleanup_failures: list[BaseException] = []
     try:
         parent_fd = os.open(
             parent,
@@ -6985,12 +7194,6 @@ def _remove_integrated_lifecycle_tree(
             | getattr(os, "O_NOFOLLOW", 0)
             | getattr(os, "O_CLOEXEC", 0),
         )
-    except OSError:
-        raise CollectorError(
-            "integrated lifecycle cleanup parent identity changed"
-        ) from None
-    root_fd: int | None = None
-    try:
         parent_metadata = os.fstat(parent_fd)
         if (
             not stat.S_ISDIR(parent_metadata.st_mode)
@@ -7000,6 +7203,26 @@ def _remove_integrated_lifecycle_tree(
         ):
             raise CollectorError(
                 "integrated lifecycle cleanup parent identity changed"
+            )
+        os.mkdir(quarantine_name, mode=0o700, dir_fd=parent_fd)
+        quarantine_created = True
+        quarantine_fd = os.open(
+            quarantine_name,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0),
+            dir_fd=parent_fd,
+        )
+        quarantine_metadata = os.fstat(quarantine_fd)
+        if (
+            not stat.S_ISDIR(quarantine_metadata.st_mode)
+            or int(quarantine_metadata.st_dev) != expected_device
+            or quarantine_metadata.st_uid != controller_uid
+            or stat.S_IMODE(quarantine_metadata.st_mode) != 0o700
+        ):
+            raise CollectorError(
+                "integrated lifecycle cleanup quarantine is invalid"
             )
         try:
             root_fd = os.open(
@@ -7031,28 +7254,49 @@ def _remove_integrated_lifecycle_tree(
             runner_uid=runner_uid,
             runner_owned_relative=runner_owned_relative,
         )
-        _delete_integrated_lifecycle_tree_fd(root_fd, manifest)
-        final_metadata = os.stat(
-            target.name, dir_fd=parent_fd, follow_symlinks=False
+        quarantine_sequence = [0]
+        _delete_integrated_lifecycle_tree_fd(
+            root_fd,
+            manifest,
+            quarantine_fd=quarantine_fd,
+            quarantine_sequence=quarantine_sequence,
         )
-        bound_metadata = os.fstat(root_fd)
-        if (
-            not stat.S_ISDIR(final_metadata.st_mode)
-            or int(final_metadata.st_dev) != expected_device
-            or int(final_metadata.st_ino) != expected_inode
-            or final_metadata.st_uid != controller_uid
-            or int(bound_metadata.st_dev) != expected_device
-            or int(bound_metadata.st_ino) != expected_inode
-            or bound_metadata.st_uid != controller_uid
-        ):
-            raise CollectorError(
-                "integrated lifecycle cleanup identity changed"
-            )
-        os.rmdir(target.name, dir_fd=parent_fd)
+        detached_root = _quarantine_integrated_lifecycle_entry(
+            parent_fd,
+            target.name,
+            manifest,
+            root_fd,
+            quarantine_fd,
+            quarantine_sequence,
+        )
+        os.rmdir(detached_root, dir_fd=quarantine_fd)
+    except BaseException as exc:
+        primary_failure = exc
+        primary_traceback = exc.__traceback__
     finally:
-        if root_fd is not None:
-            os.close(root_fd)
-        os.close(parent_fd)
+        for descriptor in (root_fd, quarantine_fd):
+            if descriptor is None:
+                continue
+            try:
+                os.close(descriptor)
+            except BaseException as exc:
+                cleanup_failures.append(exc)
+        if quarantine_created and parent_fd is not None:
+            try:
+                os.rmdir(quarantine_name, dir_fd=parent_fd)
+            except BaseException as exc:
+                cleanup_failures.append(exc)
+        if parent_fd is not None:
+            try:
+                os.close(parent_fd)
+            except BaseException as exc:
+                cleanup_failures.append(exc)
+    if primary_failure is not None:
+        raise primary_failure.with_traceback(primary_traceback)
+    if cleanup_failures:
+        raise CollectorError(
+            "integrated lifecycle cleanup descriptor failed"
+        ) from cleanup_failures[0]
 
 
 def _run_protected_linux_integrated_lifecycle(
@@ -7241,8 +7485,58 @@ def _run_protected_linux_integrated_lifecycle(
                 expected_uid=FORMAL_RUNNER_UID,
             )
             child.bind_process_identity(str(child_process["start_identity"]))
-            guard.activate()
-            guard.verify()
+            if child._receipt_fd is None:
+                raise CollectorError(
+                    "integrated lifecycle receipt descriptor is unavailable"
+                )
+            readable, _, _ = select.select([child._receipt_fd], [], [], 0.0)
+            if readable:
+                raise CollectorError(
+                    "integrated lifecycle runner receipt was not absent"
+                )
+            exact_inventory = child._formal_group_members()
+            if (
+                len(exact_inventory) != 2
+                or child.process.pid not in exact_inventory
+            ):
+                raise CollectorError(
+                    "integrated lifecycle descendant inventory is invalid"
+                )
+            for pid in exact_inventory:
+                credentials = _integrated_lifecycle_credentials(pid)
+                if (
+                    credentials["uids"] != [FORMAL_RUNNER_UID] * 4
+                    or credentials["gids"] != [FORMAL_RUNNER_GID] * 4
+                    or credentials["groups"] != []
+                ):
+                    raise CollectorError(
+                        "integrated lifecycle credential drop is incomplete"
+                    )
+            descendant_pids = set(exact_inventory) - {child.process.pid}
+            if len(descendant_pids) != 1 or child._receipt_fd is None:
+                raise CollectorError(
+                    "integrated lifecycle worker state is unavailable"
+                )
+            descendant_pid = next(iter(descendant_pids))
+            receipt_descriptor = child._receipt_fd
+            state = {
+                "schema": "txnmem-integrated-lifecycle-worker-state-v1",
+                "runner_pid": child.process.pid,
+                "runner_start_ticks": exact_inventory[child.process.pid],
+                "descendant_pid": descendant_pid,
+                "descendant_start_ticks": exact_inventory[descendant_pid],
+            }
+            _send_integrated_lifecycle_worker_state(
+                worker_channel,
+                state,
+                receipt_descriptor,
+            )
+            child._receipt_fd = None
+            os.close(receipt_descriptor)
+            if worker_channel.recv(1) != b"A":
+                raise CollectorError(
+                    "integrated lifecycle parent guard gate failed"
+                )
             child.release()
             deadline = time.monotonic() + 12.0
             while (
@@ -7279,33 +7573,6 @@ def _run_protected_linux_integrated_lifecycle(
                 raise CollectorError(
                     "integrated lifecycle external completion appeared"
                 )
-            if child._receipt_fd is None:
-                raise CollectorError(
-                    "integrated lifecycle receipt descriptor is unavailable"
-                )
-            readable, _, _ = select.select([child._receipt_fd], [], [], 0.0)
-            if readable:
-                raise CollectorError(
-                    "integrated lifecycle runner receipt was not absent"
-                )
-            exact_inventory = child._formal_group_members()
-            if (
-                len(exact_inventory) != 2
-                or child.process.pid not in exact_inventory
-            ):
-                raise CollectorError(
-                    "integrated lifecycle descendant inventory is invalid"
-                )
-            for pid in exact_inventory:
-                credentials = _integrated_lifecycle_credentials(pid)
-                if (
-                    credentials["uids"] != [FORMAL_RUNNER_UID] * 4
-                    or credentials["gids"] != [FORMAL_RUNNER_GID] * 4
-                    or credentials["groups"] != []
-                ):
-                    raise CollectorError(
-                        "integrated lifecycle credential drop is incomplete"
-                    )
             pidfds_before_term = _integrated_lifecycle_pidfds()
             if child._signal_formal_inventory(
                 exact_inventory, signal.SIGTERM
@@ -7342,27 +7609,10 @@ def _run_protected_linux_integrated_lifecycle(
                 raise CollectorError(
                     "integrated lifecycle pidfd drift targeted a live process"
                 )
-            descendant_pids = set(exact_inventory) - {child.process.pid}
-            if len(descendant_pids) != 1 or child._receipt_fd is None:
+            if worker_channel.send(b"P") != 1:
                 raise CollectorError(
-                    "integrated lifecycle worker state is unavailable"
+                    "integrated lifecycle worker proof was unavailable"
                 )
-            descendant_pid = next(iter(descendant_pids))
-            receipt_descriptor = child._receipt_fd
-            state = {
-                "schema": "txnmem-integrated-lifecycle-worker-state-v1",
-                "runner_pid": child.process.pid,
-                "runner_start_ticks": exact_inventory[child.process.pid],
-                "descendant_pid": descendant_pid,
-                "descendant_start_ticks": exact_inventory[descendant_pid],
-            }
-            _send_integrated_lifecycle_worker_state(
-                worker_channel,
-                state,
-                receipt_descriptor,
-            )
-            child._receipt_fd = None
-            os.close(receipt_descriptor)
             worker_channel.close()
             ctypes.PyDLL(None).sleep(60)
         except BaseException:
@@ -7398,7 +7648,6 @@ def _run_protected_linux_integrated_lifecycle(
                 timeout=15.0,
             )
         )
-        parent_channel.close()
         runner_inventory = {
             int(worker_state["runner_pid"]): str(
                 worker_state["runner_start_ticks"]
@@ -7435,10 +7684,26 @@ def _run_protected_linux_integrated_lifecycle(
             raise CollectorError(
                 "integrated lifecycle descendant escaped the runner group"
             )
-        guard.active = True
-        guard._expected_snapshot = guard.snapshot()
+        guard_owner.activate_retaining_table()
         guard.verify()
         lifecycle_events.append("guard_active")
+        parent_channel.sendall(b"A")
+        previous_channel_timeout = parent_channel.gettimeout()
+        try:
+            parent_channel.settimeout(15.0)
+            worker_proof = parent_channel.recv(1)
+        except (OSError, TimeoutError):
+            raise CollectorError(
+                "integrated lifecycle worker proof was unavailable"
+            ) from None
+        finally:
+            parent_channel.settimeout(previous_channel_timeout)
+        if worker_proof != b"P":
+            raise CollectorError(
+                "integrated lifecycle worker proof was unavailable"
+            )
+        parent_channel.close()
+        guard.verify()
         if not pointer_path.is_file() or not precommit_marker.is_file():
             raise CollectorError("integrated lifecycle pointer is unavailable")
         if _signal_integrated_lifecycle_identities(

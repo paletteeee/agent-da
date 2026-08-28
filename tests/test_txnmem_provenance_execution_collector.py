@@ -8572,6 +8572,586 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             self.assertIn("O_NOFOLLOW", cleanup_source)
             self.assertIn("dir_fd=", cleanup_source)
 
+        with self.subTest(
+            correction="round2-parent-owned-guard-activation"
+        ):
+            table_name = "txnmem_" + "d" * 16
+
+            def activation_probe():
+                table_present = False
+                calls = []
+                guard = collector_module._NftNetworkGuard(
+                    table_name,
+                    backend_ipv4_subnet="172.19.0.0/16",
+                    ingress_ipv4_subnet="172.20.0.0/16",
+                    backend_bridge_interface="br-aaaaaaaaaaaa",
+                    ingress_bridge_interface="br-bbbbbbbbbbbb",
+                    toxiproxy_ingress_ipv4="172.20.0.2",
+                )
+
+                def table_names():
+                    return {table_name} if table_present else set()
+
+                def run(arguments, *, stdin=None, check=True):
+                    nonlocal table_present
+                    calls.append(tuple(arguments))
+                    if arguments == ("-f", "-"):
+                        table_present = True
+                    elif arguments == (
+                        "delete",
+                        "table",
+                        "inet",
+                        table_name,
+                    ):
+                        table_present = False
+                    return SimpleNamespace(
+                        returncode=0,
+                        stdout="",
+                        stderr="",
+                    )
+
+                return guard, calls, table_names, run, lambda: table_present
+
+            (
+                rollback_guard,
+                rollback_calls,
+                rollback_tables,
+                rollback_run,
+                rollback_present,
+            ) = activation_probe()
+            with patch.object(
+                rollback_guard,
+                "_table_names",
+                side_effect=rollback_tables,
+            ), patch.object(
+                rollback_guard,
+                "_run",
+                side_effect=rollback_run,
+            ), patch.object(
+                rollback_guard,
+                "snapshot",
+                side_effect=CollectorError("post-apply snapshot failed"),
+            ):
+                with self.assertRaisesRegex(
+                    CollectorError, "post-apply snapshot"
+                ):
+                    rollback_guard.activate()
+            self.assertIn(
+                ("delete", "table", "inet", table_name),
+                rollback_calls,
+            )
+            self.assertFalse(rollback_present())
+
+            (
+                retained_guard,
+                retained_calls,
+                retained_tables,
+                retained_run,
+                retained_present,
+            ) = activation_probe()
+            retained_owner = guard_owner_type(
+                guard=retained_guard,
+                owner_pid=os.getpid(),
+            )
+            self.assertTrue(
+                callable(
+                    getattr(
+                        retained_owner,
+                        "activate_retaining_table",
+                        None,
+                    )
+                )
+            )
+            with patch.object(
+                collector_module.os,
+                "getpid",
+                return_value=os.getpid() + 1,
+            ), patch.object(
+                retained_guard,
+                "_table_names",
+                side_effect=retained_tables,
+            ), patch.object(
+                retained_guard,
+                "_run",
+                side_effect=retained_run,
+            ), self.assertRaisesRegex(CollectorError, "owner"):
+                retained_owner.activate_retaining_table()
+            self.assertEqual(retained_calls, [])
+
+            with patch.object(
+                retained_guard,
+                "_table_names",
+                side_effect=retained_tables,
+            ), patch.object(
+                retained_guard,
+                "_run",
+                side_effect=retained_run,
+            ), patch.object(
+                retained_guard,
+                "snapshot",
+                side_effect=CollectorError("post-apply snapshot failed"),
+            ):
+                with self.assertRaisesRegex(
+                    CollectorError, "post-apply snapshot"
+                ):
+                    retained_owner.activate_retaining_table()
+            self.assertTrue(retained_guard.active)
+            self.assertTrue(retained_present())
+            self.assertNotIn(
+                ("delete", "table", "inet", table_name),
+                retained_calls,
+            )
+            with self.assertRaisesRegex(CollectorError, "not quiescent"):
+                retained_owner.deactivate_after_quiescence(
+                    lambda: (_ for _ in ()).throw(
+                        CollectorError("lineage not quiescent")
+                    )
+                )
+            self.assertTrue(retained_present())
+
+        with self.subTest(correction="round2-atomic-quarantine-deletion"):
+            real_rename = collector_module.os.rename
+            real_unlink = collector_module.os.unlink
+            real_rmdir = collector_module.os.rmdir
+
+            def inode_survives(parent, expected_inode):
+                for directory, names, files in os.walk(parent):
+                    for name in [*names, *files]:
+                        path = Path(directory) / name
+                        try:
+                            if path.lstat().st_ino == expected_inode:
+                                return True
+                        except FileNotFoundError:
+                            continue
+                return False
+
+            for node_kind in ("file", "directory", "root"):
+                with self.subTest(node_kind=node_kind):
+                    with TemporaryDirectory() as tmp:
+                        parent = Path(tmp).resolve()
+                        lifecycle = parent / "lifecycle"
+                        lifecycle.mkdir(mode=0o700)
+                        candidate = lifecycle / "candidate"
+                        candidate.mkdir(mode=0o700)
+                        if node_kind == "file":
+                            target = candidate / "swap-file"
+                            target.write_bytes(b"bound")
+                        elif node_kind == "directory":
+                            target = candidate / "swap-directory"
+                            target.mkdir(mode=0o700)
+                        else:
+                            target = lifecycle
+                        original_inode = target.lstat().st_ino
+                        target_name = target.name
+                        survivor_name = target_name + ".bound-survivor"
+                        replacement_inode = None
+                        swapped = False
+
+                        def install_swap(directory_fd):
+                            nonlocal replacement_inode, swapped
+                            if swapped:
+                                return
+                            swapped = True
+                            real_rename(
+                                target_name,
+                                survivor_name,
+                                src_dir_fd=directory_fd,
+                                dst_dir_fd=directory_fd,
+                            )
+                            if node_kind == "file":
+                                descriptor = os.open(
+                                    target_name,
+                                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                                    0o600,
+                                    dir_fd=directory_fd,
+                                )
+                                try:
+                                    os.write(descriptor, b"replacement")
+                                finally:
+                                    os.close(descriptor)
+                            else:
+                                os.mkdir(
+                                    target_name,
+                                    mode=0o700,
+                                    dir_fd=directory_fd,
+                                )
+                            replacement_inode = os.stat(
+                                target_name,
+                                dir_fd=directory_fd,
+                                follow_symlinks=False,
+                            ).st_ino
+
+                        def swapping_rename(
+                            source,
+                            destination,
+                            *args,
+                            **kwargs,
+                        ):
+                            if source == target_name and not swapped:
+                                install_swap(kwargs.get("src_dir_fd"))
+                            return real_rename(
+                                source,
+                                destination,
+                                *args,
+                                **kwargs,
+                            )
+
+                        def swapping_unlink(name, *args, **kwargs):
+                            if name == target_name and not swapped:
+                                install_swap(kwargs.get("dir_fd"))
+                            return real_unlink(name, *args, **kwargs)
+
+                        def swapping_rmdir(name, *args, **kwargs):
+                            if name == target_name and not swapped:
+                                install_swap(kwargs.get("dir_fd"))
+                            return real_rmdir(name, *args, **kwargs)
+
+                        parent_metadata = parent.stat()
+                        lifecycle_metadata = lifecycle.stat()
+                        removal_failure = None
+                        with patch.object(
+                            collector_module.os,
+                            "rename",
+                            side_effect=swapping_rename,
+                        ), patch.object(
+                            collector_module.os,
+                            "unlink",
+                            side_effect=swapping_unlink,
+                        ), patch.object(
+                            collector_module.os,
+                            "rmdir",
+                            side_effect=swapping_rmdir,
+                        ):
+                            try:
+                                remove_tree(
+                                    lifecycle,
+                                    expected_parent_device=int(
+                                        parent_metadata.st_dev
+                                    ),
+                                    expected_parent_inode=int(
+                                        parent_metadata.st_ino
+                                    ),
+                                    expected_device=int(
+                                        lifecycle_metadata.st_dev
+                                    ),
+                                    expected_inode=int(
+                                        lifecycle_metadata.st_ino
+                                    ),
+                                    controller_uid=os.getuid(),
+                                    runner_uid=os.getuid(),
+                                    runner_owned_relative=Path("candidate"),
+                                )
+                            except BaseException as exc:
+                                removal_failure = exc
+                        self.assertTrue(swapped)
+                        self.assertIsNotNone(removal_failure)
+                        self.assertIsNotNone(replacement_inode)
+                        self.assertTrue(
+                            inode_survives(parent, original_inode)
+                        )
+                        self.assertTrue(
+                            inode_survives(parent, replacement_inode)
+                        )
+                        guard_events = []
+                        cleanup_owner = guard_owner_type(
+                            guard=SimpleNamespace(
+                                deactivate=lambda: guard_events.append(
+                                    "deactivate"
+                                )
+                            ),
+                            owner_pid=os.getpid(),
+                        )
+                        with self.assertRaises(type(removal_failure)):
+                            cleanup_owner.deactivate_after_quiescence(
+                                lambda: (_ for _ in ()).throw(
+                                    removal_failure
+                                )
+                            )
+                        self.assertEqual(guard_events, [])
+
+        with self.subTest(correction="round2-exact-scm-rights-receive"):
+            int_size = collector_module.array.array("i").itemsize
+
+            class MutatingReceiveSocket(socket.socket):
+                def __init__(
+                    self,
+                    *,
+                    fileno,
+                    mutation,
+                    restore_failure,
+                    fd_capacity,
+                ):
+                    super().__init__(fileno=fileno)
+                    self.mutation = mutation
+                    self.restore_failure = restore_failure
+                    self.fd_capacity = fd_capacity
+                    self.timeout_writes = 0
+                    self.received_descriptors = []
+
+                def settimeout(self, value):
+                    self.timeout_writes += 1
+                    if self.restore_failure and self.timeout_writes == 2:
+                        raise OSError("timeout restore failed")
+                    return super().settimeout(value)
+
+                def recvmsg(self, bufsize, ancbufsize=0, flags=0):
+                    if self.fd_capacity > 1:
+                        ancbufsize = socket.CMSG_SPACE(
+                            int_size * self.fd_capacity
+                        )
+                    payload, ancillary, message_flags, address = (
+                        super().recvmsg(
+                            bufsize,
+                            ancbufsize,
+                            flags,
+                        )
+                    )
+                    for level, kind, data in ancillary:
+                        if (
+                            level == socket.SOL_SOCKET
+                            and kind == socket.SCM_RIGHTS
+                        ):
+                            values = collector_module.array.array("i")
+                            usable = len(data) - (len(data) % int_size)
+                            values.frombytes(data[:usable])
+                            self.received_descriptors.extend(values)
+                    if self.mutation == "unexpected":
+                        ancillary = [
+                            *ancillary,
+                            (socket.SOL_SOCKET, socket.SCM_RIGHTS + 97, b""),
+                        ]
+                    elif self.mutation == "non-integral":
+                        level, kind, data = ancillary[0]
+                        ancillary = [(level, kind, data + b"x")]
+                    elif self.mutation == "message-truncated":
+                        message_flags |= getattr(socket, "MSG_TRUNC", 0x20)
+                    return payload, ancillary, message_flags, address
+
+            receive_cases = (
+                ("restore", None, True, 1, "timeout restoration"),
+                (
+                    "unexpected-primary",
+                    "unexpected",
+                    True,
+                    1,
+                    "worker state is invalid",
+                ),
+                (
+                    "unexpected",
+                    "unexpected",
+                    False,
+                    1,
+                    "worker state is invalid",
+                ),
+                (
+                    "non-integral",
+                    "non-integral",
+                    False,
+                    1,
+                    "worker state is invalid",
+                ),
+                (
+                    "multiple",
+                    None,
+                    False,
+                    2,
+                    "worker state is invalid",
+                ),
+                (
+                    "message-truncated",
+                    "message-truncated",
+                    False,
+                    1,
+                    "worker state is invalid",
+                ),
+            )
+            state_payload = collector_module.canonical_json_bytes(state)
+            real_close = collector_module.os.close
+            for (
+                case_name,
+                mutation,
+                restore_failure,
+                fd_count,
+                expected_error,
+            ) in receive_cases:
+                with self.subTest(protocol_case=case_name):
+                    sender, base_receiver = socket.socketpair()
+                    receiver = MutatingReceiveSocket(
+                        fileno=base_receiver.detach(),
+                        mutation=mutation,
+                        restore_failure=restore_failure,
+                        fd_capacity=fd_count,
+                    )
+                    pipes = [os.pipe() for _ in range(fd_count)]
+                    sent_descriptors = [pair[0] for pair in pipes]
+                    descriptor_bytes = collector_module.array.array(
+                        "i", sent_descriptors
+                    ).tobytes()
+                    sender.sendmsg(
+                        [state_payload],
+                        [
+                            (
+                                socket.SOL_SOCKET,
+                                socket.SCM_RIGHTS,
+                                descriptor_bytes,
+                            )
+                        ],
+                    )
+                    close_counts = {}
+
+                    def tracked_close(descriptor):
+                        close_counts[descriptor] = (
+                            close_counts.get(descriptor, 0) + 1
+                        )
+                        return real_close(descriptor)
+
+                    caught = None
+                    returned_descriptor = None
+                    try:
+                        with patch.object(
+                            collector_module.os,
+                            "close",
+                            side_effect=tracked_close,
+                        ):
+                            try:
+                                _observed, returned_descriptor = receive_state(
+                                    receiver,
+                                    timeout=1.0,
+                                )
+                            except BaseException as exc:
+                                caught = exc
+                    finally:
+                        sender.close()
+                        receiver.close()
+                        for read_descriptor, write_descriptor in pipes:
+                            real_close(read_descriptor)
+                            real_close(write_descriptor)
+                        if returned_descriptor is not None:
+                            real_close(returned_descriptor)
+                    try:
+                        self.assertIsInstance(caught, CollectorError)
+                        self.assertRegex(str(caught), expected_error)
+                        self.assertEqual(
+                            len(receiver.received_descriptors),
+                            fd_count,
+                        )
+                        for descriptor in receiver.received_descriptors:
+                            self.assertEqual(close_counts.get(descriptor), 1)
+                            with self.assertRaises(OSError):
+                                os.fstat(descriptor)
+                    finally:
+                        for descriptor in receiver.received_descriptors:
+                            try:
+                                real_close(descriptor)
+                            except OSError:
+                                pass
+
+        with self.subTest(
+            correction="round2-failure-accumulating-cleanup"
+        ):
+            class PrimaryUnlinkFailure(BaseException):
+                pass
+
+            class SecondaryCloseFailure(BaseException):
+                pass
+
+            primary = PrimaryUnlinkFailure("first-unlink-primary")
+            origin = []
+            unlink_calls = []
+            unlink_failed = False
+            close_failed = False
+            real_unlink = collector_module.os.unlink
+            real_close = collector_module.os.close
+
+            def accumulating_unlink(name, *args, **kwargs):
+                nonlocal unlink_failed
+                unlink_calls.append(name)
+                if not unlink_failed:
+                    unlink_failed = True
+                    try:
+                        raise primary
+                    except BaseException as exc:
+                        origin.append(exc.__traceback__)
+                        raise
+                return real_unlink(name, *args, **kwargs)
+
+            def accumulating_close(descriptor):
+                nonlocal close_failed
+                is_regular = False
+                try:
+                    is_regular = collector_module.stat.S_ISREG(
+                        os.fstat(descriptor).st_mode
+                    )
+                except OSError:
+                    pass
+                if unlink_failed and is_regular and not close_failed:
+                    close_failed = True
+                    real_close(descriptor)
+                    raise SecondaryCloseFailure("file-close-secondary")
+                return real_close(descriptor)
+
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                lifecycle = parent / "lifecycle"
+                lifecycle.mkdir(mode=0o700)
+                candidate = lifecycle / "candidate"
+                candidate.mkdir(mode=0o700)
+                (candidate / "a").write_bytes(b"a")
+                (candidate / "b").write_bytes(b"b")
+                parent_metadata = parent.stat()
+                lifecycle_metadata = lifecycle.stat()
+                caught = None
+                caught_traceback = None
+                with patch.object(
+                    collector_module.os,
+                    "unlink",
+                    side_effect=accumulating_unlink,
+                ), patch.object(
+                    collector_module.os,
+                    "close",
+                    side_effect=accumulating_close,
+                ):
+                    try:
+                        remove_tree(
+                            lifecycle,
+                            expected_parent_device=int(
+                                parent_metadata.st_dev
+                            ),
+                            expected_parent_inode=int(
+                                parent_metadata.st_ino
+                            ),
+                            expected_device=int(lifecycle_metadata.st_dev),
+                            expected_inode=int(lifecycle_metadata.st_ino),
+                            controller_uid=os.getuid(),
+                            runner_uid=os.getuid(),
+                            runner_owned_relative=Path("candidate"),
+                        )
+                    except BaseException as exc:
+                        caught = exc
+                        caught_traceback = exc.__traceback__
+                self.assertIs(caught, primary)
+                self.assertTrue(close_failed)
+                self.assertGreaterEqual(len(unlink_calls), 2)
+                traceback_nodes = []
+                while caught_traceback is not None:
+                    traceback_nodes.append(caught_traceback)
+                    caught_traceback = caught_traceback.tb_next
+                self.assertIn(origin[0], traceback_nodes)
+                cleanup_events = []
+                cleanup_owner = guard_owner_type(
+                    guard=SimpleNamespace(
+                        deactivate=lambda: cleanup_events.append(
+                            "deactivate"
+                        )
+                    ),
+                    owner_pid=os.getpid(),
+                )
+                with self.assertRaises(PrimaryUnlinkFailure):
+                    cleanup_owner.deactivate_after_quiescence(
+                        lambda: (_ for _ in ()).throw(caught)
+                    )
+                self.assertEqual(cleanup_events, [])
+
         protected_primitives = bool(
             sys.platform.startswith("linux")
             and hasattr(os, "geteuid")

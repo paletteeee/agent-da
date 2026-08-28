@@ -647,3 +647,305 @@ on the required later protected-host zero-skip run and independent residue
 inventory. The deferred Minor about duplicated collector/runner lifecycle
 material remains for final whole-branch review, as directed; Fix Round 1 did not
 expand scope to address it.
+
+## Fix Round 2
+
+Date: 2026-08-29
+
+Starting commit: `317cdf2`
+
+### Implementation and exact lifecycle
+
+Fix Round 2 keeps the one accepted lifecycle and exact selector. It does not
+add a second selector, invoke another test method, duplicate a runner workload,
+or add a public activation route.
+
+The corrected lifecycle is:
+
+1. The surviving controller parent creates and PID-binds the nft guard owner
+   before `fork`. The worker starts the existing gated immutable runner, binds
+   the runner and resistant descendant PID/start identities, proves the exact
+   credential drop, and transfers the actual runner receipt read FD plus the
+   two exact identities to the parent over `SCM_RIGHTS`. It then blocks on the
+   parent's guard-active byte.
+2. The surviving parent validates the transferred lineage and invokes the real
+   `_NftNetworkGuard` activation. Integrated activation deliberately retains a
+   possibly created table when the post-apply snapshot fails; no rollback
+   delete is available to the worker. Only after activation and verification
+   does the parent release the worker, which releases the real runner.
+3. The existing immutable runner publishes one real anonymous-inode pointer,
+   preserves its internal bundle-object `COMPLETED.json`, deliberately omits
+   the distinct runner/collector receipt, and leaves the distinct external
+   collector completion entry absent. The worker proves the real pointer and
+   resistant descendant behavior, using only already recorded PID/start
+   identities and pidfds.
+4. The parent kills the collector worker through its exact revalidated pidfd,
+   proves kernel death and reaping of worker/runner/descendant, then reads the
+   transferred receipt FD to byte-empty EOF. That actual absent result is fed
+   into the ordinary collector completion writer, the real seal function, and
+   the real promotion validator; all three required rejection boundaries are
+   observed while the pointer remains real.
+5. Tree cleanup binds parent, root, every directory, and every regular file by
+   no-follow descriptor and owner/type/device/inode. Each object is atomically
+   detached into a same-filesystem root-owned `0700` unique quarantine before
+   its detached name and held FD are revalidated. Only the detached,
+   revalidated object can be destroyed. Cleanup accumulates the first failure
+   and original traceback while continuing safe siblings/descendants and every
+   owned FD close.
+6. The surviving parent alone can remove the nft table. Both normal and
+   exceptional removal require exact lineage death/reaping, assertion-only UID
+   emptiness, pidfd baseline, successful bound-tree cleanup, subreaper restore,
+   and zero cleanup failures. Identity drift, quarantine mismatch, close
+   failure, or any other cleanup failure keeps the guard active and fails
+   closed.
+
+Ordinary diagnostic publication behavior is unchanged: its named compatibility
+fallback remains the default. The integrated private exact enum remains the
+only path that forces the real anonymous-inode proof. Ordinary registration,
+the frozen formal matrix, and the authoritative
+`txnmem-formal-provenance-smoke-v2` spelling are unchanged.
+
+### Binding TDD RED and GREEN
+
+Only the existing exact selector was extended:
+
+```text
+tests.test_txnmem_provenance_execution_collector.ProvenanceExecutionCollectorTests.test_protected_linux_integrated_root_drop_parent_death_pidfd_guard_pointer_zero_residue
+```
+
+Before any Fix Round 2 production edit, the selector added four pre-skip
+behavior groups. The exact RED command was:
+
+```text
+PYTHONPATH=src python3 -m unittest tests.test_txnmem_provenance_execution_collector.ProvenanceExecutionCollectorTests.test_protected_linux_integrated_root_drop_parent_death_pidfd_guard_pointer_zero_residue -v
+```
+
+Sanitized RED outcome: status 1; 10 assertion failures; 0 errors; 1 explicit
+protected-body skip. The failures map to one real post-apply nft snapshot
+rollback/delete, three same-name replacement deletions (regular file, nested
+directory, and root), five SCM ownership/protocol cases (timeout restoration,
+unexpected ancillary with and without restore failure, non-integral control
+data, and message truncation), and one first-failure cleanup stop/replacement.
+The multiple-FD SCM case was present in the same RED group and already rejected
+by the narrow legacy count check; the failing sibling cases bound the missing
+outer ownership and closed-protocol behavior while the multiple-FD case
+retained its no-leak contract.
+
+After only the guard-ownership production correction, the same command gave
+status 1; 9 failures; 0 errors; 1 protected-body skip. The nft correction was
+GREEN while all remaining correction failures stayed RED.
+
+After atomic quarantine and failure accumulation, the same command gave status
+1; 5 SCM failures; 1 existing dangling-root normalization error; 1
+protected-body skip. All three swap cases and the failure-accumulation case
+were GREEN. The dangling-root `ENOTDIR` was normalized to the existing
+fail-closed identity `CollectorError` contract.
+
+Final GREEN used the same exact command. Sanitized outcome: status 0; the four
+pre-skip correction groups completed with no failure/error; unittest then
+reported the protected lifecycle body as exactly 1 explicit skip. That skip is
+not counted as a pass.
+
+The behavior groups prove:
+
+- `round2-parent-owned-guard-activation`: a real `_NftNetworkGuard.activate`
+  with a post-apply snapshot failure demonstrates the old delete, while the
+  PID-bound integrated owner rejects a non-owner before any nft call and the
+  parent activation retains the real table/active state. Failed quiescence
+  cannot deactivate it.
+- `round2-atomic-quarantine-deletion`: a swap is injected at the real atomic
+  rename boundary after descriptor validation for a regular file, nested
+  directory, and root. In every case both original and replacement inode
+  survive, cleanup fails, and the guard-removal callback is not reached.
+- `round2-exact-scm-rights-receive`: real socket pairs and real SCM_RIGHTS FDs
+  cover timeout-restore failure, unexpected control records, protocol-primary
+  preservation when restore also fails, non-integral control bytes, multiple
+  FDs, and `MSG_TRUNC`. Every actually received FD is attempted exactly once by
+  the receiver and is closed on every rejection (`fstat` then fails).
+- `round2-failure-accumulating-cleanup`: the sorted first sibling's quarantine
+  unlink raises a specific `BaseException`; its FD is really closed and then a
+  secondary close exception is injected. The later sibling is still attempted,
+  the exact primary object and originating traceback survive, and guard removal
+  is blocked.
+
+### Changed files and helper justification
+
+Fix Round 2 changes exactly these files:
+
+- `src/txnmem_provenance_execution_collector.py`: corrects guard activation
+  ownership, exact SCM receipt ownership, atomic lifecycle-tree removal,
+  failure accumulation, and the existing one-lifecycle parent/worker
+  handshake. It does not change public collection parameters or ordinary
+  authorization/publication behavior.
+- `tests/test_txnmem_provenance_execution_collector.py`: extends only the sole
+  exact Task 7C selector with the four required pre-skip behavior groups. No
+  other test method or test module is changed and no test method is called from
+  the selector.
+- `.superpowers/sdd/2026-08-28-formal-progress-fail-fast-v6/task-7c-report.md`:
+  records this round's exact implementation, TDD evidence, proof map,
+  verification, skips, self-review, and remaining protected-host blocker.
+
+Every new or materially changed production helper is justified here:
+
+- `_NftNetworkGuard._activate_retaining_table`, plus its integrated owner PID
+  checks in `activate`/`deactivate`: uses the real nft check/apply/snapshot but
+  prevents the ordinary rollback delete after table creation in this private
+  lifecycle. Ordinary guards have no integrated owner PID and retain their
+  accepted rollback behavior.
+- `_IntegratedLifecycleGuardOwner.activate_retaining_table`: makes the
+  surviving parent PID the sole integrated activation caller, complementing
+  its existing sole-removal/quiescence boundary.
+- `_receive_integrated_lifecycle_worker_state`: places every descriptor
+  received from `recvmsg` under one exception-safe ownership scope through
+  ancillary parsing, canonical-state validation, non-inheritable setup,
+  timeout restoration, close, or transfer. It closes all complete SCM_RIGHTS
+  integers and preserves a protocol primary over restore/close failures.
+- `_integrated_lifecycle_manifest_identity_matches`: one closed comparison for
+  the only accepted regular-file/directory type plus exact owner/device/inode;
+  it prevents divergent checks across detach and recursive cleanup.
+- `_quarantine_integrated_lifecycle_entry`: atomically renames one bound name
+  to a unique protected quarantine entry and revalidates both detached name and
+  held FD before returning a destroyable name. Mismatch leaves the unbound
+  object intact and raises.
+- `_delete_integrated_lifecycle_tree_fd`: consumes the existing bound manifest,
+  quarantines each child before destruction, captures the first exception and
+  traceback, continues every still-safe child/descendant, attempts every child
+  FD close, and raises the original primary last.
+- `_remove_integrated_lifecycle_tree`: creates and binds the same-filesystem
+  root-owned quarantine, applies the atomic rule to the lifecycle root itself,
+  closes all root/quarantine/parent FDs even after failure, preserves the
+  operation primary, and normalizes a dangling/no-follow root to the existing
+  identity failure.
+- `_run_protected_linux_integrated_lifecycle`: moves real guard activation to
+  the surviving parent and adds one parent/worker byte gate around the existing
+  runner release. It transfers the actual receipt FD before activation so the
+  parent can retain it even when the worker later dies; it adds no independent
+  lifecycle implementation.
+
+No other production helper or test module changed in Fix Round 2.
+
+### Proof map for every Fix Round 2 finding
+
+| Finding | Production proof | Behavioral proof |
+| --- | --- | --- |
+| Critical: all post-create nft removal is parent-owned | Integrated owner PID is bound before fork. Worker sends state/receipt then waits. Parent alone calls real activation and release; integrated snapshot failure leaves `active=True` and never invokes delete. Both `activate` and `deactivate` reject inherited non-owner PIDs. Finally removal is gated by complete quiescence and zero cleanup failures. | Real post-apply snapshot fault shows the ordinary old rollback delete, non-owner calls make zero nft calls, parent-owned integrated activation retains the table, and failed quiescence performs no delete. Source closure has no worker guard call. |
+| Important: atomic deletion binding | Every file, nested directory, and root is atomically renamed by `dir_fd` into unique mode-0700 quarantine, then compared against its manifest and held `O_NOFOLLOW` FD before unlink/rmdir. Mismatch is retained and raised. | Three rename-boundary swaps prove both original and replacement inode survive and guard deactivation remains unreachable. |
+| Important: exact/exception-safe SCM_RIGHTS receive | One outer ownership scope captures all complete rights integers immediately after `recvmsg`; protocol requires one exact SOL_SOCKET/SCM_RIGHTS record of one-int size and rejects extra/non-rights/non-integral/multiple/truncated control or payload. Timeout restore and every close are attempted without replacing the first error; success transfers exactly one non-inheritable FD. | Six real descriptor-transfer cases prove invalid/restore primary selection, exact-once receiver close, and no live received FD after rejection. Both `MSG_CTRUNC` and `MSG_TRUNC` are closed source checks; `MSG_TRUNC` is fault-injected. |
+| Important: failure-accumulating cleanup | Recursive cleanup records the first exception plus traceback, continues safe sorted siblings/descendants, closes every owned child FD, and raises the exact first exception last. The lifecycle finally treats any cleanup failure as a guard-removal veto. | First sibling unlink failure plus secondary close failure still reaches the later sibling; the exact primary and traceback are asserted; deactivation events remain empty. |
+| Important: all behavior bindings precede protected skip | The production path is not needed for contract checks on non-protected systems. | All four correction labels execute before the one platform/root/kernel/filesystem skip in the sole exact selector. |
+
+Accepted contracts remain intact: exact recorded PID/start pidfd identities only;
+UID inventory is assertion-only; actual receipt FD/EOF reaches the real
+completion writer, seal, and promotion validator; the private fault enums each
+have one exact member and default `None`; no public route enables them; the
+integrated diagnostic path forces the real anonymous pointer without changing
+ordinary named diagnostic fallback; fixed result counts and bounded sanitized
+output remain unchanged.
+
+### Verification commands and sanitized outcomes
+
+Reviewer-focused seven selectors:
+
+```text
+PYTHONPATH=src python3 -m unittest tests.test_txnmem_provenance_execution_collector.ProvenanceExecutionCollectorTests.test_collector_writes_launch_before_run_and_completion_after_exact_candidate tests.test_txnmem_provenance_execution_collector.ProvenanceExecutionCollectorTests.test_candidate_seal_is_tree_complete_and_receipt_bound tests.test_txnmem_provenance_execution_collector.ProvenanceExecutionCollectorTests.test_formal_pidfds_open_all_then_revalidate_start_identity_before_signal tests.test_txnmem_provenance_execution_collector.ProvenanceExecutionCollectorTests.test_formal_pidfd_partial_open_failure_closes_once_without_signal tests.test_txnmem_provenance_execution_collector.ProvenanceExecutionCollectorTests.test_formal_pidfd_close_failure_never_broadens_target tests.test_txnmem_provenance_execution_collector.ProvenanceExecutionCollectorTests.test_cleanup_identity_failure_preserves_guard_and_is_hard_failure tests.test_txnmem_provenance_execution_collector.ProvenanceExecutionCollectorTests.test_protected_linux_integrated_root_drop_parent_death_pidfd_guard_pointer_zero_residue
+```
+
+Sanitized outcome: status 0; 7 tests in 0.047s; 6 passes; 1 explicit
+protected-body skip; 0 failures/errors.
+
+Adjacent collector/smoke/performance:
+
+```text
+PYTHONPATH=src python3 -m unittest tests.test_txnmem_provenance_execution_collector tests.test_txnmem_formal_smoke tests.test_txnmem_provenance_performance
+```
+
+Sanitized outcome: status 0; 284 tests in 8.502s; 270 passes; 14 explicit
+environment/protected skips; 0 failures/errors.
+
+Task 7 Step 6:
+
+```text
+PYTHONPATH=src python3 -m unittest tests.test_txnmem_provenance_progress tests.test_txnmem_formal_controller tests.test_txnmem_formal_smoke tests.test_real_backend_script
+```
+
+Sanitized outcome: status 0; 142 tests in 1.903s; 140 passes; 2 explicit
+environment skips; 0 failures/errors.
+
+Explicit protected gates used the same 14-selector command listed in Fix Round
+1. Sanitized outcome: status 0; 14 tests in 0.031s; 0 protected passes; 14
+explicit platform/root/kernel/filesystem skips; 0 failures/errors. These skips
+are not included in any pass count.
+
+The one Fix Round 2 full-suite run, after all production/test edits:
+
+```text
+PYTHONPATH=src python3 -m unittest discover -s tests
+```
+
+Sanitized outcome: status 0; 1,185 tests in 124.546s; 1,166 passes; 19 explicit
+platform/root/environment skips; 0 failures/errors.
+
+Static/diff/security checks:
+
+```text
+env PYTHONPYCACHEPREFIX=/private/tmp/txnmem-task7c-r2-pycache python3 -m py_compile src/txnmem_provenance_execution_collector.py tests/test_txnmem_provenance_execution_collector.py
+git diff --check
+git diff 8c05f12 -- tests/test_txnmem_provenance_execution_collector.py | rg -c '^\+\s+def test_'
+git diff 8c05f12 -- src tests configs scripts | rg '^\+.*(add_argument|ArgumentParser|TXNMEM_.*INTEGRATED|INTEGRATED.*TXNMEM_|os\.environ.*INTEGRATED|getenv.*INTEGRATED)'
+git diff 8c05f12 -- src tests configs scripts | rg '^\+.*(password\s*=|passwd\s*=|token\s*=|secret\s*=|api[_-]?key\s*=|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY)'
+git diff 8c05f12 -- src tests configs scripts | rg '^\+.*(_formal_uid_processes.*(kill|signal)|killall|pkill|kill\s+--?uid|kill\s+-u)'
+rg -n 'self\.test_[A-Za-z0-9_]+' tests/test_txnmem_provenance_execution_collector.py
+rg -n --pcre2 'txnmem-formal-provenance-smoke-v(?!2)' src tests configs scripts
+```
+
+Sanitized outcomes: `py_compile` status 0 using the private temporary cache;
+`git diff --check` status 0; exactly 1 selector added from accepted Task 7B
+commit `8c05f12`; 0 public integrated enable-route hits; 0 credential-literal
+assignment hits; 0 UID-wide signal hits; 0 cross-test-method calls; 0 smoke
+schema spellings other than v2. The first `py_compile` attempt used macOS's
+default cache location and failed with a cache-directory permission error
+before compilation; rerunning the exact files with the private temporary cache
+gave status 0. No code failure was hidden.
+
+All verbose outputs were redirected to private temporary files. Only aggregate
+counts and selector names are recorded here.
+
+### Fix Round 2 self-review and concerns
+
+- The four accepted findings were reread verbatim and each is mapped above to
+  both a production boundary and behavior in the only selector before skip.
+- Worker source has no guard activation or removal call. The inherited real
+  guard additionally rejects direct activation/deactivation from any PID other
+  than the bound surviving parent, before an nft command. Snapshot failure
+  after apply retains the table and makes exceptional cleanup prove complete
+  quiescence before parent removal.
+- There is no UID-derived signaling path. Every signal target comes from the
+  worker/runner/descendant PID/start map, all pidfds open before all identities
+  revalidate, and any drift stops delivery and keeps the guard.
+- Quarantine is unique, root-owned, mode `0700`, on the expected device, and
+  held open. Destruction uses only its detached descriptor-relative names after
+  held-FD revalidation. A same-name replacement can be quarantined but cannot
+  be destroyed because its inode mismatches; both it and the originally bound
+  object remain recoverable and guard removal is vetoed.
+- SCM ownership starts immediately after the real `recvmsg`; all complete
+  SCM_RIGHTS integers are collected before validation. Restore, parse,
+  canonical validation, inheritable setup, close, and transfer have one owner.
+  A primary protocol error survives secondary timeout/close errors.
+- Cleanup catches `BaseException` intentionally at ownership boundaries so
+  even injected non-`Exception` failures cannot skip later safe children or FD
+  closes. It re-raises the exact primary with its original traceback and lets
+  the lifecycle's zero-cleanup-failure predicate veto guard removal.
+- No formal identity or nonce was created or reused. No remote service,
+  database, raw log/payload, credential, server coordinate, username, nonce, or
+  private remote path was accessed or exposed. No subagent/reviewer was
+  dispatched; no push or merge was performed.
+- The large pre-existing Task 7C delta was not expanded into another lifecycle.
+  This round changes only one production module, the one existing selector,
+  and this report. The deferred Minor concerning duplicated lifecycle material
+  remains deliberately unaddressed, as instructed.
+
+Remaining concern/blocker: this machine is not the protected Linux/root/kernel/
+filesystem host. The exact integrated kernel body and all 14 protected gates
+therefore have zero protected passes locally and must be rerun from the final
+commit with zero skips, followed by the independent residue inventory. No
+other known Critical or Important concern remains after local verification.
