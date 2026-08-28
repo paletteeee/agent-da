@@ -710,6 +710,131 @@ def _dispatch(
     return result
 
 
+def _run_protected_linux_integrated_lifecycle(
+    project_root: Path,
+) -> dict[str, Any]:
+    """Drive the one private protected lifecycle from committed source bytes."""
+
+    if (
+        os.name != "posix"
+        or not sys.platform.startswith("linux")
+        or not hasattr(os, "geteuid")
+        or os.geteuid() != 0
+    ):
+        raise FormalControllerError(
+            "integrated lifecycle requires the protected Linux controller"
+        )
+    root = project_root.expanduser().absolute().resolve(strict=True)
+    approved = _verify_installed_controller(root)
+    bootstrap_before = (
+        set(BOOTSTRAP_ROOT.iterdir()) if BOOTSTRAP_ROOT.is_dir() else set()
+    )
+    export = _create_committed_export(root, approved)
+    source_directory = export.path / "src"
+    original_modules = set(sys.modules)
+    primary: BaseException | None = None
+    result: dict[str, Any] | None = None
+    try:
+        if "txnmem_provenance_execution_collector" in sys.modules:
+            raise FormalControllerError(
+                "integrated lifecycle collector was pre-imported"
+            )
+        sys.path.insert(0, str(source_directory))
+        collector = importlib.import_module(
+            "txnmem_provenance_execution_collector"
+        )
+        collector_file = Path(str(getattr(collector, "__file__", ""))).resolve(
+            strict=True
+        )
+        try:
+            collector_file.relative_to(export.path)
+        except ValueError:
+            raise FormalControllerError(
+                "integrated lifecycle collector escaped committed export"
+            ) from None
+        entry = getattr(
+            collector, "_run_protected_linux_integrated_lifecycle", None
+        )
+        fault_type = getattr(collector, "_IntegratedLifecycleFault", None)
+        if not callable(entry) or fault_type is None:
+            raise FormalControllerError(
+                "integrated lifecycle collector entry is unavailable"
+            )
+        fault = fault_type.POINTER_WITHOUT_RECEIPT
+        controller_context = {
+            "schema": _CONTEXT_SCHEMA,
+            "source_commit": approved.commit,
+            "source_manifest": {
+                "schema": "txnmem-provenance-source-manifest-v1",
+                "source_commit": approved.commit,
+                "files": [
+                    {"path": path, "blob_sha256": digest}
+                    for path, digest in approved.files
+                ],
+            },
+            "approval_manifest_sha256": approved.manifest_sha256,
+        }
+        observed = entry(
+            project_root=root,
+            _controller_context=controller_context,
+            fault=fault,
+        )
+        if not isinstance(observed, Mapping):
+            raise FormalControllerError(
+                "integrated lifecycle collector result is invalid"
+            )
+        result = dict(observed)
+    except BaseException as exc:
+        primary = exc
+    finally:
+        for name, module in list(sys.modules.items()):
+            if name in original_modules:
+                continue
+            module_file = getattr(module, "__file__", None)
+            if module_file is None:
+                continue
+            try:
+                Path(str(module_file)).resolve().relative_to(export.path)
+            except (OSError, ValueError):
+                continue
+            sys.modules.pop(name, None)
+        if sys.path and sys.path[0] == str(source_directory):
+            sys.path.pop(0)
+        else:
+            try:
+                sys.path.remove(str(source_directory))
+            except ValueError:
+                if primary is None:
+                    primary = FormalControllerError(
+                        "integrated lifecycle import path changed"
+                    )
+        try:
+            _remove_export(export)
+        except BaseException as cleanup:
+            if primary is None:
+                primary = cleanup
+            else:
+                try:
+                    primary.add_note(
+                        "integrated bootstrap cleanup also failed: "
+                        f"{type(cleanup).__name__}"
+                    )
+                except AttributeError:
+                    pass
+    if primary is not None:
+        raise primary.with_traceback(primary.__traceback__)
+    if result is None:
+        raise FormalControllerError("integrated lifecycle result is unavailable")
+    bootstrap_after = (
+        set(BOOTSTRAP_ROOT.iterdir()) if BOOTSTRAP_ROOT.is_dir() else set()
+    )
+    if bootstrap_after != bootstrap_before:
+        raise FormalControllerError("integrated lifecycle bootstrap residue remains")
+    result["installed_controller_proven"] = True
+    result["committed_export_proven"] = True
+    return result
+
+
 def _smoke_output_path(arguments: Sequence[str], project_root: Path) -> Path:
     target, _forwarded = _bind_smoke_output_arguments(arguments, project_root)
     return target

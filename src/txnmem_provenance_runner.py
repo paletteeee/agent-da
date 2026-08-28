@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import enum
 import hashlib
 import importlib
 import json
@@ -20,7 +21,9 @@ FORMAL_RUNNER_UID = 65532
 FORMAL_RUNNER_GID = 65532
 _PR_GET_DUMPABLE = 3
 _PR_SET_DUMPABLE = 4
+_PR_SET_PDEATHSIG = 1
 _PR_GET_NO_NEW_PRIVS = 39
+_PR_GET_PDEATHSIG = 2
 _SMOKE_V2_SCENARIOS = frozenset(
     {
         "normal_prefix",
@@ -34,6 +37,18 @@ _SMOKE_V2_RECEIPT_SCHEMA = "txnmem-provenance-smoke-child-receipt-v2"
 
 class _RunnerInterruption(BaseException):
     """The protected runner received a termination request."""
+
+
+class _IntegratedLifecycleFault(enum.Enum):
+    """The sole private fault accepted by the protected lifecycle probe."""
+
+    POINTER_WITHOUT_RECEIPT = "pointer_without_receipt"
+
+
+def _require_integrated_lifecycle_fault(value) -> _IntegratedLifecycleFault:
+    if type(value) is not _IntegratedLifecycleFault:
+        raise TypeError("integrated lifecycle fault must be an exact enum member")
+    return value
 
 
 class _RunnerTerminationState:
@@ -66,6 +81,93 @@ def _require_controlled_sigterm_mask() -> None:
         raise RuntimeError("runner signal mask is unavailable") from None
     if observed != {signal.SIGTERM}:
         raise RuntimeError("runner signal mask is not exact")
+
+
+def _require_parent_death_sigkill(
+    *,
+    expected_parent_pid: int | None = None,
+    prctl=None,
+) -> None:
+    """Query the post-drop kernel state and bind it to the current parent."""
+
+    if expected_parent_pid is not None and (
+        type(expected_parent_pid) is not int or expected_parent_pid <= 0
+    ):
+        raise RuntimeError("formal runner parent identity is invalid")
+    if not sys.platform.startswith("linux"):
+        raise RuntimeError("formal runner parent-death query requires Linux")
+    operation = prctl
+    if operation is None:
+        try:
+            raw_prctl = ctypes.CDLL(None, use_errno=True).prctl
+        except (AttributeError, OSError) as exc:
+            raise RuntimeError("formal runner prctl is unavailable") from exc
+        raw_prctl.argtypes = [
+            ctypes.c_int,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+        ]
+        raw_prctl.restype = ctypes.c_int
+        operation = raw_prctl
+    observed_signal = ctypes.c_int(0)
+    try:
+        result = operation(
+            _PR_GET_PDEATHSIG,
+            ctypes.addressof(observed_signal),
+            0,
+            0,
+            0,
+        )
+        observed_parent = os.getppid()
+    except Exception:
+        raise RuntimeError("formal runner parent-death query failed") from None
+    if (
+        type(result) is not int
+        or result != 0
+        or observed_signal.value != signal.SIGKILL
+        or (
+            expected_parent_pid is not None
+            and observed_parent != expected_parent_pid
+        )
+    ):
+        raise RuntimeError("formal runner parent-death state is not exact")
+
+
+def _set_and_require_parent_death_sigkill(expected_parent_pid: int) -> None:
+    """Set a descendant's fork-cleared PDEATHSIG and close the parent race."""
+
+    if type(expected_parent_pid) is not int or expected_parent_pid <= 0:
+        raise RuntimeError("formal runner parent identity is invalid")
+    try:
+        operation = ctypes.CDLL(None, use_errno=True).prctl
+    except (AttributeError, OSError) as exc:
+        raise RuntimeError("formal runner prctl is unavailable") from exc
+    operation.argtypes = [
+        ctypes.c_int,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+    ]
+    operation.restype = ctypes.c_int
+    try:
+        result = operation(
+            _PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0
+        )
+    except Exception:
+        raise RuntimeError("formal runner parent-death setup failed") from None
+    if (
+        type(result) is not int
+        or result != 0
+        or os.getppid() != expected_parent_pid
+    ):
+        raise RuntimeError("formal runner parent-death setup failed")
+    _require_parent_death_sigkill(
+        expected_parent_pid=expected_parent_pid,
+        prctl=operation,
+    )
 
 
 def _harden_execd_formal_runner(*, prctl=None) -> None:
@@ -111,6 +213,7 @@ def _harden_execd_formal_runner(*, prctl=None) -> None:
         or os.getgroups() != []
     ):
         raise RuntimeError("formal runner credentials are not exact")
+    _require_parent_death_sigkill(prctl=operation)
     _require_controlled_sigterm_mask()
     source_directory = os.path.dirname(os.path.abspath(__file__))
     if source_directory not in sys.path:
@@ -582,6 +685,200 @@ def _cleanup_runner_resources(
         except BaseException as exc:
             failures.append(exc)
     return failures
+
+
+def _run_protected_linux_integrated_lifecycle_probe(
+    candidate_root: Path,
+    run_id: str,
+    fault: _IntegratedLifecycleFault | None = None,
+) -> int:
+    """Publish one real fd-bound pointer and deliberately withhold its receipt."""
+
+    selected_fault = _require_integrated_lifecycle_fault(fault)
+    if selected_fault is not _IntegratedLifecycleFault.POINTER_WITHOUT_RECEIPT:
+        raise RuntimeError("integrated lifecycle fault is unavailable")
+    if not isinstance(candidate_root, Path) or not candidate_root.is_absolute():
+        raise RuntimeError("integrated lifecycle candidate is invalid")
+    if not isinstance(run_id, str) or run_id != "txnmem-integrated-lifecycle":
+        raise RuntimeError("integrated lifecycle binding is invalid")
+    gate_value = os.environ.pop("TXNMEM_PROVENANCE_START_GATE_FD", None)
+    ready_value = os.environ.pop("TXNMEM_PROVENANCE_READY_FD", None)
+    completion_value = os.environ.pop(
+        "TXNMEM_PROVENANCE_COMPLETION_FD", None
+    )
+    if (
+        gate_value is None
+        or not gate_value.isdigit()
+        or ready_value is None
+        or not ready_value.isdigit()
+        or completion_value is None
+        or not completion_value.isdigit()
+        or len({gate_value, ready_value, completion_value}) != 3
+    ):
+        raise RuntimeError("integrated lifecycle descriptors are invalid")
+    gate_fd = int(gate_value)
+    ready_fd = int(ready_value)
+    completion_fd = int(completion_value)
+    _harden_execd_formal_runner()
+
+    descendant_read, descendant_write = os.pipe()
+    descendant_pid = os.fork()
+    if descendant_pid == 0:
+        try:
+            os.close(descendant_read)
+            parent_pid = os.getppid()
+            _set_and_require_parent_death_sigkill(parent_pid)
+            if (
+                os.getuid() != FORMAL_RUNNER_UID
+                or os.geteuid() != FORMAL_RUNNER_UID
+                or os.getgid() != FORMAL_RUNNER_GID
+                or os.getegid() != FORMAL_RUNNER_GID
+                or os.getgroups() != []
+            ):
+                os._exit(91)
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            if os.write(descendant_write, b"R") != 1:
+                os._exit(92)
+            os.close(descendant_write)
+            ctypes.PyDLL(None).sleep(60)
+        except BaseException:
+            os._exit(93)
+        os._exit(0)
+    os.close(descendant_write)
+    try:
+        if os.read(descendant_read, 1) != b"R":
+            raise RuntimeError("integrated lifecycle descendant did not harden")
+    finally:
+        os.close(descendant_read)
+    waited_pid, _waited_status = os.waitpid(descendant_pid, os.WNOHANG)
+    if waited_pid != 0:
+        raise RuntimeError("integrated lifecycle descendant exited early")
+    if os.write(ready_fd, b"R") != 1:
+        raise RuntimeError("integrated lifecycle readiness failed")
+    os.close(ready_fd)
+    if os.read(gate_fd, 1) != b"G":
+        raise RuntimeError("integrated lifecycle gate failed")
+    os.close(gate_fd)
+
+    from txnmem_backend import InstrumentedMemoryBackend
+    from txnmem_provenance_performance import (
+        _PrivatePublicationMode,
+        _canonical_json_bytes,
+        aggregate_matrix,
+        build_layered_dag,
+        canonical_jsonl_sha256,
+        provenance_bundle_id,
+        publish_provenance_bundle,
+        run_matrix_cell,
+    )
+
+    config = {
+        "schema": "txnmem-provenance-performance-v2",
+        "graph_node_counts": [2],
+        "concurrency_levels": [1],
+        "repetitions": 1,
+        "graph_seed": 17,
+        "operations_per_type": 1,
+        "bootstrap_repetitions": 10,
+        "bootstrap_seed": 17,
+        "request_timeout_seconds": 30.0,
+    }
+    cell = run_matrix_cell(
+        lambda _namespace: InstrumentedMemoryBackend(),
+        build_layered_dag(2, 17),
+        concurrency=1,
+        repetitions=1,
+        operations_per_type=1,
+        run_id=run_id,
+        formal=False,
+    )
+    operation_samples = list(cell["samples"])
+    repetitions = list(cell["repetitions"])
+    config_hash = hashlib.sha256(_canonical_json_bytes(config)).hexdigest()
+    bundle_id = provenance_bundle_id(
+        config_sha256=config_hash,
+        run_id_sha256=cell["run_id_sha256"],
+        formal=False,
+        backend="vector-graph",
+    )
+    report = {
+        "schema": "txnmem-provenance-performance-report-v1",
+        "backend": "vector-graph",
+        "formal_requested": False,
+        "bundle_id": bundle_id,
+        "publication_status": "complete",
+        "production_backend_claim": False,
+        "config": config,
+        "config_sha256": config_hash,
+        "config_file_sha256": "0" * 64,
+        "run_id_sha256": cell["run_id_sha256"],
+        "matrix_cell_count": 1,
+        "repetition_count": 1,
+        "operation_sample_count": 4,
+        "operation_samples_sha256": canonical_jsonl_sha256(
+            operation_samples
+        ),
+        "repetitions_sha256": canonical_jsonl_sha256(repetitions),
+        "graphs": [cell["graph"]],
+        "aggregate": aggregate_matrix(
+            cell,
+            bootstrap_repetitions=10,
+            seed=17,
+            require_formal=False,
+        ),
+        "topology_attestation_sha256": None,
+    }
+    pointer_name = f"{bundle_id}.json"
+    precommit_marker = candidate_root / "anonymous-precommit-observed"
+
+    def require_anonymous_precommit() -> None:
+        bundles = candidate_root / "bundles"
+        observed_names = {path.name for path in bundles.iterdir()}
+        if pointer_name in observed_names or any(
+            name.startswith(f".{pointer_name}.") for name in observed_names
+        ):
+            raise RuntimeError(
+                "integrated lifecycle pointer became named before commit"
+            )
+        descriptor = os.open(
+            precommit_marker,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        try:
+            os.write(descriptor, b"anonymous\n")
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    publish_provenance_bundle(
+        candidate_root,
+        bundle_id=bundle_id,
+        operation_samples=operation_samples,
+        repetitions=repetitions,
+        report=report,
+        _precommit_check=require_anonymous_precommit,
+        _private_publication_mode=(
+            _PrivatePublicationMode.INTEGRATED_POINTER_WITHOUT_RECEIPT
+        ),
+    )
+    pointer = candidate_root / "bundles" / pointer_name
+    if not pointer.is_file() or not precommit_marker.is_file():
+        raise RuntimeError("integrated lifecycle pointer is unavailable")
+    object_id = json.loads(pointer.read_text(encoding="utf-8"))["object_id"]
+    if not (
+        candidate_root / "bundle_objects" / object_id / "COMPLETED.json"
+    ).is_file():
+        raise RuntimeError("integrated lifecycle object completion is unavailable")
+
+    # The internal object marker is complete, but the collector receipt remains
+    # open and byte-empty until actual parent death kills this process.
+    _ = completion_fd
+    ctypes.PyDLL(None).sleep(60)
+    return 94
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -11,6 +11,7 @@ returned; memory values and service endpoints never enter result artifacts.
 from __future__ import annotations
 
 import copy
+import enum
 import hashlib
 import json
 import math
@@ -77,6 +78,20 @@ _DISK_MEDIA = frozenset({"nvme", "ssd", "hdd", "network-block"})
 
 class ProvenancePerformanceError(RuntimeError):
     """Raised when evidence cannot satisfy the formal performance boundary."""
+
+
+class _PrivatePublicationMode(enum.Enum):
+    """One invocation-scoped publication mode for the protected lifecycle gate."""
+
+    INTEGRATED_POINTER_WITHOUT_RECEIPT = (
+        "integrated_pointer_without_receipt"
+    )
+
+
+def _require_private_publication_mode(value: Any) -> _PrivatePublicationMode:
+    if type(value) is not _PrivatePublicationMode:
+        raise TypeError("private publication mode must be an exact enum member")
+    return value
 
 
 @dataclass(frozen=True)
@@ -2412,6 +2427,7 @@ def publish_provenance_bundle(
     report: Mapping[str, Any],
     topology_attestation: Mapping[str, Any] | None = None,
     _precommit_check: Callable[[], None] | None = None,
+    _private_publication_mode: _PrivatePublicationMode | None = None,
 ) -> Path:
     """Write an immutable object, then atomically publish one exclusive pointer."""
 
@@ -2419,6 +2435,11 @@ def publish_provenance_bundle(
 
     if _precommit_check is not None and not callable(_precommit_check):
         raise TypeError("private publication precommit check must be callable")
+    private_publication_mode = None
+    if _private_publication_mode is not None:
+        private_publication_mode = _require_private_publication_mode(
+            _private_publication_mode
+        )
     sample_bytes = _jsonl_bytes(operation_samples)
     repetition_bytes = _jsonl_bytes(repetitions)
     report_payload = copy.deepcopy(dict(report))
@@ -2450,6 +2471,13 @@ def publish_provenance_bundle(
         )
     else:  # pragma: no cover - parser is exhaustive
         raise ProvenancePerformanceError("unknown bundle scope")
+    if (
+        private_publication_mode is not None
+        and scope != "diagnostic"
+    ):
+        raise ProvenancePerformanceError(
+            "private publication mode requires a diagnostic bundle"
+        )
 
     store = preflight_provenance_output(out_dir, bundle_id)
     object_id = f"object-{secrets.token_hex(16)}"
@@ -2527,7 +2555,9 @@ def publish_provenance_bundle(
         f"{bundle_id}.json",
         payload=pointer,
         _precommit_check=_precommit_check,
-        _allow_named_fallback=scope != "formal",
+        _allow_named_fallback=(
+            scope != "formal" and private_publication_mode is None
+        ),
     )
     return store.path(
         "bundle_objects", object_id, "results", "provenance_performance.json"
@@ -2801,6 +2831,8 @@ def _observe_sealed_candidate_tree(candidate_root: str | Path) -> dict[str, Any]
 def _require_candidate_seal_matches(
     candidate_root: str | Path, topology_attestation: Mapping[str, Any]
 ) -> None:
+    if not isinstance(topology_attestation, Mapping):
+        raise ProvenancePerformanceError("formal topology omits candidate seal")
     seal = topology_attestation.get("candidate_seal")
     if not isinstance(seal, Mapping):
         raise ProvenancePerformanceError("formal topology omits candidate seal")
@@ -2820,6 +2852,7 @@ def promote_provenance_candidate(
 ) -> Path:
     """Promote the exact immutable candidate bytes without rerunning measurement."""
 
+    _require_candidate_seal_matches(candidate_root, topology_attestation)
     candidate = _load_provenance_candidate(candidate_root, bundle_id)
     reports = _candidate_formal_reports(candidate)
     config = validate_matrix_config(FORMAL_MATRIX_CONFIG, formal=True)
@@ -2830,7 +2863,6 @@ def promote_provenance_candidate(
         require_formal=True,
         topology_attestation=topology_attestation,
     )
-    _require_candidate_seal_matches(candidate_root, topology_attestation)
     source_report = candidate["report"]
     operation_samples = candidate["operation_samples"]
     repetitions = candidate["repetitions"]

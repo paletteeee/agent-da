@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import ctypes
 import errno
 import hashlib
 import json
@@ -2599,6 +2600,9 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
 
         def prctl(option, argument, third, fourth, fifth):
             calls.append((option, argument, third, fourth, fifth))
+            if option == 2:
+                ctypes.c_int.from_address(argument).value = signal.SIGKILL
+                return 0
             return {4: 0, 3: 0, 39: 1}[option]
 
         with patch.object(runner.sys, "platform", "linux"), patch.object(
@@ -2622,6 +2626,7 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
                 (4, 0, 0, 0, 0),
                 (3, 0, 0, 0, 0),
                 (39, 0, 0, 0, 0),
+                (2, calls[3][1], 0, 0, 0),
             ],
         )
         require_mask.assert_called_once_with()
@@ -2632,21 +2637,19 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
         if harden is None:
             return
 
-        def valid_prctl(option, _argument, _third, _fourth, _fifth):
-            return {4: 0, 3: 0, 39: 1}[option]
-
         cases = {
-            "set-dumpable": ({4: 1, 3: 0, 39: 1}, {}),
-            "set-dumpable-bool": ({4: False, 3: 0, 39: 1}, {}),
-            "get-dumpable": ({4: 0, 3: 1, 39: 1}, {}),
-            "get-dumpable-bool": ({4: 0, 3: False, 39: 1}, {}),
-            "no-new-privileges": ({4: 0, 3: 0, 39: 0}, {}),
-            "no-new-privileges-bool": ({4: 0, 3: 0, 39: True}, {}),
-            "real-uid": ({4: 0, 3: 0, 39: 1}, {"getuid": 1}),
-            "effective-uid": ({4: 0, 3: 0, 39: 1}, {"geteuid": 1}),
-            "real-gid": ({4: 0, 3: 0, 39: 1}, {"getgid": 1}),
-            "effective-gid": ({4: 0, 3: 0, 39: 1}, {"getegid": 1}),
-            "groups": ({4: 0, 3: 0, 39: 1}, {"getgroups": [1]}),
+            "set-dumpable": ({4: 1, 3: 0, 39: 1, 2: signal.SIGKILL}, {}),
+            "set-dumpable-bool": ({4: False, 3: 0, 39: 1, 2: signal.SIGKILL}, {}),
+            "get-dumpable": ({4: 0, 3: 1, 39: 1, 2: signal.SIGKILL}, {}),
+            "get-dumpable-bool": ({4: 0, 3: False, 39: 1, 2: signal.SIGKILL}, {}),
+            "no-new-privileges": ({4: 0, 3: 0, 39: 0, 2: signal.SIGKILL}, {}),
+            "no-new-privileges-bool": ({4: 0, 3: 0, 39: True, 2: signal.SIGKILL}, {}),
+            "real-uid": ({4: 0, 3: 0, 39: 1, 2: signal.SIGKILL}, {"getuid": 1}),
+            "effective-uid": ({4: 0, 3: 0, 39: 1, 2: signal.SIGKILL}, {"geteuid": 1}),
+            "real-gid": ({4: 0, 3: 0, 39: 1, 2: signal.SIGKILL}, {"getgid": 1}),
+            "effective-gid": ({4: 0, 3: 0, 39: 1, 2: signal.SIGKILL}, {"getegid": 1}),
+            "groups": ({4: 0, 3: 0, 39: 1, 2: signal.SIGKILL}, {"getgroups": [1]}),
+            "parent-death": ({4: 0, 3: 0, 39: 1, 2: 0}, {}),
         }
         for name, (prctl_results, overrides) in cases.items():
             with self.subTest(name=name), patch.object(
@@ -2674,11 +2677,15 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
             ), patch.object(
                 runner, "_require_controlled_sigterm_mask"
             ), self.assertRaisesRegex(RuntimeError, "runner"):
-                harden(
-                    prctl=lambda option, _argument, _third, _fourth, _fifth: (
-                        prctl_results[option]
-                    )
-                )
+                def prctl(option, argument, _third, _fourth, _fifth):
+                    if option == 2:
+                        ctypes.c_int.from_address(argument).value = (
+                            prctl_results[option]
+                        )
+                        return 0
+                    return prctl_results[option]
+
+                harden(prctl=prctl)
 
         class HardeningPrimary(BaseException):
             pass

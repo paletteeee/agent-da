@@ -1,4 +1,5 @@
 import copy
+import enum
 import errno
 import hashlib
 import inspect
@@ -1942,12 +1943,34 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             self.assertFalse(progress_path.is_relative_to(candidate))
 
             (candidate / "result.json").write_text("{}\n", encoding="utf-8")
+            receipt = {
+                "schema": "txnmem-provenance-candidate-attestation-material-v1",
+                "candidate_bundle_id": (
+                    "diagnostic-vector_graph-" + "1" * 16 + "-" + "2" * 16
+                ),
+                "run_id_sha256": "2" * 64,
+                "config_sha256": "1" * 64,
+                "config_file_sha256": "3" * 64,
+                "workload_sha256": "4" * 64,
+                "environment_attestation_sha256": "5" * 64,
+                "evidence_manifest_sha256": "6" * 64,
+                "matrix_cell_count": 15,
+                "repetition_count": 450,
+                "operation_sample_count": 14400,
+                "observed_service_versions": {
+                    "qdrant": "1.15.4",
+                    "neo4j": "5.26.0",
+                    "toxiproxy": "2.9.0",
+                },
+                "candidate_operation_samples_sha256": "7" * 64,
+                "candidate_repetitions_sha256": "8" * 64,
+            }
             seal = collector_module._seal_candidate_tree(
                 candidate,
                 expected_owner_uid=os.getuid(),
                 sealed_owner_uid=os.getuid(),
                 sealed_owner_gid=os.getgid(),
-                completion_receipt={"result": "sealed"},
+                completion_receipt=receipt,
             )
             self.assertEqual(seal["file_count"], 1)
 
@@ -5770,6 +5793,28 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 "candidate_operation_samples_sha256": "7" * 64,
                 "candidate_repetitions_sha256": "8" * 64,
             }
+            modes_before = (
+                candidate.stat().st_mode & 0o777,
+                first.stat().st_mode & 0o777,
+            )
+
+            with self.assertRaisesRegex(
+                CollectorError, "completion receipt"
+            ):
+                collector_module._seal_candidate_tree(
+                    candidate,
+                    expected_owner_uid=os.getuid(),
+                    sealed_owner_uid=os.getuid(),
+                    sealed_owner_gid=os.getgid(),
+                    completion_receipt={},
+                )
+            self.assertEqual(
+                (
+                    candidate.stat().st_mode & 0o777,
+                    first.stat().st_mode & 0o777,
+                ),
+                modes_before,
+            )
 
             sealed = collector_module._seal_candidate_tree(
                 candidate,
@@ -8092,6 +8137,296 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 expected={},
             )
             self.assertEqual(current_pidfds(), pidfds_before)
+
+    def test_protected_linux_integrated_root_drop_parent_death_pidfd_guard_pointer_zero_residue(self):
+        import txnmem_formal_controller as controller_module
+        import txnmem_formal_smoke as smoke_module
+        import txnmem_provenance_performance as performance_module
+        import txnmem_provenance_runner as runner_module
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        selector = (
+            "tests.test_txnmem_provenance_execution_collector."
+            "ProvenanceExecutionCollectorTests."
+            "test_protected_linux_integrated_root_drop_parent_death_pidfd_guard_pointer_zero_residue"
+        )
+        controller_entry = getattr(
+            controller_module,
+            "_run_protected_linux_integrated_lifecycle",
+            None,
+        )
+        collector_fault = getattr(
+            collector_module, "_IntegratedLifecycleFault", None
+        )
+        collector_validator = getattr(
+            collector_module, "_require_integrated_lifecycle_fault", None
+        )
+        runner_fault = getattr(runner_module, "_IntegratedLifecycleFault", None)
+        runner_validator = getattr(
+            runner_module, "_require_integrated_lifecycle_fault", None
+        )
+        publication_mode = getattr(
+            performance_module, "_PrivatePublicationMode", None
+        )
+        publication_validator = getattr(
+            performance_module, "_require_private_publication_mode", None
+        )
+        self.assertTrue(
+            callable(controller_entry),
+            "integrated lifecycle controller entry is unavailable",
+        )
+        for enum_type, validator, expected_name, expected_value in (
+            (
+                collector_fault,
+                collector_validator,
+                "POINTER_WITHOUT_RECEIPT",
+                "pointer_without_receipt",
+            ),
+            (
+                runner_fault,
+                runner_validator,
+                "POINTER_WITHOUT_RECEIPT",
+                "pointer_without_receipt",
+            ),
+            (
+                publication_mode,
+                publication_validator,
+                "INTEGRATED_POINTER_WITHOUT_RECEIPT",
+                "integrated_pointer_without_receipt",
+            ),
+        ):
+            self.assertIsNotNone(enum_type)
+            self.assertTrue(callable(validator))
+            self.assertEqual(
+                [(member.name, member.value) for member in enum_type],
+                [(expected_name, expected_value)],
+            )
+            with self.assertRaises((CollectorError, TypeError, ValueError)):
+                validator(expected_value)
+            self.assertIs(
+                validator(next(iter(enum_type))),
+                next(iter(enum_type)),
+            )
+            class StringSubclass(str):
+                pass
+
+            class UnknownEnum(enum.Enum):
+                UNKNOWN = expected_value
+
+            for invalid in (
+                True,
+                StringSubclass(expected_value),
+                UnknownEnum.UNKNOWN,
+            ):
+                with self.assertRaises((CollectorError, TypeError, ValueError)):
+                    validator(invalid)
+        self.assertIsNone(
+            inspect.signature(
+                collector_module._run_protected_linux_integrated_lifecycle
+            ).parameters["fault"].default
+        )
+        self.assertIsNone(
+            inspect.signature(
+                runner_module._run_protected_linux_integrated_lifecycle_probe
+            ).parameters["fault"].default
+        )
+        self.assertIsNone(
+            inspect.signature(
+                performance_module.publish_provenance_bundle
+            ).parameters["_private_publication_mode"].default
+        )
+        self.assertEqual(
+            smoke_module._REPORT_SCHEMA,
+            "txnmem-formal-provenance-smoke-v2",
+        )
+        with self.assertRaisesRegex(
+            controller_module.FormalControllerError, "unsupported"
+        ):
+            controller_module._dispatch(
+                "integrated-lifecycle",
+                (),
+                Path("."),
+                object(),
+            )
+
+        protected_primitives = bool(
+            sys.platform.startswith("linux")
+            and hasattr(os, "geteuid")
+            and os.geteuid() == 0
+            and Path("/proc/self/status").is_file()
+            and hasattr(os, "O_TMPFILE")
+            and callable(getattr(os, "pidfd_open", None))
+            and callable(getattr(signal, "pidfd_send_signal", None))
+            and Path(collector_module._FORMAL_NFT_EXECUTABLE).is_file()
+            and controller_module.CONTROLLER_INSTALL_PATH.is_file()
+            and controller_module.APPROVAL_MANIFEST_PATH.is_file()
+        )
+        if not protected_primitives:
+            self.skipTest("protected Linux lifecycle primitives unavailable")
+        try:
+            collector_module._require_pidfd_support()
+            with TemporaryDirectory() as probe_tmp:
+                FormalStore(probe_tmp)._require_fd_bound_publication_support(
+                    _require_credential_match=False
+                )
+        except (CollectorError, FormalIOError, OSError):
+            self.skipTest("protected Linux lifecycle primitives unavailable")
+
+        def current_pidfds():
+            observed = {}
+            for entry in (Path("/proc") / "self" / "fd").iterdir():
+                try:
+                    target = os.readlink(entry)
+                except FileNotFoundError:
+                    continue
+                if "pidfd" in target:
+                    observed[int(entry.name)] = target
+            return observed
+
+        guard_probe = collector_module._NftNetworkGuard(
+            "txnmem_0000000000000000",
+            backend_ipv4_subnet="10.253.0.0/24",
+            ingress_ipv4_subnet="10.254.0.0/24",
+            backend_bridge_interface="br-f3f3f3f3f3f3",
+            ingress_bridge_interface="br-e3e3e3e3e3e3",
+            toxiproxy_ingress_ipv4="10.254.0.2",
+        )
+        pidfds_before = current_pidfds()
+        bootstrap_before = (
+            set(controller_module.BOOTSTRAP_ROOT.iterdir())
+            if controller_module.BOOTSTRAP_ROOT.is_dir()
+            else set()
+        )
+        nft_tables_before = guard_probe._table_names()
+        collector_module._require_formal_uid_processes(
+            collector_module.FORMAL_RUNNER_UID,
+            expected={},
+        )
+
+        repository = Path(__file__).resolve().parents[1]
+        invocation = "\n".join(
+            (
+                "import importlib.util, json, pathlib, sys",
+                "controller_path = pathlib.Path(sys.argv[1]).resolve(strict=True)",
+                "project_root = pathlib.Path(sys.argv[2]).resolve(strict=True)",
+                "spec = importlib.util.spec_from_file_location("
+                "'_txnmem_installed_controller', controller_path)",
+                "if spec is None or spec.loader is None: raise SystemExit(90)",
+                "module = importlib.util.module_from_spec(spec)",
+                "sys.modules[spec.name] = module",
+                "spec.loader.exec_module(module)",
+                "result = module._run_protected_linux_integrated_lifecycle("
+                "project_root)",
+                "print(json.dumps(result, sort_keys=True, separators=(',', ':')), "
+                "flush=True)",
+            )
+        )
+        with TemporaryDirectory() as output_tmp:
+            output_root = Path(output_tmp).resolve()
+            stdout_path = output_root / "stdout.txt"
+            stderr_path = output_root / "stderr.txt"
+            with stdout_path.open("wb") as stdout_stream, stderr_path.open(
+                "wb"
+            ) as stderr_stream:
+                controller_process = subprocess.Popen(
+                    (
+                        sys.executable,
+                        "-I",
+                        "-S",
+                        "-B",
+                        "-c",
+                        invocation,
+                        str(controller_module.CONTROLLER_INSTALL_PATH),
+                        str(repository),
+                    ),
+                    cwd=repository,
+                    env={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+                    stdin=subprocess.DEVNULL,
+                    stdout=stdout_stream,
+                    stderr=stderr_stream,
+                )
+                controller_pid = controller_process.pid
+                try:
+                    controller_status = controller_process.wait(timeout=30.0)
+                except subprocess.TimeoutExpired:
+                    controller_pidfd = os.pidfd_open(controller_pid)
+                    try:
+                        signal.pidfd_send_signal(
+                            controller_pidfd, signal.SIGKILL
+                        )
+                    finally:
+                        os.close(controller_pidfd)
+                    controller_process.wait(timeout=5.0)
+                    self.fail(f"{selector} controller timed out")
+            self.assertEqual(
+                controller_status,
+                0,
+                f"{selector} controller status={controller_status}",
+            )
+            self.assertFalse((Path("/proc") / str(controller_pid)).exists())
+            raw_result = stdout_path.read_bytes()
+            self.assertLessEqual(len(raw_result), 4096)
+            self.assertEqual(raw_result.count(b"\n"), 1)
+            result = json.loads(raw_result)
+
+        true_fields = {
+            "installed_controller_proven",
+            "committed_export_proven",
+            "collector_worker_proven",
+            "immutable_runner_proven",
+            "credential_drop_proven",
+            "post_drop_parent_death_sigkill_proven",
+            "actual_parent_death_proven",
+            "resistant_descendant_proven",
+            "pidfd_identity_drift_rejected",
+            "pidfd_wrong_target_avoided",
+            "guard_removed_last",
+            "anonymous_pointer_visible",
+            "completion_receipt_absent",
+            "candidate_seal_invoked",
+            "seal_rejected",
+            "promotion_validator_invoked",
+            "promotion_rejected",
+        }
+        count_fields = {
+            "controller_process_count",
+            "runner_process_count",
+            "descendant_process_count",
+            "dedicated_uid_process_count",
+            "owned_pidfd_count",
+            "anonymous_pointer_residue_count",
+            "named_pointer_residue_count",
+            "candidate_residue_count",
+            "committed_export_residue_count",
+            "nft_table_count",
+        }
+        self.assertEqual(
+            set(result),
+            {"schema", "selector", *true_fields, *count_fields},
+        )
+        self.assertEqual(
+            result["schema"],
+            "txnmem-protected-linux-integrated-lifecycle-v1",
+        )
+        self.assertEqual(result["selector"], selector)
+        for field in true_fields:
+            self.assertIs(result[field], True, field)
+        for field in count_fields:
+            self.assertIs(type(result[field]), int, field)
+            self.assertEqual(result[field], 0, field)
+
+        collector_module._require_formal_uid_processes(
+            collector_module.FORMAL_RUNNER_UID,
+            expected={},
+        )
+        self.assertEqual(current_pidfds(), pidfds_before)
+        self.assertEqual(guard_probe._table_names(), nft_tables_before)
+        bootstrap_after = (
+            set(controller_module.BOOTSTRAP_ROOT.iterdir())
+            if controller_module.BOOTSTRAP_ROOT.is_dir()
+            else set()
+        )
+        self.assertEqual(bootstrap_after, bootstrap_before)
 
     def test_validated_group_identity_mismatch_sends_no_signal(self):
         valid = {
