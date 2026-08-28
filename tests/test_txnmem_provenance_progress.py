@@ -490,6 +490,72 @@ class TxnMemProgressSnapshotStoreTests(unittest.TestCase):
         self.assertEqual(view["status"], "blocked")
         self.assertEqual(view["terminal_reason_class"], "formal_eligibility_failed")
 
+    def test_eligibility_blocked_terminal_retains_the_zero_starting_counts(self):
+        self.store.write_starting("a" * 64, "b" * 64)
+        self.store.write_terminal("blocked", "formal_eligibility_failed")
+        view = self.store.read_view()
+        self.assertEqual(view["status"], "blocked")
+        self.assertEqual(view["terminal_reason_class"], "formal_eligibility_failed")
+        self.assertEqual(
+            (view["repetition_index"], view["completed_repetitions"], view["completed_samples"], view["update_sequence"]),
+            (0, 0, 0, 0),
+        )
+
+    def test_cross_instance_terminal_commit_serializes_later_running_write(self):
+        other_store = progress.ProgressSnapshotStore(
+            self.path, expected_uid=os.getuid(), expected_gid=os.getgid()
+        )
+        self.store.write_running(self.event())
+        entered_replace = threading.Event()
+        release_replace = threading.Event()
+        running_finished = threading.Event()
+        terminal_errors: list[BaseException] = []
+        running_errors: list[BaseException] = []
+        real_replace = os.replace
+
+        def pause_terminal_replace(source, destination, *args, **kwargs):
+            if threading.current_thread().name == "terminal-writer":
+                entered_replace.set()
+                release_replace.wait(2.0)
+            return real_replace(source, destination, *args, **kwargs)
+
+        def terminal_writer():
+            try:
+                self.store.write_terminal("blocked", "backend_timeout")
+            except BaseException as exc:
+                terminal_errors.append(exc)
+
+        def running_writer():
+            try:
+                other_store.write_running(self.event(sequence=2))
+            except BaseException as exc:
+                running_errors.append(exc)
+            finally:
+                running_finished.set()
+
+        with mock.patch("txnmem_provenance_progress.os.replace", pause_terminal_replace):
+            terminal_thread = threading.Thread(target=terminal_writer, name="terminal-writer")
+            terminal_thread.start()
+            self.assertTrue(entered_replace.wait(2.0))
+            running_thread = threading.Thread(target=running_writer, name="running-writer")
+            running_thread.start()
+            try:
+                running_finished_before_release = running_finished.wait(0.1)
+            finally:
+                release_replace.set()
+                terminal_thread.join(2.0)
+                running_thread.join(2.0)
+
+        self.assertFalse(running_finished_before_release)
+        self.assertFalse(terminal_thread.is_alive())
+        self.assertFalse(running_thread.is_alive())
+        self.assertEqual(terminal_errors, [])
+        self.assertEqual(len(running_errors), 1)
+        self.assertIsInstance(running_errors[0], ProgressProtocolError)
+        view = self.store.read_view()
+        self.assertEqual(view["status"], "blocked")
+        self.assertEqual(view["update_sequence"], 1)
+
 
 class TxnMemProgressPipeDrainerTests(unittest.TestCase):
     def setUp(self):

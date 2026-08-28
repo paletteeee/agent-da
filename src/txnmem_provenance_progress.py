@@ -62,6 +62,8 @@ TERMINAL_REASON_CLASSES = frozenset(
         "resource_cleanup_failed",
     }
 )
+_STORE_LOCKS_GUARD = threading.Lock()
+_STORE_LOCKS: dict[str, threading.RLock] = {}
 
 _HASH_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _INTEGER_FIELDS = frozenset(
@@ -79,6 +81,12 @@ _INTEGER_FIELDS = frozenset(
         "update_sequence",
     }
 )
+
+
+def _store_writer_lock(path: Path) -> threading.RLock:
+    lock_key = os.path.normcase(os.path.abspath(os.fspath(path)))
+    with _STORE_LOCKS_GUARD:
+        return _STORE_LOCKS.setdefault(lock_key, threading.RLock())
 
 
 def _protocol_error(message: str) -> None:
@@ -401,6 +409,7 @@ class ProgressSnapshotStore:
         self._expected_uid = expected_uid
         self._expected_gid = expected_gid
         self._transition_lock = threading.Lock()
+        self._writer_lock = _store_writer_lock(path)
 
     def _open_parent(self) -> int:
         flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -599,11 +608,12 @@ class ProgressSnapshotStore:
             "last_update_age_seconds": 0,
         }
         with self._transition_lock:
-            parent_fd = self._open_parent()
-            try:
-                self._write_snapshot(snapshot, parent_fd=parent_fd)
-            finally:
-                os.close(parent_fd)
+            with self._writer_lock:
+                parent_fd = self._open_parent()
+                try:
+                    self._write_snapshot(snapshot, parent_fd=parent_fd)
+                finally:
+                    os.close(parent_fd)
 
     def write_running(self, event: Mapping[str, Any]) -> None:
         normalized = _validate_event(event)
@@ -611,15 +621,16 @@ class ProgressSnapshotStore:
         snapshot["schema"] = PROGRESS_SNAPSHOT_SCHEMA
         snapshot["last_update_age_seconds"] = 0
         with self._transition_lock:
-            parent_fd = self._open_parent()
-            try:
-                self._write_snapshot(
-                    snapshot,
-                    parent_fd=parent_fd,
-                    reject_terminal_predecessor=True,
-                )
-            finally:
-                os.close(parent_fd)
+            with self._writer_lock:
+                parent_fd = self._open_parent()
+                try:
+                    self._write_snapshot(
+                        snapshot,
+                        parent_fd=parent_fd,
+                        reject_terminal_predecessor=True,
+                    )
+                finally:
+                    os.close(parent_fd)
 
     def write_terminal(self, status: str, reason_class: str) -> None:
         if type(status) is not str or status not in TERMINAL_STATUSES:
@@ -627,29 +638,31 @@ class ProgressSnapshotStore:
         if type(reason_class) is not str or reason_class not in TERMINAL_REASON_CLASSES:
             _protocol_error("terminal snapshot reason class has an invalid value")
         with self._transition_lock:
-            parent_fd = self._open_parent()
-            try:
-                snapshot, current_stat = self._read_persisted(parent_fd)
-                if snapshot["status"] in TERMINAL_STATUSES:
-                    _protocol_error("terminal progress snapshot cannot transition again")
-                snapshot["status"] = status
-                snapshot["terminal_reason_class"] = reason_class
-                snapshot["last_update_age_seconds"] = 0
-                self._write_snapshot(
-                    snapshot,
-                    parent_fd=parent_fd,
-                    expected_identity=(current_stat.st_dev, current_stat.st_ino),
-                )
-            finally:
-                os.close(parent_fd)
+            with self._writer_lock:
+                parent_fd = self._open_parent()
+                try:
+                    snapshot, current_stat = self._read_persisted(parent_fd)
+                    if snapshot["status"] in TERMINAL_STATUSES:
+                        _protocol_error("terminal progress snapshot cannot transition again")
+                    snapshot["status"] = status
+                    snapshot["terminal_reason_class"] = reason_class
+                    snapshot["last_update_age_seconds"] = 0
+                    self._write_snapshot(
+                        snapshot,
+                        parent_fd=parent_fd,
+                        expected_identity=(current_stat.st_dev, current_stat.st_ino),
+                    )
+                finally:
+                    os.close(parent_fd)
 
     def read_view(self) -> dict[str, Any]:
         with self._transition_lock:
-            parent_fd = self._open_parent()
-            try:
-                snapshot, file_stat = self._read_persisted(parent_fd)
-            finally:
-                os.close(parent_fd)
+            with self._writer_lock:
+                parent_fd = self._open_parent()
+                try:
+                    snapshot, file_stat = self._read_persisted(parent_fd)
+                finally:
+                    os.close(parent_fd)
         view = dict(snapshot)
         view["last_update_age_seconds"] = max(0, math.floor(time.time() - file_stat.st_mtime))
         return copy.deepcopy(view)
