@@ -1619,3 +1619,73 @@ The correction still requires a new independent review. No remote host,
 protected identity, database, log, raw payload, controller installation,
 formal matrix, push, or promotion was touched during this correction. The 14
 local skips remain zero protected passes and cannot authorize a formal run.
+
+## Fix Round 5 descriptor-owner registration correction
+
+The independent local review of `c408881..c702c33` accepted the corrected
+root-name provenance and object-close fallback, but rejected worker-state
+handoff with one Important residual, I-C1. Three supported production line
+events existed after a temporary `io.FileIO` had acquired the received SCM
+descriptor but before its `_IntegratedLifecycleFdOwner` reached the persistent
+owner group. An exception at those boundaries could destroy the temporary
+object, close the descriptor, and leave retained-message reconciliation with no
+owner from which to adopt the runner, descendant, and receipt. The coordinator
+accepted the finding; arbitrary-opcode asynchronous injection remains outside
+the documented pure-Python boundary and was not used by the reviewer.
+
+The correction separates durable owner registration from file-object
+materialization:
+
+- `_IntegratedLifecycleFdOwner.from_descriptor` now constructs only a validated
+  descriptor-identity slot; it does not acquire a `FileIO`.
+- `_IntegratedLifecycleFdOwnerGroup.adopt_descriptor` appends that slot to the
+  persistent group before materialization.
+- `ensure_file_object` performs `FileIO` acquisition and publication to the
+  already-persistent slot on one physical source line. Before that line, retry
+  finds the raw owner slot; after it, retry finds the published object owner.
+  This closes every supported line-event boundary without claiming
+  arbitrary-opcode atomicity.
+- Harvest retry completes materialization and inheritable-bit normalization for
+  both newly created and already registered slots. Final cleanup can also
+  materialize an unmaterialized retained slot, makes at most two object-level
+  attempts, preserves the first failure and traceback, and never retries a raw
+  numeric close.
+
+### TDD and final local evidence
+
+The sole exact Task 7C selector was first extended with a real socketpair,
+pipe, canonical SCM_RIGHTS state message, and a production-line exception on
+the owner materialization line. Before production edits, the selector returned
+one failure plus the existing explicit protected-host skip because no durable
+materialization boundary existed. After the correction, all local pre-skip
+assertions passed: the exact primary object and originating traceback survived,
+one persistent owner remained, worker/runner/descendant identities were all
+adopted, exact PID/start signaling received the complete map, the transferred
+descriptor and lifecycle tree were closed, and no guard-removal or broad
+process-group route ran.
+
+All final commands below ran after the last production and test edit:
+
+- Exact selector: 1 test in 0.128 seconds; all local pre-skip behavior passed;
+  1 explicit protected skip; 0 failures/errors.
+- Reviewer-focused set: 7 tests in 0.126 seconds; 6 passes, 1 explicit
+  protected skip, 0 failures/errors.
+- Adjacent collector/smoke/performance: 284 tests in 8.587 seconds; 270 passes,
+  14 explicit environment/protected skips, 0 failures/errors.
+- Task 7 Step 6: 142 tests in 1.929 seconds; 140 passes, 2 explicit environment
+  skips, 0 failures/errors.
+- Exact protected list: 14 tests in 0.114 seconds; 0 protected passes, 14
+  explicit local skips, 0 failures/errors.
+- Full repository discovery: 1,185 tests in 133.031 seconds; 1,166 passes, 19
+  explicit environment/platform/protected skips, 0 failures/errors.
+- Isolated-cache compilation, `git diff --check`, exact one-selector checks,
+  and scans for cross-test calls, public integrated routes, credential
+  literals, and raw numeric descriptor retry all passed.
+
+This correction remains local and unaccepted until a fresh independent review
+exhaustively checks the post-`recvmsg` line-event boundary and the unchanged
+root, close, pidfd, guard-last, and receipt-to-promotion contracts. No remote
+host, protected identity, database, log, raw payload, push, controller
+installation, matrix, promotion, or paper artifact was touched. The protected
+Linux gate remains outstanding and all 14 local skips count as zero protected
+passes.

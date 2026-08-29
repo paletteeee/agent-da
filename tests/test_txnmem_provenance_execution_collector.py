@@ -11634,6 +11634,144 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 self.assertEqual(guard_events, [])
                 self.assertEqual(killpg_calls, 0)
 
+        with self.subTest(
+            round5_review_gap="owner-slot-precedes-file-object"
+        ):
+            owner_type = collector_module._IntegratedLifecycleFdOwner
+            owner_group_type = (
+                collector_module._IntegratedLifecycleFdOwnerGroup
+            )
+            ensure_file_object = getattr(
+                owner_type,
+                "ensure_file_object",
+                None,
+            )
+            self.assertTrue(callable(ensure_file_object))
+            adoption_source = inspect.getsource(
+                owner_group_type.adopt_descriptor
+            )
+            self.assertLess(
+                adoption_source.index("self.owners.append(owner)"),
+                adoption_source.index("owner.ensure_file_object()"),
+            )
+            ensure_lines, ensure_start = inspect.getsourcelines(
+                ensure_file_object
+            )
+            materialize_offsets = [
+                offset
+                for offset, source_line in enumerate(ensure_lines)
+                if "self.file_object = io.FileIO" in source_line
+            ]
+            self.assertEqual(len(materialize_offsets), 1)
+            materialize_line = ensure_start + materialize_offsets[0]
+            primary = Round5Primary("owner-slot-precedes-file-object")
+            primary_origins = []
+            trace_raised = False
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                resources, lifecycle, _endpoints = make_round4_resources(
+                    parent,
+                    channels=False,
+                )
+                collector_module._adopt_integrated_lifecycle_worker(
+                    resources,
+                    100,
+                    "10",
+                )
+                guard_events = attach_round5_guard(resources, "4")
+                sender, base_receiver = socket.socketpair()
+                receiver = Round5RecordingReceiveSocket(
+                    fileno=base_receiver.detach()
+                )
+                resources.parent_channel = receiver
+                receipt_read, receipt_write = os.pipe()
+                sender.sendmsg(
+                    [collector_module.canonical_json_bytes(state)],
+                    [
+                        (
+                            socket.SOL_SOCKET,
+                            socket.SCM_RIGHTS,
+                            collector_module.array.array(
+                                "i", [receipt_read]
+                            ).tobytes(),
+                        )
+                    ],
+                )
+
+                def owner_materialization_trace(frame, event, _arg):
+                    nonlocal trace_raised
+                    if (
+                        event == "line"
+                        and frame.f_code is ensure_file_object.__code__
+                        and frame.f_lineno == materialize_line
+                        and not trace_raised
+                    ):
+                        trace_raised = True
+                        sys.settrace(None)
+                        try:
+                            raise primary
+                        except BaseException as exc:
+                            primary_origins.append(exc.__traceback__)
+                            raise
+                    return owner_materialization_trace
+
+                receive_failure = None
+                previous_trace = sys.gettrace()
+                try:
+                    sys.settrace(owner_materialization_trace)
+                    try:
+                        receive_round5(receiver, resources)
+                    except BaseException as exc:
+                        receive_failure = exc
+                finally:
+                    sys.settrace(previous_trace)
+                expected_identities = {
+                    100: "10",
+                    101: "11",
+                    102: "12",
+                }
+                identities_before_finalize = dict(
+                    resources.recorded_identities
+                )
+                caught, signal_calls, _uids, killpg_calls = finalize_round5(
+                    resources,
+                    receive_failure,
+                )
+                transferred_descriptor = receiver.received_descriptors[0]
+                transferred_closed = False
+                try:
+                    os.fstat(transferred_descriptor)
+                except OSError:
+                    transferred_closed = True
+                sender.close()
+                os.close(receipt_read)
+                os.close(receipt_write)
+                if not transferred_closed:
+                    os.close(transferred_descriptor)
+                self.assertTrue(trace_raised)
+                self.assertIs(receive_failure, primary)
+                self.assertIs(caught, primary)
+                self.assertEqual(len(resources.fd_owners.owners), 1)
+                self.assertEqual(
+                    identities_before_finalize,
+                    expected_identities,
+                )
+                self.assertEqual(
+                    signal_calls,
+                    [(expected_identities, signal.SIGKILL)],
+                )
+                self.assertTrue(transferred_closed)
+                self.assertTrue(
+                    all(owner.closed for owner in resources.fd_owners.owners)
+                )
+                self.assertTrue(resources.tree_cleanup.root_removed)
+                self.assertFalse(lifecycle.exists())
+                self.assertEqual(guard_events, [])
+                self.assertEqual(killpg_calls, 0)
+                self.assertTrue(
+                    traceback_contains(caught.__traceback__, primary_origins[0])
+                )
+
         protected_primitives = bool(
             sys.platform.startswith("linux")
             and hasattr(os, "geteuid")

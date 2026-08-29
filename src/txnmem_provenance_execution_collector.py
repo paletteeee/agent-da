@@ -6664,6 +6664,9 @@ def _harvest_integrated_lifecycle_received_fds(
             owner = owner_group.owner_for_descriptor(descriptor)
             if owner is None:
                 owner = owner_group.adopt_descriptor(descriptor)
+            else:
+                owner.ensure_file_object()
+                os.set_inheritable(owner.borrow(), False)
             if not any(
                 received_owner is owner
                 for received_owner in received_owners
@@ -7418,8 +7421,8 @@ def _close_integrated_lifecycle_fd_object(file_object: io.FileIO) -> None:
 
 @dataclass
 class _IntegratedLifecycleFdOwner:
-    file_object: io.FileIO
     initial_descriptor: int
+    file_object: io.FileIO | None = None
 
     @classmethod
     def from_descriptor(cls, descriptor: int) -> _IntegratedLifecycleFdOwner:
@@ -7427,21 +7430,29 @@ class _IntegratedLifecycleFdOwner:
             raise CollectorError(
                 "integrated lifecycle descriptor ownership is invalid"
             )
-        return cls(
-            file_object=io.FileIO(descriptor, mode="rb", closefd=True),
-            initial_descriptor=descriptor,
-        )
+        return cls(initial_descriptor=descriptor)
+
+    def ensure_file_object(self) -> io.FileIO:
+        if self.file_object is None:
+            # The owner slot is already persistent. One source line makes the
+            # FileIO acquisition and slot publication indivisible to the
+            # supported line-event fault model.
+            self.file_object = io.FileIO(self.initial_descriptor, mode="rb", closefd=True)
+        return self.file_object
 
     @property
     def closed(self) -> bool:
-        return bool(self.file_object.closed)
+        return bool(
+            self.file_object is not None and self.file_object.closed
+        )
 
     def borrow(self) -> int:
-        if self.closed:
+        file_object = self.ensure_file_object()
+        if file_object.closed:
             raise CollectorError(
                 "integrated lifecycle descriptor ownership is closed"
             )
-        descriptor = self.file_object.fileno()
+        descriptor = file_object.fileno()
         if type(descriptor) is not int or descriptor < 0:
             raise CollectorError(
                 "integrated lifecycle descriptor ownership is invalid"
@@ -7452,6 +7463,29 @@ class _IntegratedLifecycleFdOwner:
         if self.closed:
             return
         first_failure: _IntegratedLifecycleCapturedFailure | None = None
+        for _attempt in range(2):
+            if self.file_object is not None:
+                break
+            try:
+                self.ensure_file_object()
+            except BaseException as exc:
+                if first_failure is None:
+                    first_failure = _IntegratedLifecycleCapturedFailure(
+                        exception=exc,
+                        traceback=exc.__traceback__,
+                    )
+        if self.file_object is None:
+            if first_failure is None:
+                failure = CollectorError(
+                    "integrated lifecycle descriptor ownership is invalid"
+                )
+                first_failure = _IntegratedLifecycleCapturedFailure(
+                    exception=failure,
+                    traceback=failure.__traceback__,
+                )
+            raise first_failure.exception.with_traceback(
+                first_failure.traceback
+            )
         for _attempt in range(2):
             if self.closed:
                 break
@@ -7502,10 +7536,9 @@ class _IntegratedLifecycleFdOwnerGroup:
             raise CollectorError(
                 "integrated lifecycle descriptor ownership is duplicated"
             )
-        self.owners.append(
-            _IntegratedLifecycleFdOwner.from_descriptor(descriptor)
-        )
-        owner = self.owners[-1]
+        owner = _IntegratedLifecycleFdOwner.from_descriptor(descriptor)
+        self.owners.append(owner)
+        owner.ensure_file_object()
         os.set_inheritable(owner.borrow(), False)
         return owner
 
