@@ -8326,6 +8326,8 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             self.assertEqual(closed, [81, 82])
             lifecycle_source = inspect.getsource(
                 collector_module._run_protected_linux_integrated_lifecycle
+            ) + inspect.getsource(
+                collector_module._run_protected_linux_integrated_lifecycle_body
             )
             finalizer_source = inspect.getsource(
                 collector_module._finalize_integrated_lifecycle_resources
@@ -8380,7 +8382,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             self.assertEqual(events, ["quiescence", "deactivate"])
             worker_start = lifecycle_source.index("def worker_main()")
             worker_end = lifecycle_source.index(
-                "\n        worker_pid = os.fork()",
+                "\n        worker_pid, worker_start = _fork_integrated_lifecycle_worker(",
                 worker_start,
             )
             worker_source = lifecycle_source[worker_start:worker_end]
@@ -8396,6 +8398,11 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             receive_state = getattr(
                 collector_module,
                 "_receive_integrated_lifecycle_worker_state",
+                None,
+            )
+            receipt_owner_type = getattr(
+                collector_module,
+                "_IntegratedLifecycleReceiptOwner",
                 None,
             )
             read_absent = getattr(
@@ -8416,6 +8423,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         receive_state,
                         read_absent,
                         completion_writer,
+                        receipt_owner_type,
                     )
                 )
             )
@@ -8429,17 +8437,21 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             sender, receiver = socket.socketpair()
             receipt_read, receipt_write = os.pipe()
             transferred_fd = None
+            receipt_owner = receipt_owner_type()
             try:
                 send_state(sender, state, receipt_read)
-                observed_state, transferred_fd = receive_state(
-                    receiver, timeout=1.0
+                observed_state = receive_state(
+                    receiver,
+                    timeout=1.0,
+                    receipt_owner=receipt_owner,
                 )
+                transferred_fd = receipt_owner.borrow()
                 self.assertEqual(observed_state, state)
                 os.close(receipt_read)
                 receipt_read = -1
                 os.close(receipt_write)
                 receipt_write = -1
-                absent_receipt = read_absent(transferred_fd, timeout=1.0)
+                absent_receipt = read_absent(receipt_owner, timeout=1.0)
                 transferred_fd = None
             finally:
                 sender.close()
@@ -9037,7 +9049,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         return real_close(descriptor)
 
                     caught = None
-                    returned_descriptor = None
+                    receipt_owner = receipt_owner_type()
                     try:
                         with patch.object(
                             collector_module.os,
@@ -9045,9 +9057,10 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                             side_effect=tracked_close,
                         ):
                             try:
-                                _observed, returned_descriptor = receive_state(
+                                receive_state(
                                     receiver,
                                     timeout=1.0,
+                                    receipt_owner=receipt_owner,
                                 )
                             except BaseException as exc:
                                 caught = exc
@@ -9057,8 +9070,8 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         for read_descriptor, write_descriptor in pipes:
                             real_close(read_descriptor)
                             real_close(write_descriptor)
-                        if returned_descriptor is not None:
-                            real_close(returned_descriptor)
+                        if receipt_owner.descriptor is not None:
+                            receipt_owner.close_retained()
                     try:
                         self.assertIsInstance(caught, CollectorError)
                         self.assertRegex(str(caught), expected_error)
@@ -9080,6 +9093,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             sender, receiver = socket.socketpair()
             receipt_read, receipt_write = os.pipe()
             transferred_descriptor = None
+            success_owner = receipt_owner_type()
             success_close_counts = {}
             try:
                 sender.sendmsg(
@@ -9106,10 +9120,12 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     "close",
                     side_effect=track_success_close,
                 ):
-                    observed, transferred_descriptor = receive_state(
+                    observed = receive_state(
                         receiver,
                         timeout=1.0,
+                        receipt_owner=success_owner,
                     )
+                    transferred_descriptor = success_owner.borrow()
                 self.assertEqual(observed, state)
                 self.assertFalse(os.get_inheritable(transferred_descriptor))
                 self.assertNotIn(
@@ -9130,6 +9146,11 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                             real_close(descriptor)
                         except OSError:
                             pass
+                if success_owner.descriptor is not None:
+                    try:
+                        success_owner.close_retained()
+                    except OSError:
+                        pass
 
         with self.subTest(
             correction="round2-failure-accumulating-cleanup"
@@ -9362,6 +9383,8 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             finalizer_source = inspect.getsource(finalize_resources)
             lifecycle_source = inspect.getsource(
                 collector_module._run_protected_linux_integrated_lifecycle
+            ) + inspect.getsource(
+                collector_module._run_protected_linux_integrated_lifecycle_body
             )
             self.assertEqual(
                 lifecycle_source.count(
@@ -9395,6 +9418,8 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     self.argtypes = None
                     self.restype = None
                     self.calls = []
+                    self.current = 0
+                    self.set_returned = False
 
                 def __call__(self, option, value, arg3, arg4, arg5):
                     self.calls.append((option, int(value)))
@@ -9405,7 +9430,11 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                                 collector_module.ctypes.c_int
                             ),
                         )
-                        pointer.contents.value = 0
+                        pointer.contents.value = self.current
+                    elif option == 36:
+                        self.current = int(value)
+                        if int(value) == 1:
+                            self.set_returned = True
                     return 0
 
             class TrackingSocket:
@@ -9421,17 +9450,72 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     return self.owned.close()
 
             setup_cases = (
+                "root-return-pre-record",
                 "post-root-chown",
                 "workspace-construction",
                 "export-construction",
+                "subreaper-return-pre-owned",
                 "post-subreaper-pre-socket",
+                "socketpair-return-pre-slots",
+                "socketpair-partial-adopt",
                 "socket-endpoint-setup",
             )
-            real_mkdtemp = collector_module.tempfile.mkdtemp
+            real_mkdir = collector_module.os.mkdir
             real_set_inheritable = collector_module.os.set_inheritable
             real_socketpair = socket.socketpair
             repository = Path(__file__).resolve().parents[1]
             source_identity = {"runner_sha256": "a" * 64}
+
+            def invoke_setup_with_trace(boundary_trace):
+                caught = None
+                caught_traceback = None
+                run_hash = hashlib.sha256(
+                    b"txnmem-integrated-lifecycle-private-run-v1"
+                ).hexdigest()
+                scope_hash = hashlib.sha256(
+                    b"txnmem-integrated-lifecycle-private-scope-v1"
+                ).hexdigest()
+                resources = (
+                    collector_module._new_integrated_lifecycle_resources(
+                        run_hash=run_hash,
+                        scope_hash=scope_hash,
+                        pidfds_before={},
+                        controller_uid=os.getuid(),
+                        runner_uid=os.getuid(),
+                    )
+                )
+                setup_failure = None
+                setup_traceback = None
+                previous_trace = sys.gettrace()
+                if boundary_trace is not None:
+                    sys.settrace(boundary_trace)
+                try:
+                    prepare_setup(
+                        project_root=repository,
+                        source_identity=source_identity,
+                        pidfds_before={},
+                        resources=resources,
+                        controller_uid=os.getuid(),
+                        runner_uid=os.getuid(),
+                        runner_gid=os.getgid(),
+                        require_root=False,
+                    )
+                except BaseException as exc:
+                    setup_failure = exc
+                    setup_traceback = exc.__traceback__
+                finally:
+                    sys.settrace(previous_trace)
+                try:
+                    finalize_resources(
+                        resources,
+                        primary_failure=setup_failure,
+                        primary_traceback=setup_traceback,
+                    )
+                except BaseException as exc:
+                    caught = exc
+                    caught_traceback = exc.__traceback__
+                return caught, caught_traceback
+
             for setup_case in setup_cases:
                 with self.subTest(setup_fault=setup_case):
                     self.assertTrue(callable(prepare_setup))
@@ -9441,6 +9525,11 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     tracked_sockets = []
                     inheritable_calls = []
                     fake_prctl = FakePrctl()
+                    boundary_state = {
+                        "root_returned": False,
+                        "socketpair_returned": False,
+                        "raised": False,
+                    }
 
                     def raise_primary():
                         try:
@@ -9449,10 +9538,19 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                             primary_origins.append(exc.__traceback__)
                             raise
 
-                    def scoped_mkdtemp(*args, **kwargs):
-                        created = Path(real_mkdtemp(*args, **kwargs))
-                        created_roots.append(created)
-                        return str(created)
+                    def tracked_root_mkdir(path, *args, **kwargs):
+                        result = real_mkdir(path, *args, **kwargs)
+                        name = os.fspath(path)
+                        if (
+                            isinstance(name, str)
+                            and name.startswith("txnmem-integrated-lifecycle-")
+                        ):
+                            created = setup_parent / name
+                            if created not in created_roots:
+                                created_roots.append(created)
+                            if setup_case == "root-return-pre-record":
+                                boundary_state["root_returned"] = True
+                        return result
 
                     def fail_or_accept_chown(*_args, **_kwargs):
                         if setup_case == "post-root-chown":
@@ -9499,6 +9597,8 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         tracked_sockets.extend(
                             (TrackingSocket(first), TrackingSocket(second))
                         )
+                        if setup_case == "socketpair-return-pre-slots":
+                            boundary_state["socketpair_returned"] = True
                         return tuple(tracked_sockets)
 
                     def fail_second_inheritable(descriptor, inheritable):
@@ -9537,7 +9637,11 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                             "socketpair",
                             side_effect=tracked_socketpair,
                         )
-                        if setup_case == "socket-endpoint-setup"
+                        if setup_case in {
+                            "socketpair-return-pre-slots",
+                            "socketpair-partial-adopt",
+                            "socket-endpoint-setup",
+                        }
                         else nullcontext()
                     )
                     inheritable_context = (
@@ -9549,19 +9653,54 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         if setup_case == "socket-endpoint-setup"
                         else nullcontext()
                     )
+                    mkdir_context = patch.object(
+                        collector_module.os,
+                        "mkdir",
+                        side_effect=tracked_root_mkdir,
+                    )
                     caught = None
                     caught_traceback = None
                     with TemporaryDirectory() as tmp:
                         setup_parent = Path(tmp).resolve()
 
-                        def rooted_mkdtemp(*args, **kwargs):
-                            kwargs["dir"] = setup_parent
-                            return scoped_mkdtemp(*args, **kwargs)
+                        def setup_boundary_trace(frame, event, _arg):
+                            if (
+                                event != "line"
+                                or frame.f_globals is not collector_module.__dict__
+                                or boundary_state["raised"]
+                            ):
+                                return setup_boundary_trace
+                            should_raise = bool(
+                                setup_case == "root-return-pre-record"
+                                and boundary_state["root_returned"]
+                            ) or bool(
+                                setup_case == "subreaper-return-pre-owned"
+                                and fake_prctl.set_returned
+                            ) or bool(
+                                setup_case == "socketpair-return-pre-slots"
+                                and boundary_state["socketpair_returned"]
+                            ) or bool(
+                                setup_case == "socketpair-partial-adopt"
+                                and frame.f_locals.get("resources") is not None
+                                and frame.f_locals[
+                                    "resources"
+                                ].parent_channel
+                                is not None
+                                and frame.f_locals[
+                                    "resources"
+                                ].worker_channel
+                                is None
+                            )
+                            if should_raise:
+                                boundary_state["raised"] = True
+                                sys.settrace(None)
+                                raise_primary()
+                            return setup_boundary_trace
 
                         with patch.object(
                             collector_module.tempfile,
-                            "mkdtemp",
-                            side_effect=rooted_mkdtemp,
+                            "gettempdir",
+                            return_value=str(setup_parent),
                         ), patch.object(
                             collector_module.os,
                             "chown",
@@ -9587,7 +9726,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                             collector_module.ctypes,
                             "CDLL",
                             return_value=SimpleNamespace(prctl=fake_prctl),
-                        ), socket_context, inheritable_context, patch.object(
+                        ), socket_context, inheritable_context, mkdir_context, patch.object(
                             collector_module,
                             "_require_formal_uid_processes",
                             return_value=None,
@@ -9600,19 +9739,19 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                             "_remove_integrated_lifecycle_tree",
                             wraps=remove_tree,
                         ) as remove_spy:
-                            try:
-                                prepare_setup(
-                                    project_root=repository,
-                                    source_identity=source_identity,
-                                    pidfds_before={},
-                                    controller_uid=os.getuid(),
-                                    runner_uid=os.getuid(),
-                                    runner_gid=os.getgid(),
-                                    require_root=False,
-                                )
-                            except BaseException as exc:
-                                caught = exc
-                                caught_traceback = exc.__traceback__
+                            boundary_trace = (
+                                setup_boundary_trace
+                                if setup_case in {
+                                    "root-return-pre-record",
+                                    "subreaper-return-pre-owned",
+                                    "socketpair-return-pre-slots",
+                                    "socketpair-partial-adopt",
+                                }
+                                else None
+                            )
+                            caught, caught_traceback = invoke_setup_with_trace(
+                                boundary_trace
+                            )
                         self.assertIs(caught, primary)
                         self.assertEqual(len(created_roots), 1)
                         self.assertEqual(remove_spy.call_count, 1)
@@ -9636,19 +9775,607 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         if option == 36
                     ]
                     if setup_case in {
+                        "subreaper-return-pre-owned",
                         "post-subreaper-pre-socket",
+                        "socketpair-return-pre-slots",
+                        "socketpair-partial-adopt",
                         "socket-endpoint-setup",
                     }:
                         self.assertEqual(subreaper_values, [1, 0])
                     else:
                         self.assertEqual(subreaper_values, [])
-                    if setup_case == "socket-endpoint-setup":
+                    if setup_case in {
+                        "socketpair-return-pre-slots",
+                        "socketpair-partial-adopt",
+                        "socket-endpoint-setup",
+                    }:
+                        observed_close_counts = [
+                            endpoint.close_count for endpoint in tracked_sockets
+                        ]
+                        for endpoint in tracked_sockets:
+                            try:
+                                endpoint.owned.close()
+                            except OSError:
+                                pass
                         self.assertEqual(
-                            [endpoint.close_count for endpoint in tracked_sockets],
+                            observed_close_counts,
                             [1, 1],
                         )
                     else:
                         self.assertEqual(tracked_sockets, [])
+
+        with self.subTest(correction="round4-lifecycle-handoff-ownership"):
+            resources_type = collector_module._IntegratedLifecycleResources
+            run_lifecycle = (
+                collector_module._run_protected_linux_integrated_lifecycle
+            )
+            finalize_resources = (
+                collector_module._finalize_integrated_lifecycle_resources
+            )
+
+            class Round4Primary(BaseException):
+                pass
+
+            class Round4Channel:
+                def __init__(
+                    self,
+                    owned,
+                    *,
+                    fail_before_close=False,
+                    fail_after_close=False,
+                ):
+                    self.owned = owned
+                    self.fail_before_close = fail_before_close
+                    self.fail_after_close = fail_after_close
+                    self.close_count = 0
+
+                def __getattr__(self, name):
+                    return getattr(self.owned, name)
+
+                def close(self):
+                    self.close_count += 1
+                    if self.fail_before_close and self.close_count == 1:
+                        raise OSError("channel close failed before effect")
+                    result = self.owned.close()
+                    if self.fail_after_close and self.close_count == 1:
+                        raise OSError("channel close failed after effect")
+                    return result
+
+            def make_round4_resources(parent, *, channels=True):
+                lifecycle = parent / "lifecycle"
+                lifecycle.mkdir(mode=0o700)
+                candidate = lifecycle / "candidate"
+                candidate.mkdir(mode=0o700)
+                parent_metadata = parent.stat()
+                lifecycle_metadata = lifecycle.stat()
+                resources = resources_type(
+                    lifecycle_root=lifecycle,
+                    lifecycle_parent_device=int(parent_metadata.st_dev),
+                    lifecycle_parent_inode=int(parent_metadata.st_ino),
+                    lifecycle_device=int(lifecycle_metadata.st_dev),
+                    lifecycle_inode=int(lifecycle_metadata.st_ino),
+                    controller_uid=os.getuid(),
+                    runner_uid=os.getuid(),
+                    runner_owned_relative=Path("candidate"),
+                    pidfds_before={},
+                )
+                endpoints = ()
+                if channels:
+                    parent_channel, worker_channel = socket.socketpair()
+                    endpoints = (
+                        Round4Channel(parent_channel),
+                        Round4Channel(worker_channel),
+                    )
+                    resources.parent_channel = endpoints[0]
+                    resources.worker_channel = endpoints[1]
+                return resources, lifecycle, endpoints
+
+            def make_round4_setup(resources, lifecycle):
+                guard = SimpleNamespace(
+                    active=False,
+                    table_name="txnmem_" + "f" * 16,
+                    _table_names=lambda: set(),
+                )
+                return SimpleNamespace(
+                    resources=resources,
+                    workspace=SimpleNamespace(candidate=lifecycle / "candidate"),
+                    immutable_source=lifecycle,
+                    runner_path=lifecycle / "runner.py",
+                    bundle_id="0" * 64,
+                    pointer_path=lifecycle / "pointer.json",
+                    precommit_marker=lifecycle / "precommit",
+                    external_completion=lifecycle / "completion.json",
+                    external_completion_store=SimpleNamespace(),
+                    external_completion_name="completion.json",
+                    guard=guard,
+                    guard_owner=None,
+                    command=(sys.executable,),
+                    environment={},
+                )
+
+            def finalize_round4(resources, primary):
+                caught = None
+                with patch.object(
+                    collector_module,
+                    "_require_formal_uid_processes",
+                    return_value=None,
+                ), patch.object(
+                    collector_module,
+                    "_integrated_lifecycle_pidfds",
+                    return_value={},
+                ):
+                    try:
+                        finalize_resources(
+                            resources,
+                            primary_failure=primary,
+                            primary_traceback=primary.__traceback__,
+                        )
+                    except BaseException as exc:
+                        caught = exc
+                return caught
+
+            def run_with_local_preflight(setup, **extra_patches):
+                patches = (
+                    patch.object(collector_module.sys, "platform", "linux"),
+                    patch.object(collector_module.os, "geteuid", return_value=0),
+                    patch.object(collector_module.Path, "is_file", return_value=True),
+                    patch.object(
+                        collector_module,
+                        "_require_pidfd_support",
+                        return_value=None,
+                    ),
+                    patch.object(
+                        collector_module,
+                        "_require_formal_uid_processes",
+                        return_value=None,
+                    ),
+                    patch.object(
+                        collector_module,
+                        "_validate_formal_controller_context",
+                        return_value={
+                            "source_commit": "0" * 40,
+                            "source_manifest": {},
+                        },
+                    ),
+                    patch.object(
+                        collector_module,
+                        "attest_committed_source",
+                        return_value={"runner_sha256": "a" * 64},
+                    ),
+                    patch.object(
+                        collector_module,
+                        "_integrated_lifecycle_pidfds",
+                        return_value={},
+                    ),
+                    patch.object(
+                        collector_module,
+                        "_new_integrated_lifecycle_resources",
+                        create=True,
+                        return_value=setup.resources,
+                    ),
+                    patch.object(
+                        collector_module,
+                        "_prepare_integrated_lifecycle_setup",
+                        side_effect=lambda **_kwargs: setup,
+                    ),
+                )
+                entered = []
+                try:
+                    for context in patches:
+                        entered.append(context)
+                        context.__enter__()
+                    for context in extra_patches.values():
+                        entered.append(context)
+                        context.__enter__()
+                    return run_lifecycle(
+                        project_root=Path(__file__).resolve().parents[1],
+                        _controller_context={},
+                        fault=collector_module._IntegratedLifecycleFault.POINTER_WITHOUT_RECEIPT,
+                    )
+                finally:
+                    for context in reversed(entered):
+                        context.__exit__(None, None, None)
+
+            with self.subTest(ownership_gap="root-known-name-collision"):
+                caught = None
+                acquisition_failure = None
+                with TemporaryDirectory() as tmp:
+                    parent = Path(tmp).resolve()
+                    with patch.object(
+                        collector_module.tempfile,
+                        "gettempdir",
+                        return_value=str(parent),
+                    ), patch.object(
+                        collector_module.secrets,
+                        "token_hex",
+                        return_value="c" * 32,
+                    ):
+                        resources = (
+                            collector_module._new_integrated_lifecycle_resources(
+                                run_hash="1" * 64,
+                                scope_hash="2" * 64,
+                                pidfds_before={},
+                                controller_uid=os.getuid(),
+                                runner_uid=os.getuid(),
+                            )
+                        )
+                    lifecycle = resources.lifecycle_root
+                    lifecycle.mkdir(mode=0o700)
+                    marker = lifecycle / "preexisting-marker"
+                    marker.write_text("not lifecycle-owned\n", encoding="utf-8")
+                    try:
+                        collector_module._acquire_integrated_lifecycle_root(
+                            resources
+                        )
+                    except BaseException as exc:
+                        acquisition_failure = exc
+                        caught = finalize_round4(resources, exc)
+                    self.assertIs(caught, acquisition_failure)
+                    self.assertTrue(resources.root_name_collision)
+                    self.assertTrue(lifecycle.is_dir())
+                    self.assertEqual(
+                        marker.read_text(encoding="utf-8"),
+                        "not lifecycle-owned\n",
+                    )
+                    self.assertFalse(resources.tree_cleanup.root_removed)
+
+            with self.subTest(ownership_gap="setup-return-caller-handoff"):
+                primary = Round4Primary("setup-return-caller-handoff")
+                origin = []
+                caught = None
+                with TemporaryDirectory() as tmp:
+                    parent = Path(tmp).resolve()
+                    resources, lifecycle, endpoints = make_round4_resources(parent)
+                    setup = make_round4_setup(resources, lifecycle)
+                    raised = False
+
+                    def handoff_trace(frame, event, _arg):
+                        nonlocal raised
+                        if (
+                            not raised
+                            and event == "line"
+                            and frame.f_globals is collector_module.__dict__
+                            and frame.f_locals.get("setup") is setup
+                        ):
+                            raised = True
+                            sys.settrace(None)
+                            try:
+                                raise primary
+                            except BaseException as exc:
+                                origin.append(exc.__traceback__)
+                                raise
+                        return handoff_trace
+
+                    previous_trace = sys.gettrace()
+                    try:
+                        sys.settrace(handoff_trace)
+                        try:
+                            run_with_local_preflight(setup)
+                        except BaseException as exc:
+                            caught = exc
+                    finally:
+                        sys.settrace(previous_trace)
+                    observed_finalized = resources.finalized
+                    observed_root_exists = lifecycle.exists()
+                    observed_close_counts = tuple(
+                        endpoint.close_count for endpoint in endpoints
+                    )
+                    for endpoint in endpoints:
+                        try:
+                            endpoint.close()
+                        except OSError:
+                            pass
+                    self.assertIs(caught, primary)
+                    self.assertTrue(observed_finalized)
+                    self.assertFalse(observed_root_exists)
+                    self.assertEqual(observed_close_counts, (1, 1))
+                    self.assertTrue(origin)
+
+            with self.subTest(ownership_gap="fork-return-pid-start-record"):
+                primary = Round4Primary("fork-return-pid-start-record")
+                caught = None
+                signal_calls = []
+                synthetic_pid = 4242
+                synthetic_start = "424200"
+                with TemporaryDirectory() as tmp:
+                    parent = Path(tmp).resolve()
+                    resources, lifecycle, endpoints = make_round4_resources(parent)
+                    setup = make_round4_setup(resources, lifecycle)
+                    endpoints[1].sendall(
+                        f"H{synthetic_pid}:{synthetic_start}\n".encode("ascii")
+                    )
+                    raised = False
+
+                    def fork_trace(frame, event, _arg):
+                        nonlocal raised
+                        if (
+                            not raised
+                            and event == "line"
+                            and frame.f_globals is collector_module.__dict__
+                            and synthetic_pid
+                            in {
+                                frame.f_locals.get("worker_pid"),
+                                frame.f_locals.get("fork_pid"),
+                            }
+                            and not resources.recorded_identities
+                        ):
+                            raised = True
+                            sys.settrace(None)
+                            raise primary
+                        return fork_trace
+
+                    def record_signal(identities, signal_number):
+                        signal_calls.append((dict(identities), signal_number))
+                        return len(identities)
+
+                    previous_trace = sys.gettrace()
+                    try:
+                        sys.settrace(fork_trace)
+                        try:
+                            run_with_local_preflight(
+                                setup,
+                                fork=patch.object(
+                                    collector_module.os,
+                                    "fork",
+                                    return_value=synthetic_pid,
+                                ),
+                                start=patch.object(
+                                    collector_module,
+                                    "_integrated_lifecycle_start_ticks",
+                                    return_value=synthetic_start,
+                                ),
+                                observed=patch.object(
+                                    collector_module,
+                                    "_integrated_lifecycle_observed_start_ticks",
+                                    return_value=None,
+                                ),
+                                signal=patch.object(
+                                    collector_module,
+                                    "_signal_integrated_lifecycle_identities",
+                                    side_effect=record_signal,
+                                ),
+                                waitpid=patch.object(
+                                    collector_module.os,
+                                    "waitpid",
+                                    return_value=(synthetic_pid, signal.SIGKILL),
+                                ),
+                            )
+                        except BaseException as exc:
+                            caught = exc
+                    finally:
+                        sys.settrace(previous_trace)
+                    for endpoint in endpoints:
+                        try:
+                            endpoint.close()
+                        except OSError:
+                            pass
+                    self.assertIs(caught, primary)
+                    self.assertEqual(
+                        resources.recorded_identities,
+                        {synthetic_pid: synthetic_start},
+                    )
+                    self.assertEqual(
+                        signal_calls,
+                        [({synthetic_pid: synthetic_start}, signal.SIGKILL)],
+                    )
+                    self.assertIn(synthetic_pid, resources.reaped_statuses)
+                    self.assertFalse(lifecycle.exists())
+
+            with self.subTest(ownership_gap="scm-return-direct-adopt"):
+                primary = Round4Primary("scm-return-direct-adopt")
+                caught = None
+                received_descriptors = []
+
+                class RecordingReceiveSocket(socket.socket):
+                    def recvmsg(self, bufsize, ancbufsize=0, flags=0):
+                        result = super().recvmsg(bufsize, ancbufsize, flags)
+                        for level, kind, data in result[1]:
+                            if (
+                                level == socket.SOL_SOCKET
+                                and kind == socket.SCM_RIGHTS
+                            ):
+                                values = collector_module.array.array("i")
+                                values.frombytes(data[: values.itemsize])
+                                received_descriptors.extend(values)
+                        return result
+
+                with TemporaryDirectory() as tmp:
+                    parent = Path(tmp).resolve()
+                    resources, lifecycle, _endpoints = make_round4_resources(
+                        parent,
+                        channels=False,
+                    )
+                    sender, base_receiver = socket.socketpair()
+                    receiver = RecordingReceiveSocket(
+                        fileno=base_receiver.detach()
+                    )
+                    receipt_read, receipt_write = os.pipe()
+                    state_payload = collector_module.canonical_json_bytes(state)
+                    sender.sendmsg(
+                        [state_payload],
+                        [
+                            (
+                                socket.SOL_SOCKET,
+                                socket.SCM_RIGHTS,
+                                collector_module.array.array(
+                                    "i", [receipt_read]
+                                ).tobytes(),
+                            )
+                        ],
+                    )
+                    receive_kwargs = {"timeout": 1.0}
+                    if "receipt_owner" in inspect.signature(
+                        receive_state
+                    ).parameters:
+                        receive_kwargs["receipt_owner"] = (
+                            resources.receipt_owner
+                        )
+                    try:
+                        receive_state(receiver, **receive_kwargs)
+                        raise primary
+                    except BaseException as exc:
+                        caught = finalize_round4(resources, exc)
+                    finally:
+                        sender.close()
+                        receiver.close()
+                        os.close(receipt_read)
+                        os.close(receipt_write)
+                    self.assertIs(caught, primary)
+                    self.assertEqual(len(received_descriptors), 1)
+                    with self.assertRaises(OSError):
+                        os.fstat(received_descriptors[0])
+                    self.assertFalse(lifecycle.exists())
+
+            with self.subTest(ownership_gap="scm-recvmsg-return-pre-harvest"):
+                primary = Round4Primary("scm-recvmsg-return-pre-harvest")
+                caught = None
+                received_descriptors = []
+                with TemporaryDirectory() as tmp:
+                    parent = Path(tmp).resolve()
+                    resources, lifecycle, _endpoints = make_round4_resources(
+                        parent,
+                        channels=False,
+                    )
+                    sender, base_receiver = socket.socketpair()
+                    receiver = RecordingReceiveSocket(
+                        fileno=base_receiver.detach()
+                    )
+                    receipt_read, receipt_write = os.pipe()
+                    state_payload = collector_module.canonical_json_bytes(state)
+                    sender.sendmsg(
+                        [state_payload],
+                        [
+                            (
+                                socket.SOL_SOCKET,
+                                socket.SCM_RIGHTS,
+                                collector_module.array.array(
+                                    "i", [receipt_read]
+                                ).tobytes(),
+                            )
+                        ],
+                    )
+                    raised = False
+
+                    def recvmsg_trace(frame, event, _arg):
+                        nonlocal raised
+                        if (
+                            not raised
+                            and event == "line"
+                            and frame.f_globals is collector_module.__dict__
+                            and (
+                                frame.f_locals.get("ancillary")
+                                or frame.f_locals.get("recv_result")
+                            )
+                            and not frame.f_locals.get("received_fds")
+                        ):
+                            raised = True
+                            sys.settrace(None)
+                            raise primary
+                        return recvmsg_trace
+
+                    previous_trace = sys.gettrace()
+                    try:
+                        sys.settrace(recvmsg_trace)
+                        try:
+                            receive_state(
+                                receiver,
+                                timeout=1.0,
+                                receipt_owner=resources.receipt_owner,
+                            )
+                        except BaseException as exc:
+                            caught = finalize_round4(resources, exc)
+                    finally:
+                        sys.settrace(previous_trace)
+                        sender.close()
+                        receiver.close()
+                        os.close(receipt_read)
+                        os.close(receipt_write)
+                    self.assertIs(caught, primary)
+                    self.assertTrue(raised)
+                    self.assertEqual(len(received_descriptors), 1)
+                    descriptor_open = True
+                    try:
+                        os.fstat(received_descriptors[0])
+                    except OSError:
+                        descriptor_open = False
+                    if descriptor_open:
+                        os.close(received_descriptors[0])
+                    self.assertFalse(descriptor_open)
+                    self.assertFalse(lifecycle.exists())
+
+            with self.subTest(ownership_gap="channel-close-retained"):
+                for close_fault, expected_count in (
+                    ("before", 2),
+                    ("after", 1),
+                ):
+                    with self.subTest(close_fault=close_fault):
+                        primary = Round4Primary(
+                            f"channel-close-retained-{close_fault}"
+                        )
+                        caught = None
+                        with TemporaryDirectory() as tmp:
+                            parent = Path(tmp).resolve()
+                            resources, lifecycle, _endpoints = (
+                                make_round4_resources(
+                                    parent,
+                                    channels=False,
+                                )
+                            )
+                            owned, peer = socket.socketpair()
+                            channel = Round4Channel(
+                                owned,
+                                fail_before_close=close_fault == "before",
+                                fail_after_close=close_fault == "after",
+                            )
+                            descriptor = owned.fileno()
+                            resources.parent_channel = channel
+                            caught = finalize_round4(resources, primary)
+                            descriptor_open = True
+                            try:
+                                os.fstat(descriptor)
+                            except OSError:
+                                descriptor_open = False
+                            if descriptor_open:
+                                owned.close()
+                            peer.close()
+                            self.assertIs(caught, primary)
+                            self.assertEqual(
+                                channel.close_count,
+                                expected_count,
+                            )
+                            self.assertFalse(descriptor_open)
+                            self.assertFalse(lifecycle.exists())
+
+            with self.subTest(ownership_gap="receipt-consumer-entry"):
+                primary = Round4Primary("receipt-consumer-entry")
+                caught = None
+                with TemporaryDirectory() as tmp:
+                    parent = Path(tmp).resolve()
+                    resources, lifecycle, _endpoints = make_round4_resources(
+                        parent,
+                        channels=False,
+                    )
+                    receipt_read, receipt_write = os.pipe()
+                    if hasattr(resources, "receipt_owner"):
+                        resources.receipt_owner.adopt(receipt_read)
+                    else:
+                        resources.parent_receipt_fd = receipt_read
+                        resources.take_receipt_fd()
+                    try:
+                        raise primary
+                    except BaseException as exc:
+                        caught = finalize_round4(resources, exc)
+                    descriptor_open = True
+                    try:
+                        os.fstat(receipt_read)
+                    except OSError:
+                        descriptor_open = False
+                    if descriptor_open:
+                        os.close(receipt_read)
+                    os.close(receipt_write)
+                    self.assertIs(caught, primary)
+                    self.assertFalse(descriptor_open)
+                    self.assertFalse(lifecycle.exists())
 
         protected_primitives = bool(
             sys.platform.startswith("linux")

@@ -1259,3 +1259,203 @@ gates therefore have zero protected passes locally. The final commit must be
 rerun on the protected host with zero skips, followed by the independent residue
 inventory. No other known Critical or Important concern remains after the local
 behavioral and full-suite verification above.
+
+## Fix Round 4
+
+Date: 2026-08-29
+
+Round baseline: `7c70242`
+
+This round closes the six I-N6 acquisition/handoff gaps from
+`task-7c-r3-review.md` within the existing private lifecycle and sole Task 7C
+selector. It preserves C-N1, I-N1, I-N2, I-N4, the exact pidfd target model,
+the real SCM receipt/EOF chain, the one-member private fault enum, and the
+absence of any public enable route. No remote system, formal identity, push, or
+merge was used.
+
+### Ownership API and call graph
+
+The surviving controller now creates `_IntegratedLifecycleResources` before
+the first lifecycle side effect and keeps one outer `try/finally` across setup,
+the setup-result handoff, body execution, fork, SCM receive, receipt
+consumption, and all failure exits:
+
+```text
+_run_protected_linux_integrated_lifecycle
+  -> _new_integrated_lifecycle_resources
+  -> try
+       -> _run_protected_linux_integrated_lifecycle_body
+            -> _prepare_integrated_lifecycle_setup(resources=owner)
+                 -> _acquire_integrated_lifecycle_root
+                 -> PR_SET_CHILD_SUBREAPER attempt
+                 -> _acquire_integrated_lifecycle_channels
+            -> _fork_integrated_lifecycle_worker
+            -> _receive_integrated_lifecycle_worker_state(
+                   receipt_owner=owner.receipt_owner)
+            -> _read_integrated_lifecycle_absent_receipt(
+                   owner.receipt_owner)
+     finally
+       -> _finalize_integrated_lifecycle_resources(owner)
+```
+
+`_IntegratedLifecycleSetup.resources` is a non-owning identity reference used
+to reject a changed owner; setup cannot create or finalize an owner. The
+wrapper is the only lifecycle finalization caller. AST inspection found one
+wrapper resource construction, one body call, one finalizer call, one setup
+call, one fork-helper call, one SCM receiver call, one receipt-reader call,
+one finalizer tree-remover call, and one finalizer guard-deactivation call.
+
+### Six I-N6 gaps
+
+| Gap | Owner/token/helper and rollback |
+| --- | --- |
+| Root create -> record | `_new_integrated_lifecycle_resources` resolves and records the exact parent device/inode, generates the random known name, derives the candidate-relative path, and returns the owner before mutation. `_acquire_integrated_lifecycle_root` records `root_create_attempted` before descriptor-relative `mkdir`, opens with no-follow directory flags, and binds root device/inode through `fstat`. `_reconcile_integrated_lifecycle_root` handles an interrupted attempted create. Root/parent descriptors use identity-aware close/retry. Explicit `EEXIST` sets `root_name_collision`; the finalizer never binds or deletes that object. |
+| `prctl` success -> owned | `subreaper_set_attempted` is stored before `PR_SET_CHILD_SUBREAPER`. Signals are narrowly masked around the state-changing call. `_restore_integrated_lifecycle_subreaper` always queries current state, restores the recorded prior state only when needed, queries again, and verifies it. Cleanup does not depend on the post-call `subreaper_owned` assignment. |
+| `socketpair` return -> slots | `_acquire_integrated_lifecycle_channels` owns the returned pair locally while signals are masked, applies non-inheritability, and then adopts into the two shared resource slots. Any pre-adopt or partial-adopt failure rolls both endpoints back; an endpoint whose closed state cannot be confirmed remains in its slot. `close_channel` and the helper-local close path query state, retry close-before-effect failures, handle close-after-effect failures, and clear only after confirmed closure. |
+| Setup return -> caller handoff | The caller-owned resource and one wrapper `finally` exist before setup starts. Setup only mutates that owner and returns metadata/non-owning references. No field-copy or setup-return interval is outside the wrapper owner. |
+| Fork return -> PID/start record | `_fork_integrated_lifecycle_worker` owns the fork result locally under a narrow signal mask. The child sends a PID/start `HELLO` over the preowned worker channel before restoring its exact inherited mask and entering `worker_main`. The parent adopts the PID/start map before returning. An injected post-fork/pre-adopt failure either adopts the known PID directly or recovers and validates `HELLO`; the outer finalizer then opens/revalidates exact pidfds, signals only that PID/start inventory, waits, and reaps. There is no UID-wide, process-group, or `killpg` fallback in this path. |
+| SCM FD return/adopt and channel/receipt transfer-to-null | `_recv_integrated_lifecycle_message_owned` receives under a narrow signal mask and harvests every complete SCM_RIGHTS integer into a preexisting helper-local list before returning. Its retrying harvest closes the tested recvmsg-return line-event window. `_receive_integrated_lifecycle_worker_state` validates the exact protocol and directly adopts the sole descriptor into the preexisting `_IntegratedLifecycleReceiptOwner`; it returns only normalized metadata, never a bare FD. The receipt reader borrows that owner and closes through it, while the owner remains the finalizer fallback. Channel and receipt fields are never cleared before confirmed close. |
+
+The pair tuple, fork PID/start locals, received-FD list, shared channel slots,
+and receipt owner are idempotent ownership tokens: a failure can leave the
+token either locally owned, shared-owned, or confirmed closed, but does not
+intentionally create an untracked intermediate transfer state.
+
+### TDD RED and GREEN
+
+Only the existing exact selector was extended. No test method, second Task 7C
+selector, cross-test call, public fixture, or public fault route was added.
+All Fix Round 4 behavior cases execute before the existing protected-host skip.
+
+Exact command:
+
+```text
+PYTHONPATH=src python3 -m unittest tests.test_txnmem_provenance_execution_collector.ProvenanceExecutionCollectorTests.test_protected_linux_integrated_root_drop_parent_death_pidfd_guard_pointer_zero_residue -v
+```
+
+Before production edits, the binding RED ran one selector with eight failing
+pre-skip subtests, zero errors, and one explicit protected-body skip. The
+failure labels were:
+
+- `root-return-pre-record`
+- `subreaper-return-pre-owned`
+- `socketpair-return-pre-slots`
+- `setup-return-caller-handoff`
+- `fork-return-pid-start-record`
+- `scm-return-direct-adopt`
+- `channel-close-retained`
+- `receipt-consumer-entry`
+
+Two self-review cases followed their own supplemental RED/GREEN cycles in the
+same selector. `root-known-name-collision` first proved that a colliding
+preexisting directory was incorrectly removed; after the collision-veto fix,
+its directory and marker survived. `scm-recvmsg-return-pre-harvest` first
+proved that the received descriptor remained open; after helper-local harvest,
+the exact received descriptor was closed and the original exception retained.
+
+The final exact run returned status 0: one selector in 0.096s, all pre-skip
+cases passed, zero failures/errors, and one explicit local protected-host skip.
+The selector additionally proves socketpair partial adoption, channel
+close-before-effect and close-after-effect behavior, direct receipt ownership,
+and no wrong-object deletion on root-name collision.
+
+### Pure-Python threat boundary
+
+The implemented contract covers ordinary exceptions and the production
+line-event fault boundaries exercised by the selector. Narrow signal masks,
+attempt-before-call state, known names, helper-local rollback, shared
+idempotent slots, the preowned `HELLO` handshake, exact PID/start recording,
+pidfd revalidation, and the retained receipt owner reduce the unowned window
+without weakening any kernel/process claim.
+
+This round does **not** claim absolute closure against
+`PyThreadState_SetAsyncExc` at every arbitrary opcode. In pure Python there can
+still be an uninterruptible ownership ambiguity between a C syscall returning
+and the result becoming a Python-owned local/field, or while cleanup bytecode
+itself is repeatedly interrupted. Absolute closure requires a lower-level
+RAII/ownership primitive: for example a C/Rust wrapper that atomically performs
+known-name `mkdirat` plus descriptor binding, `socketpair` plus owner-slot
+registration, `clone3(CLONE_PIDFD)`/fork plus PID/pidfd token publication, or
+`recvmsg` plus direct owner adoption, with cleanup performed below Python
+bytecode. This is the explicit threat boundary; no claim is made for arbitrary
+opcode injection, and the original protected kernel/process claims were not
+lowered.
+
+### Preserved proof map
+
+- C-N1: guard construction, activation, and the only deactivation remain bound
+  to the surviving parent owner. Worker code has no guard-removal route.
+- I-N1: descriptor-relative, no-follow, owner/type/device/inode-bound quarantine
+  deletion is unchanged. The finalizer still makes one persistent removal
+  decision; explicit root-name collision is now a non-owned veto, never a
+  deletion target.
+- I-N2: one SCM ownership scope still rejects non-exact ancillary data,
+  truncation, and extra descriptors; every harvested FD is either directly
+  adopted or closed. Timeout restoration and cleanup preserve the first
+  exception.
+- I-N4: the wrapper has one finalizer call; the body has no remover/finalizer;
+  the finalizer has one remover and one parent-owned guard-deactivation call.
+  Persistent cleanup/failure state still permanently vetoes guard removal.
+- I-N5/I-N6: caller ownership precedes mutation and spans all six acquisition
+  and handoff boundaries listed above, within the explicit pure-Python threat
+  boundary.
+- PID targeting remains exact PID/start plus open-all/revalidate-all pidfds.
+  Dedicated-UID inventory is assertion-only; no new UID-wide, process-group,
+  or `killpg` signaling was added.
+- The actual SCM-transferred receipt descriptor still reaches empty EOF only
+  after exact process death/reaping, and that absence still reaches the real
+  completion writer, seal, and promotion rejection chain.
+- `_IntegratedLifecycleFault` remains one private member,
+  `POINTER_WITHOUT_RECEIPT`, with no CLI/config/environment/manifest/schema
+  enable route. The smoke-v2 schema and fixed result shape/counts are unchanged.
+- There remains one lifecycle call graph and exactly one required Task 7C
+  selector; no cross-test invocation was introduced.
+
+### Final local verification
+
+All commands ran after the final production/test hardening:
+
+- Exact selector: 1 test in 0.096s; 0 local protected passes; 1 explicit
+  protected skip; 0 failures/errors.
+- Reviewer-focused set: 7 tests in 0.108s; 6 passes; 1 explicit protected skip;
+  0 failures/errors.
+- Adjacent collector/smoke/performance: 284 tests in 8.610s; 270 passes;
+  14 explicit environment/protected skips; 0 failures/errors.
+- Task 7 Step 6: 142 tests in 2.203s; 140 passes; 2 explicit environment skips;
+  0 failures/errors.
+- Exact protected-gate list: 14 tests in 0.096s; 0 protected passes;
+  14 explicit local platform/root/kernel/filesystem skips; 0 failures/errors.
+- Full discovery: 1,185 tests in 124.481s; 1,166 passes; 19 explicit
+  platform/root/environment skips; 0 failures/errors.
+
+Static/safety gates passed: isolated-cache `py_compile`; `git diff --check`;
+one added selector from accepted Task 7B base `8c05f12`; one definition of the
+required selector; zero cross-test calls; zero added public integrated enable
+routes; zero added credential literals; zero added UID-wide/`killpg` signal
+routes; no production `mkdtemp`; no receipt transfer-to-null; and no smoke
+schema spelling other than v2. AST checks confirmed the call cardinalities
+listed above and the exact one-member fault enum.
+
+### Changed files and remaining blocker
+
+- `src/txnmem_provenance_execution_collector.py`: caller-owned resource API,
+  known-name root acquisition/reconciliation, subreaper query/restore/verify,
+  helper-local socket/fork/recv ownership, retained channel/receipt close, and
+  the wrapper/body finalization boundary.
+- `tests/test_txnmem_provenance_execution_collector.py`: only the existing Task
+  7C selector, with the six I-N6 production-boundary groups and supplemental
+  collision/SCM/partial-close behavior cases.
+- `.superpowers/sdd/2026-08-28-formal-progress-fail-fast-v6/task-7c-report.md`:
+  this Fix Round 4 ownership design, RED/GREEN evidence, threat boundary, proof
+  map, counts, and blocker.
+
+No independent reviewer subagent was available in this session; the final diff
+was reviewed locally against the same Critical/Important checklist. No known
+local Critical or Important issue remains.
+
+Remaining protected blocker: this machine cannot execute the protected-root
+Linux kernel/filesystem lifecycle. The integrated protected body and all 14
+protected gates therefore still have zero protected passes locally. Acceptance
+requires rerunning the exact committed revision on the protected host with zero
+skips, followed by the independent zero-residue inventory. This round did not
+perform that remote/protected action.
