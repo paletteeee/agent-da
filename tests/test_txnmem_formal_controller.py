@@ -164,6 +164,18 @@ class FormalControllerCleanupTests(unittest.TestCase):
 
     def test_approved_source_closure_includes_smoke_module_and_wrapper(self):
         self.assertIn(
+            "infra/formal_controller/Dockerfile",
+            controller._FORMAL_AUXILIARY_PATHS,
+        )
+        self.assertIn(
+            "scripts/manage_formal_controller_container.sh",
+            controller._FORMAL_AUXILIARY_PATHS,
+        )
+        self.assertIn(
+            "src/txnmem_formal_controller_container.py",
+            controller._REQUIRED_APPROVED_PATHS,
+        )
+        self.assertIn(
             "scripts/run_formal_provenance_smoke.sh",
             controller._FORMAL_AUXILIARY_PATHS,
         )

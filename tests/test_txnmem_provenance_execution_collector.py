@@ -12601,6 +12601,18 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
 
     def test_controller_context_is_bound_to_root_approval_manifest_hash(self):
         self.assertIn(
+            "infra/formal_controller/Dockerfile",
+            collector_module._REQUIRED_SOURCE_PATHS,
+        )
+        self.assertIn(
+            "scripts/manage_formal_controller_container.sh",
+            collector_module._REQUIRED_SOURCE_PATHS,
+        )
+        self.assertIn(
+            "src/txnmem_formal_controller_container.py",
+            collector_module._REQUIRED_SOURCE_PATHS,
+        )
+        self.assertIn(
             "src/txnmem_provenance_progress.py",
             collector_module._REQUIRED_SOURCE_PATHS,
         )

@@ -123,8 +123,10 @@ git = "/usr/bin/git"
 auxiliary = {
     "configs/provenance_performance_matrix.json",
     "configs/provenance_runtime_lock.json",
+    "infra/formal_controller/Dockerfile",
     "infra/real_backend/docker-compose.yml",
     "scripts/install_formal_provenance_runtime.sh",
+    "scripts/manage_formal_controller_container.sh",
     "scripts/read_formal_provenance_progress.sh",
     "scripts/run_cross_host_provenance_performance.sh",
     "scripts/run_formal_provenance_smoke.sh",
@@ -132,6 +134,7 @@ auxiliary = {
 }
 required = auxiliary | {
     "src/txnmem_formal_controller.py",
+    "src/txnmem_formal_controller_container.py",
     "src/txnmem_formal_smoke.py",
     "src/txnmem_provenance_execution_collector.py",
     "src/txnmem_provenance_progress.py",
