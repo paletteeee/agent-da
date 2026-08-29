@@ -7536,7 +7536,8 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             root.chmod(0o755)
             candidate = root / "candidate"
             candidate.mkdir(mode=0o700)
-            candidate.chown(
+            os.chown(
+                candidate,
                 collector_module.FORMAL_RUNNER_UID,
                 collector_module.FORMAL_RUNNER_GID,
             )
