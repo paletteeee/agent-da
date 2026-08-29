@@ -8050,9 +8050,13 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             pointer_fixture.write_text(
                 "\n".join(
                     (
-                        "import json, os, signal, sys",
+                        "import ctypes, json, os, signal, sys",
                         "from pathlib import Path",
                         "import txnmem_formal_io as formal_io",
+                        "prctl = ctypes.CDLL(None, use_errno=True).prctl",
+                        "prctl.argtypes = [ctypes.c_int] + [ctypes.c_ulong] * 4",
+                        "prctl.restype = ctypes.c_int",
+                        "if prctl(4, 0, 0, 0, 0) != 0: raise SystemExit(90)",
                         "phase, raw_root = sys.argv[1:]",
                         "root = Path(raw_root)",
                         "store = formal_io.FormalStore(root)",
