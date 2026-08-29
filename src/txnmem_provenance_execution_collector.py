@@ -41,7 +41,7 @@ import urllib.parse
 import urllib.error
 import urllib.request
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -7136,6 +7136,98 @@ def _delete_integrated_lifecycle_tree_fd(
         raise primary_failure.with_traceback(primary_traceback)
 
 
+@dataclass(frozen=True)
+class _IntegratedLifecycleCapturedFailure:
+    exception: BaseException
+    traceback: Any
+
+
+@dataclass
+class _IntegratedLifecycleTreeCleanup:
+    quarantine_name: str = field(
+        default_factory=lambda: f".txnmem-cleanup-{secrets.token_hex(16)}"
+    )
+    attempted: bool = False
+    root_removed: bool = False
+    quarantine_created: bool = False
+    quarantine_device: int | None = None
+    quarantine_inode: int | None = None
+    quarantine_removed: bool = False
+
+    @property
+    def has_unresolved_quarantine(self) -> bool:
+        return self.quarantine_created and not self.quarantine_removed
+
+
+@dataclass
+class _IntegratedLifecycleResources:
+    lifecycle_root: Path
+    lifecycle_parent_device: int
+    lifecycle_parent_inode: int
+    lifecycle_device: int
+    lifecycle_inode: int
+    controller_uid: int
+    runner_uid: int
+    runner_owned_relative: Path
+    pidfds_before: dict[int, str]
+    tree_identity_bound: bool = True
+    tree_cleanup: _IntegratedLifecycleTreeCleanup = field(
+        default_factory=_IntegratedLifecycleTreeCleanup
+    )
+    prctl: Any = None
+    prior_subreaper: int | None = None
+    subreaper_owned: bool = False
+    subreaper_restored: bool = True
+    parent_channel: Any = None
+    worker_channel: Any = None
+    parent_receipt_fd: int | None = None
+    worker_pid: int | None = None
+    recorded_identities: dict[int, str] = field(default_factory=dict)
+    reaped_statuses: dict[int, int] = field(default_factory=dict)
+    guard: Any = None
+    guard_owner: _IntegratedLifecycleGuardOwner | None = None
+    cleanup_primary: _IntegratedLifecycleCapturedFailure | None = None
+    lifecycle_failures: list[_IntegratedLifecycleCapturedFailure] = field(
+        default_factory=list
+    )
+    lineage_quiescent: bool = False
+    tree_removed: bool = False
+    guard_removed: bool = False
+    finalized: bool = False
+    lifecycle_events: list[str] = field(default_factory=list)
+
+    def record_failure(
+        self, exception: BaseException, traceback: Any = None
+    ) -> None:
+        captured = _IntegratedLifecycleCapturedFailure(
+            exception=exception,
+            traceback=exception.__traceback__ if traceback is None else traceback,
+        )
+        self.lifecycle_failures.append(captured)
+        if self.cleanup_primary is None:
+            self.cleanup_primary = captured
+
+    def close_channel(self, field_name: str) -> None:
+        if field_name not in {"parent_channel", "worker_channel"}:
+            raise CollectorError(
+                "integrated lifecycle channel ownership is invalid"
+            )
+        channel = getattr(self, field_name)
+        if channel is None:
+            return
+        setattr(self, field_name, None)
+        channel.close()
+
+    def take_receipt_fd(self) -> int:
+        descriptor = self.parent_receipt_fd
+        if descriptor is None:
+            raise CollectorError(
+                "integrated lifecycle receipt descriptor was not transferred"
+            )
+        self.parent_receipt_fd = None
+        return descriptor
+
+
 def _remove_integrated_lifecycle_tree(
     root: Path,
     *,
@@ -7146,6 +7238,7 @@ def _remove_integrated_lifecycle_tree(
     controller_uid: int,
     runner_uid: int,
     runner_owned_relative: Path,
+    tree_cleanup: _IntegratedLifecycleTreeCleanup | None = None,
 ) -> None:
     if (
         not isinstance(root, Path)
@@ -7178,11 +7271,23 @@ def _remove_integrated_lifecycle_tree(
         or any(part in {"", ".", ".."} for part in runner_owned_relative.parts)
     ):
         raise CollectorError("integrated lifecycle cleanup identity is invalid")
+    cleanup = (
+        _IntegratedLifecycleTreeCleanup()
+        if tree_cleanup is None
+        else tree_cleanup
+    )
+    if (
+        not isinstance(cleanup, _IntegratedLifecycleTreeCleanup)
+        or cleanup.attempted
+    ):
+        raise CollectorError(
+            "integrated lifecycle cleanup transaction is invalid"
+        )
+    cleanup.attempted = True
     parent_fd: int | None = None
     root_fd: int | None = None
     quarantine_fd: int | None = None
-    quarantine_name = f".txnmem-cleanup-{secrets.token_hex(16)}"
-    quarantine_created = False
+    quarantine_name = cleanup.quarantine_name
     primary_failure: BaseException | None = None
     primary_traceback = None
     cleanup_failures: list[BaseException] = []
@@ -7205,7 +7310,7 @@ def _remove_integrated_lifecycle_tree(
                 "integrated lifecycle cleanup parent identity changed"
             )
         os.mkdir(quarantine_name, mode=0o700, dir_fd=parent_fd)
-        quarantine_created = True
+        cleanup.quarantine_created = True
         quarantine_fd = os.open(
             quarantine_name,
             os.O_RDONLY
@@ -7215,6 +7320,8 @@ def _remove_integrated_lifecycle_tree(
             dir_fd=parent_fd,
         )
         quarantine_metadata = os.fstat(quarantine_fd)
+        cleanup.quarantine_device = int(quarantine_metadata.st_dev)
+        cleanup.quarantine_inode = int(quarantine_metadata.st_ino)
         if (
             not stat.S_ISDIR(quarantine_metadata.st_mode)
             or int(quarantine_metadata.st_dev) != expected_device
@@ -7270,6 +7377,7 @@ def _remove_integrated_lifecycle_tree(
             quarantine_sequence,
         )
         os.rmdir(detached_root, dir_fd=quarantine_fd)
+        cleanup.root_removed = True
     except BaseException as exc:
         primary_failure = exc
         primary_traceback = exc.__traceback__
@@ -7281,9 +7389,10 @@ def _remove_integrated_lifecycle_tree(
                 os.close(descriptor)
             except BaseException as exc:
                 cleanup_failures.append(exc)
-        if quarantine_created and parent_fd is not None:
+        if cleanup.quarantine_created and parent_fd is not None:
             try:
                 os.rmdir(quarantine_name, dir_fd=parent_fd)
+                cleanup.quarantine_removed = True
             except BaseException as exc:
                 cleanup_failures.append(exc)
         if parent_fd is not None:
@@ -7297,6 +7406,517 @@ def _remove_integrated_lifecycle_tree(
         raise CollectorError(
             "integrated lifecycle cleanup descriptor failed"
         ) from cleanup_failures[0]
+
+
+def _finalize_integrated_lifecycle_resources(
+    resources: _IntegratedLifecycleResources,
+    *,
+    primary_failure: BaseException | None,
+    primary_traceback: Any,
+) -> None:
+    if (
+        not isinstance(resources, _IntegratedLifecycleResources)
+        or resources.finalized
+    ):
+        raise CollectorError(
+            "integrated lifecycle resource ownership is invalid"
+        )
+    resources.finalized = True
+    if primary_failure is not None:
+        resources.record_failure(primary_failure, primary_traceback)
+
+    for field_name in ("parent_channel", "worker_channel"):
+        try:
+            resources.close_channel(field_name)
+        except BaseException as exc:
+            resources.record_failure(exc)
+    if resources.parent_receipt_fd is not None:
+        descriptor = resources.parent_receipt_fd
+        resources.parent_receipt_fd = None
+        try:
+            os.close(descriptor)
+        except BaseException as exc:
+            resources.record_failure(exc)
+
+    recorded_identities = resources.recorded_identities
+    reaped_statuses = resources.reaped_statuses
+    lineage_quiescent = False
+    if recorded_identities:
+        try:
+            _signal_integrated_lifecycle_identities(
+                recorded_identities,
+                signal.SIGKILL,
+            )
+        except BaseException as exc:
+            resources.record_failure(exc)
+        deadline = time.monotonic() + 5.0
+        identity_drifted = False
+        while time.monotonic() < deadline:
+            for pid in recorded_identities:
+                try:
+                    waited_pid, status = os.waitpid(pid, os.WNOHANG)
+                except ChildProcessError:
+                    continue
+                if waited_pid == pid:
+                    reaped_statuses.setdefault(pid, status)
+            observed_recorded: dict[int, str] = {}
+            try:
+                for pid, expected_start in recorded_identities.items():
+                    observed_start = (
+                        _integrated_lifecycle_observed_start_ticks(pid)
+                    )
+                    if observed_start is None:
+                        continue
+                    if observed_start != expected_start:
+                        identity_drifted = True
+                        raise CollectorError(
+                            "integrated lifecycle recorded identity drifted"
+                        )
+                    observed_recorded[pid] = observed_start
+            except BaseException as exc:
+                resources.record_failure(exc)
+                break
+            if not observed_recorded:
+                try:
+                    _require_formal_uid_processes(
+                        resources.runner_uid,
+                        expected={},
+                    )
+                except BaseException:
+                    pass
+                else:
+                    if set(reaped_statuses) == set(recorded_identities):
+                        lineage_quiescent = True
+                        break
+            time.sleep(0.01)
+        if not lineage_quiescent and not identity_drifted:
+            resources.record_failure(
+                CollectorError(
+                    "integrated lifecycle recorded processes did not quiesce"
+                )
+            )
+    else:
+        worker_absent = resources.worker_pid is None
+        if resources.worker_pid is not None:
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                try:
+                    waited_pid, _status = os.waitpid(
+                        resources.worker_pid,
+                        os.WNOHANG,
+                    )
+                except ChildProcessError:
+                    worker_absent = True
+                    break
+                if waited_pid == resources.worker_pid:
+                    worker_absent = True
+                    break
+                time.sleep(0.01)
+        try:
+            _require_formal_uid_processes(resources.runner_uid, expected={})
+        except BaseException as exc:
+            resources.record_failure(exc)
+        else:
+            lineage_quiescent = worker_absent
+        if not worker_absent:
+            resources.record_failure(
+                CollectorError(
+                    "integrated lifecycle unrecorded worker did not exit"
+                )
+            )
+    if lineage_quiescent:
+        try:
+            _require_formal_uid_processes(resources.runner_uid, expected={})
+        except BaseException as exc:
+            lineage_quiescent = False
+            resources.record_failure(exc)
+    resources.lineage_quiescent = lineage_quiescent
+
+    if lineage_quiescent and not resources.tree_cleanup.attempted:
+        if not resources.tree_identity_bound:
+            resources.tree_cleanup.attempted = True
+            resources.record_failure(
+                CollectorError(
+                    "integrated lifecycle cleanup identity is unavailable"
+                )
+            )
+        else:
+            try:
+                _remove_integrated_lifecycle_tree(
+                    resources.lifecycle_root,
+                    expected_parent_device=resources.lifecycle_parent_device,
+                    expected_parent_inode=resources.lifecycle_parent_inode,
+                    expected_device=resources.lifecycle_device,
+                    expected_inode=resources.lifecycle_inode,
+                    controller_uid=resources.controller_uid,
+                    runner_uid=resources.runner_uid,
+                    runner_owned_relative=resources.runner_owned_relative,
+                    tree_cleanup=resources.tree_cleanup,
+                )
+            except BaseException as exc:
+                resources.record_failure(exc)
+    resources.tree_removed = bool(
+        resources.tree_cleanup.root_removed
+        and not resources.tree_cleanup.has_unresolved_quarantine
+    )
+    if resources.tree_removed:
+        resources.lifecycle_events.append("pointer_cleanup")
+
+    if resources.subreaper_owned:
+        try:
+            if resources.prctl is None or resources.prior_subreaper is None:
+                raise CollectorError(
+                    "integrated lifecycle subreaper ownership is invalid"
+                )
+            if (
+                resources.prctl(
+                    36,
+                    int(resources.prior_subreaper),
+                    0,
+                    0,
+                    0,
+                )
+                != 0
+            ):
+                raise CollectorError(
+                    "integrated lifecycle subreaper cleanup failed"
+                )
+            resources.subreaper_owned = False
+            resources.subreaper_restored = True
+            resources.lifecycle_events.append("subreaper_restore")
+        except BaseException as exc:
+            resources.record_failure(exc)
+
+    guard = resources.guard
+    guard_owner = resources.guard_owner
+    guard_present = False
+    if guard is not None and bool(getattr(guard, "active", False)):
+        try:
+            guard_present = guard.table_name in guard._table_names()
+            if not guard_present:
+                raise CollectorError(
+                    "integrated lifecycle guard disappeared before cleanup"
+                )
+        except BaseException as exc:
+            resources.record_failure(exc)
+            guard_present = True
+    if (
+        guard_present
+        and primary_failure is None
+        and resources.cleanup_primary is None
+        and not resources.lifecycle_failures
+        and resources.lineage_quiescent
+        and resources.tree_removed
+        and not resources.tree_cleanup.has_unresolved_quarantine
+        and resources.subreaper_restored
+        and not resources.subreaper_owned
+    ):
+        try:
+            if guard_owner is None:
+                raise CollectorError(
+                    "integrated lifecycle guard owner is unavailable"
+                )
+            guard._expected_snapshot = guard.snapshot()
+
+            def require_cleanup_quiescence() -> None:
+                if set(resources.reaped_statuses) != set(
+                    resources.recorded_identities
+                ):
+                    raise CollectorError(
+                        "integrated lifecycle recorded processes were not reaped"
+                    )
+                _require_formal_uid_processes(
+                    resources.runner_uid,
+                    expected={},
+                )
+                if _integrated_lifecycle_pidfds() != resources.pidfds_before:
+                    raise CollectorError(
+                        "integrated lifecycle pidfd residue remains"
+                    )
+                for pid, expected_start in (
+                    resources.recorded_identities.items()
+                ):
+                    observed_start = (
+                        _integrated_lifecycle_observed_start_ticks(pid)
+                    )
+                    if observed_start is not None:
+                        if observed_start != expected_start:
+                            raise CollectorError(
+                                "integrated lifecycle recorded identity drifted"
+                            )
+                        raise CollectorError(
+                            "integrated lifecycle recorded process remains"
+                        )
+
+            guard_owner.deactivate_after_quiescence(
+                require_cleanup_quiescence
+            )
+            resources.guard_removed = True
+            resources.lifecycle_events.append("guard_removed")
+        except BaseException as exc:
+            resources.record_failure(exc)
+
+    if resources.cleanup_primary is not None:
+        captured = resources.cleanup_primary
+        raise captured.exception.with_traceback(captured.traceback)
+
+
+@dataclass(frozen=True)
+class _IntegratedLifecycleSetup:
+    resources: _IntegratedLifecycleResources
+    workspace: _FormalRunWorkspace
+    immutable_source: Path
+    runner_path: Path
+    bundle_id: str
+    pointer_path: Path
+    precommit_marker: Path
+    external_completion: Path
+    external_completion_store: Any
+    external_completion_name: str
+    guard: _NftNetworkGuard
+    guard_owner: _IntegratedLifecycleGuardOwner
+    command: tuple[str, ...]
+    environment: dict[str, str]
+
+
+def _prepare_integrated_lifecycle_setup(
+    *,
+    project_root: Path,
+    source_identity: Mapping[str, Any],
+    pidfds_before: Mapping[int, str],
+    controller_uid: int = 0,
+    runner_uid: int = FORMAL_RUNNER_UID,
+    runner_gid: int = FORMAL_RUNNER_GID,
+    require_root: bool = True,
+) -> _IntegratedLifecycleSetup:
+    run_hash = hashlib.sha256(
+        b"txnmem-integrated-lifecycle-private-run-v1"
+    ).hexdigest()
+    scope_hash = hashlib.sha256(
+        b"txnmem-integrated-lifecycle-private-scope-v1"
+    ).hexdigest()
+    lifecycle_root = Path(
+        tempfile.mkdtemp(prefix="txnmem-integrated-lifecycle-")
+    ).absolute()
+    runs_root = lifecycle_root / "runs"
+    expected_candidate = _formal_candidate_root(
+        run_hash,
+        scope_hash,
+        runs_root=runs_root,
+    )
+    resources = _IntegratedLifecycleResources(
+        lifecycle_root=lifecycle_root,
+        lifecycle_parent_device=0,
+        lifecycle_parent_inode=0,
+        lifecycle_device=0,
+        lifecycle_inode=0,
+        controller_uid=controller_uid,
+        runner_uid=runner_uid,
+        runner_owned_relative=expected_candidate.relative_to(
+            lifecycle_root
+        ),
+        pidfds_before=dict(pidfds_before),
+        tree_identity_bound=False,
+    )
+    try:
+        lifecycle_metadata = os.stat(
+            lifecycle_root,
+            follow_symlinks=False,
+        )
+        lifecycle_parent_metadata = os.stat(
+            lifecycle_root.parent,
+            follow_symlinks=False,
+        )
+        resolved_lifecycle_root = lifecycle_root.resolve(strict=True)
+        resolved_metadata = resolved_lifecycle_root.stat()
+        if (
+            not stat.S_ISDIR(lifecycle_metadata.st_mode)
+            or lifecycle_metadata.st_uid != controller_uid
+            or not stat.S_ISDIR(lifecycle_parent_metadata.st_mode)
+            or lifecycle_parent_metadata.st_uid != controller_uid
+        ):
+            raise CollectorError(
+                "integrated lifecycle root ownership is invalid"
+            )
+        if (
+            int(resolved_metadata.st_dev) != int(lifecycle_metadata.st_dev)
+            or int(resolved_metadata.st_ino) != int(lifecycle_metadata.st_ino)
+        ):
+            raise CollectorError(
+                "integrated lifecycle root identity changed"
+            )
+        resources.lifecycle_root = resolved_lifecycle_root
+        resources.lifecycle_parent_device = int(
+            lifecycle_parent_metadata.st_dev
+        )
+        resources.lifecycle_parent_inode = int(
+            lifecycle_parent_metadata.st_ino
+        )
+        resources.lifecycle_device = int(lifecycle_metadata.st_dev)
+        resources.lifecycle_inode = int(lifecycle_metadata.st_ino)
+        resources.tree_identity_bound = True
+        runs_root = resolved_lifecycle_root / "runs"
+        resolved_lifecycle_root.chmod(0o755)
+        runs_root.mkdir(mode=0o750)
+        os.chown(runs_root, controller_uid, runner_gid)
+        runs_root.chmod(0o750)
+        workspace = _prepare_formal_run_workspace(
+            run_hash,
+            scope_hash,
+            runs_root=runs_root,
+            controller_uid=controller_uid,
+            runner_uid=runner_uid,
+            runner_gid=runner_gid,
+            require_root=require_root,
+        )
+        private_parent = _create_formal_input_staging(
+            workspace,
+            controller_uid=controller_uid,
+            runner_gid=runner_gid,
+        )
+        immutable_source = create_immutable_source_export(
+            project_root,
+            private_parent,
+            source_identity,
+        )
+        _publish_formal_input_tree(
+            private_parent,
+            controller_uid=controller_uid,
+            runner_gid=runner_gid,
+        )
+        runner_path = (
+            immutable_source / "src" / "txnmem_provenance_runner.py"
+        )
+        if (
+            _file_sha256(runner_path, "integrated immutable runner")
+            != source_identity["runner_sha256"]
+        ):
+            raise CollectorError("integrated immutable runner hash mismatch")
+        config = _integrated_lifecycle_config()
+        config_hash = hashlib.sha256(canonical_json_bytes(config)).hexdigest()
+        lifecycle_run_id = "txnmem-integrated-lifecycle"
+        lifecycle_run_id_hash = hashlib.sha256(
+            lifecycle_run_id.encode("utf-8")
+        ).hexdigest()
+        bundle_id = provenance_bundle_id(
+            config_sha256=config_hash,
+            run_id_sha256=lifecycle_run_id_hash,
+            formal=False,
+            backend="vector-graph",
+        )
+        pointer_path = workspace.candidate / "bundles" / f"{bundle_id}.json"
+        precommit_marker = (
+            workspace.candidate / "anonymous-precommit-observed"
+        )
+        external_root = resolved_lifecycle_root / "external-evidence"
+        external_root.mkdir(mode=0o700)
+        external_launch = external_root / "launch.json"
+        external_completion = external_root / "completion.json"
+        (
+            _external_launch_store,
+            _external_launch_name,
+            external_completion_store,
+            external_completion_name,
+        ) = _preflight_external_outputs(
+            project_root,
+            workspace.candidate,
+            external_launch,
+            external_completion,
+        )
+        guard = _NftNetworkGuard(
+            _formal_network_table_name(run_hash),
+            backend_ipv4_subnet="10.253.0.0/24",
+            ingress_ipv4_subnet="10.254.0.0/24",
+            backend_bridge_interface="br-f3f3f3f3f3f3",
+            ingress_bridge_interface="br-e3e3e3e3e3e3",
+            toxiproxy_ingress_ipv4="10.254.0.2",
+            runner_uid=runner_uid,
+        )
+        guard_owner = _IntegratedLifecycleGuardOwner(
+            guard=guard,
+            owner_pid=os.getpid(),
+        )
+        resources.guard = guard
+        resources.guard_owner = guard_owner
+        bootstrap = "\n".join(
+            (
+                "import pathlib, runpy, sys",
+                "runner_path = pathlib.Path(sys.argv[1]).resolve(strict=True)",
+                "sys.path.insert(0, str(runner_path.parent))",
+                "namespace = runpy.run_path(str(runner_path))",
+                "fault = namespace['_IntegratedLifecycleFault'].POINTER_WITHOUT_RECEIPT",
+                "entry = namespace['_run_protected_linux_integrated_lifecycle_probe']",
+                "raise SystemExit(entry(namespace['Path'](sys.argv[2]), sys.argv[3], fault))",
+            )
+        )
+        command = (
+            sys.executable,
+            "-I",
+            "-S",
+            "-B",
+            "-c",
+            bootstrap,
+            str(runner_path),
+            str(workspace.candidate),
+            lifecycle_run_id,
+        )
+        environment = {
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+        libc = ctypes.CDLL(None, use_errno=True)
+        prctl = libc.prctl
+        prctl.argtypes = [
+            ctypes.c_int,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+        ]
+        prctl.restype = ctypes.c_int
+        prior_subreaper = ctypes.c_int(0)
+        if prctl(37, ctypes.addressof(prior_subreaper), 0, 0, 0) != 0:
+            raise CollectorError(
+                "integrated lifecycle subreaper query failed"
+            )
+        resources.prctl = prctl
+        resources.prior_subreaper = int(prior_subreaper.value)
+        if prctl(36, 1, 0, 0, 0) != 0:
+            raise CollectorError(
+                "integrated lifecycle subreaper setup failed"
+            )
+        resources.subreaper_owned = True
+        resources.subreaper_restored = False
+        channels = socket.socketpair()
+        resources.parent_channel = channels[0]
+        resources.worker_channel = channels[1]
+        os.set_inheritable(resources.parent_channel.fileno(), False)
+        os.set_inheritable(resources.worker_channel.fileno(), False)
+        return _IntegratedLifecycleSetup(
+            resources=resources,
+            workspace=workspace,
+            immutable_source=immutable_source,
+            runner_path=runner_path,
+            bundle_id=bundle_id,
+            pointer_path=pointer_path,
+            precommit_marker=precommit_marker,
+            external_completion=external_completion,
+            external_completion_store=external_completion_store,
+            external_completion_name=external_completion_name,
+            guard=guard,
+            guard_owner=guard_owner,
+            command=command,
+            environment=environment,
+        )
+    except BaseException as exc:
+        primary_traceback = exc.__traceback__
+        _finalize_integrated_lifecycle_resources(
+            resources,
+            primary_failure=exc,
+            primary_traceback=primary_traceback,
+        )
+        raise
 
 
 def _run_protected_linux_integrated_lifecycle(
@@ -7332,136 +7952,31 @@ def _run_protected_linux_integrated_lifecycle(
         expected_source_manifest=dict(controller_context["source_manifest"]),
     )
     pidfds_before = _integrated_lifecycle_pidfds()
-    lifecycle_root = Path(
-        tempfile.mkdtemp(prefix="txnmem-integrated-lifecycle-")
-    ).resolve(strict=True)
-    lifecycle_metadata = lifecycle_root.stat()
-    lifecycle_device = int(lifecycle_metadata.st_dev)
-    lifecycle_inode = int(lifecycle_metadata.st_ino)
-    lifecycle_parent_metadata = lifecycle_root.parent.stat()
-    lifecycle_parent_device = int(lifecycle_parent_metadata.st_dev)
-    lifecycle_parent_inode = int(lifecycle_parent_metadata.st_ino)
-    lifecycle_root.chmod(0o755)
-    runs_root = lifecycle_root / "runs"
-    runs_root.mkdir(mode=0o750)
-    os.chown(runs_root, 0, FORMAL_RUNNER_GID)
-    runs_root.chmod(0o750)
-    run_hash = hashlib.sha256(
-        b"txnmem-integrated-lifecycle-private-run-v1"
-    ).hexdigest()
-    scope_hash = hashlib.sha256(
-        b"txnmem-integrated-lifecycle-private-scope-v1"
-    ).hexdigest()
-    workspace = _prepare_formal_run_workspace(
-        run_hash,
-        scope_hash,
-        runs_root=runs_root,
+    setup = _prepare_integrated_lifecycle_setup(
+        project_root=root,
+        source_identity=source_identity,
+        pidfds_before=pidfds_before,
     )
-    runner_owned_relative = workspace.candidate.relative_to(lifecycle_root)
-    private_parent = _create_formal_input_staging(workspace)
-    immutable_source = create_immutable_source_export(
-        root, private_parent, source_identity
-    )
-    _publish_formal_input_tree(private_parent)
-    runner_path = immutable_source / "src" / "txnmem_provenance_runner.py"
-    if _file_sha256(runner_path, "integrated immutable runner") != source_identity[
-        "runner_sha256"
-    ]:
-        raise CollectorError("integrated immutable runner hash mismatch")
-    config = _integrated_lifecycle_config()
-    config_hash = hashlib.sha256(canonical_json_bytes(config)).hexdigest()
-    lifecycle_run_id = "txnmem-integrated-lifecycle"
-    lifecycle_run_id_hash = hashlib.sha256(
-        lifecycle_run_id.encode("utf-8")
-    ).hexdigest()
-    bundle_id = provenance_bundle_id(
-        config_sha256=config_hash,
-        run_id_sha256=lifecycle_run_id_hash,
-        formal=False,
-        backend="vector-graph",
-    )
-    pointer_path = workspace.candidate / "bundles" / f"{bundle_id}.json"
-    precommit_marker = workspace.candidate / "anonymous-precommit-observed"
-    external_root = lifecycle_root / "external-evidence"
-    external_root.mkdir(mode=0o700)
-    external_launch = external_root / "launch.json"
-    external_completion = external_root / "completion.json"
-    (
-        _external_launch_store,
-        _external_launch_name,
-        external_completion_store,
-        external_completion_name,
-    ) = _preflight_external_outputs(
-        root,
-        workspace.candidate,
-        external_launch,
-        external_completion,
-    )
-    guard = _NftNetworkGuard(
-        _formal_network_table_name(run_hash),
-        backend_ipv4_subnet="10.253.0.0/24",
-        ingress_ipv4_subnet="10.254.0.0/24",
-        backend_bridge_interface="br-f3f3f3f3f3f3",
-        ingress_bridge_interface="br-e3e3e3e3e3e3",
-        toxiproxy_ingress_ipv4="10.254.0.2",
-    )
-    guard_owner = _IntegratedLifecycleGuardOwner(
-        guard=guard,
-        owner_pid=os.getpid(),
-    )
-    bootstrap = "\n".join(
-        (
-            "import pathlib, runpy, sys",
-            "runner_path = pathlib.Path(sys.argv[1]).resolve(strict=True)",
-            "sys.path.insert(0, str(runner_path.parent))",
-            "namespace = runpy.run_path(str(runner_path))",
-            "fault = namespace['_IntegratedLifecycleFault'].POINTER_WITHOUT_RECEIPT",
-            "entry = namespace['_run_protected_linux_integrated_lifecycle_probe']",
-            "raise SystemExit(entry(namespace['Path'](sys.argv[2]), sys.argv[3], fault))",
-        )
-    )
-    command = (
-        sys.executable,
-        "-I",
-        "-S",
-        "-B",
-        "-c",
-        bootstrap,
-        str(runner_path),
-        str(workspace.candidate),
-        lifecycle_run_id,
-    )
-    environment = {
-        "LANG": "C.UTF-8",
-        "LC_ALL": "C.UTF-8",
-        "PYTHONDONTWRITEBYTECODE": "1",
-    }
-    libc = ctypes.CDLL(None, use_errno=True)
-    prctl = libc.prctl
-    prctl.argtypes = [
-        ctypes.c_int,
-        ctypes.c_ulong,
-        ctypes.c_ulong,
-        ctypes.c_ulong,
-        ctypes.c_ulong,
-    ]
-    prctl.restype = ctypes.c_int
-    prior_subreaper = ctypes.c_int(0)
-    if prctl(37, ctypes.addressof(prior_subreaper), 0, 0, 0) != 0:
-        raise CollectorError("integrated lifecycle subreaper query failed")
-    if prctl(36, 1, 0, 0, 0) != 0:
-        raise CollectorError("integrated lifecycle subreaper setup failed")
-
-    parent_channel, worker_channel = socket.socketpair()
-    worker_pid: int | None = None
-    parent_receipt_fd: int | None = None
-    recorded_identities: dict[int, str] = {}
+    resources = setup.resources
+    lifecycle_root = resources.lifecycle_root
+    workspace = setup.workspace
+    immutable_source = setup.immutable_source
+    bundle_id = setup.bundle_id
+    pointer_path = setup.pointer_path
+    precommit_marker = setup.precommit_marker
+    external_completion = setup.external_completion
+    external_completion_store = setup.external_completion_store
+    external_completion_name = setup.external_completion_name
+    guard = setup.guard
+    guard_owner = setup.guard_owner
+    command = setup.command
+    environment = setup.environment
+    parent_channel = resources.parent_channel
+    worker_channel = resources.worker_channel
+    recorded_identities = resources.recorded_identities
     runner_inventory: dict[int, str] = {}
-    reaped_statuses: dict[int, int] = {}
-    subreaper_restored = False
-    tree_removed = False
-    guard_removed = False
-    lifecycle_events: list[str] = []
+    reaped_statuses = resources.reaped_statuses
+    lifecycle_events = resources.lifecycle_events
 
     def worker_main() -> None:
         parent_channel.close()
@@ -7634,15 +8149,17 @@ def _run_protected_linux_integrated_lifecycle(
             os._exit(91)
         os._exit(92)
 
+    lifecycle_body_completed = False
     try:
         worker_pid = os.fork()
         if worker_pid == 0:
             worker_main()
-        worker_channel.close()
+        resources.worker_pid = worker_pid
+        resources.close_channel("worker_channel")
         worker_start = _integrated_lifecycle_start_ticks(worker_pid)
         recorded_identities[worker_pid] = worker_start
         parent_channel.sendall(b"G")
-        worker_state, parent_receipt_fd = (
+        worker_state, resources.parent_receipt_fd = (
             _receive_integrated_lifecycle_worker_state(
                 parent_channel,
                 timeout=15.0,
@@ -7702,7 +8219,7 @@ def _run_protected_linux_integrated_lifecycle(
             raise CollectorError(
                 "integrated lifecycle worker proof was unavailable"
             )
-        parent_channel.close()
+        resources.close_channel("parent_channel")
         guard.verify()
         if not pointer_path.is_file() or not precommit_marker.is_file():
             raise CollectorError("integrated lifecycle pointer is unavailable")
@@ -7749,15 +8266,11 @@ def _run_protected_linux_integrated_lifecycle(
                 "integrated lifecycle pidfd ownership did not close"
             )
         lifecycle_events.append("pidfd_quiescence")
-        if parent_receipt_fd is None:
-            raise CollectorError(
-                "integrated lifecycle receipt descriptor was not transferred"
-            )
+        receipt_descriptor = resources.take_receipt_fd()
         absent_receipt = _read_integrated_lifecycle_absent_receipt(
-            parent_receipt_fd,
+            receipt_descriptor,
             timeout=2.0,
         )
-        parent_receipt_fd = None
         completion_writer_rejected = False
         completion_failure: CollectorError | None = None
         try:
@@ -7844,264 +8357,71 @@ def _run_protected_linux_integrated_lifecycle(
             raise CollectorError(
                 "integrated lifecycle external completion appeared"
             )
-
-        _remove_integrated_lifecycle_tree(
-            lifecycle_root,
-            expected_parent_device=lifecycle_parent_device,
-            expected_parent_inode=lifecycle_parent_inode,
-            expected_device=lifecycle_device,
-            expected_inode=lifecycle_inode,
-            controller_uid=0,
-            runner_uid=FORMAL_RUNNER_UID,
-            runner_owned_relative=runner_owned_relative,
-        )
-        tree_removed = True
-        lifecycle_events.append("pointer_cleanup")
-        if prctl(36, int(prior_subreaper.value), 0, 0, 0) != 0:
-            raise CollectorError("integrated lifecycle subreaper restore failed")
-        subreaper_restored = True
-        lifecycle_events.append("subreaper_restore")
-        def require_integrated_quiescence() -> None:
-            if set(reaped_statuses) != set(recorded_identities):
-                raise CollectorError(
-                    "integrated lifecycle recorded processes were not reaped"
-                )
-            _require_formal_uid_processes(
-                FORMAL_RUNNER_UID, expected={}
-            )
-            if _integrated_lifecycle_pidfds() != pidfds_before:
-                raise CollectorError(
-                    "integrated lifecycle pidfd residue remains"
-                )
-
-        guard_owner.deactivate_after_quiescence(
-            require_integrated_quiescence
-        )
-        guard_removed = True
-        lifecycle_events.append("guard_removed")
-        if lifecycle_events[-1] != "guard_removed":
-            raise CollectorError(
-                "integrated lifecycle guard removal was not last"
-            )
-        if guard.table_name in guard._table_names():
-            raise CollectorError("integrated lifecycle guard residue remains")
-        if lifecycle_root.exists():
-            raise CollectorError("integrated lifecycle pointer residue remains")
-        if _integrated_lifecycle_pidfds() != pidfds_before:
-            raise CollectorError("integrated lifecycle pidfd residue remains")
-        _require_formal_uid_processes(FORMAL_RUNNER_UID, expected={})
-
-        return {
-            "schema": "txnmem-protected-linux-integrated-lifecycle-v1",
-            "selector": (
-                "tests.test_txnmem_provenance_execution_collector."
-                "ProvenanceExecutionCollectorTests."
-                "test_protected_linux_integrated_root_drop_parent_death_pidfd_guard_pointer_zero_residue"
-            ),
-            "collector_worker_proven": True,
-            "immutable_runner_proven": True,
-            "credential_drop_proven": True,
-            "post_drop_parent_death_sigkill_proven": True,
-            "actual_parent_death_proven": True,
-            "resistant_descendant_proven": True,
-            "pidfd_identity_drift_rejected": True,
-            "pidfd_wrong_target_avoided": True,
-            "guard_removed_last": True,
-            "anonymous_pointer_visible": True,
-            "completion_receipt_absent": True,
-            "candidate_seal_invoked": seal_invoked,
-            "seal_rejected": seal_rejected,
-            "promotion_validator_invoked": promotion_invoked,
-            "promotion_rejected": promotion_rejected,
-            "controller_process_count": 0,
-            "runner_process_count": 0,
-            "descendant_process_count": 0,
-            "dedicated_uid_process_count": 0,
-            "owned_pidfd_count": 0,
-            "anonymous_pointer_residue_count": 0,
-            "named_pointer_residue_count": 0,
-            "candidate_residue_count": 0,
-            "committed_export_residue_count": 0,
-            "nft_table_count": 0,
-        }
+        lifecycle_body_completed = True
+    except BaseException as exc:
+        primary_failure = exc
+        primary_traceback = exc.__traceback__
+    else:
+        primary_failure = None
+        primary_traceback = None
     finally:
-        primary_failure = sys.exc_info()[1]
-        cleanup_failures: list[BaseException] = []
-        try:
-            parent_channel.close()
-        except BaseException as exc:
-            cleanup_failures.append(exc)
-        try:
-            worker_channel.close()
-        except BaseException as exc:
-            cleanup_failures.append(exc)
-        if parent_receipt_fd is not None:
-            try:
-                os.close(parent_receipt_fd)
-            except BaseException as exc:
-                cleanup_failures.append(exc)
+        _finalize_integrated_lifecycle_resources(
+            resources,
+            primary_failure=primary_failure,
+            primary_traceback=primary_traceback,
+        )
 
-        lineage_quiescent = False
-        if recorded_identities:
-            try:
-                _signal_integrated_lifecycle_identities(
-                    recorded_identities,
-                    signal.SIGKILL,
-                )
-            except BaseException as exc:
-                cleanup_failures.append(exc)
-            deadline = time.monotonic() + 5.0
-            identity_drifted = False
-            while time.monotonic() < deadline:
-                for pid in recorded_identities:
-                    try:
-                        waited_pid, status = os.waitpid(pid, os.WNOHANG)
-                    except ChildProcessError:
-                        continue
-                    if waited_pid == pid:
-                        reaped_statuses.setdefault(pid, status)
-                observed_recorded: dict[int, str] = {}
-                try:
-                    for pid, expected_start in recorded_identities.items():
-                        observed_start = (
-                            _integrated_lifecycle_observed_start_ticks(pid)
-                        )
-                        if observed_start is None:
-                            continue
-                        if observed_start != expected_start:
-                            identity_drifted = True
-                            raise CollectorError(
-                                "integrated lifecycle recorded identity drifted"
-                            )
-                        observed_recorded[pid] = observed_start
-                except BaseException as exc:
-                    cleanup_failures.append(exc)
-                    break
-                if not observed_recorded:
-                    try:
-                        _require_formal_uid_processes(
-                            FORMAL_RUNNER_UID, expected={}
-                        )
-                    except BaseException:
-                        pass
-                    else:
-                        lineage_quiescent = True
-                        break
-                time.sleep(0.01)
-            if not lineage_quiescent and not identity_drifted:
-                cleanup_failures.append(
-                    CollectorError(
-                        "integrated lifecycle recorded processes did not quiesce"
-                    )
-                )
-        else:
-            worker_absent = worker_pid is None
-            if worker_pid is not None:
-                deadline = time.monotonic() + 2.0
-                while time.monotonic() < deadline:
-                    try:
-                        waited_pid, _status = os.waitpid(
-                            worker_pid, os.WNOHANG
-                        )
-                    except ChildProcessError:
-                        worker_absent = True
-                        break
-                    if waited_pid == worker_pid:
-                        worker_absent = True
-                        break
-                    time.sleep(0.01)
-            try:
-                _require_formal_uid_processes(
-                    FORMAL_RUNNER_UID, expected={}
-                )
-            except BaseException as exc:
-                cleanup_failures.append(exc)
-            else:
-                lineage_quiescent = worker_absent
-            if not worker_absent:
-                cleanup_failures.append(
-                    CollectorError(
-                        "integrated lifecycle unrecorded worker did not exit"
-                    )
-                )
+    if not lifecycle_body_completed:
+        raise CollectorError("integrated lifecycle did not complete")
+    if not resources.guard_removed or lifecycle_events[-1] != "guard_removed":
+        raise CollectorError(
+            "integrated lifecycle guard removal was not last"
+        )
+    if guard.table_name in guard._table_names():
+        raise CollectorError("integrated lifecycle guard residue remains")
+    if not resources.tree_removed or lifecycle_root.exists():
+        raise CollectorError("integrated lifecycle pointer residue remains")
+    if resources.tree_cleanup.has_unresolved_quarantine:
+        raise CollectorError(
+            "integrated lifecycle quarantine residue remains"
+        )
+    if _integrated_lifecycle_pidfds() != pidfds_before:
+        raise CollectorError("integrated lifecycle pidfd residue remains")
+    _require_formal_uid_processes(FORMAL_RUNNER_UID, expected={})
 
-        if lineage_quiescent:
-            try:
-                _require_formal_uid_processes(
-                    FORMAL_RUNNER_UID, expected={}
-                )
-            except BaseException as exc:
-                lineage_quiescent = False
-                cleanup_failures.append(exc)
-
-        if lineage_quiescent and not tree_removed and lifecycle_root.exists():
-            try:
-                _remove_integrated_lifecycle_tree(
-                    lifecycle_root,
-                    expected_parent_device=lifecycle_parent_device,
-                    expected_parent_inode=lifecycle_parent_inode,
-                    expected_device=lifecycle_device,
-                    expected_inode=lifecycle_inode,
-                    controller_uid=0,
-                    runner_uid=FORMAL_RUNNER_UID,
-                    runner_owned_relative=runner_owned_relative,
-                )
-                tree_removed = True
-            except BaseException as exc:
-                cleanup_failures.append(exc)
-        if not subreaper_restored:
-            try:
-                if prctl(36, int(prior_subreaper.value), 0, 0, 0) != 0:
-                    raise CollectorError(
-                        "integrated lifecycle subreaper cleanup failed"
-                    )
-                subreaper_restored = True
-            except BaseException as exc:
-                cleanup_failures.append(exc)
-        if not guard_removed:
-            try:
-                guard_present = guard.table_name in guard._table_names()
-            except BaseException as exc:
-                cleanup_failures.append(exc)
-                guard_present = True
-            if (
-                guard_present
-                and lineage_quiescent
-                and tree_removed
-                and subreaper_restored
-                and not cleanup_failures
-            ):
-                try:
-                    guard.active = True
-                    guard._expected_snapshot = guard.snapshot()
-
-                    def require_cleanup_quiescence() -> None:
-                        _require_formal_uid_processes(
-                            FORMAL_RUNNER_UID, expected={}
-                        )
-                        for pid, expected_start in recorded_identities.items():
-                            observed_start = (
-                                _integrated_lifecycle_observed_start_ticks(pid)
-                            )
-                            if observed_start is not None:
-                                if observed_start != expected_start:
-                                    raise CollectorError(
-                                        "integrated lifecycle recorded identity drifted"
-                                    )
-                                raise CollectorError(
-                                    "integrated lifecycle recorded process remains"
-                                )
-
-                    guard_owner.deactivate_after_quiescence(
-                        require_cleanup_quiescence
-                    )
-                    guard_removed = True
-                except BaseException as exc:
-                    cleanup_failures.append(exc)
-        if cleanup_failures and primary_failure is None:
-            raise CollectorError(
-                "integrated lifecycle resource cleanup failed"
-            ) from cleanup_failures[0]
+    return {
+        "schema": "txnmem-protected-linux-integrated-lifecycle-v1",
+        "selector": (
+            "tests.test_txnmem_provenance_execution_collector."
+            "ProvenanceExecutionCollectorTests."
+            "test_protected_linux_integrated_root_drop_parent_death_pidfd_guard_pointer_zero_residue"
+        ),
+        "collector_worker_proven": True,
+        "immutable_runner_proven": True,
+        "credential_drop_proven": True,
+        "post_drop_parent_death_sigkill_proven": True,
+        "actual_parent_death_proven": True,
+        "resistant_descendant_proven": True,
+        "pidfd_identity_drift_rejected": True,
+        "pidfd_wrong_target_avoided": True,
+        "guard_removed_last": True,
+        "anonymous_pointer_visible": True,
+        "completion_receipt_absent": True,
+        "candidate_seal_invoked": seal_invoked,
+        "seal_rejected": seal_rejected,
+        "promotion_validator_invoked": promotion_invoked,
+        "promotion_rejected": promotion_rejected,
+        "controller_process_count": 0,
+        "runner_process_count": 0,
+        "descendant_process_count": 0,
+        "dedicated_uid_process_count": 0,
+        "owned_pidfd_count": 0,
+        "anonymous_pointer_residue_count": 0,
+        "named_pointer_residue_count": 0,
+        "candidate_residue_count": 0,
+        "committed_export_residue_count": 0,
+        "nft_table_count": 0,
+    }
 
 
 def collect_formal_execution(

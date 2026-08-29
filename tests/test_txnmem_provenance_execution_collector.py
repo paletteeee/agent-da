@@ -8327,13 +8327,21 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             lifecycle_source = inspect.getsource(
                 collector_module._run_protected_linux_integrated_lifecycle
             )
+            finalizer_source = inspect.getsource(
+                collector_module._finalize_integrated_lifecycle_resources
+            )
             self.assertEqual(
                 lifecycle_source.count(
+                    "_signal_integrated_lifecycle_identities("
+                )
+                + finalizer_source.count(
                     "_signal_integrated_lifecycle_identities("
                 ),
                 2,
             )
-            self.assertNotIn("_pidfd_send_signal(", lifecycle_source)
+            self.assertNotIn(
+                "_pidfd_send_signal(", lifecycle_source + finalizer_source
+            )
 
         with self.subTest(correction="surviving-parent-owns-guard-removal"):
             guard_owner_type = getattr(
@@ -8370,20 +8378,14 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 lambda: events.append("quiescence")
             )
             self.assertEqual(events, ["quiescence", "deactivate"])
-            worker_start = lifecycle_source.index("    def worker_main()")
+            worker_start = lifecycle_source.index("def worker_main()")
             worker_end = lifecycle_source.index(
-                "\n    try:\n        worker_pid = os.fork()",
+                "\n        worker_pid = os.fork()",
                 worker_start,
             )
             worker_source = lifecycle_source[worker_start:worker_end]
             self.assertNotIn("guard.deactivate(", worker_source)
             self.assertNotIn(".deactivate_after_quiescence(", worker_source)
-            self.assertEqual(
-                lifecycle_source.count(
-                    "guard_owner.deactivate_after_quiescence("
-                ),
-                2,
-            )
 
         with self.subTest(correction="actual-receipt-and-completion-boundary"):
             send_state = getattr(
@@ -8925,15 +8927,25 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         ancillary = [(level, kind, data + b"x")]
                     elif self.mutation == "message-truncated":
                         message_flags |= getattr(socket, "MSG_TRUNC", 0x20)
+                    elif self.mutation == "control-truncated":
+                        message_flags |= getattr(socket, "MSG_CTRUNC", 0x08)
                     return payload, ancillary, message_flags, address
 
             receive_cases = (
-                ("restore", None, True, 1, "timeout restoration"),
+                (
+                    "restore",
+                    None,
+                    True,
+                    1,
+                    False,
+                    "timeout restoration",
+                ),
                 (
                     "unexpected-primary",
                     "unexpected",
                     True,
                     1,
+                    False,
                     "worker state is invalid",
                 ),
                 (
@@ -8941,6 +8953,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     "unexpected",
                     False,
                     1,
+                    False,
                     "worker state is invalid",
                 ),
                 (
@@ -8948,6 +8961,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     "non-integral",
                     False,
                     1,
+                    False,
                     "worker state is invalid",
                 ),
                 (
@@ -8955,6 +8969,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     None,
                     False,
                     2,
+                    False,
                     "worker state is invalid",
                 ),
                 (
@@ -8962,6 +8977,15 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     "message-truncated",
                     False,
                     1,
+                    False,
+                    "worker state is invalid",
+                ),
+                (
+                    "control-truncated-close-secondary",
+                    "control-truncated",
+                    False,
+                    1,
+                    True,
                     "worker state is invalid",
                 ),
             )
@@ -8972,6 +8996,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 mutation,
                 restore_failure,
                 fd_count,
+                close_secondary,
                 expected_error,
             ) in receive_cases:
                 with self.subTest(protocol_case=case_name):
@@ -9003,6 +9028,12 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         close_counts[descriptor] = (
                             close_counts.get(descriptor, 0) + 1
                         )
+                        if (
+                            close_secondary
+                            and descriptor in receiver.received_descriptors
+                        ):
+                            real_close(descriptor)
+                            raise OSError("received FD close secondary")
                         return real_close(descriptor)
 
                     caught = None
@@ -9046,6 +9077,60 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                             except OSError:
                                 pass
 
+            sender, receiver = socket.socketpair()
+            receipt_read, receipt_write = os.pipe()
+            transferred_descriptor = None
+            success_close_counts = {}
+            try:
+                sender.sendmsg(
+                    [state_payload],
+                    [
+                        (
+                            socket.SOL_SOCKET,
+                            socket.SCM_RIGHTS,
+                            collector_module.array.array(
+                                "i", [receipt_read]
+                            ).tobytes(),
+                        )
+                    ],
+                )
+
+                def track_success_close(descriptor):
+                    success_close_counts[descriptor] = (
+                        success_close_counts.get(descriptor, 0) + 1
+                    )
+                    return real_close(descriptor)
+
+                with patch.object(
+                    collector_module.os,
+                    "close",
+                    side_effect=track_success_close,
+                ):
+                    observed, transferred_descriptor = receive_state(
+                        receiver,
+                        timeout=1.0,
+                    )
+                self.assertEqual(observed, state)
+                self.assertFalse(os.get_inheritable(transferred_descriptor))
+                self.assertNotIn(
+                    transferred_descriptor,
+                    success_close_counts,
+                )
+                os.fstat(transferred_descriptor)
+            finally:
+                sender.close()
+                receiver.close()
+                for descriptor in (
+                    receipt_read,
+                    receipt_write,
+                    transferred_descriptor,
+                ):
+                    if descriptor is not None:
+                        try:
+                            real_close(descriptor)
+                        except OSError:
+                            pass
+
         with self.subTest(
             correction="round2-failure-accumulating-cleanup"
         ):
@@ -9060,6 +9145,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             unlink_calls = []
             unlink_failed = False
             close_failed = False
+            close_attempts = {}
             real_unlink = collector_module.os.unlink
             real_close = collector_module.os.close
 
@@ -9078,12 +9164,17 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             def accumulating_close(descriptor):
                 nonlocal close_failed
                 is_regular = False
+                inode = None
                 try:
+                    metadata = os.fstat(descriptor)
+                    inode = metadata.st_ino
                     is_regular = collector_module.stat.S_ISREG(
-                        os.fstat(descriptor).st_mode
+                        metadata.st_mode
                     )
                 except OSError:
                     pass
+                if inode is not None:
+                    close_attempts[inode] = close_attempts.get(inode, 0) + 1
                 if unlink_failed and is_regular and not close_failed:
                     close_failed = True
                     real_close(descriptor)
@@ -9098,6 +9189,15 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 candidate.mkdir(mode=0o700)
                 (candidate / "a").write_bytes(b"a")
                 (candidate / "b").write_bytes(b"b")
+                nested = candidate / "nested"
+                nested.mkdir(mode=0o700)
+                (nested / "c").write_bytes(b"c")
+                expected_close_inodes = {
+                    (candidate / "a").stat().st_ino,
+                    (candidate / "b").stat().st_ino,
+                    nested.stat().st_ino,
+                    (nested / "c").stat().st_ino,
+                }
                 parent_metadata = parent.stat()
                 lifecycle_metadata = lifecycle.stat()
                 caught = None
@@ -9131,26 +9231,424 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         caught_traceback = exc.__traceback__
                 self.assertIs(caught, primary)
                 self.assertTrue(close_failed)
-                self.assertGreaterEqual(len(unlink_calls), 2)
+                self.assertGreaterEqual(len(unlink_calls), 3)
+                for inode in expected_close_inodes:
+                    self.assertEqual(close_attempts.get(inode), 2, inode)
                 traceback_nodes = []
                 while caught_traceback is not None:
                     traceback_nodes.append(caught_traceback)
                     caught_traceback = caught_traceback.tb_next
                 self.assertIn(origin[0], traceback_nodes)
-                cleanup_events = []
-                cleanup_owner = guard_owner_type(
-                    guard=SimpleNamespace(
-                        deactivate=lambda: cleanup_events.append(
-                            "deactivate"
-                        )
-                    ),
+
+        with self.subTest(
+            correction="round3-persistent-final-cleanup-veto"
+        ):
+            resources_type = getattr(
+                collector_module,
+                "_IntegratedLifecycleResources",
+                None,
+            )
+            finalize_resources = getattr(
+                collector_module,
+                "_finalize_integrated_lifecycle_resources",
+                None,
+            )
+            self.assertTrue(callable(resources_type))
+            self.assertTrue(callable(finalize_resources))
+
+            class FinalCleanupPrimary(BaseException):
+                pass
+
+            primary = FinalCleanupPrimary("persistent-tree-cleanup-primary")
+            primary_origins = []
+            guard_events = []
+            unlink_failed = False
+            real_unlink = collector_module.os.unlink
+
+            def fail_first_quarantine_unlink(name, *args, **kwargs):
+                nonlocal unlink_failed
+                if not unlink_failed:
+                    unlink_failed = True
+                    try:
+                        raise primary
+                    except BaseException as exc:
+                        primary_origins.append(exc.__traceback__)
+                        raise
+                return real_unlink(name, *args, **kwargs)
+
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                lifecycle = parent / "lifecycle"
+                lifecycle.mkdir(mode=0o700)
+                candidate = lifecycle / "candidate"
+                candidate.mkdir(mode=0o700)
+                (candidate / "a").write_bytes(b"a")
+                (candidate / "b").write_bytes(b"b")
+                parent_metadata = parent.stat()
+                lifecycle_metadata = lifecycle.stat()
+                guard = SimpleNamespace(
+                    active=True,
+                    table_name="txnmem_" + "e" * 16,
+                    _expected_snapshot=None,
+                    _table_names=lambda: {"txnmem_" + "e" * 16},
+                    snapshot=lambda: {"table": "retained"},
+                    deactivate=lambda: guard_events.append("deactivate"),
+                )
+                resources = resources_type(
+                    lifecycle_root=lifecycle,
+                    lifecycle_parent_device=int(parent_metadata.st_dev),
+                    lifecycle_parent_inode=int(parent_metadata.st_ino),
+                    lifecycle_device=int(lifecycle_metadata.st_dev),
+                    lifecycle_inode=int(lifecycle_metadata.st_ino),
+                    controller_uid=os.getuid(),
+                    runner_uid=os.getuid(),
+                    runner_owned_relative=Path("candidate"),
+                    pidfds_before={},
+                )
+                resources.guard = guard
+                resources.guard_owner = guard_owner_type(
+                    guard=guard,
                     owner_pid=os.getpid(),
                 )
-                with self.assertRaises(PrimaryUnlinkFailure):
-                    cleanup_owner.deactivate_after_quiescence(
-                        lambda: (_ for _ in ()).throw(caught)
+                caught = None
+                caught_traceback = None
+                with patch.object(
+                    collector_module.os,
+                    "unlink",
+                    side_effect=fail_first_quarantine_unlink,
+                ), patch.object(
+                    collector_module,
+                    "_remove_integrated_lifecycle_tree",
+                    wraps=remove_tree,
+                ) as remove_spy, patch.object(
+                    collector_module,
+                    "_require_formal_uid_processes",
+                    return_value=None,
+                ), patch.object(
+                    collector_module,
+                    "_integrated_lifecycle_pidfds",
+                    return_value={},
+                ):
+                    try:
+                        finalize_resources(
+                            resources,
+                            primary_failure=None,
+                            primary_traceback=None,
+                        )
+                    except BaseException as exc:
+                        caught = exc
+                        caught_traceback = exc.__traceback__
+                self.assertIs(caught, primary)
+                self.assertEqual(remove_spy.call_count, 1)
+                self.assertTrue(lifecycle.is_dir())
+                quarantine_residue = [
+                    entry
+                    for entry in parent.iterdir()
+                    if entry.name.startswith(".txnmem-cleanup-")
+                ]
+                self.assertEqual(len(quarantine_residue), 1)
+                self.assertEqual(guard_events, [])
+                self.assertFalse(resources.tree_removed)
+                self.assertTrue(
+                    resources.tree_cleanup.has_unresolved_quarantine
+                )
+                self.assertIs(resources.cleanup_primary.exception, primary)
+                traceback_nodes = []
+                while caught_traceback is not None:
+                    traceback_nodes.append(caught_traceback)
+                    caught_traceback = caught_traceback.tb_next
+                self.assertIn(primary_origins[0], traceback_nodes)
+
+            finalizer_source = inspect.getsource(finalize_resources)
+            lifecycle_source = inspect.getsource(
+                collector_module._run_protected_linux_integrated_lifecycle
+            )
+            self.assertEqual(
+                lifecycle_source.count(
+                    "_finalize_integrated_lifecycle_resources("
+                ),
+                1,
+            )
+            self.assertNotIn(
+                "_remove_integrated_lifecycle_tree(",
+                lifecycle_source,
+            )
+            self.assertEqual(
+                finalizer_source.count(
+                    "guard_owner.deactivate_after_quiescence("
+                ),
+                1,
+            )
+
+        with self.subTest(correction="round3-setup-resource-ownership"):
+            prepare_setup = getattr(
+                collector_module,
+                "_prepare_integrated_lifecycle_setup",
+                None,
+            )
+
+            class SetupPrimary(BaseException):
+                pass
+
+            class FakePrctl:
+                def __init__(self):
+                    self.argtypes = None
+                    self.restype = None
+                    self.calls = []
+
+                def __call__(self, option, value, arg3, arg4, arg5):
+                    self.calls.append((option, int(value)))
+                    if option == 37:
+                        pointer = collector_module.ctypes.cast(
+                            value,
+                            collector_module.ctypes.POINTER(
+                                collector_module.ctypes.c_int
+                            ),
+                        )
+                        pointer.contents.value = 0
+                    return 0
+
+            class TrackingSocket:
+                def __init__(self, owned):
+                    self.owned = owned
+                    self.close_count = 0
+
+                def fileno(self):
+                    return self.owned.fileno()
+
+                def close(self):
+                    self.close_count += 1
+                    return self.owned.close()
+
+            setup_cases = (
+                "post-root-chown",
+                "workspace-construction",
+                "export-construction",
+                "post-subreaper-pre-socket",
+                "socket-endpoint-setup",
+            )
+            real_mkdtemp = collector_module.tempfile.mkdtemp
+            real_set_inheritable = collector_module.os.set_inheritable
+            real_socketpair = socket.socketpair
+            repository = Path(__file__).resolve().parents[1]
+            source_identity = {"runner_sha256": "a" * 64}
+            for setup_case in setup_cases:
+                with self.subTest(setup_fault=setup_case):
+                    self.assertTrue(callable(prepare_setup))
+                    primary = SetupPrimary(setup_case)
+                    primary_origins = []
+                    created_roots = []
+                    tracked_sockets = []
+                    inheritable_calls = []
+                    fake_prctl = FakePrctl()
+
+                    def raise_primary():
+                        try:
+                            raise primary
+                        except BaseException as exc:
+                            primary_origins.append(exc.__traceback__)
+                            raise
+
+                    def scoped_mkdtemp(*args, **kwargs):
+                        created = Path(real_mkdtemp(*args, **kwargs))
+                        created_roots.append(created)
+                        return str(created)
+
+                    def fail_or_accept_chown(*_args, **_kwargs):
+                        if setup_case == "post-root-chown":
+                            raise_primary()
+                        return None
+
+                    def fail_workspace(
+                        _run_hash,
+                        _scope_hash,
+                        *,
+                        runs_root,
+                        **_kwargs,
+                    ):
+                        (runs_root / "workspace-partial").mkdir(mode=0o700)
+                        raise_primary()
+
+                    def successful_export(
+                        _project_root,
+                        private_parent,
+                        _source_identity,
+                    ):
+                        immutable_source = private_parent / "immutable-source"
+                        source_directory = immutable_source / "src"
+                        source_directory.mkdir(parents=True, mode=0o700)
+                        (source_directory / "txnmem_provenance_runner.py").write_text(
+                            "# setup fixture\n",
+                            encoding="utf-8",
+                        )
+                        return immutable_source
+
+                    def fail_export(
+                        _project_root,
+                        private_parent,
+                        _source_identity,
+                    ):
+                        (private_parent / "export-partial").write_bytes(b"partial")
+                        raise_primary()
+
+                    def fail_socketpair():
+                        raise_primary()
+
+                    def tracked_socketpair():
+                        first, second = real_socketpair()
+                        tracked_sockets.extend(
+                            (TrackingSocket(first), TrackingSocket(second))
+                        )
+                        return tuple(tracked_sockets)
+
+                    def fail_second_inheritable(descriptor, inheritable):
+                        inheritable_calls.append(descriptor)
+                        real_set_inheritable(descriptor, inheritable)
+                        if len(inheritable_calls) == 2:
+                            raise_primary()
+
+                    workspace_context = (
+                        patch.object(
+                            collector_module,
+                            "_prepare_formal_run_workspace",
+                            side_effect=fail_workspace,
+                        )
+                        if setup_case == "workspace-construction"
+                        else nullcontext()
                     )
-                self.assertEqual(cleanup_events, [])
+                    export_context = patch.object(
+                        collector_module,
+                        "create_immutable_source_export",
+                        side_effect=(
+                            fail_export
+                            if setup_case == "export-construction"
+                            else successful_export
+                        ),
+                    )
+                    socket_context = (
+                        patch.object(
+                            collector_module.socket,
+                            "socketpair",
+                            side_effect=fail_socketpair,
+                        )
+                        if setup_case == "post-subreaper-pre-socket"
+                        else patch.object(
+                            collector_module.socket,
+                            "socketpair",
+                            side_effect=tracked_socketpair,
+                        )
+                        if setup_case == "socket-endpoint-setup"
+                        else nullcontext()
+                    )
+                    inheritable_context = (
+                        patch.object(
+                            collector_module.os,
+                            "set_inheritable",
+                            side_effect=fail_second_inheritable,
+                        )
+                        if setup_case == "socket-endpoint-setup"
+                        else nullcontext()
+                    )
+                    caught = None
+                    caught_traceback = None
+                    with TemporaryDirectory() as tmp:
+                        setup_parent = Path(tmp).resolve()
+
+                        def rooted_mkdtemp(*args, **kwargs):
+                            kwargs["dir"] = setup_parent
+                            return scoped_mkdtemp(*args, **kwargs)
+
+                        with patch.object(
+                            collector_module.tempfile,
+                            "mkdtemp",
+                            side_effect=rooted_mkdtemp,
+                        ), patch.object(
+                            collector_module.os,
+                            "chown",
+                            side_effect=fail_or_accept_chown,
+                        ), workspace_context, export_context, patch.object(
+                            collector_module,
+                            "_publish_formal_input_tree",
+                            return_value=None,
+                        ), patch.object(
+                            collector_module,
+                            "_file_sha256",
+                            return_value="a" * 64,
+                        ), patch.object(
+                            collector_module,
+                            "_preflight_external_outputs",
+                            return_value=(
+                                SimpleNamespace(),
+                                "launch.json",
+                                SimpleNamespace(),
+                                "completion.json",
+                            ),
+                        ), patch.object(
+                            collector_module.ctypes,
+                            "CDLL",
+                            return_value=SimpleNamespace(prctl=fake_prctl),
+                        ), socket_context, inheritable_context, patch.object(
+                            collector_module,
+                            "_require_formal_uid_processes",
+                            return_value=None,
+                        ), patch.object(
+                            collector_module,
+                            "_integrated_lifecycle_pidfds",
+                            return_value={},
+                        ), patch.object(
+                            collector_module,
+                            "_remove_integrated_lifecycle_tree",
+                            wraps=remove_tree,
+                        ) as remove_spy:
+                            try:
+                                prepare_setup(
+                                    project_root=repository,
+                                    source_identity=source_identity,
+                                    pidfds_before={},
+                                    controller_uid=os.getuid(),
+                                    runner_uid=os.getuid(),
+                                    runner_gid=os.getgid(),
+                                    require_root=False,
+                                )
+                            except BaseException as exc:
+                                caught = exc
+                                caught_traceback = exc.__traceback__
+                        self.assertIs(caught, primary)
+                        self.assertEqual(len(created_roots), 1)
+                        self.assertEqual(remove_spy.call_count, 1)
+                        self.assertFalse(created_roots[0].exists())
+                        self.assertEqual(
+                            [
+                                entry
+                                for entry in setup_parent.iterdir()
+                                if entry.name.startswith(".txnmem-cleanup-")
+                            ],
+                            [],
+                        )
+                    traceback_nodes = []
+                    while caught_traceback is not None:
+                        traceback_nodes.append(caught_traceback)
+                        caught_traceback = caught_traceback.tb_next
+                    self.assertIn(primary_origins[0], traceback_nodes)
+                    subreaper_values = [
+                        value
+                        for option, value in fake_prctl.calls
+                        if option == 36
+                    ]
+                    if setup_case in {
+                        "post-subreaper-pre-socket",
+                        "socket-endpoint-setup",
+                    }:
+                        self.assertEqual(subreaper_values, [1, 0])
+                    else:
+                        self.assertEqual(subreaper_values, [])
+                    if setup_case == "socket-endpoint-setup":
+                        self.assertEqual(
+                            [endpoint.close_count for endpoint in tracked_sockets],
+                            [1, 1],
+                        )
+                    else:
+                        self.assertEqual(tracked_sockets, [])
 
         protected_primitives = bool(
             sys.platform.startswith("linux")

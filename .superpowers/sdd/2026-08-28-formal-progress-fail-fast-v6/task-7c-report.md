@@ -949,3 +949,313 @@ filesystem host. The exact integrated kernel body and all 14 protected gates
 therefore have zero protected passes locally and must be rerun from the final
 commit with zero skips, followed by the independent residue inventory. No
 other known Critical or Important concern remains after local verification.
+
+## Fix Round 3
+
+Date: 2026-08-29
+
+Round baseline: `85dcf1f`
+
+This round addresses only I-N4 and I-N5 from `task-7c-r2-review.md` and adds
+the missing behavioral bindings requested by that review. It preserves the
+reviewed C-N1 parent-only guard ownership, I-N1 atomic quarantine deletion,
+I-N2 exact SCM_RIGHTS ownership, exact recorded pidfd identities, the actual
+runner receipt FD/EOF boundary, and the private exact-enum contracts. It does
+not add a second selector or call another test method.
+
+### Implementation and exact lifecycle
+
+The real integrated lifecycle now has one resource record and one finalization
+owner:
+
+1. `_prepare_integrated_lifecycle_setup` computes immutable names first, creates
+   the private lifecycle root, and immediately transfers it into an unbound,
+   fail-closed `_IntegratedLifecycleResources` record. Its resource-owning
+   `try` then binds and validates the exact parent/root device and inode
+   identities before any root mode/ownership, workspace/input/export,
+   external-output preflight, guard-owner, subreaper, socket, or fork work. A
+   binding failure is permanently recorded, makes the one cleanup transaction
+   non-retryable, leaves the unbound root untouched, and vetoes guard removal.
+2. A successful subreaper change is marked owned immediately. Both socketpair
+   endpoints are put in their ownership slots before either inheritable-state
+   operation. A setup exception is captured with its original traceback and
+   sent to the same finalizer used by the real lifecycle body.
+3. The surviving parent records the worker PID/start identity, receives the
+   real runner/descendant PID/start inventory and actual receipt read FD, and
+   remains the sole owner of guard activation/removal. The worker never owns or
+   invokes guard removal.
+4. The existing lifecycle still proves the real anonymous pointer, bundle
+   object's internal `COMPLETED.json`, absent runner-to-collector receipt EOF,
+   rejected real external completion writer, rejected real seal, and rejected
+   real promotion validator in that order.
+5. The lifecycle body performs no formal tree removal. Its `finally` calls
+   `_finalize_integrated_lifecycle_resources` exactly once, passing the exact
+   body/setup primary object and traceback.
+6. The finalizer closes every still-owned channel/receipt FD, signals only
+   recorded PID/start identities through the existing pidfd boundary, reaps and
+   verifies quiescence, makes one formal tree-removal decision, restores an
+   owned subreaper, and only then evaluates guard removal.
+7. `_IntegratedLifecycleTreeCleanup` is a persistent, one-attempt transaction.
+   It records the unique quarantine name, bound quarantine identity, root
+   removal, and quarantine resolution. A cleanup transaction cannot be retried.
+8. Guard removal requires all of: no body/setup primary, no persistent cleanup
+   primary, an empty persistent failure list, exact lineage quiescence, real
+   root removal, no unresolved quarantine, restored subreaper state, unchanged
+   pidfd inventory, empty assertion-only dedicated-UID inventory, and no live
+   recorded identity. Any failure permanently vetoes removal and the exact
+   first primary is re-raised with its original traceback.
+
+There is no fallback to installed-controller export cleanup for the independent
+lifecycle root and no path-based or `shutil` retry. The accepted descriptor-
+relative, owner/type/device/inode-bound recursive deletion remains the only
+tree destruction implementation.
+
+### Resource ownership table
+
+| Resource | Ownership acquisition | Persistent record | Exact release / veto |
+| --- | --- | --- | --- |
+| Lifecycle parent/root | immediate unbound resource record after `mkdtemp`, then no-follow metadata/resolve binding in its `try` | bound flag, parent and root device/inode, controller UID | finalizer's one tree transaction; unbound/mismatch/failure leaves residue and vetoes guard |
+| Candidate/input/export/external subtree | construction below the bound root | exact runner-owned relative candidate plus root transaction | descriptor-relative inspection, detach, revalidation, recursive deletion |
+| Quarantine | unique directory created by the remover | name, device, inode, created/removed flags | removed only after detached entries; any residue is permanently visible and vetoes guard |
+| Subreaper state | successful `PR_SET_CHILD_SUBREAPER` | `prctl`, prior value, owned/restored flags | finalizer restores prior value; restore failure preserves ownership and primary precedence |
+| Parent socket endpoint | immediately after `socketpair` | `parent_channel` slot | exact-once slot transfer-to-null before close |
+| Worker socket endpoint | immediately after `socketpair` | `worker_channel` slot | exact-once slot transfer-to-null before close |
+| Runner receipt read FD | successful exact SCM_RIGHTS receive | `parent_receipt_fd` slot | transferred once to the EOF reader or closed once by finalizer |
+| Worker/runner/descendant | worker fork or exact received PID/start inventory | `worker_pid`, `recorded_identities`, `reaped_statuses` | pidfd bind/revalidate/signal only; UID inventory is assertion-only |
+| nft guard | parent constructs owner and activates | `guard`, `guard_owner` | only the surviving-parent finalizer may remove it after the complete predicate |
+| Failure state | first body/setup/cleanup failure | exact exception/traceback in `cleanup_primary` plus persistent list | never cleared; later safe cleanup continues, then first primary is re-raised |
+
+### TDD RED and GREEN
+
+The sole existing selector was edited first; no production file had changed
+when the binding RED was recorded.
+
+Exact RED command:
+
+```text
+PYTHONPATH=src python3 -m unittest tests.test_txnmem_provenance_execution_collector.ProvenanceExecutionCollectorTests.test_protected_linux_integrated_root_drop_parent_death_pidfd_guard_pointer_zero_residue -v
+```
+
+Sanitized RED outcome: status 1; 1 selector; 6 failing pre-skip subtests;
+0 errors; 1 explicit protected-body skip. Failure labels were:
+
+- `round3-persistent-final-cleanup-veto`
+- `round3-setup-resource-ownership (post-root-chown)`
+- `round3-setup-resource-ownership (workspace-construction)`
+- `round3-setup-resource-ownership (export-construction)`
+- `round3-setup-resource-ownership (post-subreaper-pre-socket)`
+- `round3-setup-resource-ownership (socket-endpoint-setup)`
+
+The I-N4 subtest requires the same production finalizer called by the real
+lifecycle and wraps the real remover. It injects the first quarantine unlink
+failure and binds one removal attempt, the exact primary/traceback, a visible
+root and quarantine residue, `tree_removed == False`, and zero guard-deactivate
+calls. Its source-closure assertions require exactly one real-lifecycle
+finalizer call, no body remover call, and one finalizer-owned guard removal
+call. The five I-N5 labels invoke the actual production setup boundary and
+inject failures at the required acquisition points.
+
+One test-harness calibration run, still before production edits, initially
+counted each regular child FD once rather than once during manifest binding and
+once during deletion binding. The expectation was corrected to two; the
+binding RED above was then rerun against unchanged production and is the RED of
+record.
+
+After the minimum production implementation, the same exact command was run.
+Sanitized GREEN outcome: status 0; 1 selector in 0.059s; every pre-skip subtest
+passed; 1 explicit protected-body skip; 0 failures/errors. After final
+self-review moved identity bootstrap under immediate fail-closed resource
+ownership, the exact selector was rerun in 0.062s with the same GREEN result.
+The skip is not a protected pass.
+
+The same selector also now behavior-binds the already accepted SCM receiver:
+
+- `MSG_CTRUNC` is rejected and every received descriptor is closed;
+- a descriptor is really closed before an injected secondary close exception,
+  while the protocol primary remains the raised exception;
+- a successful transferred descriptor is non-inheritable, is not closed by the
+  receiver after ownership transfer, and remains usable by the caller;
+- the cleanup accumulator attempts both binding and close for every later
+  sibling and nested descendant FD after the first sorted unlink failure, while
+  retaining the first primary traceback despite a secondary close failure.
+
+These supplemental bindings passed the already accepted Round 2 production
+implementation; no SCM implementation rewrite was made in this round.
+
+### Proof map for the accepted findings
+
+I-N4, permanent cleanup veto:
+
+- `_run_protected_linux_integrated_lifecycle` contains one finalizer call and no
+  direct `_remove_integrated_lifecycle_tree` call.
+- `_finalize_integrated_lifecycle_resources` is the sole formal tree-removal
+  decision and the sole integrated guard-removal call site.
+- `_IntegratedLifecycleTreeCleanup.attempted` rejects a second formal cleanup
+  attempt. The transaction retains unresolved quarantine state even if other
+  later cleanup operations succeed.
+- `cleanup_primary` and `lifecycle_failures` are never replaced or reset.
+  `tree_removed` requires both actual root removal and zero unresolved
+  quarantine. Every failure therefore permanently vetoes guard removal.
+- The production-helper subtest uses the real remover and verifies one attempt,
+  exact primary/traceback, visible residue, no guard deactivation, and false
+  `tree_removed`.
+
+I-N5, setup ownership from first mutable resource:
+
+- `mkdtemp` success is immediately registered in a fail-closed resource record;
+  exact root and parent identities are then bound and stored in its owning
+  `try` before mode, ownership, workspace, export, preflight, subreaper, socket,
+  or fork work. An identity-bootstrap failure retains the original primary,
+  marks the cleanup transaction attempted, and cannot delete an unbound name.
+- All those operations are inside the setup owner's exception boundary and use
+  the same production finalizer as body failures.
+- Subreaper ownership is recorded immediately after the successful state
+  change. Both socket endpoint slots are populated immediately after
+  `socketpair`, before inheritable setup.
+- Setup cleanup records the original exception and traceback first, continues
+  safe closes/tree cleanup/subreaper restoration, and does not let a secondary
+  failure replace the primary or permit guard removal.
+- Five production-boundary fault cases prove one root cleanup attempt, removed
+  root and zero quarantine on successful cleanup, exact primary/traceback,
+  subreaper set/restore where owned, and exact-once close of both socket
+  endpoints.
+
+Preserved reviewed contracts:
+
+- C-N1: guard activation and every removal path remain in the surviving parent;
+  activation post-apply snapshot failure retains the table and worker code has
+  no guard owner/removal access.
+- I-N1: files, nested directories, and root are atomically detached to unique
+  quarantine names and revalidated against held owner/type/device/inode
+  descriptors before destruction; replacements survive swaps.
+- I-N2: the SCM receiver maintains one outer FD-ownership `try/finally`, rejects
+  non-exact ancillary protocols and truncation, preserves the primary, and
+  closes/transfers every received FD exactly once.
+- Signals use only recorded PID/start identities after pidfd binding and
+  revalidation; there is no dedicated-UID-wide signaling fallback.
+- The actual receipt FD reaches byte-empty EOF only after kernel death/reaping;
+  that actual absence reaches the real completion writer, seal, and promotion
+  validator.
+- `_IntegratedLifecycleFault` remains an exact private one-member enum with a
+  `None` default and no CLI/config/environment/manifest/schema route. Ordinary
+  registration checks and diagnostic named-fallback behavior are unchanged.
+- The authoritative smoke schema remains
+  `txnmem-formal-provenance-smoke-v2`, fixed formal counts remain unchanged,
+  and there is one lifecycle and one Task 7C selector.
+
+### Regression and local-skip results
+
+All verbose outputs were redirected to private temporary files. Only aggregate
+counts and selector labels are reported here.
+
+Reviewer-focused seven selectors (candidate seal, three pidfd failure modes,
+cleanup identity, and the integrated selector): status 0; 7 tests in 0.075s;
+6 passes; 1 protected skip; 0 failures/errors.
+
+Adjacent collector/smoke/performance command:
+
+```text
+PYTHONPATH=src python3 -m unittest tests.test_txnmem_provenance_execution_collector tests.test_txnmem_formal_smoke tests.test_txnmem_provenance_performance
+```
+
+Sanitized outcome: status 0; 284 tests in 8.528s; 270 passes; 14 explicit
+environment/protected skips; 0 failures/errors.
+
+Task 7 Step 6 command:
+
+```text
+PYTHONPATH=src python3 -m unittest tests.test_txnmem_provenance_progress tests.test_txnmem_formal_controller tests.test_txnmem_formal_smoke tests.test_real_backend_script
+```
+
+Sanitized outcome: status 0; 142 tests in 2.195s; 140 passes; 2 explicit
+environment skips; 0 failures/errors.
+
+The exact 14-selector protected-gate command remains the one listed in Fix
+Round 1. Sanitized outcome: status 0; 14 tests in 0.051s; 0 protected passes;
+14 explicit local platform/root/kernel/filesystem skips; 0 failures/errors.
+These skips are not included in any pass count.
+
+The final Fix Round 3 full-suite command, after all production/test edits and
+the identity-bootstrap self-review correction:
+
+```text
+PYTHONPATH=src python3 -m unittest discover -s tests
+```
+
+Sanitized outcome: status 0; 1,185 tests in 124.028s; 1,166 passes; 19 explicit
+platform/root/environment skips; 0 failures/errors.
+
+A pre-final full discover had also passed 1,185 tests in 124.688s with the same
+1,166/19/0 pass/skip/fail split. It was rerun because the subsequent self-review
+correction moved the identity bootstrap itself under immediate resource
+ownership; only the post-correction run above is used as final evidence.
+
+### Static, diff, and security checks
+
+Commands:
+
+```text
+env PYTHONPYCACHEPREFIX=/private/tmp/txnmem-task7c-r3-pycache-final python3 -m py_compile src/txnmem_provenance_execution_collector.py tests/test_txnmem_provenance_execution_collector.py
+git diff --check
+git diff 8c05f12 -- tests/test_txnmem_provenance_execution_collector.py | rg -c '^\+\s+def test_'
+rg -n '^\s+def test_protected_linux_integrated_root_drop_parent_death_pidfd_guard_pointer_zero_residue\(' tests
+git diff 8c05f12 -- src tests configs scripts | rg '^\+.*(add_argument|ArgumentParser|TXNMEM_.*INTEGRATED|INTEGRATED.*TXNMEM_|os\.environ.*INTEGRATED|getenv.*INTEGRATED)'
+git diff 8c05f12 -- src tests configs scripts | rg '^\+.*(password\s*=|passwd\s*=|token\s*=|secret\s*=|api[_-]?key\s*=|BEGIN (RSA|OPENSSH|EC) PRIVATE KEY)'
+git diff 8c05f12 -- src tests configs scripts | rg '^\+.*(_formal_uid_processes.*(kill|signal)|killall|pkill|kill\s+--?uid|kill\s+-u)'
+rg -n 'self\.test_[A-Za-z0-9_]+' tests/test_txnmem_provenance_execution_collector.py
+rg -n --pcre2 'txnmem-formal-provenance-smoke-v(?!2)' src tests configs scripts
+```
+
+Sanitized outcomes: `py_compile` status 0 with isolated cache; `git diff
+--check` status 0; exactly 1 added selector from accepted Task 7B commit
+`8c05f12`; exactly 1 definition of the required selector; 0 public integrated
+enable-route hits; 0 credential-literal assignment hits; 0 UID-wide signal
+hits; 0 cross-test-method calls; 0 smoke schema spellings other than v2.
+
+### Changed files and helper justification
+
+- `src/txnmem_provenance_execution_collector.py`: adds the persistent resource,
+  cleanup-transaction, captured-failure, setup-result, setup-owner, and finalizer
+  boundaries. These helpers are necessary to make one owner and one cleanup
+  decision explicit and behavior-testable; they factor the existing lifecycle
+  rather than implement a second lifecycle. The integrated body now delegates
+  setup and final cleanup to those boundaries.
+- `tests/test_txnmem_provenance_execution_collector.py`: extends only the one
+  existing Task 7C selector with I-N4/I-N5 production-boundary fault injection
+  and the missing SCM/failure-accumulator behavior bindings. No new test method
+  or cross-test call is added.
+- `.superpowers/sdd/2026-08-28-formal-progress-fail-fast-v6/task-7c-report.md`:
+  records this review round's design, TDD evidence, proof map, aggregate
+  verification, and remaining blocker.
+
+### Self-review and remaining concern
+
+- The real lifecycle has one finalizer invocation, no body tree-remover call,
+  and no worker guard-removal route. The finalizer has one formal tree-remover
+  call and one integrated guard-removal call.
+- The cleanup transaction rejects blind retry and retains unresolved quarantine
+  inventory. No later successful cleanup can clear the first failure or turn
+  residue into `tree_removed`.
+- Setup-owned sockets are nulled before close for exact-once semantics; an owned
+  subreaper remains marked owned if restoration fails. Primary exception object
+  and traceback precedence are preserved across all secondary cleanup failures.
+- Final self-review found and removed a smaller pre-ownership window between
+  `mkdtemp` and identity binding. The root now enters resource state immediately
+  in unbound fail-closed mode; no unbound path is ever deleted, and a binding
+  failure permanently vetoes the guard. All focused and full verification was
+  rerun after this correction.
+- The fixed selector schema/counts, anonymous pointer path, external completion
+  boundary, real seal/promotion rejection, private enum, and ordinary
+  collector/diagnostic behavior remain unchanged.
+- No deferred Minor was deliberately addressed. No second lifecycle or selector
+  was introduced despite the necessary extraction of setup/finalization state.
+- No remote system, database, raw log/payload, formal identity, nonce,
+  credential, server coordinate, username, or private remote path was accessed
+  or exposed. No subagent/reviewer was dispatched; no push or merge occurred.
+
+Remaining concern/blocker: this machine cannot execute the protected-root Linux
+kernel/filesystem lifecycle. The exact integrated body and all 14 protected
+gates therefore have zero protected passes locally. The final commit must be
+rerun on the protected host with zero skips, followed by the independent residue
+inventory. No other known Critical or Important concern remains after the local
+behavioral and full-suite verification above.
