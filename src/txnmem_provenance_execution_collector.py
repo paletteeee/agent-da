@@ -6671,6 +6671,26 @@ def _harvest_integrated_lifecycle_received_fds(
                 received_owners.append(owner)
 
 
+def _remember_integrated_lifecycle_worker_state_message(
+    recv_result: tuple[
+        bytes,
+        list[tuple[int, int, bytes]],
+        int,
+        Any,
+    ],
+    resources: _IntegratedLifecycleResources,
+) -> None:
+    payload, ancillary, message_flags, _address = recv_result
+    resources.worker_state_message = (
+        bytes(payload),
+        tuple(
+            (int(level), int(kind), bytes(data))
+            for level, kind, data in ancillary
+        ),
+        int(message_flags),
+    )
+
+
 def _recv_integrated_lifecycle_message_owned(
     channel: socket.socket,
     *,
@@ -6699,6 +6719,10 @@ def _recv_integrated_lifecycle_message_owned(
             raise CollectorError(
                 "integrated lifecycle worker state is unavailable"
             ) from None
+        _remember_integrated_lifecycle_worker_state_message(
+            recv_result,
+            resources,
+        )
         _harvest_integrated_lifecycle_received_fds(
             recv_result[1],
             received_owners,
@@ -6709,6 +6733,19 @@ def _recv_integrated_lifecycle_message_owned(
         primary_traceback = exc.__traceback__
     finally:
         if recv_result is not None:
+            for _attempt in range(2):
+                try:
+                    _remember_integrated_lifecycle_worker_state_message(
+                        recv_result,
+                        resources,
+                    )
+                    break
+                except BaseException as exc:
+                    if primary_failure is None:
+                        primary_failure = exc
+                        primary_traceback = exc.__traceback__
+                    else:
+                        resources.defer_failure(exc)
             for _attempt in range(2):
                 try:
                     _harvest_integrated_lifecycle_received_fds(
@@ -6740,6 +6777,137 @@ def _recv_integrated_lifecycle_message_owned(
             "integrated lifecycle worker state is unavailable"
         )
     return recv_result
+
+
+def _validated_integrated_lifecycle_worker_state_message(
+    resources: _IntegratedLifecycleResources,
+) -> tuple[dict[str, Any], _IntegratedLifecycleFdOwner]:
+    message = resources.worker_state_message
+    if message is None:
+        raise CollectorError(
+            "integrated lifecycle worker state is invalid"
+        )
+    payload, ancillary, message_flags = message
+    integer_size = array.array("i").itemsize
+    if (
+        not payload
+        or len(payload) > 4096
+        or message_flags & getattr(socket, "MSG_CTRUNC", 0)
+        or message_flags & getattr(socket, "MSG_TRUNC", 0)
+        or len(ancillary) != 1
+        or ancillary[0][0] != socket.SOL_SOCKET
+        or ancillary[0][1] != socket.SCM_RIGHTS
+        or len(ancillary[0][2]) != integer_size
+    ):
+        raise CollectorError(
+            "integrated lifecycle worker state is invalid"
+        )
+    descriptors = array.array("i")
+    descriptors.frombytes(ancillary[0][2])
+    if len(descriptors) != 1:
+        raise CollectorError(
+            "integrated lifecycle worker state is invalid"
+        )
+    receipt_fd_owner = resources.fd_owners.owner_for_descriptor(
+        int(descriptors[0])
+    )
+    if receipt_fd_owner is None:
+        raise CollectorError(
+            "integrated lifecycle worker state is invalid"
+        )
+    document = _strict_json_bytes(
+        payload,
+        "integrated lifecycle worker state",
+    )
+    normalized = _normalize_integrated_lifecycle_worker_state(document)
+    if canonical_json_bytes(normalized) != payload:
+        raise CollectorError(
+            "integrated lifecycle worker state is invalid"
+        )
+    return normalized, receipt_fd_owner
+
+
+def _adopt_integrated_lifecycle_worker_state_inventory(
+    resources: _IntegratedLifecycleResources,
+    normalized: Mapping[str, Any],
+) -> dict[int, str]:
+    runner_inventory = {
+        int(normalized["runner_pid"]): str(
+            normalized["runner_start_ticks"]
+        ),
+        int(normalized["descendant_pid"]): str(
+            normalized["descendant_start_ticks"]
+        ),
+    }
+    worker_pid = resources.worker_pid
+    worker_start = resources.recorded_identities.get(worker_pid)
+    if (
+        type(worker_pid) is not int
+        or worker_pid <= 0
+        or type(worker_start) is not str
+        or not worker_start.isdigit()
+        or worker_pid in runner_inventory
+        or len(runner_inventory) != 2
+        or any(
+            type(pid) is not int
+            or pid <= 0
+            or type(start) is not str
+            or not start.isdigit()
+            for pid, start in runner_inventory.items()
+        )
+    ):
+        raise CollectorError(
+            "integrated lifecycle worker state is invalid"
+        )
+    expected = {worker_pid: worker_start}
+    expected.update(runner_inventory)
+    if set(resources.recorded_identities) not in (
+        {worker_pid},
+        set(expected),
+    ) or any(
+        type(pid) is not int
+        or pid not in expected
+        or type(start) is not str
+        or start != expected[pid]
+        for pid, start in resources.recorded_identities.items()
+    ):
+        raise CollectorError(
+            "integrated lifecycle worker state is invalid"
+        )
+    resources.recorded_identities.update(runner_inventory)
+    return runner_inventory
+
+
+def _adopt_integrated_lifecycle_receipt_owner(
+    resources: _IntegratedLifecycleResources,
+    receipt_fd_owner: _IntegratedLifecycleFdOwner,
+) -> None:
+    if not resources.receipt_owner.has_owner:
+        resources.receipt_owner.adopt_owner(receipt_fd_owner)
+    elif resources.receipt_owner.fd_owner is not receipt_fd_owner:
+        raise CollectorError(
+            "integrated lifecycle receipt ownership is invalid"
+        )
+
+
+def _reconcile_integrated_lifecycle_worker_state_message(
+    resources: _IntegratedLifecycleResources,
+) -> None:
+    normalized, receipt_fd_owner = (
+        _validated_integrated_lifecycle_worker_state_message(resources)
+    )
+    runner_inventory = _adopt_integrated_lifecycle_worker_state_inventory(
+        resources,
+        normalized,
+    )
+    _require_formal_uid_processes(
+        resources.runner_uid,
+        expected=runner_inventory,
+    )
+    _adopt_integrated_lifecycle_receipt_owner(
+        resources,
+        receipt_fd_owner,
+    )
 
 
 def _receive_integrated_lifecycle_worker_state(
@@ -6777,57 +6945,29 @@ def _receive_integrated_lifecycle_worker_state(
             )
         )
 
-        integer_size = array.array("i").itemsize
-        if (
-            not payload
-            or len(payload) > 4096
-            or message_flags & getattr(socket, "MSG_CTRUNC", 0)
-            or message_flags & getattr(socket, "MSG_TRUNC", 0)
-            or len(ancillary) != 1
-            or ancillary[0][0] != socket.SOL_SOCKET
-            or ancillary[0][1] != socket.SCM_RIGHTS
-            or len(ancillary[0][2]) != integer_size
-            or len(received_owners) != 1
-        ):
+        if len(received_owners) != 1:
             raise CollectorError(
                 "integrated lifecycle worker state is invalid"
             )
-        document = _strict_json_bytes(
-            payload, "integrated lifecycle worker state"
+        normalized, receipt_fd_owner = (
+            _validated_integrated_lifecycle_worker_state_message(resources)
         )
-        normalized = _normalize_integrated_lifecycle_worker_state(document)
-        if canonical_json_bytes(normalized) != payload:
+        if received_owners[0] is not receipt_fd_owner:
             raise CollectorError(
                 "integrated lifecycle worker state is invalid"
             )
-        receipt_fd_owner = received_owners[0]
-        runner_inventory = {
-            int(normalized["runner_pid"]): str(
-                normalized["runner_start_ticks"]
-            ),
-            int(normalized["descendant_pid"]): str(
-                normalized["descendant_start_ticks"]
-            ),
-        }
-        worker_pid = resources.worker_pid
-        if (
-            type(worker_pid) is not int
-            or worker_pid <= 0
-            or set(resources.recorded_identities) != {worker_pid}
-            or type(resources.recorded_identities.get(worker_pid)) is not str
-            or not resources.recorded_identities[worker_pid].isdigit()
-            or worker_pid in runner_inventory
-            or set(runner_inventory) & set(resources.recorded_identities)
-        ):
-            raise CollectorError(
-                "integrated lifecycle worker state is invalid"
-            )
-        resources.recorded_identities.update(runner_inventory)
+        runner_inventory = _adopt_integrated_lifecycle_worker_state_inventory(
+            resources,
+            normalized,
+        )
         _require_formal_uid_processes(
             resources.runner_uid,
             expected=runner_inventory,
         )
-        resources.receipt_owner.adopt_owner(receipt_fd_owner)
+        _adopt_integrated_lifecycle_receipt_owner(
+            resources,
+            receipt_fd_owner,
+        )
     except BaseException as exc:
         primary_failure = exc
         primary_traceback = exc.__traceback__
@@ -6848,6 +6988,12 @@ def _receive_integrated_lifecycle_worker_state(
             else:
                 resources.defer_failure(exc)
         if primary_failure is not None:
+            try:
+                _reconcile_integrated_lifecycle_worker_state_message(
+                    resources
+                )
+            except BaseException as exc:
+                resources.defer_failure(exc)
             for owner in received_owners:
                 try:
                     owner.close_retained()
@@ -7305,7 +7451,32 @@ class _IntegratedLifecycleFdOwner:
     def close_retained(self) -> None:
         if self.closed:
             return
-        _close_integrated_lifecycle_fd_object(self.file_object)
+        first_failure: _IntegratedLifecycleCapturedFailure | None = None
+        for _attempt in range(2):
+            if self.closed:
+                break
+            try:
+                _close_integrated_lifecycle_fd_object(self.file_object)
+            except BaseException as exc:
+                if first_failure is None:
+                    first_failure = _IntegratedLifecycleCapturedFailure(
+                        exception=exc,
+                        traceback=exc.__traceback__,
+                    )
+            else:
+                break
+        if not self.closed and first_failure is None:
+            failure = CollectorError(
+                "integrated lifecycle descriptor cleanup had no effect"
+            )
+            first_failure = _IntegratedLifecycleCapturedFailure(
+                exception=failure,
+                traceback=failure.__traceback__,
+            )
+        if first_failure is not None:
+            raise first_failure.exception.with_traceback(
+                first_failure.traceback
+            )
 
 
 @dataclass
@@ -7423,6 +7594,11 @@ class _IntegratedLifecycleResources:
     receipt_owner: _IntegratedLifecycleReceiptOwner = field(
         default_factory=_IntegratedLifecycleReceiptOwner
     )
+    worker_state_message: tuple[
+        bytes,
+        tuple[tuple[int, int, bytes], ...],
+        int,
+    ] | None = field(default=None, repr=False)
     worker_pid: int | None = None
     recorded_identities: dict[int, str] = field(default_factory=dict)
     reaped_statuses: dict[int, int] = field(default_factory=dict)
@@ -7542,6 +7718,7 @@ def _new_integrated_lifecycle_resources(
         runner_owned_relative=expected_candidate.relative_to(lifecycle_root),
         pidfds_before=dict(pidfds_before),
         lifecycle_name=lifecycle_name,
+        root_name_collision=True,
         tree_identity_bound=False,
     )
 
@@ -7556,6 +7733,21 @@ def _close_integrated_lifecycle_directory_fd_once(
             "integrated lifecycle descriptor cleanup is invalid"
         )
     os.close(descriptor)
+
+
+def _mkdir_integrated_lifecycle_root_and_mark_owned(
+    resources: _IntegratedLifecycleResources,
+    parent_fd: int,
+) -> None:
+    name = resources.lifecycle_name
+    if name is None:
+        raise CollectorError(
+            "integrated lifecycle root acquisition is invalid"
+        )
+    # One source line makes mkdir success and the ownership bit indivisible to
+    # the supported line-event fault model; arbitrary-opcode injection remains
+    # outside the documented pure-Python threat boundary.
+    os.mkdir(name, mode=0o700, dir_fd=parent_fd); resources.root_name_collision = False
 
 
 def _bind_integrated_lifecycle_root(
@@ -7659,16 +7851,14 @@ def _acquire_integrated_lifecycle_root(
         except FileNotFoundError:
             resources.root_absent_before_attempt = True
         else:
-            resources.root_name_collision = True
             raise CollectorError(
                 "integrated lifecycle root name already exists"
             )
         resources.root_create_attempted = True
         try:
-            os.mkdir(
-                resources.lifecycle_name,
-                mode=0o700,
-                dir_fd=parent_fd,
+            _mkdir_integrated_lifecycle_root_and_mark_owned(
+                resources,
+                parent_fd,
             )
         except FileExistsError as exc:
             resources.root_name_collision = True

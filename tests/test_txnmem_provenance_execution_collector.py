@@ -10352,6 +10352,10 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         os.close(receipt_write)
                     self.assertIs(caught, primary)
                     self.assertTrue(raised)
+                    self.assertEqual(
+                        resources.recorded_identities,
+                        {100: "10", 101: "11", 102: "12"},
+                    )
                     self.assertEqual(len(received_descriptors), 1)
                     descriptor_open = True
                     try:
@@ -11280,6 +11284,351 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 self.assertIs(caught, primary)
                 self.assertGreaterEqual(len(restore_calls), 2)
                 self.assertTrue(received_closed)
+                self.assertTrue(resources.tree_cleanup.root_removed)
+                self.assertFalse(lifecycle.exists())
+                self.assertEqual(guard_events, [])
+                self.assertEqual(killpg_calls, 0)
+
+        with self.subTest(
+            round5_review_gap="collision-marker-line-event"
+        ):
+            primary = Round5Primary("collision-marker-line-event")
+            primary_origins = []
+            acquisition = (
+                collector_module._acquire_integrated_lifecycle_root
+            )
+            acquisition_lines, acquisition_start = inspect.getsourcelines(
+                acquisition
+            )
+            collision_else_offset = next(
+                offset
+                for offset, source_line in enumerate(acquisition_lines)
+                if source_line.strip() == "else:"
+            )
+            collision_line = next(
+                acquisition_start + offset
+                for offset, source_line in enumerate(acquisition_lines)
+                if offset > collision_else_offset
+                and source_line.strip() == "raise CollectorError("
+            )
+            trace_raised = False
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                resources = make_round5_named_resources(parent, "f" * 32)
+                lifecycle = resources.lifecycle_root
+                lifecycle.mkdir(mode=0o700)
+                marker = lifecycle / "foreign-marker"
+                marker.write_text("foreign\n", encoding="utf-8")
+                guard_events = attach_round5_guard(resources, "f")
+
+                def collision_marker_trace(frame, event, _arg):
+                    nonlocal trace_raised
+                    if (
+                        event == "line"
+                        and frame.f_code is acquisition.__code__
+                        and frame.f_lineno == collision_line
+                        and not trace_raised
+                    ):
+                        trace_raised = True
+                        sys.settrace(None)
+                        try:
+                            raise primary
+                        except BaseException as exc:
+                            primary_origins.append(exc.__traceback__)
+                            raise
+                    return collision_marker_trace
+
+                acquisition_failure = None
+                previous_trace = sys.gettrace()
+                try:
+                    sys.settrace(collision_marker_trace)
+                    try:
+                        acquisition(resources)
+                    except BaseException as exc:
+                        acquisition_failure = exc
+                finally:
+                    sys.settrace(previous_trace)
+                caught, _signals, _uids, killpg_calls = finalize_round5(
+                    resources,
+                    acquisition_failure,
+                )
+                self.assertTrue(trace_raised)
+                self.assertIs(acquisition_failure, primary)
+                self.assertIs(caught, primary)
+                self.assertTrue(resources.root_name_collision)
+                self.assertTrue(lifecycle.is_dir())
+                self.assertEqual(
+                    marker.read_text(encoding="utf-8"),
+                    "foreign\n",
+                )
+                self.assertFalse(resources.tree_cleanup.root_removed)
+                self.assertEqual(guard_events, [])
+                self.assertEqual(killpg_calls, 0)
+                self.assertTrue(
+                    traceback_contains(caught.__traceback__, primary_origins[0])
+                )
+
+        with self.subTest(
+            round5_review_gap="mkdir-race-collision-line-event"
+        ):
+            real_mkdir = collector_module.os.mkdir
+            primary = Round5Primary("mkdir-race-collision-line-event")
+            primary_origins = []
+            acquisition = (
+                collector_module._acquire_integrated_lifecycle_root
+            )
+            acquisition_lines, acquisition_start = inspect.getsourcelines(
+                acquisition
+            )
+            race_collision_line = max(
+                acquisition_start + offset
+                for offset, source_line in enumerate(acquisition_lines)
+                if "resources.root_name_collision = True" in source_line
+            )
+            collision_created = False
+            trace_raised = False
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                resources = make_round5_named_resources(parent, "3" * 32)
+                lifecycle = resources.lifecycle_root
+                marker = lifecycle / "racing-foreign-marker"
+                guard_events = attach_round5_guard(resources, "3")
+
+                def racing_mkdir(path, *args, **kwargs):
+                    nonlocal collision_created
+                    if not collision_created:
+                        collision_created = True
+                        lifecycle.mkdir(mode=0o700)
+                        marker.write_text("foreign\n", encoding="utf-8")
+                    return real_mkdir(path, *args, **kwargs)
+
+                def race_collision_trace(frame, event, _arg):
+                    nonlocal trace_raised
+                    if (
+                        event == "line"
+                        and frame.f_code is acquisition.__code__
+                        and frame.f_lineno == race_collision_line
+                        and not trace_raised
+                    ):
+                        trace_raised = True
+                        sys.settrace(None)
+                        try:
+                            raise primary
+                        except BaseException as exc:
+                            primary_origins.append(exc.__traceback__)
+                            raise
+                    return race_collision_trace
+
+                acquisition_failure = None
+                previous_trace = sys.gettrace()
+                try:
+                    with patch.object(
+                        collector_module.os,
+                        "mkdir",
+                        side_effect=racing_mkdir,
+                    ):
+                        sys.settrace(race_collision_trace)
+                        try:
+                            acquisition(resources)
+                        except BaseException as exc:
+                            acquisition_failure = exc
+                finally:
+                    sys.settrace(previous_trace)
+                caught, _signals, _uids, killpg_calls = finalize_round5(
+                    resources,
+                    acquisition_failure,
+                )
+                self.assertTrue(collision_created)
+                self.assertTrue(trace_raised)
+                self.assertIs(acquisition_failure, primary)
+                self.assertIs(caught, primary)
+                self.assertTrue(resources.root_name_collision)
+                self.assertTrue(lifecycle.is_dir())
+                self.assertEqual(
+                    marker.read_text(encoding="utf-8"),
+                    "foreign\n",
+                )
+                self.assertFalse(resources.tree_cleanup.root_removed)
+                self.assertEqual(guard_events, [])
+                self.assertEqual(killpg_calls, 0)
+                self.assertTrue(
+                    traceback_contains(caught.__traceback__, primary_origins[0])
+                )
+
+        with self.subTest(
+            round5_review_gap="receiver-pre-ledger-line-event"
+        ):
+            primary = Round5Primary("receiver-pre-ledger-line-event")
+            primary_origins = []
+            adoption_function = (
+                collector_module._adopt_integrated_lifecycle_worker_state_inventory
+            )
+            adoption_lines, adoption_start = inspect.getsourcelines(
+                adoption_function
+            )
+            ledger_line = next(
+                adoption_start + offset
+                for offset, source_line in enumerate(adoption_lines)
+                if "resources.recorded_identities.update" in source_line
+            )
+            trace_raised = False
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                resources, lifecycle, _endpoints = make_round4_resources(
+                    parent,
+                    channels=False,
+                )
+                collector_module._adopt_integrated_lifecycle_worker(
+                    resources,
+                    100,
+                    "10",
+                )
+                guard_events = attach_round5_guard(resources, "1")
+                sender, base_receiver = socket.socketpair()
+                receiver = Round5RecordingReceiveSocket(
+                    fileno=base_receiver.detach()
+                )
+                resources.parent_channel = receiver
+                receipt_read, receipt_write = os.pipe()
+                sender.sendmsg(
+                    [collector_module.canonical_json_bytes(state)],
+                    [
+                        (
+                            socket.SOL_SOCKET,
+                            socket.SCM_RIGHTS,
+                            collector_module.array.array(
+                                "i", [receipt_read]
+                            ).tobytes(),
+                        )
+                    ],
+                )
+
+                def pre_ledger_trace(frame, event, _arg):
+                    nonlocal trace_raised
+                    if (
+                        event == "line"
+                        and frame.f_code is adoption_function.__code__
+                        and frame.f_lineno == ledger_line
+                        and not trace_raised
+                    ):
+                        trace_raised = True
+                        sys.settrace(None)
+                        try:
+                            raise primary
+                        except BaseException as exc:
+                            primary_origins.append(exc.__traceback__)
+                            raise
+                    return pre_ledger_trace
+
+                receive_failure = None
+                previous_trace = sys.gettrace()
+                try:
+                    sys.settrace(pre_ledger_trace)
+                    try:
+                        receive_round5(receiver, resources)
+                    except BaseException as exc:
+                        receive_failure = exc
+                finally:
+                    sys.settrace(previous_trace)
+                expected_identities = {
+                    100: "10",
+                    101: "11",
+                    102: "12",
+                }
+                identities_before_finalize = dict(
+                    resources.recorded_identities
+                )
+                caught, signal_calls, _uids, killpg_calls = finalize_round5(
+                    resources,
+                    receive_failure,
+                )
+                transferred_descriptor = receiver.received_descriptors[0]
+                transferred_closed = False
+                try:
+                    os.fstat(transferred_descriptor)
+                except OSError:
+                    transferred_closed = True
+                sender.close()
+                os.close(receipt_read)
+                os.close(receipt_write)
+                if not transferred_closed:
+                    os.close(transferred_descriptor)
+                self.assertTrue(trace_raised)
+                self.assertIs(receive_failure, primary)
+                self.assertIs(caught, primary)
+                self.assertEqual(
+                    identities_before_finalize,
+                    expected_identities,
+                )
+                self.assertEqual(
+                    signal_calls,
+                    [(expected_identities, signal.SIGKILL)],
+                )
+                self.assertTrue(transferred_closed)
+                self.assertTrue(resources.tree_cleanup.root_removed)
+                self.assertFalse(lifecycle.exists())
+                self.assertEqual(guard_events, [])
+                self.assertEqual(killpg_calls, 0)
+                self.assertTrue(
+                    traceback_contains(caught.__traceback__, primary_origins[0])
+                )
+
+        with self.subTest(
+            round5_review_gap="finalizer-first-close-before-effect"
+        ):
+            primary = Round5Primary("finalizer-first-close-before-effect")
+            close_primary = Round5CloseBefore(
+                "finalizer-first-close-before-effect"
+            )
+            close_attempts = []
+            real_object_close = (
+                collector_module._close_integrated_lifecycle_fd_object
+            )
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                resources, lifecycle, _endpoints = make_round4_resources(
+                    parent,
+                    channels=False,
+                )
+                guard_events = attach_round5_guard(resources, "2")
+                receipt_read, receipt_write = os.pipe()
+                receipt_fd_owner = (
+                    resources.fd_owners.adopt_descriptor(receipt_read)
+                )
+                resources.receipt_owner.adopt_owner(receipt_fd_owner)
+
+                def fail_first_object_close(file_object):
+                    close_attempts.append(file_object.fileno())
+                    if len(close_attempts) == 1:
+                        raise close_primary
+                    return real_object_close(file_object)
+
+                with patch.object(
+                    collector_module,
+                    "_close_integrated_lifecycle_fd_object",
+                    side_effect=fail_first_object_close,
+                ):
+                    caught, _signals, _uids, killpg_calls = finalize_round5(
+                        resources,
+                        primary,
+                    )
+                descriptor_open = True
+                try:
+                    os.fstat(receipt_read)
+                except OSError:
+                    descriptor_open = False
+                if descriptor_open:
+                    os.close(receipt_read)
+                os.close(receipt_write)
+                self.assertIs(caught, primary)
+                self.assertEqual(len(close_attempts), 2)
+                self.assertFalse(descriptor_open)
+                self.assertTrue(
+                    any(
+                        captured.exception is close_primary
+                        for captured in resources.lifecycle_failures
+                    )
+                )
                 self.assertTrue(resources.tree_cleanup.root_removed)
                 self.assertFalse(lifecycle.exists())
                 self.assertEqual(guard_events, [])

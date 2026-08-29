@@ -1547,3 +1547,75 @@ Critical/Important closure. Only after review acceptance and a fresh
 coordinator verification may the exact committed revision run the 14 protected
 Linux selectors with zero skips and undergo an independent zero-residue
 inventory. The formal matrix remains frozen until those gates pass.
+
+## Fix Round 5 independent-review correction
+
+The fresh independent review of `9bf1879..c408881` rejected the candidate with
+three Important residuals and no Critical finding. It reproduced a line event
+before the preflight collision assignment that allowed a foreign root to be
+deleted, a receiver-internal line event before the runner/descendant ledger
+update, and a finalizer-first close-before-effect failure that left the object
+owner open. The review accepted the documented arbitrary-opcode exclusion;
+all three findings were ordinary or production line-event faults inside the
+declared threat model. The coordinator accepted the findings.
+
+These residuals did not require a native C/Rust ownership layer. The same Fix
+Round 5 was corrected narrowly:
+
+- Root acquisition now begins with a conservative collision/unknown marker.
+  Absence preflight does not clear it. A private helper performs `mkdir` and
+  clears the marker on one physical source line, making syscall success plus
+  the ownership transition indivisible to the supported line-event model. A
+  real EEXIST—including a same-name race—leaves the conservative marker set;
+  a successful create clears it before the next line event. Tests bind both a
+  pre-existing foreign root and a racing foreign root, including exceptions at
+  their first production collision lines; neither root or marker is deleted.
+- The owned resource ledger now retains an immutable private copy of the raw
+  worker-state message as soon as `recvmsg` returns, with helper-finally retry
+  alongside SCM descriptor harvesting. One validator rechecks exact ancillary
+  cardinality/type/length, truncation flags, the retained descriptor-object
+  owner, strict canonical JSON, and the private state schema. Identity and
+  receipt adoption are idempotent. Any receiver primary reconciles the retained
+  message into worker/runner/descendant and receipt ownership before closing
+  the descriptor owner, so a line event before the ordinary ledger update can
+  no longer omit the runner or descendant.
+- The `io.FileIO` descriptor owner now makes at most two object-close attempts
+  while retaining and re-raising the first exception and traceback. A
+  close-before-effect first failure therefore receives one final-tier fallback
+  and closes the descriptor while still vetoing guard removal. If the first
+  close completed and then raised, `FileIO.closed` prevents the second call, so
+  a same-number replacement remains untouched. No raw numeric retry was added.
+
+### Review-correction TDD and final local verification
+
+Before the production correction, the existing exact selector was extended
+with the three independent-review reproductions. RED returned status 1 with
+exactly three failures and one explicit protected-host skip. The failures were
+the collision marker, receiver pre-ledger identity handoff, and
+finalizer-first close-before-effect assertions. After the production changes,
+all local behavioral groups passed and the selector ended only in the same
+explicit protected-Linux skip; a supplemental real mkdir-race collision and
+the existing pre-harvest SCM line-event case also passed.
+
+All final commands below ran after the last production and test edit:
+
+- Exact selector: 1 test in 0.119 seconds; all local pre-skip behavior passed;
+  1 explicit protected skip; 0 failures/errors.
+- Reviewer-focused set: 7 tests in 0.132 seconds; 6 passes, 1 explicit
+  protected skip, 0 failures/errors.
+- Adjacent collector/smoke/performance: 284 tests in 8.640 seconds; 270 passes,
+  14 explicit environment/protected skips, 0 failures/errors.
+- Task 7 Step 6: 142 tests in 1.968 seconds; 140 passes, 2 explicit environment
+  skips, 0 failures/errors.
+- Exact protected list: 14 tests in 0.107 seconds; 0 protected passes, 14
+  explicit local skips, 0 failures/errors.
+- Full repository discovery: 1,185 tests in 125.907 seconds; 1,166 passes, 19
+  explicit environment/platform/protected skips, 0 failures/errors.
+- Isolated-cache compilation, diff checks, one-selector/one-definition checks,
+  and scans for cross-test calls, public integrated routes, credentials,
+  UID-wide/`killpg` signal paths, and non-v2 smoke schema spellings passed.
+
+The correction still requires a new independent review. No remote host,
+protected identity, database, log, raw payload, controller installation,
+formal matrix, push, or promotion was touched during this correction. The 14
+local skips remain zero protected passes and cannot authorize a formal run.
