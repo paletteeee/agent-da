@@ -1459,3 +1459,91 @@ protected gates therefore still have zero protected passes locally. Acceptance
 requires rerunning the exact committed revision on the protected host with zero
 skips, followed by the independent zero-residue inventory. This round did not
 perform that remote/protected action.
+
+## Fix Round 5: collision provenance and object-owned SCM handoff
+
+This is the final planned local correction round after the independent Round 4
+review identified I-N7, I-N8, and I-N9. The implementation subagent produced a
+tests-first and production-code diff but stopped responding while running the
+larger regressions. The coordinator preserved that diff, terminated only the
+subagent, independently inspected the implementation, reproduced RED in an
+isolated detached worktree, and ran every GREEN command below. No remote host,
+formal run identity, database, log, or raw payload was accessed.
+
+### Corrected ownership boundaries
+
+- **I-N7, root provenance.** Root acquisition now performs a
+  descriptor-relative, no-follow known-name absence check before `mkdir`.
+  A genuine pre-existing name is marked as a foreign collision before any
+  creation syscall and is never deleted. Once creation is attempted, an
+  exception raised after a successful `mkdir` is reconciled by opening and
+  binding the exact root identity; the original exception object and traceback
+  remain primary, so a typed post-success `FileExistsError` cannot be
+  misclassified as a collision.
+- **I-N8, full worker-state adoption.** The SCM receiver now receives the
+  persistent resource owner directly. Before returning, it validates and
+  records both runner and resistant-descendant PID/start identities, verifies
+  the dedicated-UID inventory, and adopts the transferred receipt owner. A
+  caller-boundary exception after receiver return therefore leaves worker,
+  runner, descendant, and receipt state in the finalizer-owned ledger.
+- **I-N9, descriptor-object ownership.** Every harvested SCM descriptor is
+  immediately wrapped in one `io.FileIO`-backed private owner and registered in
+  a persistent owner group. Invalid protocol and later receipt consumption use
+  that same object owner. A close-before-effect failure leaves the object open
+  for the finalizer's fallback; a close-after-effect failure leaves the object
+  marked closed, so descriptor-number reuse cannot cause a second raw-number
+  close of an unrelated replacement. Directory descriptors deliberately use
+  one exact close attempt and no numeric retry; any close error remains a hard
+  lifecycle failure and permanent guard-removal veto.
+- The receiver also preserves a post-`recvmsg` primary exception and the signal
+  mask restorer preserves its first failure even if a later restoration attempt
+  succeeds. The private lifecycle enum, public CLI/config/environment surface,
+  exact PID/start pidfd targeting, assertion-only UID inventory, real
+  receipt/completion/seal/promotion chain, and single lifecycle/selector remain
+  unchanged.
+
+### Binding TDD evidence
+
+Only the existing exact Task 7C selector was extended. In an isolated detached
+worktree at `9bf1879`, the coordinator applied the final test delta without the
+production delta and ran the exact selector. RED returned status 1 with five
+failures, eight errors, and one explicit protected-host skip. The failures
+included genuine-collision preflight, post-success typed exception provenance,
+directory close/no-retry behavior, receiver-return full-state adoption,
+close-before-effect fallback, close-after-effect same-pipe-number reuse,
+post-`recvmsg` primary provenance, and first signal-restore failure. The
+temporary worktree was then removed; the main candidate worktree was never
+rolled back.
+
+With the production correction present, the same exact selector returned
+status 0 in 0.140 seconds: all local pre-skip behavioral cases passed, followed
+by one explicit protected-Linux skip and zero failures/errors. That skip is not
+counted as a protected pass.
+
+### Coordinator verification
+
+- Reviewer-focused set: 7 tests in 0.135 seconds; 6 passes, 1 explicit
+  protected skip, 0 failures/errors.
+- Adjacent collector/smoke/performance: 284 tests in 8.688 seconds; 270 passes,
+  14 explicit environment/protected skips, 0 failures/errors.
+- Task 7 Step 6: 142 tests in 2.387 seconds; 140 passes, 2 explicit environment
+  skips, 0 failures/errors.
+- Exact protected list: 14 tests in 0.128 seconds; 0 protected passes, 14
+  explicit local skips, 0 failures/errors.
+- Full repository discovery: 1,185 tests in 127.499 seconds; 1,166 passes, 19
+  explicit environment/platform/protected skips, 0 failures/errors.
+- Isolated-cache `py_compile`, `git diff --check`, and the static safety gates
+  passed. Relative to accepted Task 7B base `8c05f12`, exactly one test method
+  is added and exactly one required selector definition exists. Scans found no
+  cross-test invocation, public integrated enable route, credential literal,
+  UID-wide/`killpg` signal route, production `mkdtemp`, receipt-to-null path, or
+  smoke schema spelling other than v2.
+
+### Remaining gates
+
+This local candidate is not yet accepted. A fresh independent reviewer must
+review the Round 5 delta specifically against I-N7/I-N8/I-N9 and the prior
+Critical/Important closure. Only after review acceptance and a fresh
+coordinator verification may the exact committed revision run the 14 protected
+Linux selectors with zero skips and undergo an independent zero-residue
+inventory. The formal matrix remains frozen until those gates pass.

@@ -6649,7 +6649,8 @@ def _send_integrated_lifecycle_worker_state(
 
 def _harvest_integrated_lifecycle_received_fds(
     ancillary: Sequence[tuple[int, int, bytes]],
-    received_fds: list[int],
+    received_owners: list[_IntegratedLifecycleFdOwner],
+    owner_group: _IntegratedLifecycleFdOwnerGroup,
 ) -> None:
     integer_size = array.array("i").itemsize
     for level, kind, data in ancillary:
@@ -6660,15 +6661,22 @@ def _harvest_integrated_lifecycle_received_fds(
         values.frombytes(data[:usable])
         for value in values:
             descriptor = int(value)
-            if descriptor not in received_fds:
-                received_fds.append(descriptor)
+            owner = owner_group.owner_for_descriptor(descriptor)
+            if owner is None:
+                owner = owner_group.adopt_descriptor(descriptor)
+            if not any(
+                received_owner is owner
+                for received_owner in received_owners
+            ):
+                received_owners.append(owner)
 
 
 def _recv_integrated_lifecycle_message_owned(
     channel: socket.socket,
     *,
     flags: int,
-    received_fds: list[int],
+    received_owners: list[_IntegratedLifecycleFdOwner],
+    resources: _IntegratedLifecycleResources,
 ) -> tuple[bytes, list[tuple[int, int, bytes]], int, Any]:
     recv_result: tuple[
         bytes,
@@ -6681,14 +6689,20 @@ def _recv_integrated_lifecycle_message_owned(
     primary_traceback = None
     try:
         previous_mask = _block_integrated_lifecycle_signals()
-        recv_result = channel.recvmsg(
-            4096,
-            socket.CMSG_SPACE(array.array("i").itemsize),
-            flags,
-        )
+        try:
+            recv_result = channel.recvmsg(
+                4096,
+                socket.CMSG_SPACE(array.array("i").itemsize),
+                flags,
+            )
+        except (OSError, TimeoutError):
+            raise CollectorError(
+                "integrated lifecycle worker state is unavailable"
+            ) from None
         _harvest_integrated_lifecycle_received_fds(
             recv_result[1],
-            received_fds,
+            received_owners,
+            resources.fd_owners,
         )
     except BaseException as exc:
         primary_failure = exc
@@ -6699,13 +6713,16 @@ def _recv_integrated_lifecycle_message_owned(
                 try:
                     _harvest_integrated_lifecycle_received_fds(
                         recv_result[1],
-                        received_fds,
+                        received_owners,
+                        resources.fd_owners,
                     )
                     break
                 except BaseException as exc:
                     if primary_failure is None:
                         primary_failure = exc
                         primary_traceback = exc.__traceback__
+                    else:
+                        resources.defer_failure(exc)
         for _attempt in range(2):
             try:
                 _restore_integrated_lifecycle_signals(previous_mask)
@@ -6714,6 +6731,8 @@ def _recv_integrated_lifecycle_message_owned(
                 if primary_failure is None:
                     primary_failure = exc
                     primary_traceback = exc.__traceback__
+                else:
+                    resources.defer_failure(exc)
     if primary_failure is not None:
         raise primary_failure.with_traceback(primary_traceback)
     if recv_result is None:
@@ -6727,7 +6746,7 @@ def _receive_integrated_lifecycle_worker_state(
     channel: socket.socket,
     *,
     timeout: float,
-    receipt_owner: _IntegratedLifecycleReceiptOwner,
+    resources: _IntegratedLifecycleResources,
 ) -> dict[str, Any]:
     if (
         not isinstance(channel, socket.socket)
@@ -6735,35 +6754,28 @@ def _receive_integrated_lifecycle_worker_state(
         or not isinstance(timeout, (int, float))
         or not math.isfinite(float(timeout))
         or float(timeout) <= 0.0
-        or not isinstance(
-            receipt_owner, _IntegratedLifecycleReceiptOwner
-        )
-        or receipt_owner.descriptor is not None
-        or receipt_owner.closed
+        or not isinstance(resources, _IntegratedLifecycleResources)
+        or resources.receipt_owner.has_owner
     ):
         raise CollectorError(
             "integrated lifecycle worker channel is invalid"
         )
     previous_timeout = channel.gettimeout()
-    received_fds: list[int] = []
+    received_owners: list[_IntegratedLifecycleFdOwner] = []
     primary_failure: BaseException | None = None
     primary_traceback = None
     normalized: dict[str, Any] | None = None
     try:
-        try:
-            channel.settimeout(float(timeout))
-            flags = getattr(socket, "MSG_CMSG_CLOEXEC", 0)
-            payload, ancillary, message_flags, _address = (
-                _recv_integrated_lifecycle_message_owned(
-                    channel,
-                    flags=flags,
-                    received_fds=received_fds,
-                )
+        channel.settimeout(float(timeout))
+        flags = getattr(socket, "MSG_CMSG_CLOEXEC", 0)
+        payload, ancillary, message_flags, _address = (
+            _recv_integrated_lifecycle_message_owned(
+                channel,
+                flags=flags,
+                received_owners=received_owners,
+                resources=resources,
             )
-        except (OSError, TimeoutError):
-            raise CollectorError(
-                "integrated lifecycle worker state is unavailable"
-            ) from None
+        )
 
         integer_size = array.array("i").itemsize
         if (
@@ -6775,7 +6787,7 @@ def _receive_integrated_lifecycle_worker_state(
             or ancillary[0][0] != socket.SOL_SOCKET
             or ancillary[0][1] != socket.SCM_RIGHTS
             or len(ancillary[0][2]) != integer_size
-            or len(received_fds) != 1
+            or len(received_owners) != 1
         ):
             raise CollectorError(
                 "integrated lifecycle worker state is invalid"
@@ -6788,8 +6800,34 @@ def _receive_integrated_lifecycle_worker_state(
             raise CollectorError(
                 "integrated lifecycle worker state is invalid"
             )
-        os.set_inheritable(received_fds[0], False)
-        receipt_owner.adopt(received_fds[0])
+        receipt_fd_owner = received_owners[0]
+        runner_inventory = {
+            int(normalized["runner_pid"]): str(
+                normalized["runner_start_ticks"]
+            ),
+            int(normalized["descendant_pid"]): str(
+                normalized["descendant_start_ticks"]
+            ),
+        }
+        worker_pid = resources.worker_pid
+        if (
+            type(worker_pid) is not int
+            or worker_pid <= 0
+            or set(resources.recorded_identities) != {worker_pid}
+            or type(resources.recorded_identities.get(worker_pid)) is not str
+            or not resources.recorded_identities[worker_pid].isdigit()
+            or worker_pid in runner_inventory
+            or set(runner_inventory) & set(resources.recorded_identities)
+        ):
+            raise CollectorError(
+                "integrated lifecycle worker state is invalid"
+            )
+        resources.recorded_identities.update(runner_inventory)
+        _require_formal_uid_processes(
+            resources.runner_uid,
+            expected=runner_inventory,
+        )
+        resources.receipt_owner.adopt_owner(receipt_fd_owner)
     except BaseException as exc:
         primary_failure = exc
         primary_traceback = exc.__traceback__
@@ -6807,35 +6845,17 @@ def _receive_integrated_lifecycle_worker_state(
                     primary_traceback = (
                         normalized_timeout_failure.__traceback__
                     )
-        adopted_descriptor = receipt_owner.descriptor
-        if (
-            adopted_descriptor is not None
-            and adopted_descriptor in received_fds
-        ):
-            received_fds.remove(adopted_descriptor)
-        if primary_failure is not None and adopted_descriptor is not None:
-            try:
-                receipt_owner.close_retained()
-            except BaseException:
-                pass
-        close_failure: BaseException | None = None
-        for descriptor in received_fds:
-            try:
-                os.close(descriptor)
-            except BaseException as exc:
-                if close_failure is None:
-                    close_failure = exc
-        if primary_failure is None and close_failure is not None:
-            try:
-                raise CollectorError(
-                    "integrated lifecycle worker descriptor cleanup failed"
-                ) from close_failure
-            except CollectorError as normalized_close_failure:
-                primary_failure = normalized_close_failure
-                primary_traceback = normalized_close_failure.__traceback__
+            else:
+                resources.defer_failure(exc)
+        if primary_failure is not None:
+            for owner in received_owners:
+                try:
+                    owner.close_retained()
+                except BaseException as exc:
+                    resources.defer_failure(exc)
     if primary_failure is not None:
         raise primary_failure.with_traceback(primary_traceback)
-    if normalized is None or receipt_owner.descriptor is None:
+    if normalized is None or resources.receipt_owner.descriptor is None:
         raise CollectorError("integrated lifecycle worker state is invalid")
     return normalized
 
@@ -7246,79 +7266,128 @@ class _IntegratedLifecycleTreeCleanup:
         return self.quarantine_created and not self.quarantine_removed
 
 
+def _close_integrated_lifecycle_fd_object(file_object: io.FileIO) -> None:
+    file_object.close()
+
+
+@dataclass
+class _IntegratedLifecycleFdOwner:
+    file_object: io.FileIO
+    initial_descriptor: int
+
+    @classmethod
+    def from_descriptor(cls, descriptor: int) -> _IntegratedLifecycleFdOwner:
+        if type(descriptor) is not int or descriptor < 0:
+            raise CollectorError(
+                "integrated lifecycle descriptor ownership is invalid"
+            )
+        return cls(
+            file_object=io.FileIO(descriptor, mode="rb", closefd=True),
+            initial_descriptor=descriptor,
+        )
+
+    @property
+    def closed(self) -> bool:
+        return bool(self.file_object.closed)
+
+    def borrow(self) -> int:
+        if self.closed:
+            raise CollectorError(
+                "integrated lifecycle descriptor ownership is closed"
+            )
+        descriptor = self.file_object.fileno()
+        if type(descriptor) is not int or descriptor < 0:
+            raise CollectorError(
+                "integrated lifecycle descriptor ownership is invalid"
+            )
+        return descriptor
+
+    def close_retained(self) -> None:
+        if self.closed:
+            return
+        _close_integrated_lifecycle_fd_object(self.file_object)
+
+
+@dataclass
+class _IntegratedLifecycleFdOwnerGroup:
+    owners: list[_IntegratedLifecycleFdOwner] = field(default_factory=list)
+
+    def owner_for_descriptor(
+        self, descriptor: int
+    ) -> _IntegratedLifecycleFdOwner | None:
+        matches = [
+            owner
+            for owner in self.owners
+            if not owner.closed and owner.initial_descriptor == descriptor
+        ]
+        if len(matches) > 1:
+            raise CollectorError(
+                "integrated lifecycle descriptor ownership is ambiguous"
+            )
+        return None if not matches else matches[0]
+
+    def adopt_descriptor(self, descriptor: int) -> _IntegratedLifecycleFdOwner:
+        if self.owner_for_descriptor(descriptor) is not None:
+            raise CollectorError(
+                "integrated lifecycle descriptor ownership is duplicated"
+            )
+        self.owners.append(
+            _IntegratedLifecycleFdOwner.from_descriptor(descriptor)
+        )
+        owner = self.owners[-1]
+        os.set_inheritable(owner.borrow(), False)
+        return owner
+
+    def close_retained(self) -> list[_IntegratedLifecycleCapturedFailure]:
+        failures: list[_IntegratedLifecycleCapturedFailure] = []
+        for owner in self.owners:
+            try:
+                owner.close_retained()
+            except BaseException as exc:
+                failures.append(
+                    _IntegratedLifecycleCapturedFailure(
+                        exception=exc,
+                        traceback=exc.__traceback__,
+                    )
+                )
+        return failures
+
+
 @dataclass
 class _IntegratedLifecycleReceiptOwner:
-    descriptor: int | None = None
-    identity: tuple[int, int, int] | None = None
-    closed: bool = False
+    fd_owner: _IntegratedLifecycleFdOwner | None = None
 
-    def adopt(self, descriptor: int) -> None:
+    @property
+    def has_owner(self) -> bool:
+        return self.fd_owner is not None
+
+    @property
+    def descriptor(self) -> int | None:
+        if self.fd_owner is None or self.fd_owner.closed:
+            return None
+        return self.fd_owner.borrow()
+
+    def adopt_owner(self, owner: _IntegratedLifecycleFdOwner) -> None:
         if (
-            type(descriptor) is not int
-            or descriptor < 0
-            or self.descriptor is not None
-            or self.closed
+            not isinstance(owner, _IntegratedLifecycleFdOwner)
+            or self.fd_owner is not None
+            or owner.closed
         ):
             raise CollectorError(
                 "integrated lifecycle receipt ownership is invalid"
             )
-        metadata = os.fstat(descriptor)
-        self.descriptor = descriptor
-        self.identity = (
-            int(metadata.st_dev),
-            int(metadata.st_ino),
-            int(metadata.st_mode),
-        )
-
-    def owns(self, descriptor: int) -> bool:
-        return self.descriptor == descriptor and not self.closed
+        self.fd_owner = owner
 
     def borrow(self) -> int:
-        if self.descriptor is None or self.closed:
+        if self.fd_owner is None:
             raise CollectorError(
                 "integrated lifecycle receipt descriptor was not transferred"
             )
-        return self.descriptor
+        return self.fd_owner.borrow()
 
     def close_retained(self) -> None:
-        descriptor = self.descriptor
-        if descriptor is None or self.closed:
-            return
-        first_failure: BaseException | None = None
-        for _attempt in range(2):
-            try:
-                os.close(descriptor)
-            except BaseException as exc:
-                if first_failure is None:
-                    first_failure = exc
-                try:
-                    metadata = os.fstat(descriptor)
-                except OSError as query_exc:
-                    if query_exc.errno == errno.EBADF:
-                        self.descriptor = None
-                        self.closed = True
-                        break
-                    raise
-                observed = (
-                    int(metadata.st_dev),
-                    int(metadata.st_ino),
-                    int(metadata.st_mode),
-                )
-                if self.identity is None or observed != self.identity:
-                    raise CollectorError(
-                        "integrated lifecycle receipt descriptor identity drifted"
-                    ) from exc
-                continue
-            else:
-                self.descriptor = None
-                self.closed = True
-                break
-        if not self.closed:
-            raise CollectorError(
-                "integrated lifecycle receipt cleanup failed"
-            ) from first_failure
-        if first_failure is not None:
-            raise first_failure
+        if self.fd_owner is not None:
+            self.fd_owner.close_retained()
 
 
 @dataclass
@@ -7334,6 +7403,7 @@ class _IntegratedLifecycleResources:
     pidfds_before: dict[int, str]
     lifecycle_name: str | None = None
     root_create_attempted: bool = False
+    root_absent_before_attempt: bool = False
     root_create_absent: bool = False
     root_name_collision: bool = False
     tree_identity_bound: bool = True
@@ -7347,6 +7417,9 @@ class _IntegratedLifecycleResources:
     subreaper_restored: bool = True
     parent_channel: Any = None
     worker_channel: Any = None
+    fd_owners: _IntegratedLifecycleFdOwnerGroup = field(
+        default_factory=_IntegratedLifecycleFdOwnerGroup
+    )
     receipt_owner: _IntegratedLifecycleReceiptOwner = field(
         default_factory=_IntegratedLifecycleReceiptOwner
     )
@@ -7357,6 +7430,9 @@ class _IntegratedLifecycleResources:
     guard_owner: _IntegratedLifecycleGuardOwner | None = None
     cleanup_primary: _IntegratedLifecycleCapturedFailure | None = None
     lifecycle_failures: list[_IntegratedLifecycleCapturedFailure] = field(
+        default_factory=list
+    )
+    deferred_failures: list[_IntegratedLifecycleCapturedFailure] = field(
         default_factory=list
     )
     lineage_quiescent: bool = False
@@ -7376,6 +7452,20 @@ class _IntegratedLifecycleResources:
         self.lifecycle_failures.append(captured)
         if self.cleanup_primary is None:
             self.cleanup_primary = captured
+
+    def defer_failure(
+        self, exception: BaseException, traceback: Any = None
+    ) -> None:
+        self.deferred_failures.append(
+            _IntegratedLifecycleCapturedFailure(
+                exception=exception,
+                traceback=(
+                    exception.__traceback__
+                    if traceback is None
+                    else traceback
+                ),
+            )
+        )
 
     def close_channel(self, field_name: str) -> None:
         if field_name not in {"parent_channel", "worker_channel"}:
@@ -7411,23 +7501,6 @@ class _IntegratedLifecycleResources:
             ) from first_failure
         if first_failure is not None:
             raise first_failure
-
-    def take_receipt_fd(self) -> int:
-        return self.receipt_owner.borrow()
-
-    @property
-    def parent_receipt_fd(self) -> int | None:
-        return self.receipt_owner.descriptor
-
-    @parent_receipt_fd.setter
-    def parent_receipt_fd(self, descriptor: int | None) -> None:
-        if descriptor is None:
-            if self.receipt_owner.descriptor is not None:
-                raise CollectorError(
-                    "integrated lifecycle receipt ownership cannot be cleared"
-                )
-            return
-        self.receipt_owner.adopt(descriptor)
 
 
 def _new_integrated_lifecycle_resources(
@@ -7473,52 +7546,16 @@ def _new_integrated_lifecycle_resources(
     )
 
 
-def _close_integrated_lifecycle_fd_exact(
+def _close_integrated_lifecycle_directory_fd_once(
     descriptor: int,
     *,
-    identity: tuple[int, int, int] | None,
     label: str,
 ) -> None:
-    first_failure: BaseException | None = None
-    confirmed_closed = False
-    for _attempt in range(2):
-        try:
-            os.close(descriptor)
-        except BaseException as exc:
-            if first_failure is None:
-                first_failure = exc
-            try:
-                metadata = os.fstat(descriptor)
-            except OSError as query_exc:
-                if query_exc.errno == errno.EBADF:
-                    confirmed_closed = True
-                    break
-                raise CollectorError(
-                    f"integrated lifecycle {label} cleanup state is unavailable"
-                ) from query_exc
-            observed = (
-                int(metadata.st_dev),
-                int(metadata.st_ino),
-                int(metadata.st_mode),
-            )
-            if identity is None:
-                raise CollectorError(
-                    f"integrated lifecycle {label} cleanup identity is unavailable"
-                ) from exc
-            if observed != identity:
-                raise CollectorError(
-                    f"integrated lifecycle {label} descriptor identity drifted"
-                ) from exc
-            continue
-        else:
-            confirmed_closed = True
-            break
-    if not confirmed_closed:
+    if type(descriptor) is not int or descriptor < 0 or not label:
         raise CollectorError(
-            f"integrated lifecycle {label} cleanup failed"
-        ) from first_failure
-    if first_failure is not None:
-        raise first_failure
+            "integrated lifecycle descriptor cleanup is invalid"
+        )
+    os.close(descriptor)
 
 
 def _bind_integrated_lifecycle_root(
@@ -7530,7 +7567,6 @@ def _bind_integrated_lifecycle_root(
             "integrated lifecycle root acquisition is invalid"
         )
     root_fd: int | None = None
-    root_identity: tuple[int, int, int] | None = None
     primary_failure: BaseException | None = None
     primary_traceback = None
     close_failure: BaseException | None = None
@@ -7544,11 +7580,6 @@ def _bind_integrated_lifecycle_root(
             dir_fd=parent_fd,
         )
         metadata = os.fstat(root_fd)
-        root_identity = (
-            int(metadata.st_dev),
-            int(metadata.st_ino),
-            int(metadata.st_mode),
-        )
         if (
             not stat.S_ISDIR(metadata.st_mode)
             or metadata.st_uid != resources.controller_uid
@@ -7568,14 +7599,15 @@ def _bind_integrated_lifecycle_root(
     finally:
         if root_fd is not None:
             try:
-                _close_integrated_lifecycle_fd_exact(
+                _close_integrated_lifecycle_directory_fd_once(
                     root_fd,
-                    identity=root_identity,
                     label="root descriptor",
                 )
             except BaseException as exc:
                 close_failure = exc
     if primary_failure is not None:
+        if close_failure is not None:
+            resources.defer_failure(close_failure)
         raise primary_failure.with_traceback(primary_traceback)
     if close_failure is not None:
         raise close_failure
@@ -7595,7 +7627,6 @@ def _acquire_integrated_lifecycle_root(
         )
     parent = resources.lifecycle_root.parent
     parent_fd: int | None = None
-    parent_identity: tuple[int, int, int] | None = None
     primary_failure: BaseException | None = None
     primary_traceback = None
     close_failure: BaseException | None = None
@@ -7608,11 +7639,6 @@ def _acquire_integrated_lifecycle_root(
             | getattr(os, "O_CLOEXEC", 0),
         )
         parent_metadata = os.fstat(parent_fd)
-        parent_identity = (
-            int(parent_metadata.st_dev),
-            int(parent_metadata.st_ino),
-            int(parent_metadata.st_mode),
-        )
         if (
             not stat.S_ISDIR(parent_metadata.st_mode)
             or parent_metadata.st_uid != resources.controller_uid
@@ -7624,16 +7650,32 @@ def _acquire_integrated_lifecycle_root(
             raise CollectorError(
                 "integrated lifecycle root parent identity changed"
             )
+        try:
+            os.stat(
+                resources.lifecycle_name,
+                dir_fd=parent_fd,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            resources.root_absent_before_attempt = True
+        else:
+            resources.root_name_collision = True
+            raise CollectorError(
+                "integrated lifecycle root name already exists"
+            )
         resources.root_create_attempted = True
-        os.mkdir(resources.lifecycle_name, mode=0o700, dir_fd=parent_fd)
+        try:
+            os.mkdir(
+                resources.lifecycle_name,
+                mode=0o700,
+                dir_fd=parent_fd,
+            )
+        except FileExistsError as exc:
+            resources.root_name_collision = True
+            raise CollectorError(
+                "integrated lifecycle root name already exists"
+            ) from exc
         _bind_integrated_lifecycle_root(resources, parent_fd)
-    except FileExistsError as exc:
-        resources.root_name_collision = True
-        primary_failure = CollectorError(
-            "integrated lifecycle root name already exists"
-        )
-        primary_failure.__cause__ = exc
-        primary_traceback = primary_failure.__traceback__
     except BaseException as exc:
         primary_failure = exc
         primary_traceback = exc.__traceback__
@@ -7641,29 +7683,29 @@ def _acquire_integrated_lifecycle_root(
             parent_fd is not None
             and resources.root_create_attempted
             and not resources.tree_identity_bound
+            and not resources.root_name_collision
         ):
             try:
                 _bind_integrated_lifecycle_root(resources, parent_fd)
             except FileNotFoundError:
                 resources.root_create_absent = True
-            except BaseException:
-                pass
+            except BaseException as reconciliation_failure:
+                resources.defer_failure(reconciliation_failure)
     finally:
         if parent_fd is not None:
             try:
-                _close_integrated_lifecycle_fd_exact(
+                _close_integrated_lifecycle_directory_fd_once(
                     parent_fd,
-                    identity=parent_identity,
                     label="root parent descriptor",
                 )
             except BaseException as exc:
                 close_failure = exc
     if primary_failure is not None:
+        if close_failure is not None:
+            resources.defer_failure(close_failure)
         raise primary_failure.with_traceback(primary_traceback)
     if close_failure is not None:
-        raise CollectorError(
-            "integrated lifecycle root parent cleanup failed"
-        ) from close_failure
+        raise close_failure
     if not resources.tree_identity_bound:
         raise CollectorError(
             "integrated lifecycle root acquisition identity is unavailable"
@@ -7677,7 +7719,6 @@ def _reconcile_integrated_lifecycle_root(
     if resources.tree_identity_bound or resources.root_create_absent:
         return
     parent_fd: int | None = None
-    parent_identity: tuple[int, int, int] | None = None
     primary_failure: BaseException | None = None
     primary_traceback = None
     close_failure: BaseException | None = None
@@ -7690,11 +7731,6 @@ def _reconcile_integrated_lifecycle_root(
             | getattr(os, "O_CLOEXEC", 0),
         )
         parent_metadata = os.fstat(parent_fd)
-        parent_identity = (
-            int(parent_metadata.st_dev),
-            int(parent_metadata.st_ino),
-            int(parent_metadata.st_mode),
-        )
         if (
             not stat.S_ISDIR(parent_metadata.st_mode)
             or parent_metadata.st_uid != resources.controller_uid
@@ -7716,14 +7752,15 @@ def _reconcile_integrated_lifecycle_root(
     finally:
         if parent_fd is not None:
             try:
-                _close_integrated_lifecycle_fd_exact(
+                _close_integrated_lifecycle_directory_fd_once(
                     parent_fd,
-                    identity=parent_identity,
                     label="root parent descriptor",
                 )
             except BaseException as exc:
                 close_failure = exc
     if primary_failure is not None:
+        if close_failure is not None:
+            resources.defer_failure(close_failure)
         raise primary_failure.with_traceback(primary_traceback)
     if close_failure is not None:
         raise close_failure
@@ -7754,10 +7791,13 @@ def _restore_integrated_lifecycle_signals(
         for _attempt in range(2):
             try:
                 pthread_sigmask(signal.SIG_SETMASK, previous)
-                return
             except BaseException as exc:
                 if first_failure is None:
                     first_failure = exc
+            else:
+                if first_failure is not None:
+                    raise first_failure
+                return
         raise first_failure
 
 
@@ -8116,6 +8156,12 @@ def _finalize_integrated_lifecycle_resources(
     resources.finalized = True
     if primary_failure is not None:
         resources.record_failure(primary_failure, primary_traceback)
+    for deferred in resources.deferred_failures:
+        resources.record_failure(
+            deferred.exception,
+            deferred.traceback,
+        )
+    resources.deferred_failures.clear()
 
     recorded_identities = resources.recorded_identities
     reaped_statuses = resources.reaped_statuses
@@ -8216,10 +8262,11 @@ def _finalize_integrated_lifecycle_resources(
             resources.close_channel(field_name)
         except BaseException as exc:
             resources.record_failure(exc)
-    try:
-        resources.receipt_owner.close_retained()
-    except BaseException as exc:
-        resources.record_failure(exc)
+    for captured in resources.fd_owners.close_retained():
+        resources.record_failure(
+            captured.exception,
+            captured.traceback,
+        )
 
     if lineage_quiescent and not resources.tree_cleanup.attempted:
         if resources.root_name_collision:
@@ -8827,7 +8874,6 @@ def _run_protected_linux_integrated_lifecycle_body(
     environment = setup.environment
     parent_channel = resources.parent_channel
     worker_channel = resources.worker_channel
-    recorded_identities = resources.recorded_identities
     runner_inventory: dict[int, str] = {}
     reaped_statuses = resources.reaped_statuses
     lifecycle_events = resources.lifecycle_events
@@ -9013,7 +9059,7 @@ def _run_protected_linux_integrated_lifecycle_body(
         worker_state = _receive_integrated_lifecycle_worker_state(
             parent_channel,
             timeout=15.0,
-            receipt_owner=resources.receipt_owner,
+            resources=resources,
         )
         runner_inventory = {
             int(worker_state["runner_pid"]): str(
@@ -9023,11 +9069,6 @@ def _run_protected_linux_integrated_lifecycle_body(
                 worker_state["descendant_start_ticks"]
             ),
         }
-        recorded_identities.update(runner_inventory)
-        _require_formal_uid_processes(
-            FORMAL_RUNNER_UID,
-            expected=runner_inventory,
-        )
         runner_groups = {
             pid: _read_process_group_identity(pid, command)
             for pid in runner_inventory

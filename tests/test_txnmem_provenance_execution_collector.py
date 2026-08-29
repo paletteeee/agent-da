@@ -8434,33 +8434,60 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 "descendant_pid": 102,
                 "descendant_start_ticks": "12",
             }
+
+            def make_receive_resources():
+                parent = Path(
+                    collector_module.tempfile.gettempdir()
+                ).resolve()
+                parent_metadata = parent.stat()
+                resources = collector_module._IntegratedLifecycleResources(
+                    lifecycle_root=parent / "txnmem-receive-fixture",
+                    lifecycle_parent_device=int(parent_metadata.st_dev),
+                    lifecycle_parent_inode=int(parent_metadata.st_ino),
+                    lifecycle_device=int(parent_metadata.st_dev),
+                    lifecycle_inode=int(parent_metadata.st_ino),
+                    controller_uid=os.getuid(),
+                    runner_uid=os.getuid(),
+                    runner_owned_relative=Path("candidate"),
+                    pidfds_before={},
+                )
+                collector_module._adopt_integrated_lifecycle_worker(
+                    resources,
+                    100,
+                    "10",
+                )
+                return resources
+
             sender, receiver = socket.socketpair()
             receipt_read, receipt_write = os.pipe()
-            transferred_fd = None
-            receipt_owner = receipt_owner_type()
+            resources = make_receive_resources()
             try:
                 send_state(sender, state, receipt_read)
-                observed_state = receive_state(
-                    receiver,
-                    timeout=1.0,
-                    receipt_owner=receipt_owner,
-                )
-                transferred_fd = receipt_owner.borrow()
+                with patch.object(
+                    collector_module,
+                    "_require_formal_uid_processes",
+                    return_value={101: "11", 102: "12"},
+                ):
+                    observed_state = receive_state(
+                        receiver,
+                        timeout=1.0,
+                        resources=resources,
+                    )
+                transferred_fd = resources.receipt_owner.borrow()
                 self.assertEqual(observed_state, state)
                 os.close(receipt_read)
                 receipt_read = -1
                 os.close(receipt_write)
                 receipt_write = -1
-                absent_receipt = read_absent(receipt_owner, timeout=1.0)
-                transferred_fd = None
+                absent_receipt = read_absent(
+                    resources.receipt_owner,
+                    timeout=1.0,
+                )
             finally:
                 sender.close()
                 receiver.close()
-                for descriptor in (
-                    receipt_read,
-                    receipt_write,
-                    transferred_fd,
-                ):
+                resources.fd_owners.close_retained()
+                for descriptor in (receipt_read, receipt_write):
                     if descriptor is not None and descriptor >= 0:
                         os.close(descriptor)
             self.assertIsNone(absent_receipt)
@@ -9003,6 +9030,9 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             )
             state_payload = collector_module.canonical_json_bytes(state)
             real_close = collector_module.os.close
+            real_object_close = (
+                collector_module._close_integrated_lifecycle_fd_object
+            )
             for (
                 case_name,
                 mutation,
@@ -9036,42 +9066,46 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     )
                     close_counts = {}
 
-                    def tracked_close(descriptor):
+                    def tracked_close(file_object):
+                        descriptor = file_object.fileno()
                         close_counts[descriptor] = (
                             close_counts.get(descriptor, 0) + 1
                         )
+                        result = real_object_close(file_object)
                         if (
                             close_secondary
                             and descriptor in receiver.received_descriptors
                         ):
-                            real_close(descriptor)
                             raise OSError("received FD close secondary")
-                        return real_close(descriptor)
+                        return result
 
                     caught = None
-                    receipt_owner = receipt_owner_type()
+                    resources = make_receive_resources()
                     try:
                         with patch.object(
-                            collector_module.os,
-                            "close",
+                            collector_module,
+                            "_close_integrated_lifecycle_fd_object",
                             side_effect=tracked_close,
+                        ), patch.object(
+                            collector_module,
+                            "_require_formal_uid_processes",
+                            return_value={101: "11", 102: "12"},
                         ):
                             try:
                                 receive_state(
                                     receiver,
                                     timeout=1.0,
-                                    receipt_owner=receipt_owner,
+                                    resources=resources,
                                 )
                             except BaseException as exc:
                                 caught = exc
                     finally:
                         sender.close()
                         receiver.close()
+                        resources.fd_owners.close_retained()
                         for read_descriptor, write_descriptor in pipes:
                             real_close(read_descriptor)
                             real_close(write_descriptor)
-                        if receipt_owner.descriptor is not None:
-                            receipt_owner.close_retained()
                     try:
                         self.assertIsInstance(caught, CollectorError)
                         self.assertRegex(str(caught), expected_error)
@@ -9093,7 +9127,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             sender, receiver = socket.socketpair()
             receipt_read, receipt_write = os.pipe()
             transferred_descriptor = None
-            success_owner = receipt_owner_type()
+            success_resources = make_receive_resources()
             success_close_counts = {}
             try:
                 sender.sendmsg(
@@ -9109,23 +9143,30 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     ],
                 )
 
-                def track_success_close(descriptor):
+                def track_success_close(file_object):
+                    descriptor = file_object.fileno()
                     success_close_counts[descriptor] = (
                         success_close_counts.get(descriptor, 0) + 1
                     )
-                    return real_close(descriptor)
+                    return real_object_close(file_object)
 
                 with patch.object(
-                    collector_module.os,
-                    "close",
+                    collector_module,
+                    "_close_integrated_lifecycle_fd_object",
                     side_effect=track_success_close,
+                ), patch.object(
+                    collector_module,
+                    "_require_formal_uid_processes",
+                    return_value={101: "11", 102: "12"},
                 ):
                     observed = receive_state(
                         receiver,
                         timeout=1.0,
-                        receipt_owner=success_owner,
+                        resources=success_resources,
                     )
-                    transferred_descriptor = success_owner.borrow()
+                    transferred_descriptor = (
+                        success_resources.receipt_owner.borrow()
+                    )
                 self.assertEqual(observed, state)
                 self.assertFalse(os.get_inheritable(transferred_descriptor))
                 self.assertNotIn(
@@ -9136,21 +9177,13 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             finally:
                 sender.close()
                 receiver.close()
-                for descriptor in (
-                    receipt_read,
-                    receipt_write,
-                    transferred_descriptor,
-                ):
+                success_resources.fd_owners.close_retained()
+                for descriptor in (receipt_read, receipt_write):
                     if descriptor is not None:
                         try:
                             real_close(descriptor)
                         except OSError:
                             pass
-                if success_owner.descriptor is not None:
-                    try:
-                        success_owner.close_retained()
-                    except OSError:
-                        pass
 
         with self.subTest(
             correction="round2-failure-accumulating-cleanup"
@@ -9903,6 +9936,21 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     collector_module,
                     "_integrated_lifecycle_pidfds",
                     return_value={},
+                ), patch.object(
+                    collector_module,
+                    "_signal_integrated_lifecycle_identities",
+                    side_effect=lambda identities, _signal: len(identities),
+                ), patch.object(
+                    collector_module,
+                    "_integrated_lifecycle_observed_start_ticks",
+                    return_value=None,
+                ), patch.object(
+                    collector_module.os,
+                    "waitpid",
+                    side_effect=lambda pid, _options: (
+                        pid,
+                        signal.SIGKILL,
+                    ),
                 ):
                     try:
                         finalize_resources(
@@ -10185,6 +10233,11 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         parent,
                         channels=False,
                     )
+                    collector_module._adopt_integrated_lifecycle_worker(
+                        resources,
+                        100,
+                        "10",
+                    )
                     sender, base_receiver = socket.socketpair()
                     receiver = RecordingReceiveSocket(
                         fileno=base_receiver.detach()
@@ -10203,15 +10256,17 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                             )
                         ],
                     )
-                    receive_kwargs = {"timeout": 1.0}
-                    if "receipt_owner" in inspect.signature(
-                        receive_state
-                    ).parameters:
-                        receive_kwargs["receipt_owner"] = (
-                            resources.receipt_owner
-                        )
                     try:
-                        receive_state(receiver, **receive_kwargs)
+                        with patch.object(
+                            collector_module,
+                            "_require_formal_uid_processes",
+                            return_value={101: "11", 102: "12"},
+                        ):
+                            receive_state(
+                                receiver,
+                                timeout=1.0,
+                                resources=resources,
+                            )
                         raise primary
                     except BaseException as exc:
                         caught = finalize_round4(resources, exc)
@@ -10235,6 +10290,11 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     resources, lifecycle, _endpoints = make_round4_resources(
                         parent,
                         channels=False,
+                    )
+                    collector_module._adopt_integrated_lifecycle_worker(
+                        resources,
+                        100,
+                        "10",
                     )
                     sender, base_receiver = socket.socketpair()
                     receiver = RecordingReceiveSocket(
@@ -10266,7 +10326,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                                 frame.f_locals.get("ancillary")
                                 or frame.f_locals.get("recv_result")
                             )
-                            and not frame.f_locals.get("received_fds")
+                            and not frame.f_locals.get("received_owners")
                         ):
                             raised = True
                             sys.settrace(None)
@@ -10280,7 +10340,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                             receive_state(
                                 receiver,
                                 timeout=1.0,
-                                receipt_owner=resources.receipt_owner,
+                                resources=resources,
                             )
                         except BaseException as exc:
                             caught = finalize_round4(resources, exc)
@@ -10356,11 +10416,10 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                         channels=False,
                     )
                     receipt_read, receipt_write = os.pipe()
-                    if hasattr(resources, "receipt_owner"):
-                        resources.receipt_owner.adopt(receipt_read)
-                    else:
-                        resources.parent_receipt_fd = receipt_read
-                        resources.take_receipt_fd()
+                    receipt_fd_owner = (
+                        resources.fd_owners.adopt_descriptor(receipt_read)
+                    )
+                    resources.receipt_owner.adopt_owner(receipt_fd_owner)
                     try:
                         raise primary
                     except BaseException as exc:
@@ -10376,6 +10435,855 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     self.assertIs(caught, primary)
                     self.assertFalse(descriptor_open)
                     self.assertFalse(lifecycle.exists())
+
+        class Round5Primary(BaseException):
+            pass
+
+        class Round5CloseBefore(OSError):
+            pass
+
+        class Round5CloseAfter(OSError):
+            pass
+
+        class Round5RecordingReceiveSocket(socket.socket):
+            def __init__(self, *, fileno):
+                super().__init__(fileno=fileno)
+                self.received_descriptors = []
+
+            def recvmsg(self, bufsize, ancbufsize=0, flags=0):
+                result = super().recvmsg(bufsize, ancbufsize, flags)
+                integer_size = collector_module.array.array("i").itemsize
+                for level, kind, data in result[1]:
+                    if (
+                        level == socket.SOL_SOCKET
+                        and kind == socket.SCM_RIGHTS
+                    ):
+                        values = collector_module.array.array("i")
+                        usable = len(data) - (len(data) % integer_size)
+                        values.frombytes(data[:usable])
+                        self.received_descriptors.extend(values)
+                return result
+
+        def make_round5_named_resources(parent, token):
+            with patch.object(
+                collector_module.tempfile,
+                "gettempdir",
+                return_value=str(parent),
+            ), patch.object(
+                collector_module.secrets,
+                "token_hex",
+                return_value=token,
+            ):
+                return collector_module._new_integrated_lifecycle_resources(
+                    run_hash="1" * 64,
+                    scope_hash="2" * 64,
+                    pidfds_before={},
+                    controller_uid=os.getuid(),
+                    runner_uid=os.getuid(),
+                )
+
+        def attach_round5_guard(resources, suffix):
+            events = []
+            table_name = "txnmem_" + suffix * 16
+            guard = SimpleNamespace(
+                active=True,
+                table_name=table_name,
+                _expected_snapshot=None,
+                _table_names=lambda: {table_name},
+                snapshot=lambda: {"table": "retained"},
+                deactivate=lambda: events.append("deactivate"),
+            )
+            resources.guard = guard
+            resources.guard_owner = guard_owner_type(
+                guard=guard,
+                owner_pid=os.getpid(),
+            )
+            return events
+
+        def receive_round5(channel, resources, *, timeout=1.0):
+            return receive_state(
+                channel,
+                timeout=timeout,
+                resources=resources,
+            )
+
+        def finalize_round5(resources, primary):
+            signal_calls = []
+            uid_checks = []
+
+            def signal_exact(identities, signal_number):
+                signal_calls.append((dict(identities), signal_number))
+                return len(identities)
+
+            def require_uid(uid, *, expected, **_kwargs):
+                uid_checks.append((uid, dict(expected)))
+                return dict(expected)
+
+            caught = None
+            with patch.object(
+                collector_module,
+                "_signal_integrated_lifecycle_identities",
+                side_effect=signal_exact,
+            ), patch.object(
+                collector_module,
+                "_integrated_lifecycle_observed_start_ticks",
+                return_value=None,
+            ), patch.object(
+                collector_module.os,
+                "waitpid",
+                side_effect=lambda pid, _options: (pid, signal.SIGKILL),
+            ), patch.object(
+                collector_module,
+                "_require_formal_uid_processes",
+                side_effect=require_uid,
+            ), patch.object(
+                collector_module,
+                "_integrated_lifecycle_pidfds",
+                return_value={},
+            ), patch.object(
+                collector_module.os,
+                "killpg",
+                side_effect=AssertionError(
+                    "integrated lifecycle must not use killpg fallback"
+                ),
+            ) as killpg_spy:
+                try:
+                    finalize_resources(
+                        resources,
+                        primary_failure=primary,
+                        primary_traceback=(
+                            None if primary is None else primary.__traceback__
+                        ),
+                    )
+                except BaseException as exc:
+                    caught = exc
+            return caught, signal_calls, uid_checks, killpg_spy.call_count
+
+        def traceback_contains(traceback_value, expected):
+            while traceback_value is not None:
+                if traceback_value is expected:
+                    return True
+                traceback_value = traceback_value.tb_next
+            return False
+
+        with self.subTest(round5_gap="genuine-collision-preflight"):
+            real_mkdir = collector_module.os.mkdir
+            mkdir_calls = []
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                resources = make_round5_named_resources(parent, "7" * 32)
+                lifecycle = resources.lifecycle_root
+                lifecycle.mkdir(mode=0o700)
+                marker = lifecycle / "foreign-marker"
+                marker.write_text("foreign\n", encoding="utf-8")
+                guard_events = attach_round5_guard(resources, "7")
+
+                def collision_mkdir(*args, **kwargs):
+                    mkdir_calls.append((args, kwargs))
+                    return real_mkdir(*args, **kwargs)
+
+                acquisition_failure = None
+                with patch.object(
+                    collector_module.os,
+                    "mkdir",
+                    side_effect=collision_mkdir,
+                ):
+                    try:
+                        collector_module._acquire_integrated_lifecycle_root(
+                            resources
+                        )
+                    except BaseException as exc:
+                        acquisition_failure = exc
+                caught, _signals, _uids, killpg_calls = finalize_round5(
+                    resources,
+                    acquisition_failure,
+                )
+                self.assertIs(caught, acquisition_failure)
+                self.assertTrue(resources.root_name_collision)
+                self.assertTrue(lifecycle.is_dir())
+                self.assertEqual(
+                    marker.read_text(encoding="utf-8"),
+                    "foreign\n",
+                )
+                self.assertFalse(resources.tree_cleanup.root_removed)
+                self.assertEqual(guard_events, [])
+                self.assertEqual(killpg_calls, 0)
+                self.assertEqual(
+                    mkdir_calls,
+                    [],
+                    "a genuine collision must be identified before mkdir",
+                )
+
+        with self.subTest(round5_gap="post-success-file-exists-provenance"):
+            real_mkdir = collector_module.os.mkdir
+            primary = FileExistsError("post-success-file-exists")
+            primary_origins = []
+            boundary = {"mkdir_succeeded": False, "raised": False}
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                resources = make_round5_named_resources(parent, "8" * 32)
+                lifecycle = resources.lifecycle_root
+                marker = lifecycle / "owned-marker"
+                guard_events = attach_round5_guard(resources, "8")
+
+                def successful_root_mkdir(path, *args, **kwargs):
+                    result = real_mkdir(path, *args, **kwargs)
+                    if os.fspath(path) == resources.lifecycle_name:
+                        marker.write_text("owned\n", encoding="utf-8")
+                        boundary["mkdir_succeeded"] = True
+                    return result
+
+                def post_success_trace(frame, event, _arg):
+                    if (
+                        event == "line"
+                        and frame.f_code
+                        is collector_module._acquire_integrated_lifecycle_root.__code__
+                        and boundary["mkdir_succeeded"]
+                        and not boundary["raised"]
+                    ):
+                        boundary["raised"] = True
+                        sys.settrace(None)
+                        try:
+                            raise primary
+                        except BaseException as exc:
+                            primary_origins.append(exc.__traceback__)
+                            raise
+                    return post_success_trace
+
+                acquisition_failure = None
+                previous_trace = sys.gettrace()
+                try:
+                    with patch.object(
+                        collector_module.os,
+                        "mkdir",
+                        side_effect=successful_root_mkdir,
+                    ):
+                        sys.settrace(post_success_trace)
+                        try:
+                            collector_module._acquire_integrated_lifecycle_root(
+                                resources
+                            )
+                        except BaseException as exc:
+                            acquisition_failure = exc
+                finally:
+                    sys.settrace(previous_trace)
+                caught, _signals, _uids, killpg_calls = finalize_round5(
+                    resources,
+                    acquisition_failure,
+                )
+                self.assertTrue(boundary["raised"])
+                self.assertIs(acquisition_failure, primary)
+                self.assertIs(caught, primary)
+                self.assertFalse(resources.root_name_collision)
+                self.assertTrue(
+                    getattr(resources, "root_absent_before_attempt", False)
+                )
+                self.assertTrue(resources.tree_cleanup.root_removed)
+                self.assertFalse(lifecycle.exists())
+                self.assertFalse(marker.exists())
+                self.assertEqual(guard_events, [])
+                self.assertEqual(killpg_calls, 0)
+                self.assertTrue(
+                    traceback_contains(caught.__traceback__, primary_origins[0])
+                )
+
+        with self.subTest(round5_gap="directory-close-no-numeric-retry"):
+            real_open = collector_module.os.open
+            real_close = collector_module.os.close
+            primary = Round5CloseAfter("directory-close-after-effect")
+            parent_descriptors = []
+            close_attempts = []
+            replacement_installed = False
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                resources = make_round5_named_resources(parent, "9" * 32)
+                lifecycle = resources.lifecycle_root
+                guard_events = attach_round5_guard(resources, "9")
+                replacement_source = real_open(
+                    parent,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+                )
+
+                def tracked_open(path, *args, **kwargs):
+                    descriptor = real_open(path, *args, **kwargs)
+                    if (
+                        os.fspath(path) == os.fspath(parent)
+                        and kwargs.get("dir_fd") is None
+                    ):
+                        parent_descriptors.append(descriptor)
+                    return descriptor
+
+                def close_after_effect(descriptor):
+                    nonlocal replacement_installed
+                    if descriptor in parent_descriptors:
+                        close_attempts.append(descriptor)
+                        if not replacement_installed:
+                            real_close(descriptor)
+                            os.dup2(replacement_source, descriptor)
+                            replacement_installed = True
+                            raise primary
+                    return real_close(descriptor)
+
+                acquisition_failure = None
+                with patch.object(
+                    collector_module.os,
+                    "open",
+                    side_effect=tracked_open,
+                ), patch.object(
+                    collector_module.os,
+                    "close",
+                    side_effect=close_after_effect,
+                ):
+                    try:
+                        collector_module._acquire_integrated_lifecycle_root(
+                            resources
+                        )
+                    except BaseException as exc:
+                        acquisition_failure = exc
+                caught, _signals, _uids, killpg_calls = finalize_round5(
+                    resources,
+                    acquisition_failure,
+                )
+                replacement_alive = False
+                if parent_descriptors:
+                    try:
+                        os.fstat(parent_descriptors[0])
+                    except OSError:
+                        pass
+                    else:
+                        replacement_alive = True
+                        real_close(parent_descriptors[0])
+                real_close(replacement_source)
+                self.assertEqual(len(parent_descriptors), 1)
+                self.assertTrue(replacement_installed)
+                self.assertIs(acquisition_failure, primary)
+                self.assertIs(caught, primary)
+                self.assertEqual(len(close_attempts), 1)
+                self.assertTrue(replacement_alive)
+                self.assertTrue(resources.tree_cleanup.root_removed)
+                self.assertFalse(lifecycle.exists())
+                self.assertEqual(guard_events, [])
+                self.assertEqual(killpg_calls, 0)
+
+        with self.subTest(round5_gap="receiver-return-full-state-adoption"):
+            worker_pid = 100
+            worker_start = "10"
+            primary = Round5Primary("receiver-return-full-state-adoption")
+            primary_origins = []
+            receive_boundary = {"returned": False, "raised": False}
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                resources, lifecycle, _endpoints = make_round4_resources(
+                    parent,
+                    channels=False,
+                )
+                sender, base_receiver = socket.socketpair()
+                receiver = Round5RecordingReceiveSocket(
+                    fileno=base_receiver.detach()
+                )
+                resources.parent_channel = receiver
+                setup = make_round4_setup(resources, lifecycle)
+                guard_events = attach_round5_guard(resources, "a")
+                setup.guard = resources.guard
+                setup.guard_owner = resources.guard_owner
+                receipt_read, receipt_write = os.pipe()
+                sender.sendmsg(
+                    [collector_module.canonical_json_bytes(state)],
+                    [
+                        (
+                            socket.SOL_SOCKET,
+                            socket.SCM_RIGHTS,
+                            collector_module.array.array(
+                                "i", [receipt_read]
+                            ).tobytes(),
+                        )
+                    ],
+                )
+
+                def adopt_worker(_resources, _worker_main):
+                    collector_module._adopt_integrated_lifecycle_worker(
+                        _resources,
+                        worker_pid,
+                        worker_start,
+                    )
+                    return worker_pid, worker_start
+
+                def receive_then_return(channel, **_kwargs):
+                    observed = receive_round5(channel, resources)
+                    receive_boundary["returned"] = True
+                    return observed
+
+                def caller_boundary_trace(frame, event, _arg):
+                    if (
+                        event == "line"
+                        and frame.f_code
+                        is collector_module._run_protected_linux_integrated_lifecycle_body.__code__
+                        and receive_boundary["returned"]
+                        and not receive_boundary["raised"]
+                    ):
+                        receive_boundary["raised"] = True
+                        sys.settrace(None)
+                        try:
+                            raise primary
+                        except BaseException as exc:
+                            primary_origins.append(exc.__traceback__)
+                            raise
+                    return caller_boundary_trace
+
+                body_failure = None
+                previous_trace = sys.gettrace()
+                try:
+                    with patch.object(
+                        collector_module,
+                        "_prepare_integrated_lifecycle_setup",
+                        return_value=setup,
+                    ), patch.object(
+                        collector_module,
+                        "_fork_integrated_lifecycle_worker",
+                        side_effect=adopt_worker,
+                    ), patch.object(
+                        collector_module,
+                        "_receive_integrated_lifecycle_worker_state",
+                        side_effect=receive_then_return,
+                    ), patch.object(
+                        collector_module,
+                        "_require_formal_uid_processes",
+                        return_value={},
+                    ):
+                        sys.settrace(caller_boundary_trace)
+                        try:
+                            collector_module._run_protected_linux_integrated_lifecycle_body(
+                                root=Path(__file__).resolve().parents[1],
+                                source_identity={},
+                                pidfds_before={},
+                                resources=resources,
+                            )
+                        except BaseException as exc:
+                            body_failure = exc
+                finally:
+                    sys.settrace(previous_trace)
+                caught, signal_calls, _uids, killpg_calls = finalize_round5(
+                    resources,
+                    body_failure,
+                )
+                transferred_descriptor = receiver.received_descriptors[0]
+                transferred_closed = False
+                try:
+                    os.fstat(transferred_descriptor)
+                except OSError:
+                    transferred_closed = True
+                sender.close()
+                os.close(receipt_read)
+                os.close(receipt_write)
+                if not transferred_closed:
+                    os.close(transferred_descriptor)
+                expected_identities = {
+                    worker_pid: worker_start,
+                    101: "11",
+                    102: "12",
+                }
+                self.assertTrue(receive_boundary["returned"])
+                self.assertTrue(receive_boundary["raised"])
+                self.assertIs(body_failure, primary)
+                self.assertIs(caught, primary)
+                self.assertEqual(
+                    resources.recorded_identities,
+                    expected_identities,
+                )
+                self.assertEqual(
+                    signal_calls,
+                    [(expected_identities, signal.SIGKILL)],
+                )
+                self.assertEqual(
+                    set(resources.reaped_statuses),
+                    set(expected_identities),
+                )
+                self.assertTrue(transferred_closed)
+                self.assertTrue(resources.tree_cleanup.root_removed)
+                self.assertFalse(lifecycle.exists())
+                self.assertEqual(guard_events, [])
+                self.assertEqual(killpg_calls, 0)
+                self.assertTrue(
+                    traceback_contains(caught.__traceback__, primary_origins[0])
+                )
+
+        with self.subTest(round5_gap="invalid-scm-close-before-effect"):
+            real_close = collector_module.os.close
+            worker_pid = 200
+            worker_start = "20"
+            close_primary = Round5CloseBefore(
+                "invalid-scm-close-before-effect"
+            )
+            close_attempts = []
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                resources, lifecycle, _endpoints = make_round4_resources(
+                    parent,
+                    channels=False,
+                )
+                collector_module._adopt_integrated_lifecycle_worker(
+                    resources,
+                    worker_pid,
+                    worker_start,
+                )
+                guard_events = attach_round5_guard(resources, "b")
+                sender, base_receiver = socket.socketpair()
+                receiver = MutatingReceiveSocket(
+                    fileno=base_receiver.detach(),
+                    mutation="unexpected",
+                    restore_failure=False,
+                    fd_capacity=1,
+                )
+                resources.parent_channel = receiver
+                receipt_read, receipt_write = os.pipe()
+                sender.sendmsg(
+                    [collector_module.canonical_json_bytes(state)],
+                    [
+                        (
+                            socket.SOL_SOCKET,
+                            socket.SCM_RIGHTS,
+                            collector_module.array.array(
+                                "i", [receipt_read]
+                            ).tobytes(),
+                        )
+                    ],
+                )
+                object_close = (
+                    collector_module._close_integrated_lifecycle_fd_object
+                )
+                object_failed = False
+
+                def fail_object_close(file_object):
+                    nonlocal object_failed
+                    descriptor = file_object.fileno()
+                    if (
+                        descriptor in receiver.received_descriptors
+                        and not object_failed
+                    ):
+                        object_failed = True
+                        close_attempts.append(descriptor)
+                        raise close_primary
+                    return object_close(file_object)
+
+                close_context = patch.object(
+                    collector_module,
+                    "_close_integrated_lifecycle_fd_object",
+                    side_effect=fail_object_close,
+                )
+                receive_failure = None
+                with close_context, patch.object(
+                    collector_module,
+                    "_require_formal_uid_processes",
+                    return_value={},
+                ):
+                    try:
+                        receive_round5(receiver, resources)
+                    except BaseException as exc:
+                        receive_failure = exc
+                caught, _signals, _uids, killpg_calls = finalize_round5(
+                    resources,
+                    receive_failure,
+                )
+                self.assertEqual(len(receiver.received_descriptors), 1)
+                received_descriptor = receiver.received_descriptors[0]
+                descriptor_open = True
+                try:
+                    os.fstat(received_descriptor)
+                except OSError:
+                    descriptor_open = False
+                if descriptor_open:
+                    real_close(received_descriptor)
+                sender.close()
+                real_close(receipt_read)
+                real_close(receipt_write)
+                self.assertIs(caught, receive_failure)
+                self.assertIsInstance(receive_failure, CollectorError)
+                self.assertRegex(str(receive_failure), "worker state is invalid")
+                self.assertEqual(len(close_attempts), 1)
+                self.assertFalse(descriptor_open)
+                self.assertTrue(resources.tree_cleanup.root_removed)
+                self.assertFalse(lifecycle.exists())
+                self.assertEqual(guard_events, [])
+                self.assertEqual(killpg_calls, 0)
+
+        with self.subTest(round5_gap="close-after-effect-same-pipe-reuse"):
+            real_close = collector_module.os.close
+            worker_pid = 300
+            worker_start = "30"
+            close_primary = Round5CloseAfter(
+                "close-after-effect-same-pipe-reuse"
+            )
+            close_attempts = []
+            replacement_installed = False
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                resources, lifecycle, _endpoints = make_round4_resources(
+                    parent,
+                    channels=False,
+                )
+                collector_module._adopt_integrated_lifecycle_worker(
+                    resources,
+                    worker_pid,
+                    worker_start,
+                )
+                guard_events = attach_round5_guard(resources, "c")
+                sender, base_receiver = socket.socketpair()
+                receiver = Round5RecordingReceiveSocket(
+                    fileno=base_receiver.detach()
+                )
+                resources.parent_channel = receiver
+                receipt_read, receipt_write = os.pipe()
+                sender.sendmsg(
+                    [collector_module.canonical_json_bytes(state)],
+                    [
+                        (
+                            socket.SOL_SOCKET,
+                            socket.SCM_RIGHTS,
+                            collector_module.array.array(
+                                "i", [receipt_read]
+                            ).tobytes(),
+                        )
+                    ],
+                )
+                with patch.object(
+                    collector_module,
+                    "_require_formal_uid_processes",
+                    return_value={},
+                ):
+                    receive_round5(receiver, resources)
+                self.assertEqual(len(receiver.received_descriptors), 1)
+                transferred_descriptor = receiver.received_descriptors[0]
+                object_close = (
+                    collector_module._close_integrated_lifecycle_fd_object
+                )
+
+                def close_after_object(file_object):
+                    nonlocal replacement_installed
+                    descriptor = file_object.fileno()
+                    close_attempts.append(descriptor)
+                    object_close(file_object)
+                    os.dup2(receipt_read, transferred_descriptor)
+                    replacement_installed = True
+                    raise close_primary
+
+                close_context = patch.object(
+                    collector_module,
+                    "_close_integrated_lifecycle_fd_object",
+                    side_effect=close_after_object,
+                )
+                receipt_close_failure = None
+                with close_context:
+                    try:
+                        resources.receipt_owner.close_retained()
+                    except BaseException as exc:
+                        receipt_close_failure = exc
+                caught, _signals, _uids, killpg_calls = finalize_round5(
+                    resources,
+                    receipt_close_failure,
+                )
+                replacement_alive = True
+                try:
+                    os.fstat(transferred_descriptor)
+                except OSError:
+                    replacement_alive = False
+                if replacement_alive:
+                    real_close(transferred_descriptor)
+                sender.close()
+                real_close(receipt_read)
+                real_close(receipt_write)
+                self.assertTrue(replacement_installed)
+                self.assertIs(receipt_close_failure, close_primary)
+                self.assertIs(caught, close_primary)
+                self.assertEqual(len(close_attempts), 1)
+                self.assertTrue(replacement_alive)
+                self.assertTrue(resources.tree_cleanup.root_removed)
+                self.assertFalse(lifecycle.exists())
+                self.assertEqual(guard_events, [])
+                self.assertEqual(killpg_calls, 0)
+
+        with self.subTest(round5_gap="recvmsg-return-oserror-provenance"):
+            worker_pid = 400
+            worker_start = "40"
+            primary = OSError("recvmsg-return-oserror-provenance")
+            primary_origins = []
+            boundary_raised = False
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                resources, lifecycle, _endpoints = make_round4_resources(
+                    parent,
+                    channels=False,
+                )
+                collector_module._adopt_integrated_lifecycle_worker(
+                    resources,
+                    worker_pid,
+                    worker_start,
+                )
+                guard_events = attach_round5_guard(resources, "d")
+                sender, base_receiver = socket.socketpair()
+                receiver = Round5RecordingReceiveSocket(
+                    fileno=base_receiver.detach()
+                )
+                resources.parent_channel = receiver
+                receipt_read, receipt_write = os.pipe()
+                sender.sendmsg(
+                    [collector_module.canonical_json_bytes(state)],
+                    [
+                        (
+                            socket.SOL_SOCKET,
+                            socket.SCM_RIGHTS,
+                            collector_module.array.array(
+                                "i", [receipt_read]
+                            ).tobytes(),
+                        )
+                    ],
+                )
+
+                def recvmsg_return_trace(frame, event, _arg):
+                    nonlocal boundary_raised
+                    if (
+                        event == "line"
+                        and frame.f_code
+                        is collector_module._recv_integrated_lifecycle_message_owned.__code__
+                        and frame.f_locals.get("recv_result") is not None
+                        and not boundary_raised
+                    ):
+                        boundary_raised = True
+                        sys.settrace(None)
+                        try:
+                            raise primary
+                        except BaseException as exc:
+                            primary_origins.append(exc.__traceback__)
+                            raise
+                    return recvmsg_return_trace
+
+                receive_failure = None
+                previous_trace = sys.gettrace()
+                try:
+                    with patch.object(
+                        collector_module,
+                        "_require_formal_uid_processes",
+                        return_value={},
+                    ):
+                        sys.settrace(recvmsg_return_trace)
+                        try:
+                            receive_round5(receiver, resources)
+                        except BaseException as exc:
+                            receive_failure = exc
+                finally:
+                    sys.settrace(previous_trace)
+                caught, _signals, _uids, killpg_calls = finalize_round5(
+                    resources,
+                    receive_failure,
+                )
+                received_descriptor = receiver.received_descriptors[0]
+                received_closed = False
+                try:
+                    os.fstat(received_descriptor)
+                except OSError:
+                    received_closed = True
+                sender.close()
+                os.close(receipt_read)
+                os.close(receipt_write)
+                if not received_closed:
+                    os.close(received_descriptor)
+                self.assertTrue(boundary_raised)
+                self.assertIs(receive_failure, primary)
+                self.assertIs(caught, primary)
+                self.assertTrue(received_closed)
+                self.assertTrue(resources.tree_cleanup.root_removed)
+                self.assertFalse(lifecycle.exists())
+                self.assertEqual(guard_events, [])
+                self.assertEqual(killpg_calls, 0)
+                self.assertTrue(
+                    traceback_contains(caught.__traceback__, primary_origins[0])
+                )
+
+        with self.subTest(round5_gap="signal-mask-restore-first-failure"):
+            worker_pid = 500
+            worker_start = "50"
+            primary = Round5CloseBefore(
+                "signal-mask-restore-first-failure"
+            )
+            restore_calls = []
+            with TemporaryDirectory() as tmp:
+                parent = Path(tmp).resolve()
+                resources, lifecycle, _endpoints = make_round4_resources(
+                    parent,
+                    channels=False,
+                )
+                collector_module._adopt_integrated_lifecycle_worker(
+                    resources,
+                    worker_pid,
+                    worker_start,
+                )
+                guard_events = attach_round5_guard(resources, "e")
+                sender, base_receiver = socket.socketpair()
+                receiver = Round5RecordingReceiveSocket(
+                    fileno=base_receiver.detach()
+                )
+                resources.parent_channel = receiver
+                receipt_read, receipt_write = os.pipe()
+                sender.sendmsg(
+                    [collector_module.canonical_json_bytes(state)],
+                    [
+                        (
+                            socket.SOL_SOCKET,
+                            socket.SCM_RIGHTS,
+                            collector_module.array.array(
+                                "i", [receipt_read]
+                            ).tobytes(),
+                        )
+                    ],
+                )
+
+                def restore_mask(operation, previous):
+                    restore_calls.append((operation, previous))
+                    if len(restore_calls) == 1:
+                        raise primary
+                    return set()
+
+                receive_failure = None
+                with patch.object(
+                    collector_module,
+                    "_block_integrated_lifecycle_signals",
+                    return_value=set(),
+                ), patch.object(
+                    collector_module.signal,
+                    "pthread_sigmask",
+                    side_effect=restore_mask,
+                    create=True,
+                ), patch.object(
+                    collector_module,
+                    "_require_formal_uid_processes",
+                    return_value={},
+                ):
+                    try:
+                        receive_round5(receiver, resources)
+                    except BaseException as exc:
+                        receive_failure = exc
+                caught, _signals, _uids, killpg_calls = finalize_round5(
+                    resources,
+                    receive_failure,
+                )
+                received_descriptor = receiver.received_descriptors[0]
+                received_closed = False
+                try:
+                    os.fstat(received_descriptor)
+                except OSError:
+                    received_closed = True
+                sender.close()
+                os.close(receipt_read)
+                os.close(receipt_write)
+                if not received_closed:
+                    os.close(received_descriptor)
+                self.assertIs(receive_failure, primary)
+                self.assertIs(caught, primary)
+                self.assertGreaterEqual(len(restore_calls), 2)
+                self.assertTrue(received_closed)
+                self.assertTrue(resources.tree_cleanup.root_removed)
+                self.assertFalse(lifecycle.exists())
+                self.assertEqual(guard_events, [])
+                self.assertEqual(killpg_calls, 0)
 
         protected_primitives = bool(
             sys.platform.startswith("linux")
