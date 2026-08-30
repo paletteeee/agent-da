@@ -480,6 +480,9 @@ FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN: dict[str, str] = {
     # txnmem-provenance-formal-20260826-v5
     "78f0cfd2bf0d33832f43a5eed1e9ad01dc6de648af0c1702f91f23aa90f108ad":
         "4464d45d13badfde4c2b5f5ce9ad3a1e3ffb159552604939fa1137d98c163eaf",
+    # Fresh one-time formal registration v6; underlying identity remains private.
+    "0e826a219a880d1accbe4e447466670b007f278bdf861916a9cf69d325a01912":
+        "b1e5b395e913d756772264e8831c0b55288bba1dd14da05c8e6b414fd17b1de5",
 }
 
 
