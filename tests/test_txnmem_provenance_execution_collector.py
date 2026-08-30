@@ -7,6 +7,7 @@ import json
 import os
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -12553,6 +12554,334 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             "src/txnmem_backend.py",
             {row["path"] for row in identity["source_manifest"]["files"]},
         )
+
+    def test_source_attestation_uses_protected_global_git_scope_for_mixed_owner_repository(self):
+        paths = (
+            "src/txnmem_provenance_execution_collector.py",
+            "src/txnmem_provenance_runner.py",
+        )
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module, "_SOURCE_PATHS_FOR_TESTS", paths
+        ):
+            workspace = Path(tmp).resolve()
+            root = workspace / "project"
+            (root / "src").mkdir(parents=True)
+            for relative in paths:
+                (root / relative).write_text(
+                    f"# approved {relative}\n", encoding="utf-8"
+                )
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "collector@example.invalid"],
+                cwd=root,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Collector Fixture"],
+                cwd=root,
+                check=True,
+            )
+            subprocess.run(["git", "add", "src"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "approved"],
+                cwd=root,
+                check=True,
+            )
+            private = workspace / "private"
+            private.mkdir(mode=0o700)
+            real_run = subprocess.run
+            observed_configs = set()
+
+            def require_protected_global_scope(command, *args, **kwargs):
+                environment = dict(kwargs.get("env") or {})
+                required_environment = {
+                    "LANG",
+                    "LC_ALL",
+                    "GIT_CONFIG_GLOBAL",
+                    "GIT_CONFIG_NOSYSTEM",
+                    "GIT_NO_REPLACE_OBJECTS",
+                }
+                config_value = environment.get("GIT_CONFIG_GLOBAL")
+                if (
+                    set(environment) != required_environment
+                    or environment.get("GIT_CONFIG_NOSYSTEM") != "1"
+                    or environment.get("GIT_NO_REPLACE_OBJECTS") != "1"
+                    or not config_value
+                    or "-c" in command
+                ):
+                    raise subprocess.CalledProcessError(128, command)
+                config_path = Path(config_value)
+                observed_configs.add(config_path)
+                metadata = config_path.lstat()
+                if (
+                    config_path.parent != Path("/var/tmp")
+                    or not config_path.name.startswith(
+                        "txnmem-collector-gitconfig."
+                    )
+                    or not stat.S_ISREG(metadata.st_mode)
+                    or metadata.st_uid != os.geteuid()
+                    or stat.S_IMODE(metadata.st_mode) != 0o600
+                    or metadata.st_nlink != 1
+                ):
+                    raise subprocess.CalledProcessError(128, command)
+                is_config_setup = len(command) >= 3 and command[1] == "config"
+                if not is_config_setup:
+                    keys = real_run(
+                        [
+                            command[0],
+                            "config",
+                            "--global",
+                            "--name-only",
+                            "--get-regexp",
+                            ".*",
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        env=environment,
+                    ).stdout
+                    values = real_run(
+                        [
+                            command[0],
+                            "config",
+                            "--global",
+                            "--get-all",
+                            "safe.directory",
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        env=environment,
+                    ).stdout
+                    if keys != "safe.directory\n" or values != f"{root}\n":
+                        raise subprocess.CalledProcessError(128, command)
+                environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
+                return real_run(
+                    command, *args, **{**kwargs, "env": environment}
+                )
+
+            with patch.object(
+                collector_module.subprocess,
+                "run",
+                side_effect=require_protected_global_scope,
+            ):
+                identity = attest_committed_source(root)
+                exported = create_immutable_source_export(
+                    root, private, identity
+                )
+
+            self.assertEqual(
+                (exported / paths[0]).read_text(encoding="utf-8"),
+                f"# approved {paths[0]}\n",
+            )
+            self.assertTrue(observed_configs)
+            self.assertEqual(len(observed_configs), 2)
+            self.assertEqual(
+                {config.exists() for config in observed_configs}, {False}
+            )
+
+    def test_formal_git_rejects_unsafe_safe_directory_semantics(self):
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp).resolve()
+            for relative in ("repository/*", "repository\nprivate"):
+                with self.subTest(relative=repr(relative)):
+                    root = workspace / relative
+                    root.mkdir(parents=True)
+                    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+                    with self.assertRaisesRegex(CollectorError, "unsafe"):
+                        collector_module._formal_git(
+                            root, "rev-parse", "--show-toplevel", text=True
+                        )
+        with self.assertRaisesRegex(CollectorError, "unsafe"):
+            collector_module._formal_git(
+                Path("repository\0private"),
+                "rev-parse",
+                "--show-toplevel",
+                text=True,
+            )
+
+    def test_formal_git_reads_approved_objects_without_replacement_refs(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "memory.txt").write_text("approved\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "collector@example.invalid"],
+                cwd=root,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Collector Fixture"],
+                cwd=root,
+                check=True,
+            )
+            subprocess.run(["git", "add", "memory.txt"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "approved"],
+                cwd=root,
+                check=True,
+            )
+            approved = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            (root / "memory.txt").write_text("replacement\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "commit", "-q", "-am", "replacement"],
+                cwd=root,
+                check=True,
+            )
+            replacement = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            subprocess.run(
+                ["git", "replace", approved, replacement],
+                cwd=root,
+                check=True,
+            )
+
+            observed = collector_module._formal_git(
+                root, "show", f"{approved}:memory.txt", text=True
+            )
+
+            self.assertEqual(observed, "approved\n")
+
+    def test_formal_git_configuration_is_removed_on_success_and_failure(self):
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp).resolve()
+            root = workspace / "repository"
+            root.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            config_root = workspace / "configs"
+            config_root.mkdir()
+            real_mkstemp = collector_module.tempfile.mkstemp
+            created = []
+
+            def tracked_mkstemp(*args, **kwargs):
+                descriptor, value = real_mkstemp(
+                    prefix=kwargs.get("prefix"), dir=config_root
+                )
+                created.append(Path(value))
+                return descriptor, value
+
+            with patch.object(
+                collector_module.tempfile,
+                "mkstemp",
+                side_effect=tracked_mkstemp,
+            ):
+                collector_module._formal_git(
+                    root, "rev-parse", "--show-toplevel", text=True
+                )
+                with self.assertRaises(CollectorError):
+                    collector_module._formal_git(
+                        root, "txnmem-invalid-subcommand"
+                    )
+
+            self.assertEqual(len(created), 2)
+            self.assertEqual([path.exists() for path in created], [False, False])
+
+    def test_formal_git_fails_closed_when_configuration_cleanup_alone_fails(self):
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp).resolve()
+            root = workspace / "repository"
+            root.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            config_root = workspace / "configs"
+            config_root.mkdir()
+            real_mkstemp = collector_module.tempfile.mkstemp
+
+            def isolated_mkstemp(*args, **kwargs):
+                return real_mkstemp(
+                    prefix=kwargs.get("prefix"), dir=config_root
+                )
+
+            with patch.object(
+                collector_module.tempfile,
+                "mkstemp",
+                side_effect=isolated_mkstemp,
+            ), patch.object(
+                collector_module.os,
+                "unlink",
+                side_effect=OSError("seeded cleanup failure"),
+            ):
+                with self.assertRaisesRegex(CollectorError, "cleanup failed"):
+                    collector_module._formal_git(
+                        root, "rev-parse", "--show-toplevel", text=True
+                    )
+
+    def test_formal_git_preserves_primary_failure_when_cleanup_also_fails(self):
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp).resolve()
+            root = workspace / "repository"
+            root.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            config_root = workspace / "configs"
+            config_root.mkdir()
+            real_mkstemp = collector_module.tempfile.mkstemp
+
+            def isolated_mkstemp(*args, **kwargs):
+                return real_mkstemp(
+                    prefix=kwargs.get("prefix"), dir=config_root
+                )
+
+            with patch.object(
+                collector_module.tempfile,
+                "mkstemp",
+                side_effect=isolated_mkstemp,
+            ), patch.object(
+                collector_module.os,
+                "unlink",
+                side_effect=OSError("seeded cleanup failure"),
+            ):
+                with self.assertRaisesRegex(
+                    CollectorError, "Git operation failed"
+                ) as caught:
+                    collector_module._formal_git(
+                        root, "txnmem-invalid-subcommand"
+                    )
+
+            self.assertIsInstance(
+                caught.exception.__cause__, subprocess.CalledProcessError
+            )
+
+    def test_formal_git_scope_preserves_body_io_failure_when_cleanup_also_fails(self):
+        with TemporaryDirectory() as tmp:
+            workspace = Path(tmp).resolve()
+            root = workspace / "repository"
+            root.mkdir()
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            config_root = workspace / "configs"
+            config_root.mkdir()
+            real_mkstemp = collector_module.tempfile.mkstemp
+
+            def isolated_mkstemp(*args, **kwargs):
+                return real_mkstemp(
+                    prefix=kwargs.get("prefix"), dir=config_root
+                )
+
+            with patch.object(
+                collector_module.tempfile,
+                "mkstemp",
+                side_effect=isolated_mkstemp,
+            ), patch.object(
+                collector_module.os,
+                "unlink",
+                side_effect=OSError("seeded cleanup failure"),
+            ):
+                with self.assertRaisesRegex(
+                    OSError, "^seeded body failure$"
+                ) as caught:
+                    with collector_module._formal_git_scope(root):
+                        raise OSError("seeded body failure")
+
+            self.assertIsNone(caught.exception.__cause__)
 
     def test_source_attestation_rejects_head_change_from_controller_commit(self):
         paths = (

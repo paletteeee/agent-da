@@ -4642,41 +4642,171 @@ def prepare_isolated_toxiproxy_routes(
     )
 
 
-def attest_committed_source(
-    project_root: Path,
-    *,
-    expected_commit: str | None = None,
-    expected_source_manifest: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Bind every formal producer to exact blobs in one Git commit."""
+@contextlib.contextmanager
+def _formal_git_scope(project_root: Path):
+    """Yield Git operations under one protected global safe.directory scope."""
 
-    if (expected_commit is None) != (expected_source_manifest is None):
-        raise CollectorError("approved source identity is incomplete")
-    if expected_source_manifest is not None and not isinstance(
-        expected_source_manifest, Mapping
+    raw_root_value = str(project_root)
+    if raw_root_value.endswith("/*") or any(
+        ord(character) < 32 or ord(character) == 127
+        for character in raw_root_value
     ):
-        raise CollectorError("approved source manifest is invalid")
-    if expected_commit is not None and (
-        not isinstance(expected_commit, str)
-        or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", expected_commit)
-    ):
-        raise CollectorError("approved source commit is invalid")
-    root = project_root.expanduser().absolute().resolve(strict=True)
+        raise CollectorError("formal Git root is unsafe")
     try:
-        commit = subprocess.run(
-            [
-                _FORMAL_GIT_EXECUTABLE,
-                "-c",
-                f"safe.directory={root}",
-                "rev-parse",
-                "HEAD",
-            ],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError) as exc:
+        root = project_root.expanduser().absolute().resolve(strict=True)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise CollectorError("formal Git root is unavailable") from exc
+    root_value = str(root)
+    if root_value.endswith("/*") or any(
+        ord(character) < 32 or ord(character) == 127
+        for character in root_value
+    ):
+        raise CollectorError("formal Git root is unsafe")
+
+    config_fd = -1
+    config_path: Path | None = None
+    try:
+        try:
+            config_fd, raw_config_path = tempfile.mkstemp(
+                prefix="txnmem-collector-gitconfig.",
+                dir="/var/tmp",
+            )
+            config_path = Path(raw_config_path)
+            os.fchmod(config_fd, 0o600)
+            created_metadata = os.fstat(config_fd)
+            if (
+                not stat.S_ISREG(created_metadata.st_mode)
+                or created_metadata.st_uid != os.geteuid()
+                or stat.S_IMODE(created_metadata.st_mode) != 0o600
+                or created_metadata.st_nlink != 1
+            ):
+                raise CollectorError("formal Git configuration is not protected")
+            os.close(config_fd)
+            config_fd = -1
+            environment = {
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "GIT_CONFIG_GLOBAL": str(config_path),
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_NO_REPLACE_OBJECTS": "1",
+            }
+            subprocess.run(
+                [
+                    _FORMAL_GIT_EXECUTABLE,
+                    "config",
+                    "--global",
+                    "--add",
+                    "safe.directory",
+                    root_value,
+                ],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                env=environment,
+            )
+            written_metadata = os.stat(config_path, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(written_metadata.st_mode)
+                or written_metadata.st_uid != os.geteuid()
+                or stat.S_IMODE(written_metadata.st_mode) != 0o600
+                or written_metadata.st_nlink != 1
+            ):
+                raise CollectorError("formal Git configuration is not protected")
+            config_keys = subprocess.run(
+                [
+                    _FORMAL_GIT_EXECUTABLE,
+                    "config",
+                    "--global",
+                    "--name-only",
+                    "--get-regexp",
+                    ".*",
+                ],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            ).stdout
+            safe_values = subprocess.run(
+                [
+                    _FORMAL_GIT_EXECUTABLE,
+                    "config",
+                    "--global",
+                    "--get-all",
+                    "safe.directory",
+                ],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=environment,
+            ).stdout
+            if (
+                config_keys != "safe.directory\n"
+                or safe_values != f"{root_value}\n"
+            ):
+                raise CollectorError("formal Git configuration is invalid")
+        except CollectorError:
+            raise
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise CollectorError("formal Git operation failed") from exc
+
+        def run(*arguments: str, text: bool = False):
+            try:
+                return subprocess.run(
+                    [_FORMAL_GIT_EXECUTABLE, *arguments],
+                    cwd=root,
+                    check=True,
+                    capture_output=True,
+                    text=text,
+                    env=environment,
+                ).stdout
+            except (OSError, subprocess.CalledProcessError) as exc:
+                raise CollectorError("formal Git operation failed") from exc
+
+        yield run
+    finally:
+        cleanup_error: OSError | None = None
+        if config_fd >= 0:
+            try:
+                os.close(config_fd)
+            except OSError as exc:
+                cleanup_error = exc
+        if config_path is not None:
+            try:
+                os.unlink(config_path)
+            except OSError as exc:
+                if cleanup_error is None:
+                    cleanup_error = exc
+        if cleanup_error is not None:
+            primary = sys.exc_info()[1]
+            if primary is None:
+                raise CollectorError(
+                    "formal Git configuration cleanup failed"
+                ) from cleanup_error
+            try:
+                primary.add_note("formal Git configuration cleanup also failed")
+            except AttributeError:
+                pass
+
+
+def _formal_git(project_root: Path, *arguments: str, text: bool = False):
+    """Run one Git operation in a protected global safe.directory scope."""
+
+    with _formal_git_scope(project_root) as run:
+        return run(*arguments, text=text)
+
+
+def _attest_committed_source_in_scope(
+    root: Path,
+    git: Callable[..., Any],
+    *,
+    expected_commit: str | None,
+    expected_source_manifest: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    try:
+        commit = git("rev-parse", "HEAD", text=True).strip()
+    except CollectorError as exc:
         raise CollectorError("cannot resolve formal source commit") from exc
     if not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", commit):
         raise CollectorError("formal source commit has an invalid object id")
@@ -4705,24 +4835,16 @@ def attest_committed_source(
         ]
     elif _SOURCE_PATHS_FOR_TESTS is None:
         try:
-            tracked_output = subprocess.run(
-                [
-                    _FORMAL_GIT_EXECUTABLE,
-                    "-c",
-                    f"safe.directory={root}",
-                    "ls-tree",
-                    "-r",
-                    "--name-only",
-                    commit,
-                    "--",
-                    "src",
-                ],
-                cwd=root,
-                check=True,
-                capture_output=True,
+            tracked_output = git(
+                "ls-tree",
+                "-r",
+                "--name-only",
+                commit,
+                "--",
+                "src",
                 text=True,
-            ).stdout
-        except (OSError, subprocess.CalledProcessError) as exc:
+            )
+        except CollectorError as exc:
             raise CollectorError("cannot enumerate committed source closure") from exc
         source_paths = sorted(
             set(_REQUIRED_SOURCE_PATHS)
@@ -4743,19 +4865,8 @@ def attest_committed_source(
             raise CollectorError("formal source file is missing or linked")
         current = path.read_bytes()
         try:
-            committed = subprocess.run(
-                [
-                    _FORMAL_GIT_EXECUTABLE,
-                    "-c",
-                    f"safe.directory={root}",
-                    "show",
-                    f"{commit}:{relative}",
-                ],
-                cwd=root,
-                check=True,
-                capture_output=True,
-            ).stdout
-        except (OSError, subprocess.CalledProcessError) as exc:
+            committed = git("show", f"{commit}:{relative}")
+        except CollectorError as exc:
             raise CollectorError("formal source file is absent from the commit") from exc
         if current != committed:
             raise CollectorError("formal source file differs from committed bytes")
@@ -4790,6 +4901,35 @@ def attest_committed_source(
     }
 
 
+def attest_committed_source(
+    project_root: Path,
+    *,
+    expected_commit: str | None = None,
+    expected_source_manifest: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Bind every formal producer to exact blobs in one Git commit."""
+
+    if (expected_commit is None) != (expected_source_manifest is None):
+        raise CollectorError("approved source identity is incomplete")
+    if expected_source_manifest is not None and not isinstance(
+        expected_source_manifest, Mapping
+    ):
+        raise CollectorError("approved source manifest is invalid")
+    if expected_commit is not None and (
+        not isinstance(expected_commit, str)
+        or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", expected_commit)
+    ):
+        raise CollectorError("approved source commit is invalid")
+    root = project_root.expanduser().absolute().resolve(strict=True)
+    with _formal_git_scope(root) as git:
+        return _attest_committed_source_in_scope(
+            root,
+            git,
+            expected_commit=expected_commit,
+            expected_source_manifest=expected_source_manifest,
+        )
+
+
 def create_immutable_source_export(
     project_root: Path,
     private_parent: Path,
@@ -4807,37 +4947,32 @@ def create_immutable_source_export(
     try:
         export.mkdir(mode=0o700)
         directories: set[Path] = {export}
-        for row in manifest["files"]:
-            relative = str(row["path"])
-            target = export / relative
-            target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            directories.update(
-                parent_path
-                for parent_path in target.parents
-                if parent_path == export or _is_within(parent_path, export)
-            )
-            committed = subprocess.run(
-                [
-                    _FORMAL_GIT_EXECUTABLE,
-                    "-c",
-                    f"safe.directory={root}",
-                    "show",
-                    f"{identity['source_commit']}:{relative}",
-                ],
-                cwd=root,
-                check=True,
-                capture_output=True,
-            ).stdout
-            if hashlib.sha256(committed).hexdigest() != row["blob_sha256"]:
-                raise CollectorError("detached source blob hash mismatch")
-            descriptor = os.open(
-                target,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-                0o400,
-            )
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(committed)
-                stream.flush()
+        with _formal_git_scope(root) as git:
+            for row in manifest["files"]:
+                relative = str(row["path"])
+                target = export / relative
+                target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                directories.update(
+                    parent_path
+                    for parent_path in target.parents
+                    if parent_path == export or _is_within(parent_path, export)
+                )
+                committed = git(
+                    "show", f"{identity['source_commit']}:{relative}"
+                )
+                if hashlib.sha256(committed).hexdigest() != row["blob_sha256"]:
+                    raise CollectorError("detached source blob hash mismatch")
+                descriptor = os.open(
+                    target,
+                    os.O_WRONLY
+                    | os.O_CREAT
+                    | os.O_EXCL
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    0o400,
+                )
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(committed)
+                    stream.flush()
         for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
             directory.chmod(0o500)
     except BaseException:
