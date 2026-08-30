@@ -563,6 +563,255 @@ class FormalControllerContainerTests(unittest.TestCase):
 
         self.assertTrue(any(call[1] == "exec" for call in calls))
 
+    def test_install_accepts_daemon_label_disable_only_when_selinux_is_not_enforcing(self):
+        repository, wheels = self._paths()
+        token = "6" * 64
+        container_id = "7" * 64
+        document = self._controller_inspect_document(
+            repository, wheels, token, container_id, "sha256:" + "8" * 64
+        )
+        document["ProcessLabel"] = ""
+        document["HostConfig"]["SecurityOpt"] = [
+            "no-new-privileges:true",
+            "label=disable",
+        ]
+        calls = []
+
+        def run(argv):
+            calls.append(argv)
+            if argv[1:3] == ["container", "inspect"]:
+                return subprocess.CompletedProcess(
+                    argv, 0, stdout=json.dumps([document])
+                )
+            return subprocess.CompletedProcess(argv, 0, stdout="")
+
+        with mock.patch.object(
+            container,
+            "_host_allows_disabled_selinux_label",
+            return_value=True,
+            create=True,
+        ):
+            container.install_controller(
+                "txnmem-formal-controller",
+                "a" * 40,
+                lifecycle_token=token,
+                run=run,
+            )
+
+        self.assertTrue(any(call[1] == "exec" for call in calls))
+
+    def test_daemon_label_disable_form_is_order_independent_and_exact(self):
+        for value in (
+            ["no-new-privileges", "label=disable"],
+            ["label=disable", "no-new-privileges:true"],
+            ["no-new-privileges=true", "label=disable"],
+        ):
+            with self.subTest(value=value):
+                self.assertTrue(
+                    container._has_daemon_disabled_selinux_label(value, "")
+                )
+
+        for value in (
+            ["no-new-privileges", "label=disable", "label=disable"],
+            ["no-new-privileges", "seccomp=unconfined"],
+            ["no-new-privileges", "label=disable", "seccomp=unconfined"],
+        ):
+            with self.subTest(value=value):
+                self.assertFalse(
+                    container._has_daemon_disabled_selinux_label(value, "")
+                )
+
+    def test_install_rechecks_selinux_immediately_before_exec(self):
+        repository, wheels = self._paths()
+        token = "6" * 64
+        container_id = "7" * 64
+        document = self._controller_inspect_document(
+            repository, wheels, token, container_id, "sha256:" + "8" * 64
+        )
+        document["ProcessLabel"] = ""
+        document["HostConfig"]["SecurityOpt"] = [
+            "no-new-privileges:true",
+            "label=disable",
+        ]
+        calls = []
+
+        def run(argv):
+            calls.append(argv)
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=json.dumps([document])
+            )
+
+        with mock.patch.object(
+            container,
+            "_host_allows_disabled_selinux_label",
+            side_effect=(True, False),
+        ) as host_gate:
+            with self.assertRaisesRegex(
+                container.ControllerContainerError,
+                "security identity",
+            ):
+                container.install_controller(
+                    "txnmem-formal-controller",
+                    "a" * 40,
+                    lifecycle_token=token,
+                    run=run,
+                )
+
+        self.assertEqual(host_gate.call_count, 2)
+        self.assertFalse(any(call[1] == "exec" for call in calls))
+
+    def test_install_rejects_daemon_label_disable_when_selinux_is_enforcing(self):
+        repository, wheels = self._paths()
+        token = "6" * 64
+        container_id = "7" * 64
+        document = self._controller_inspect_document(
+            repository, wheels, token, container_id, "sha256:" + "8" * 64
+        )
+        document["ProcessLabel"] = ""
+        document["HostConfig"]["SecurityOpt"] = [
+            "no-new-privileges=true",
+            "label=disable",
+        ]
+        calls = []
+
+        def run(argv):
+            calls.append(argv)
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=json.dumps([document])
+            )
+
+        with mock.patch.object(
+            container,
+            "_host_allows_disabled_selinux_label",
+            return_value=False,
+            create=True,
+        ):
+            with self.assertRaisesRegex(
+                container.ControllerContainerError,
+                "security identity",
+            ):
+                container.install_controller(
+                    "txnmem-formal-controller",
+                    "a" * 40,
+                    lifecycle_token=token,
+                    run=run,
+                )
+
+        self.assertFalse(any(call[1] == "exec" for call in calls))
+
+    def test_install_rejects_daemon_label_disable_with_a_process_label(self):
+        repository, wheels = self._paths()
+        token = "6" * 64
+        container_id = "7" * 64
+        document = self._controller_inspect_document(
+            repository, wheels, token, container_id, "sha256:" + "8" * 64
+        )
+        document["ProcessLabel"] = "system_u:system_r:container_t:s0"
+        document["HostConfig"]["SecurityOpt"] = [
+            "no-new-privileges",
+            "label=disable",
+        ]
+        calls = []
+
+        def run(argv):
+            calls.append(argv)
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=json.dumps([document])
+            )
+
+        with mock.patch.object(
+            container,
+            "_host_allows_disabled_selinux_label",
+            return_value=True,
+            create=True,
+        ):
+            with self.assertRaisesRegex(
+                container.ControllerContainerError,
+                "security identity",
+            ):
+                container.install_controller(
+                    "txnmem-formal-controller",
+                    "a" * 40,
+                    lifecycle_token=token,
+                    run=run,
+                )
+
+        self.assertFalse(any(call[1] == "exec" for call in calls))
+
+    def test_install_rejects_any_other_extra_security_option(self):
+        repository, wheels = self._paths()
+        token = "6" * 64
+        container_id = "7" * 64
+        document = self._controller_inspect_document(
+            repository, wheels, token, container_id, "sha256:" + "8" * 64
+        )
+        document["ProcessLabel"] = ""
+        document["HostConfig"]["SecurityOpt"] = [
+            "no-new-privileges",
+            "label=disable",
+            "seccomp=unconfined",
+        ]
+        calls = []
+
+        def run(argv):
+            calls.append(argv)
+            return subprocess.CompletedProcess(
+                argv, 0, stdout=json.dumps([document])
+            )
+
+        with mock.patch.object(
+            container,
+            "_host_allows_disabled_selinux_label",
+            return_value=True,
+            create=True,
+        ):
+            with self.assertRaisesRegex(
+                container.ControllerContainerError,
+                "security identity",
+            ):
+                container.install_controller(
+                    "txnmem-formal-controller",
+                    "a" * 40,
+                    lifecycle_token=token,
+                    run=run,
+                )
+
+        self.assertFalse(any(call[1] == "exec" for call in calls))
+
+    def test_disabled_selinux_label_host_gate_fails_closed(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        enforce_path = Path(temporary.name) / "enforce"
+
+        self.assertTrue(
+            container._host_allows_disabled_selinux_label(enforce_path)
+        )
+
+        enforce_path.write_text("0\n", encoding="utf-8")
+        self.assertTrue(
+            container._host_allows_disabled_selinux_label(enforce_path)
+        )
+
+        enforce_path.write_text("1\n", encoding="utf-8")
+        self.assertFalse(
+            container._host_allows_disabled_selinux_label(enforce_path)
+        )
+
+        enforce_path.write_text("unexpected\n", encoding="utf-8")
+        self.assertFalse(
+            container._host_allows_disabled_selinux_label(enforce_path)
+        )
+
+        with mock.patch.object(Path, "read_text", side_effect=OSError):
+            self.assertFalse(
+                container._host_allows_disabled_selinux_label(enforce_path)
+            )
+
+        with mock.patch.object(Path, "stat", side_effect=OSError):
+            self.assertFalse(
+                container._host_allows_disabled_selinux_label(enforce_path)
+            )
+
     def test_install_accepts_only_anonymous_state_volume_proof(self):
         repository, wheels = self._paths()
         token = "1" * 64

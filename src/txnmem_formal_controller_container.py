@@ -69,6 +69,7 @@ _REQUIRED_READONLY_PATHS = frozenset(
 _DYNAMIC_MASKED_PATH = re.compile(
     r"^/sys/devices/system/cpu/cpu[0-9]+/thermal_throttle$"
 )
+_SELINUX_ENFORCE_PATH = Path("/sys/fs/selinux/enforce")
 _DOCKER_ENV = {
     "LANG": "C.UTF-8",
     "LC_ALL": "C.UTF-8",
@@ -705,6 +706,39 @@ def _has_exact_no_new_privileges(value: object) -> bool:
     )
 
 
+def _has_daemon_disabled_selinux_label(
+    value: object, process_label: object
+) -> bool:
+    """Accept only Docker's exact NNP plus disabled-label normalization."""
+    if (
+        process_label != ""
+        or not isinstance(value, list)
+        or len(value) != 2
+        or any(not isinstance(option, str) for option in value)
+        or len(set(value)) != 2
+        or "label=disable" not in value
+    ):
+        return False
+    remaining = [option for option in value if option != "label=disable"]
+    return _has_exact_no_new_privileges(remaining)
+
+
+def _host_allows_disabled_selinux_label(
+    enforce_path: Path = _SELINUX_ENFORCE_PATH,
+) -> bool:
+    """Return true only when SELinux is absent or explicitly non-enforcing."""
+    try:
+        enforce_path.stat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    try:
+        return enforce_path.read_text(encoding="utf-8").strip() == "0"
+    except OSError:
+        return False
+
+
 def _is_absent_or_empty_list(value: object) -> bool:
     return value is None or (isinstance(value, list) and not value)
 
@@ -809,12 +843,19 @@ def _require_install_identity(
         raise ControllerContainerError("controller security identity is invalid")
     cap_add = _normalize_capabilities(host_config.get("CapAdd"))
     cap_drop = _normalize_capabilities(host_config.get("CapDrop"))
+    security_options = host_config.get("SecurityOpt")
+    security_options_valid = _has_exact_no_new_privileges(security_options) or (
+        _has_daemon_disabled_selinux_label(
+            security_options, document.get("ProcessLabel")
+        )
+        and _host_allows_disabled_selinux_label()
+    )
     if (
         host_config.get("NetworkMode") != "host"
         or host_config.get("PidMode") != "host"
         or cap_drop != frozenset({"ALL"})
         or cap_add != frozenset(_REQUIRED_CAPABILITIES)
-        or not _has_exact_no_new_privileges(host_config.get("SecurityOpt"))
+        or not security_options_valid
         or host_config.get("Privileged") is not False
         or not _has_closed_privilege_channels(host_config)
     ):
@@ -960,6 +1001,17 @@ def install_controller(
     container_id = _require_install_identity(
         runner, document, container_name, lifecycle_token
     )
+    host_config = document.get("HostConfig")
+    uses_disabled_selinux_label = isinstance(
+        host_config, dict
+    ) and _has_daemon_disabled_selinux_label(
+        host_config.get("SecurityOpt"), document.get("ProcessLabel")
+    )
+    if (
+        uses_disabled_selinux_label
+        and not _host_allows_disabled_selinux_label()
+    ):
+        raise ControllerContainerError("controller security identity is invalid")
     argv = [
         DOCKER, "exec", "--user", "0:0", "--env", f"TXNMEM_FORMAL_WHEEL_SOURCE={WHEEL_MOUNT}",
         container_id, "/bin/bash", f"{REPOSITORY_MOUNT}/scripts/install_formal_provenance_runtime.sh",
