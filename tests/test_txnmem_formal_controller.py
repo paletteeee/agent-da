@@ -14,6 +14,280 @@ import txnmem_formal_controller as controller
 import txnmem_provenance_progress as progress_protocol
 
 
+class FormalControllerGitTests(unittest.TestCase):
+    @staticmethod
+    def _repository(root: Path, relative: str = "repository") -> Path:
+        repository = root / relative
+        repository.mkdir(parents=True)
+        (repository / "memory.txt").write_text("approved\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "controller@example.invalid"],
+            cwd=repository,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Controller Fixture"],
+            cwd=repository,
+            check=True,
+        )
+        subprocess.run(["git", "add", "."], cwd=repository, check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "approved"],
+            cwd=repository,
+            check=True,
+        )
+        return repository
+
+    def test_git_safe_directory_is_read_from_protected_global_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repository = self._repository(Path(tmp).resolve())
+            real_run = subprocess.run
+
+            def require_protected_global_scope(command, *args, **kwargs):
+                environment = dict(kwargs.get("env") or {})
+                required_environment = {
+                    "LANG",
+                    "LC_ALL",
+                    "GIT_CONFIG_GLOBAL",
+                    "GIT_CONFIG_NOSYSTEM",
+                    "GIT_NO_REPLACE_OBJECTS",
+                }
+                config_value = environment.get("GIT_CONFIG_GLOBAL")
+                if (
+                    set(environment) != required_environment
+                    or environment.get("GIT_CONFIG_NOSYSTEM") != "1"
+                    or environment.get("GIT_NO_REPLACE_OBJECTS") != "1"
+                    or not config_value
+                    or "-c" in command
+                ):
+                    raise subprocess.CalledProcessError(128, command)
+                config_path = Path(config_value)
+                metadata = config_path.stat()
+                if (
+                    config_path.parent != Path("/var/tmp")
+                    or not config_path.name.startswith("txnmem-formal-gitconfig.")
+                    or metadata.st_uid != os.geteuid()
+                    or metadata.st_mode & 0o777 != 0o600
+                ):
+                    raise subprocess.CalledProcessError(128, command)
+                is_config_setup = len(command) >= 3 and command[1] == "config"
+                if not is_config_setup:
+                    keys = real_run(
+                        [
+                            command[0],
+                            "config",
+                            "--global",
+                            "--name-only",
+                            "--get-regexp",
+                            ".*",
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        env=environment,
+                    ).stdout
+                    values = real_run(
+                        [
+                            command[0],
+                            "config",
+                            "--global",
+                            "--get-all",
+                            "safe.directory",
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        env=environment,
+                    ).stdout
+                    if keys != "safe.directory\n" or values != f"{repository}\n":
+                        raise subprocess.CalledProcessError(128, command)
+                environment["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
+                return real_run(command, *args, **{**kwargs, "env": environment})
+
+            with patch.object(
+                controller.subprocess,
+                "run",
+                side_effect=require_protected_global_scope,
+            ):
+                try:
+                    observed = controller._git(
+                        repository,
+                        "rev-parse",
+                        "--show-toplevel",
+                        text=True,
+                    )
+                except controller.FormalControllerError as exc:
+                    self.fail(f"protected global Git scope was unavailable: {exc}")
+
+            self.assertEqual(Path(observed.strip()), repository)
+
+    def test_git_rejects_paths_with_unsafe_safe_directory_semantics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            for relative in ("repository/*", "repository\nprivate"):
+                with self.subTest(relative=repr(relative)):
+                    repository = self._repository(root, relative)
+                    with self.assertRaisesRegex(
+                        controller.FormalControllerError,
+                        "unsafe",
+                    ):
+                        controller._git(
+                            repository,
+                            "rev-parse",
+                            "--show-toplevel",
+                            text=True,
+                        )
+
+    def test_git_rejects_nul_before_filesystem_resolution(self):
+        try:
+            controller._git(
+                Path("repository\0private"),
+                "rev-parse",
+                "--show-toplevel",
+                text=True,
+            )
+        except controller.FormalControllerError as exc:
+            self.assertRegex(str(exc), "unsafe")
+        except BaseException as exc:
+            self.fail(f"unsafe Git root escaped as {type(exc).__name__}")
+        else:
+            self.fail("unsafe Git root was accepted")
+
+    def test_git_reads_the_approved_object_without_replacement_refs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repository = self._repository(Path(tmp).resolve())
+            approved_commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            (repository / "memory.txt").write_text(
+                "replacement\n",
+                encoding="utf-8",
+            )
+            subprocess.run(
+                ["git", "commit", "-q", "-am", "replacement"],
+                cwd=repository,
+                check=True,
+            )
+            replacement_commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            subprocess.run(
+                ["git", "replace", approved_commit, replacement_commit],
+                cwd=repository,
+                check=True,
+            )
+
+            observed = controller._git(
+                repository,
+                "show",
+                f"{approved_commit}:memory.txt",
+                text=True,
+            )
+
+            self.assertEqual(observed, "approved\n")
+
+    def test_git_configuration_is_always_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            repository = self._repository(root)
+            config_root = root / "configs"
+            config_root.mkdir()
+            real_mkstemp = tempfile.mkstemp
+            created: list[Path] = []
+
+            def tracked_mkstemp(*args, **kwargs):
+                fd, value = real_mkstemp(
+                    prefix=kwargs.get("prefix"),
+                    dir=config_root,
+                )
+                created.append(Path(value))
+                return fd, value
+
+            with patch.object(
+                controller.tempfile,
+                "mkstemp",
+                side_effect=tracked_mkstemp,
+            ):
+                controller._git(repository, "rev-parse", "HEAD", text=True)
+                with self.assertRaises(controller.FormalControllerError):
+                    controller._git(repository, "txnmem-invalid-subcommand")
+
+            self.assertEqual(len(created), 2)
+            self.assertEqual([path.exists() for path in created], [False, False])
+
+    def test_git_fails_closed_when_configuration_cleanup_alone_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            repository = self._repository(root)
+            config_root = root / "configs"
+            config_root.mkdir()
+            real_mkstemp = tempfile.mkstemp
+
+            def isolated_mkstemp(*args, **kwargs):
+                return real_mkstemp(
+                    prefix=kwargs.get("prefix"),
+                    dir=config_root,
+                )
+
+            with patch.object(
+                controller.tempfile,
+                "mkstemp",
+                side_effect=isolated_mkstemp,
+            ), patch.object(
+                controller.os,
+                "unlink",
+                side_effect=OSError("seeded cleanup failure"),
+            ):
+                with self.assertRaisesRegex(
+                    controller.FormalControllerError,
+                    "cleanup failed",
+                ):
+                    controller._git(repository, "rev-parse", "HEAD", text=True)
+
+    def test_git_preserves_the_primary_failure_when_cleanup_also_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            repository = self._repository(root)
+            config_root = root / "configs"
+            config_root.mkdir()
+            real_mkstemp = tempfile.mkstemp
+
+            def isolated_mkstemp(*args, **kwargs):
+                return real_mkstemp(
+                    prefix=kwargs.get("prefix"),
+                    dir=config_root,
+                )
+
+            with patch.object(
+                controller.tempfile,
+                "mkstemp",
+                side_effect=isolated_mkstemp,
+            ), patch.object(
+                controller.os,
+                "unlink",
+                side_effect=OSError("seeded cleanup failure"),
+            ):
+                with self.assertRaisesRegex(
+                    controller.FormalControllerError,
+                    "Git operation failed",
+                ) as caught:
+                    controller._git(repository, "txnmem-invalid-subcommand")
+
+            self.assertIsInstance(
+                caught.exception.__cause__,
+                subprocess.CalledProcessError,
+            )
+
+
 class FormalControllerCleanupTests(unittest.TestCase):
     @staticmethod
     def _progress_line() -> bytes:

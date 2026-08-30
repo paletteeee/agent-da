@@ -410,22 +410,144 @@ def _require_protected_file(path: Path, *, executable: bool = False) -> Path:
 
 def _git(project_root: Path, *arguments: str, text: bool = False):
     git = _require_protected_file(GIT_EXECUTABLE, executable=True)
+    raw_root_value = str(project_root)
+    if raw_root_value.endswith("/*") or any(
+        ord(character) < 32 or ord(character) == 127
+        for character in raw_root_value
+    ):
+        raise FormalControllerError("formal controller Git root is unsafe")
     try:
-        return subprocess.run(
+        root = project_root.expanduser().absolute().resolve(strict=True)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise FormalControllerError("formal controller Git root is unavailable") from exc
+    root_value = str(root)
+    if root_value.endswith("/*") or any(
+        ord(character) < 32 or ord(character) == 127 for character in root_value
+    ):
+        raise FormalControllerError("formal controller Git root is unsafe")
+
+    config_fd = -1
+    config_path: Path | None = None
+    try:
+        config_fd, raw_config_path = tempfile.mkstemp(
+            prefix="txnmem-formal-gitconfig.",
+            dir="/var/tmp",
+        )
+        config_path = Path(raw_config_path)
+        os.fchmod(config_fd, 0o600)
+        created_metadata = os.fstat(config_fd)
+        if (
+            not stat.S_ISREG(created_metadata.st_mode)
+            or created_metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(created_metadata.st_mode) != 0o600
+            or created_metadata.st_nlink != 1
+        ):
+            raise FormalControllerError(
+                "formal controller Git configuration is not protected"
+            )
+        os.close(config_fd)
+        config_fd = -1
+        environment = {
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "GIT_CONFIG_GLOBAL": str(config_path),
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_NO_REPLACE_OBJECTS": "1",
+        }
+        subprocess.run(
             [
                 str(git),
-                "-c",
-                f"safe.directory={project_root}",
-                *arguments,
+                "config",
+                "--global",
+                "--add",
+                "safe.directory",
+                root_value,
             ],
-            cwd=project_root,
+            cwd=root,
+            check=True,
+            capture_output=True,
+            env=environment,
+        )
+        written_metadata = os.stat(config_path, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(written_metadata.st_mode)
+            or written_metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(written_metadata.st_mode) != 0o600
+            or written_metadata.st_nlink != 1
+        ):
+            raise FormalControllerError(
+                "formal controller Git configuration is not protected"
+            )
+        config_keys = subprocess.run(
+            [
+                str(git),
+                "config",
+                "--global",
+                "--name-only",
+                "--get-regexp",
+                ".*",
+            ],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=environment,
+        ).stdout
+        safe_values = subprocess.run(
+            [
+                str(git),
+                "config",
+                "--global",
+                "--get-all",
+                "safe.directory",
+            ],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=environment,
+        ).stdout
+        if config_keys != "safe.directory\n" or safe_values != f"{root_value}\n":
+            raise FormalControllerError(
+                "formal controller Git configuration is invalid"
+            )
+        return subprocess.run(
+            [str(git), *arguments],
+            cwd=root,
             check=True,
             capture_output=True,
             text=text,
-            env={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+            env=environment,
         ).stdout
+    except FormalControllerError:
+        raise
     except (OSError, subprocess.CalledProcessError) as exc:
         raise FormalControllerError("formal controller Git operation failed") from exc
+    finally:
+        cleanup_error: OSError | None = None
+        if config_fd >= 0:
+            try:
+                os.close(config_fd)
+            except OSError as exc:
+                cleanup_error = exc
+        if config_path is not None:
+            try:
+                os.unlink(config_path)
+            except OSError as exc:
+                if cleanup_error is None:
+                    cleanup_error = exc
+        if cleanup_error is not None:
+            primary = sys.exc_info()[1]
+            if primary is None:
+                raise FormalControllerError(
+                    "formal controller Git configuration cleanup failed"
+                ) from cleanup_error
+            try:
+                primary.add_note(
+                    "formal controller Git configuration cleanup also failed"
+                )
+            except AttributeError:
+                pass
 
 
 def _verify_installed_controller(project_root: Path) -> _ApprovedSource:
