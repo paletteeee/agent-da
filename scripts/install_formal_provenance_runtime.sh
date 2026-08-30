@@ -31,6 +31,10 @@ fi
 
 project_argument="$1"
 approved_commit="$2"
+if [[ "$project_argument" =~ [[:cntrl:]] ]]; then
+  echo "PROJECT_ROOT has unsafe control characters" >&2
+  exit 2
+fi
 controller_dir=/opt/txnmem-formal-controller
 controller_target="$controller_dir/txnmem_formal_controller.py"
 progress_reader_target="$controller_dir/read_formal_provenance_progress.sh"
@@ -61,6 +65,7 @@ required_executables=(
   /usr/bin/sort
   /usr/bin/stat
   /usr/bin/uname
+  /usr/bin/unlink
   /usr/sbin/groupadd
   /usr/sbin/nft
   /usr/sbin/useradd
@@ -84,29 +89,94 @@ for executable in "${required_executables[@]}"; do
   fi
 done
 
-project_root=$(/usr/bin/readlink -f "$project_argument")
-observed_root=$(/usr/bin/git -c "safe.directory=$project_root" -C "$project_root" rev-parse --show-toplevel)
+project_root=
+IFS= read -r -d '' project_root < <(
+  /usr/bin/readlink -z -f -- "$project_argument"
+)
+if [[ "$project_root" == *'/*' ]] || [[ "$project_root" =~ [[:cntrl:]] ]]; then
+  echo "PROJECT_ROOT has unsafe Git safe.directory semantics" >&2
+  exit 2
+fi
+staging=
+git_config=
+cleanup() {
+  exit_status=$?
+  cleanup_status=0
+  if [[ -n "${git_config:-}" && -f "$git_config" ]]; then
+    if ! /usr/bin/unlink "$git_config"; then
+      cleanup_status=1
+    fi
+  fi
+  if [[ -n "${staging:-}" && -d "$staging" ]]; then
+    if ! /usr/bin/find "$staging" -mindepth 1 -delete; then
+      cleanup_status=1
+    fi
+    if ! /usr/bin/rmdir "$staging"; then
+      cleanup_status=1
+    fi
+  fi
+  if [[ "$exit_status" -eq 0 && "$cleanup_status" -ne 0 ]]; then
+    exit_status=1
+  fi
+  trap - EXIT
+  exit "$exit_status"
+}
+trap cleanup EXIT
+
+git_config=$(/usr/bin/mktemp /var/tmp/txnmem-formal-gitconfig.XXXXXX)
+/usr/bin/chmod 0600 "$git_config"
+if [[ "$(/usr/bin/stat -Lc '%u:%a' "$git_config")" != "0:600" ]]; then
+  echo "protected Git configuration is not root protected" >&2
+  exit 2
+fi
+/usr/bin/env -i \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_GLOBAL="$git_config" GIT_CONFIG_NOSYSTEM=1 \
+  GIT_NO_REPLACE_OBJECTS=1 \
+  /usr/bin/git config --global --add safe.directory "$project_root"
+git_config_owner_mode=$(/usr/bin/stat -Lc '%u:%a' "$git_config")
+config_keys=$(/usr/bin/env -i \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_GLOBAL="$git_config" GIT_CONFIG_NOSYSTEM=1 \
+  GIT_NO_REPLACE_OBJECTS=1 \
+  /usr/bin/git config --global --name-only --get-regexp '.*')
+safe_values=$(/usr/bin/env -i \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_GLOBAL="$git_config" GIT_CONFIG_NOSYSTEM=1 \
+  GIT_NO_REPLACE_OBJECTS=1 \
+  /usr/bin/git config --global --get-all safe.directory)
+if [[ "$git_config_owner_mode" != "0:600" ]] || \
+   [[ "$config_keys" != "safe.directory" ]] || \
+   [[ "$safe_values" != "$project_root" ]]; then
+  echo "protected Git configuration is invalid" >&2
+  exit 2
+fi
+
+observed_root=$(/usr/bin/env -i \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_GLOBAL="$git_config" GIT_CONFIG_NOSYSTEM=1 \
+  GIT_NO_REPLACE_OBJECTS=1 \
+  /usr/bin/git -C "$project_root" rev-parse --show-toplevel)
 if [[ "$observed_root" != "$project_root" ]]; then
   echo "PROJECT_ROOT is not the exact approved repository root" >&2
   exit 2
 fi
-observed_commit=$(/usr/bin/git -c "safe.directory=$project_root" -C "$project_root" rev-parse HEAD)
+observed_commit=$(/usr/bin/env -i \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  GIT_CONFIG_GLOBAL="$git_config" GIT_CONFIG_NOSYSTEM=1 \
+  GIT_NO_REPLACE_OBJECTS=1 \
+  /usr/bin/git -C "$project_root" rev-parse HEAD)
 if [[ "$observed_commit" != "$approved_commit" ]]; then
   echo "repository HEAD does not match APPROVED_COMMIT" >&2
   exit 2
 fi
 
 staging=$(/usr/bin/mktemp -d /var/tmp/txnmem-formal-install.XXXXXX)
-cleanup() {
-  if [[ -n "${staging:-}" && -d "$staging" ]]; then
-    /usr/bin/find "$staging" -mindepth 1 -delete
-    /usr/bin/rmdir "$staging"
-  fi
-}
-trap cleanup EXIT
 
 SCRIPT_PATH=$(/usr/bin/readlink -f "$0") \
 PROJECT_ROOT="$project_root" APPROVED_COMMIT="$approved_commit" \
+GIT_CONFIG_GLOBAL="$git_config" GIT_CONFIG_NOSYSTEM=1 \
+GIT_NO_REPLACE_OBJECTS=1 \
 STAGING="$staging" /usr/bin/python3 -I -S -B - <<'PY'
 import hashlib
 import json
@@ -143,11 +213,17 @@ required = auxiliary | {
 
 def run(*args, text=False):
     return subprocess.run(
-        [git, "-c", f"safe.directory={root}", "-C", str(root), *args],
+        [git, "-C", str(root), *args],
         check=True,
         capture_output=True,
         text=text,
-        env={"LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+        env={
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "GIT_CONFIG_GLOBAL": os.environ["GIT_CONFIG_GLOBAL"],
+            "GIT_CONFIG_NOSYSTEM": os.environ["GIT_CONFIG_NOSYSTEM"],
+            "GIT_NO_REPLACE_OBJECTS": os.environ["GIT_NO_REPLACE_OBJECTS"],
+        },
     ).stdout
 
 if run("rev-parse", "HEAD", text=True).strip() != commit:

@@ -254,9 +254,39 @@ class RealBackendScriptTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             ).stdout.strip()
+            replacement_wrapper_bytes = b"#!/bin/sh\n# replacement-ref payload\n"
+            (repository / wrapper_relative).write_bytes(replacement_wrapper_bytes)
+            subprocess.run(
+                ["git", "add", wrapper_relative], cwd=repository, check=True
+            )
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "replacement payload"],
+                cwd=repository,
+                check=True,
+            )
+            replacement_commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            subprocess.run(
+                ["git", "update-ref", "HEAD", commit],
+                cwd=repository,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "replace", commit, replacement_commit],
+                cwd=repository,
+                check=True,
+            )
             environment = {
                 "LANG": "C.UTF-8",
                 "LC_ALL": "C.UTF-8",
+                "GIT_CONFIG_GLOBAL": str(root / "protected-gitconfig"),
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_NO_REPLACE_OBJECTS": "1",
                 "SCRIPT_PATH": str(repository / "scripts" / "install_formal_provenance_runtime.sh"),
                 "PROJECT_ROOT": str(repository),
                 "APPROVED_COMMIT": commit,

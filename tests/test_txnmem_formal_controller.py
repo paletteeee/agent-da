@@ -1144,6 +1144,55 @@ class FormalControllerCleanupTests(unittest.TestCase):
         self.assertIn("approved_source_manifest.json", text)
         self.assertIn("running installer differs from the approved Git blob", text)
         self.assertIn("/usr/bin/mv -f", text)
+        self.assertIn("GIT_CONFIG_GLOBAL", text)
+        self.assertIn("GIT_CONFIG_NOSYSTEM=1", text)
+        self.assertIn("/usr/bin/git config --global --add safe.directory", text)
+        self.assertIn("/usr/bin/chmod 0600", text)
+        self.assertIn('/usr/bin/unlink "$git_config"', text)
+        self.assertIn('"$project_root" == *\'/*\'', text)
+        self.assertIn('"$project_argument" =~ [[:cntrl:]]', text)
+        self.assertIn('"$project_root" =~ [[:cntrl:]]', text)
+        self.assertIn("IFS= read -r -d '' project_root", text)
+        self.assertIn('/usr/bin/readlink -z -f -- "$project_argument"', text)
+        self.assertIn("GIT_NO_REPLACE_OBJECTS=1", text)
+        self.assertIn("--name-only --get-regexp '.*'", text)
+        self.assertIn("--get-all safe.directory", text)
+        self.assertIn('"$config_keys" != "safe.directory"', text)
+        self.assertIn('"$safe_values" != "$project_root"', text)
+        self.assertIn("exit_status=$?", text)
+        self.assertIn("cleanup_status=0", text)
+        self.assertIn("trap - EXIT", text)
+        self.assertIn('exit "$exit_status"', text)
+        self.assertIn(
+            '"GIT_CONFIG_GLOBAL": os.environ["GIT_CONFIG_GLOBAL"]', text
+        )
+        self.assertIn(
+            '"GIT_CONFIG_NOSYSTEM": os.environ["GIT_CONFIG_NOSYSTEM"]', text
+        )
+        self.assertNotIn('-c "safe.directory=$project_root"', text)
+        self.assertNotIn("safe.directory=*", text)
+        config_write = text.index(
+            "/usr/bin/git config --global --add safe.directory"
+        )
+        final_mode_check = text.index("git_config_owner_mode=", config_write)
+        final_contents_check = text.index("config_keys=", config_write)
+        self.assertGreater(final_mode_check, config_write)
+        self.assertGreater(final_contents_check, config_write)
+        self.assertLess(
+            text.index("git_config=$(/usr/bin/mktemp"),
+            text.index("rev-parse --show-toplevel"),
+        )
+        canonical_read = text.index("IFS= read -r -d '' project_root")
+        self.assertLess(
+            text.index('"$project_argument" =~ [[:cntrl:]]'), canonical_read
+        )
+        self.assertLess(
+            canonical_read, text.index('"$project_root" =~ [[:cntrl:]]')
+        )
+        self.assertLess(
+            text.index("trap cleanup EXIT"),
+            text.index("rev-parse --show-toplevel"),
+        )
         self.assertIn('"scripts/run_formal_provenance_smoke.sh"', text)
         self.assertIn('"src/txnmem_formal_smoke.py"', text)
         self.assertIn('"src/txnmem_provenance_progress.py"', text)
