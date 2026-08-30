@@ -35,6 +35,8 @@ from txnmem_provenance_contract import (
 )
 from txnmem_provenance_execution_collector import (
     CollectorError,
+    _FORMAL_CONTROLLER_GID,
+    _FORMAL_CONTROLLER_UID,
     _FORMAL_DOCKER_EXECUTABLE,
     _FORMAL_NEO4J_CONTAINER,
     _FORMAL_NEO4J_PROXY,
@@ -843,8 +845,8 @@ def _run_smoke_v2_scenarios(
                 progress_binding_sha256=spec.identity_sha256,
                 progress_config_sha256=config_sha256,
                 progress_snapshot_path=spec.progress_path,
-                progress_expected_uid=0,
-                progress_expected_gid=FORMAL_RUNNER_GID,
+                progress_expected_uid=_FORMAL_CONTROLLER_UID,
+                progress_expected_gid=_FORMAL_CONTROLLER_GID,
             )
             _validate_smoke_starting_progress(
                 child.read_progress(), spec=spec, config_sha256=config_sha256

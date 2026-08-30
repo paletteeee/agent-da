@@ -1414,6 +1414,8 @@ class FormalSmokeV2LifecycleTests(unittest.TestCase):
             self.assertIs(call["require_completion_receipt"], True)
             self.assertIs(call["require_progress"], True)
             self.assertIs(call["progress_allow_empty"], True)
+            self.assertEqual(call["progress_expected_uid"], 0)
+            self.assertEqual(call["progress_expected_gid"], 0)
 
         timeout_events = [
             events.index("backend_timeout:child_closed"),
