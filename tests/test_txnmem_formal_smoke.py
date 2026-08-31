@@ -1031,6 +1031,7 @@ class FormalSmokeV2LifecycleTests(unittest.TestCase):
         events = []
         children = {}
         start_calls = []
+        wait_timeouts = {}
         guard_index = 0
 
         class Process:
@@ -1103,6 +1104,7 @@ class FormalSmokeV2LifecycleTests(unittest.TestCase):
             def wait_with_receipt(self, *, timeout=None):
                 self.waited = True
                 self.process.alive = False
+                wait_timeouts[self.scenario] = timeout
                 events.append(f"{self.scenario}:waited")
                 receipts = {
                     "normal_prefix": (
@@ -1409,6 +1411,14 @@ class FormalSmokeV2LifecycleTests(unittest.TestCase):
         self.assertEqual(
             len({call["progress_snapshot_path"] for call in start_calls}),
             4,
+        )
+        self.assertEqual(
+            wait_timeouts,
+            {
+                "normal_prefix": 900.0,
+                "first_ineligible": 30.0,
+                "backend_timeout": 6.0,
+            },
         )
         for call in start_calls:
             self.assertIs(call["require_completion_receipt"], True)

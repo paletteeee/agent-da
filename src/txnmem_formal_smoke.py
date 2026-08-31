@@ -935,7 +935,11 @@ def _run_smoke_v2_scenarios(
                     )
                 progress_view = child.interrupt_progress()
             else:
-                receipt_timeout = 6.0 if scenario == "backend_timeout" else 30.0
+                receipt_timeout = {
+                    "normal_prefix": 900.0,
+                    "first_ineligible": 30.0,
+                    "backend_timeout": 6.0,
+                }[scenario]
                 exit_code, raw_receipt = child.wait_with_receipt(
                     timeout=receipt_timeout
                 )
