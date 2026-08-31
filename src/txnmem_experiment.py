@@ -129,6 +129,26 @@ def _safe_failure_provenance(exc: BaseException) -> dict[str, Any]:
     }
 
 
+def _safe_failure_reason_code(exc: BaseException) -> str:
+    """Return only an exact, closed formal-eligibility reason code."""
+
+    from txnmem_provenance_performance import (
+        FormalEligibilityError,
+        FormalEligibilityReason,
+    )
+
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen and len(seen) < 8:
+        seen.add(id(current))
+        if type(current) is FormalEligibilityError:
+            reason = current.reason
+            if type(reason) is FormalEligibilityReason:
+                return reason.value
+        current = current.__cause__ or current.__context__
+    return "unclassified_failure"
+
+
 FORMAL_WORKLOADS = WORKLOADS
 
 
@@ -1629,11 +1649,12 @@ def main(
                 pass
             failure_provenance = _safe_failure_provenance(exc)
             blocked = {
-                "schema": "txnmem-provenance-performance-blocked-v3",
+                "schema": "txnmem-provenance-performance-blocked-v4",
                 "status": "blocked",
                 "backend": args.backend,
                 "formal_requested": args.formal,
                 "reason_code": "formal_preflight_or_execution_failed",
+                "failure_reason_code": _safe_failure_reason_code(exc),
                 "error_class": failure_provenance["error_classes"][0],
                 "failure_provenance": failure_provenance,
                 "failure_stage": failure_stage,

@@ -22,6 +22,8 @@ import txnmem_provenance_performance as provenance_module
 import txnmem_provenance_execution_collector as collector_module
 from txnmem_backend import InstrumentedMemoryBackend
 from txnmem_provenance_performance import (
+    FormalEligibilityError,
+    FormalEligibilityReason,
     ProvenancePerformanceError,
     aggregate_matrix,
     build_layered_dag,
@@ -457,7 +459,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
         with self.assertRaisesRegex(
             ProvenancePerformanceError,
             "verified isolation",
-        ):
+        ) as raised:
             run_matrix_cell(
                 factory,
                 build_layered_dag(2, seed=17),
@@ -471,6 +473,10 @@ class ProvenanceMatrixTests(unittest.TestCase):
             )
 
         self.assertEqual(created, [])
+        self.assertEqual(
+            getattr(raised.exception, "reason_code", None),
+            "environment_ineligible",
+        )
 
     def test_protected_diagnostic_stops_after_completed_repetitions(self):
         created = []
@@ -778,22 +784,31 @@ class ProvenanceMatrixTests(unittest.TestCase):
     def test_formal_run_fails_closed_on_health_isolation_or_inventory(self):
         graph = build_layered_dag(10, seed=17)
         cases = {
-            "health": lambda namespace: _FixtureBackend(namespace, available=False),
-            "co_tenant": lambda namespace: _FixtureBackend(namespace, isolated=False),
-            "partial": lambda namespace: _FixtureBackend(
-                namespace,
-                inventory_override={
-                    "classification": "partial",
-                    "node_count": 0,
-                    "edge_count": 0,
-                    "graph_sha256": "0" * 64,
-                    "status_counts": {},
-                },
+            "health": (
+                lambda namespace: _FixtureBackend(namespace, available=False),
+                "service_health_unavailable",
+            ),
+            "co_tenant": (
+                lambda namespace: _FixtureBackend(namespace, isolated=False),
+                "environment_ineligible",
+            ),
+            "partial": (
+                lambda namespace: _FixtureBackend(
+                    namespace,
+                    inventory_override={
+                        "classification": "partial",
+                        "node_count": 0,
+                        "edge_count": 0,
+                        "graph_sha256": "0" * 64,
+                        "status_counts": {},
+                    },
+                ),
+                "namespace_not_empty",
             ),
         }
-        for name, factory in cases.items():
+        for name, (factory, expected_reason) in cases.items():
             with self.subTest(name=name):
-                with self.assertRaises(ProvenancePerformanceError):
+                with self.assertRaises(ProvenancePerformanceError) as raised:
                     run_matrix_cell(
                         factory,
                         graph,
@@ -803,6 +818,108 @@ class ProvenanceMatrixTests(unittest.TestCase):
                         run_id=f"fail-{name}",
                         formal=True,
                     )
+                self.assertEqual(
+                    getattr(raised.exception, "reason_code", None),
+                    expected_reason,
+                )
+
+    def test_formal_eligibility_reason_enum_is_closed(self):
+        self.assertEqual(
+            {reason.value for reason in FormalEligibilityReason},
+            {
+                "environment_ineligible",
+                "namespace_collision",
+                "service_health_unavailable",
+                "namespace_not_empty",
+                "parallel_preload_loader_missing",
+                "preload_recovery_accounting_invalid",
+                "preload_state_mismatch",
+                "retry_policy_ineligible",
+                "retry_metric_unavailable",
+                "repetition_state_ineligible",
+            },
+        )
+        with self.assertRaises(TypeError):
+            FormalEligibilityError("environment_ineligible", "unsafe")
+
+    def test_remaining_formal_eligibility_gates_have_safe_reason_codes(self):
+        graph = build_layered_dag(2, seed=17)
+
+        class MissingParallelLoader(_FixtureBackend):
+            preload_provenance_record = None
+
+        class InvalidRecoveryAccounting(_FixtureBackend):
+            def preload_provenance_record(self, memory_id, source_ids, *, value):
+                super().preload_provenance_record(
+                    memory_id, source_ids, value=value
+                )
+                return 2
+
+        class MissingPreloadState(_FixtureBackend):
+            def preload_provenance_record(self, memory_id, source_ids, *, value):
+                return 0
+
+        class InvalidRetryPolicy(_FixtureBackend):
+            def __init__(self, namespace):
+                super().__init__(namespace)
+                self.max_retries = 1
+
+        class MissingRetryMetric(_FixtureBackend):
+            def metrics(self):
+                return {}
+
+        cases = {
+            "parallel-loader": (
+                MissingParallelLoader,
+                "parallel_preload_loader_missing",
+            ),
+            "recovery-accounting": (
+                InvalidRecoveryAccounting,
+                "preload_recovery_accounting_invalid",
+            ),
+            "preload-state": (MissingPreloadState, "preload_state_mismatch"),
+            "retry-policy": (InvalidRetryPolicy, "retry_policy_ineligible"),
+            "retry-metric": (MissingRetryMetric, "retry_metric_unavailable"),
+        }
+        for name, (backend_type, expected_reason) in cases.items():
+            with self.subTest(name=name):
+                with self.assertRaises(ProvenancePerformanceError) as raised:
+                    run_matrix_cell(
+                        lambda namespace, backend_type=backend_type: backend_type(
+                            namespace
+                        ),
+                        graph,
+                        concurrency=1,
+                        repetitions=1,
+                        operations_per_type=1,
+                        run_id=f"safe-reason-{name}",
+                        formal=True,
+                    )
+                self.assertEqual(
+                    getattr(raised.exception, "reason_code", None),
+                    expected_reason,
+                )
+
+    def test_namespace_collision_has_safe_reason_code(self):
+        with patch.object(
+            provenance_module,
+            "_namespace",
+            return_value="txnmem-prov-collision-fixture",
+        ), self.assertRaises(ProvenancePerformanceError) as raised:
+            run_matrix_cell(
+                lambda namespace: _FixtureBackend(namespace),
+                build_layered_dag(2, seed=17),
+                concurrency=1,
+                repetitions=2,
+                operations_per_type=1,
+                run_id="safe-reason-namespace-collision",
+                formal=True,
+            )
+
+        self.assertEqual(
+            getattr(raised.exception, "reason_code", None),
+            "namespace_collision",
+        )
 
     def test_formal_environment_attestation_rejects_secret_bearing_fields(self):
         graph = build_layered_dag(10, seed=17)
@@ -903,7 +1020,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
                 self._retry_count += 1
                 return {"retry_count": self._retry_count}
 
-        with self.assertRaises(ProvenancePerformanceError):
+        with self.assertRaises(ProvenancePerformanceError) as raised:
             run_matrix_cell(
                 lambda namespace: RetryingBackend(namespace),
                 graph,
@@ -913,6 +1030,10 @@ class ProvenanceMatrixTests(unittest.TestCase):
                 run_id="hidden-retry",
                 formal=True,
             )
+        self.assertEqual(
+            getattr(raised.exception, "reason_code", None),
+            "repetition_state_ineligible",
+        )
 
         report = run_matrix_cell(
             lambda namespace: _FixtureBackend(namespace),

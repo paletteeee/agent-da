@@ -80,6 +80,45 @@ class ProvenancePerformanceError(RuntimeError):
     """Raised when evidence cannot satisfy the formal performance boundary."""
 
 
+class FormalEligibilityReason(enum.Enum):
+    """Closed, publication-safe reasons for formal eligibility failures."""
+
+    ENVIRONMENT_INELIGIBLE = "environment_ineligible"
+    NAMESPACE_COLLISION = "namespace_collision"
+    SERVICE_HEALTH_UNAVAILABLE = "service_health_unavailable"
+    NAMESPACE_NOT_EMPTY = "namespace_not_empty"
+    PARALLEL_PRELOAD_LOADER_MISSING = "parallel_preload_loader_missing"
+    PRELOAD_RECOVERY_ACCOUNTING_INVALID = (
+        "preload_recovery_accounting_invalid"
+    )
+    PRELOAD_STATE_MISMATCH = "preload_state_mismatch"
+    RETRY_POLICY_INELIGIBLE = "retry_policy_ineligible"
+    RETRY_METRIC_UNAVAILABLE = "retry_metric_unavailable"
+    REPETITION_STATE_INELIGIBLE = "repetition_state_ineligible"
+
+
+class FormalEligibilityError(ProvenancePerformanceError):
+    """Carry one closed reason without publishing exception text."""
+
+    def __init__(
+        self,
+        reason: FormalEligibilityReason,
+        message: str,
+    ) -> None:
+        if type(reason) is not FormalEligibilityReason:
+            raise TypeError("formal eligibility reason must be an exact enum member")
+        super().__init__(message)
+        self._reason = reason
+
+    @property
+    def reason(self) -> FormalEligibilityReason:
+        return self._reason
+
+    @property
+    def reason_code(self) -> str:
+        return self._reason.value
+
+
 class _PrivatePublicationMode(enum.Enum):
     """One invocation-scoped publication mode for the protected lifecycle gate."""
 
@@ -665,7 +704,8 @@ def _preload_graph(backend: Any, graph: GraphSpec) -> dict[str, int]:
     preload_record = getattr(backend, "preload_provenance_record", None)
     if parallel_preload is True:
         if not callable(preload_record):
-            raise ProvenancePerformanceError(
+            raise FormalEligibilityError(
+                FormalEligibilityReason.PARALLEL_PRELOAD_LOADER_MISSING,
                 "parallel preload capability has no record loader"
             )
         nodes_by_layer: dict[int, list[str]] = {}
@@ -714,7 +754,8 @@ def _preload_graph(backend: Any, graph: GraphSpec) -> dict[str, int]:
                         or recovered < 0
                         or recovered > 1
                     ):
-                        raise ProvenancePerformanceError(
+                        raise FormalEligibilityError(
+                            FormalEligibilityReason.PRELOAD_RECOVERY_ACCOUNTING_INVALID,
                             "preload recovery accounting is invalid"
                         )
                     recovery_count += recovered
@@ -861,7 +902,8 @@ def run_matrix_cell(
             prevalidated_environment["isolation_verified"]
             and prevalidated_environment["co_tenant_load_detected"] is False
         ):
-            raise ProvenancePerformanceError(
+            raise FormalEligibilityError(
+                FormalEligibilityReason.ENVIRONMENT_INELIGIBLE,
                 "formal run requires verified isolation without co-tenant load"
             )
     plan = _operation_plan(graph, operations_per_type)
@@ -875,7 +917,10 @@ def run_matrix_cell(
         namespace = _namespace(run_id, graph, concurrency, repetition)
         namespace_sha256 = _hash_text(namespace)
         if namespace_sha256 in namespace_hashes:
-            raise ProvenancePerformanceError("namespace collision within matrix cell")
+            raise FormalEligibilityError(
+                FormalEligibilityReason.NAMESPACE_COLLISION,
+                "namespace collision within matrix cell",
+            )
         namespace_hashes.add(namespace_sha256)
         backend = backend_factory(namespace)
         try:
@@ -902,11 +947,13 @@ def run_matrix_cell(
                 and environment["co_tenant_load_detected"] is False
             )
             if enforce_formal_eligibility and not services_available:
-                raise ProvenancePerformanceError(
+                raise FormalEligibilityError(
+                    FormalEligibilityReason.SERVICE_HEALTH_UNAVAILABLE,
                     "formal run requires available Qdrant and Neo4j health checks"
                 )
             if enforce_formal_eligibility and not isolation_valid:
-                raise ProvenancePerformanceError(
+                raise FormalEligibilityError(
+                    FormalEligibilityReason.ENVIRONMENT_INELIGIBLE,
                     "formal run requires verified isolation without co-tenant load"
                 )
 
@@ -920,7 +967,8 @@ def run_matrix_cell(
                 and empty_inventory.get("status_counts") == {}
             )
             if enforce_formal_eligibility and not namespace_empty:
-                raise ProvenancePerformanceError(
+                raise FormalEligibilityError(
+                    FormalEligibilityReason.NAMESPACE_NOT_EMPTY,
                     "formal run requires a new empty namespace"
                 )
 
@@ -937,7 +985,8 @@ def run_matrix_cell(
                 {"active": graph.node_count},
             )
             if enforce_formal_eligibility and not preload_closed:
-                raise ProvenancePerformanceError(
+                raise FormalEligibilityError(
+                    FormalEligibilityReason.PRELOAD_STATE_MISMATCH,
                     "preloaded graph count, status, or hash mismatch"
                 )
 
@@ -970,11 +1019,13 @@ def run_matrix_cell(
             retries_before = retry_metric()
             retry_metric_valid = retries_before is not None
             if enforce_formal_eligibility and not retry_policy_valid:
-                raise ProvenancePerformanceError(
+                raise FormalEligibilityError(
+                    FormalEligibilityReason.RETRY_POLICY_INELIGIBLE,
                     "formal run requires attested zero retry at both backend and driver"
                 )
             if enforce_formal_eligibility and not retry_metric_valid:
-                raise ProvenancePerformanceError(
+                raise FormalEligibilityError(
+                    FormalEligibilityReason.RETRY_METRIC_UNAVAILABLE,
                     "formal run requires an exact backend retry metric"
                 )
 
@@ -1130,7 +1181,8 @@ def run_matrix_cell(
                 "final_inventory": final_inventory,
             }
             if enforce_formal_eligibility and not eligible:
-                raise ProvenancePerformanceError(
+                raise FormalEligibilityError(
+                    FormalEligibilityReason.REPETITION_STATE_INELIGIBLE,
                     "formal repetition has failures or non-closed persistent state"
                 )
             all_samples.extend(measured_rows)

@@ -94,10 +94,11 @@ class TxnMemCliOutputTests(unittest.TestCase):
         self.assertNotIn("203.0.113.10", blocked_text)
         blocked = json.loads(blocked_text)
         self.assertEqual(
-            blocked["schema"], "txnmem-provenance-performance-blocked-v3"
+            blocked["schema"], "txnmem-provenance-performance-blocked-v4"
         )
         self.assertEqual(blocked["error_class"], "RuntimeError")
         self.assertEqual(blocked["reason_code"], "formal_preflight_or_execution_failed")
+        self.assertEqual(blocked["failure_reason_code"], "unclassified_failure")
         self.assertEqual(blocked["failure_stage"], "matrix_execution")
         self.assertEqual(blocked["completed_cell_count"], 0)
         self.assertEqual(blocked["completed_repetition_count"], 0)
@@ -110,6 +111,98 @@ class TxnMemCliOutputTests(unittest.TestCase):
                 "root_error_class": "TimeoutError",
                 "service": "neo4j",
             },
+        )
+
+    def test_provenance_blocked_report_records_closed_formal_reason_code(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        class UnavailableBackend:
+            def healthcheck(self):
+                return {
+                    "qdrant": {"available": False, "version": "fixture"},
+                    "neo4j": {"available": True, "version": "fixture"},
+                }
+
+            def close(self):
+                return None
+
+        with TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", {"TXNMEM_NEO4J_PASSWORD": "runtime-only"}, clear=False
+        ), patch(
+            "txnmem_provenance_performance.make_vector_graph_backend_factory",
+            return_value=lambda _namespace: UnavailableBackend(),
+        ):
+            root = Path(tmp).resolve()
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(self._small_provenance_config()), encoding="utf-8"
+            )
+            attestation = root / "environment.json"
+            attestation.write_text(
+                json.dumps(self._provenance_environment()), encoding="utf-8"
+            )
+            out_dir = root / "out"
+
+            exit_code = main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "vector-graph",
+                    "--config",
+                    str(config),
+                    "--run-id",
+                    "closed-reason-fixture",
+                    "--environment-attestation",
+                    str(attestation),
+                    "--out-dir",
+                    str(out_dir),
+                ],
+                _require_formal_eligibility=True,
+            )
+            blocked_text = (
+                out_dir / "results" / "provenance_performance_blocked.json"
+            ).read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 2)
+        self.assertNotIn("formal run requires", blocked_text)
+        blocked = json.loads(blocked_text)
+        self.assertEqual(
+            blocked["schema"], "txnmem-provenance-performance-blocked-v4"
+        )
+        self.assertEqual(
+            blocked["failure_reason_code"], "service_health_unavailable"
+        )
+        self.assertNotIn("message", blocked)
+
+    def test_safe_failure_reason_rejects_subclasses_and_forged_attributes(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import _safe_failure_reason_code
+        from txnmem_provenance_performance import (
+            FormalEligibilityError,
+            FormalEligibilityReason,
+            ProvenancePerformanceError,
+        )
+
+        class EligibilitySubclass(FormalEligibilityError):
+            pass
+
+        class ForgedEligibilityError(ProvenancePerformanceError):
+            reason = FormalEligibilityReason.SERVICE_HEALTH_UNAVAILABLE
+            reason_code = "service_health_unavailable"
+
+        self.assertEqual(
+            _safe_failure_reason_code(
+                EligibilitySubclass(
+                    FormalEligibilityReason.SERVICE_HEALTH_UNAVAILABLE,
+                    "must remain untrusted",
+                )
+            ),
+            "unclassified_failure",
+        )
+        self.assertEqual(
+            _safe_failure_reason_code(ForgedEligibilityError("forged")),
+            "unclassified_failure",
         )
 
     def test_provenance_blocked_report_catches_non_runtime_driver_exception(self):
@@ -374,11 +467,12 @@ class TxnMemCliOutputTests(unittest.TestCase):
         self.assertEqual(
             blocked,
             {
-                "schema": "txnmem-provenance-performance-blocked-v3",
+                "schema": "txnmem-provenance-performance-blocked-v4",
                 "status": "blocked",
                 "backend": "vector-graph",
                 "formal_requested": False,
                 "reason_code": "formal_preflight_or_execution_failed",
+                "failure_reason_code": "unclassified_failure",
                 "error_class": "RuntimeError",
                 "failure_provenance": {
                     "error_classes": ["RuntimeError"],
