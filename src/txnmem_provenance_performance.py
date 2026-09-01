@@ -933,6 +933,7 @@ def run_matrix_cell(
             )
         namespace_hashes.add(namespace_sha256)
         backend = backend_factory(namespace)
+        primary_failure: BaseException | None = None
         try:
             health_provider = getattr(backend, "healthcheck", None)
             health = _safe_health(health_provider() if callable(health_provider) else None)
@@ -1101,11 +1102,6 @@ def run_matrix_cell(
                 futures = [executor.submit(measured, operation) for operation in plan]
                 measured_rows = [future.result() for future in futures]
             elapsed_ns = max(1, time.perf_counter_ns() - repetition_started_ns)
-            retries_after = retry_metric()
-            if retries_before is None or retries_after is None or retries_after < retries_before:
-                retry_delta = None
-            else:
-                retry_delta = retries_after - retries_before
             measured_rows.sort(
                 key=lambda row: (row["_operation_rank"], row["_operation_index"])
             )
@@ -1121,6 +1117,26 @@ def run_matrix_cell(
                 row.pop("_operation_rank", None)
                 row.pop("_operation_index", None)
                 row.pop("_failure", None)
+            if enforce_formal_eligibility and measured_failure is not None:
+                failed_operation, failure = measured_failure
+                eligibility_error = FormalEligibilityError(
+                    FormalEligibilityReason.REPETITION_STATE_INELIGIBLE,
+                    "formal repetition has measured operation failures",
+                )
+                try:
+                    raise _MeasuredOperationFailure(failed_operation) from failure
+                except _MeasuredOperationFailure as operation_failure:
+                    raise eligibility_error from operation_failure
+
+            retries_after = retry_metric()
+            if (
+                retries_before is None
+                or retries_after is None
+                or retries_after < retries_before
+            ):
+                retry_delta = None
+            else:
+                retry_delta = retries_after - retries_before
 
             final_inventory = _inventory(backend, limit=len(expected_nodes) + 1)
             state_closed = _inventory_matches(
@@ -1204,23 +1220,25 @@ def run_matrix_cell(
                 "final_inventory": final_inventory,
             }
             if enforce_formal_eligibility and not eligible:
-                eligibility_error = FormalEligibilityError(
+                raise FormalEligibilityError(
                     FormalEligibilityReason.REPETITION_STATE_INELIGIBLE,
                     "formal repetition has failures or non-closed persistent state"
                 )
-                if measured_failure is None:
-                    raise eligibility_error
-                failed_operation, failure = measured_failure
-                try:
-                    raise _MeasuredOperationFailure(failed_operation) from failure
-                except _MeasuredOperationFailure as operation_failure:
-                    raise eligibility_error from operation_failure
             all_samples.extend(measured_rows)
             repetition_rows.append(repetition_row)
+        except BaseException as exc:
+            primary_failure = exc
+            raise
         finally:
             close = getattr(backend, "close", None)
             if callable(close):
-                close()
+                try:
+                    close()
+                except BaseException:
+                    # Cleanup is secondary while another failure is already
+                    # in flight; never replace its measured-operation chain.
+                    if primary_failure is None:
+                        raise
         if progress_callback is not None:
             progress_callback(
                 {

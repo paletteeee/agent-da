@@ -1085,6 +1085,231 @@ class ProvenanceMatrixTests(unittest.TestCase):
         self.assertIs(operation_failure.__cause__, observed_failures[0])
         self.assertNotIn("private-token", str(operation_failure))
 
+    def test_formal_measured_failure_precedes_post_measurement_boundaries(self):
+        graph = build_layered_dag(2, seed=17)
+
+        class MeasuredFailure(RuntimeError):
+            pass
+
+        class FailingInvalidateBackend(_FixtureBackend):
+            def invalidate(self, memory_id, **fields):
+                raise MeasuredFailure("measured boundary failed")
+
+        class FailingPostMetricBackend(FailingInvalidateBackend):
+            def __init__(self, namespace):
+                super().__init__(namespace)
+                self.metric_calls = 0
+
+            def metrics(self):
+                self.metric_calls += 1
+                if self.metric_calls > 1:
+                    raise RuntimeError("post-measurement metric failed")
+                return {"retry_count": self._retry_count}
+
+        class FailingFinalInventoryBackend(FailingInvalidateBackend):
+            def __init__(self, namespace):
+                super().__init__(namespace)
+                self.inventory_calls = 0
+
+            def provenance_inventory(self, limit=None):
+                self.inventory_calls += 1
+                if self.inventory_calls > 2:
+                    raise RuntimeError("post-measurement inventory failed")
+                return super().provenance_inventory(limit=limit)
+
+        for name, backend_type in (
+            ("metric", FailingPostMetricBackend),
+            ("inventory", FailingFinalInventoryBackend),
+        ):
+            with self.subTest(name=name):
+                with self.assertRaises(FormalEligibilityError) as raised:
+                    run_matrix_cell(
+                        lambda namespace, backend_type=backend_type: backend_type(
+                            namespace
+                        ),
+                        graph,
+                        concurrency=1,
+                        repetitions=1,
+                        operations_per_type=1,
+                        run_id=f"measured-before-{name}",
+                        formal=True,
+                    )
+
+                self.assertEqual(
+                    raised.exception.reason_code,
+                    "repetition_state_ineligible",
+                )
+                operation_failure = raised.exception.__cause__
+                self.assertEqual(
+                    getattr(operation_failure, "_txnmem_operation", None),
+                    "invalidate_repair",
+                )
+                self.assertIsInstance(operation_failure.__cause__, MeasuredFailure)
+
+    def test_formal_measured_failure_survives_cleanup_failure(self):
+        graph = build_layered_dag(2, seed=17)
+        created = []
+
+        class MeasuredFailure(RuntimeError):
+            pass
+
+        class FailingBackend(_FixtureBackend):
+            def __init__(self, namespace):
+                super().__init__(namespace)
+                self.close_calls = 0
+
+            def invalidate(self, memory_id, **fields):
+                raise MeasuredFailure("measured boundary failed")
+
+            def close(self):
+                self.close_calls += 1
+                raise RuntimeError("cleanup boundary failed")
+
+        def factory(namespace):
+            backend = FailingBackend(namespace)
+            created.append(backend)
+            return backend
+
+        with self.assertRaises(FormalEligibilityError) as raised:
+            run_matrix_cell(
+                factory,
+                graph,
+                concurrency=1,
+                repetitions=1,
+                operations_per_type=1,
+                run_id="measured-before-cleanup",
+                formal=True,
+            )
+
+        operation_failure = raised.exception.__cause__
+        self.assertEqual(
+            getattr(operation_failure, "_txnmem_operation", None),
+            "invalidate_repair",
+        )
+        self.assertIsInstance(operation_failure.__cause__, MeasuredFailure)
+        self.assertEqual(created[0].close_calls, 1)
+
+    def test_cleanup_failure_propagates_without_primary_failure(self):
+        graph = build_layered_dag(2, seed=17)
+
+        class CleanupFailure(RuntimeError):
+            pass
+
+        class FailingCloseBackend(_FixtureBackend):
+            def close(self):
+                raise CleanupFailure("cleanup boundary failed")
+
+        with self.assertRaises(CleanupFailure):
+            run_matrix_cell(
+                lambda namespace: FailingCloseBackend(namespace),
+                graph,
+                concurrency=1,
+                repetitions=1,
+                operations_per_type=1,
+                run_id="cleanup-without-primary",
+                formal=True,
+            )
+
+    def test_cleanup_failure_is_not_hidden_by_callers_exception_context(self):
+        graph = build_layered_dag(2, seed=17)
+
+        class CleanupFailure(RuntimeError):
+            pass
+
+        class FailingCloseBackend(_FixtureBackend):
+            def close(self):
+                raise CleanupFailure("cleanup boundary failed")
+
+        try:
+            raise RuntimeError("unrelated caller exception")
+        except RuntimeError:
+            with self.assertRaises(CleanupFailure):
+                run_matrix_cell(
+                    lambda namespace: FailingCloseBackend(namespace),
+                    graph,
+                    concurrency=1,
+                    repetitions=1,
+                    operations_per_type=1,
+                    run_id="cleanup-inside-caller-except",
+                    formal=True,
+                )
+
+    def test_concurrent_measured_failure_selection_uses_plan_order(self):
+        graph = build_layered_dag(2, seed=17)
+
+        class ReadFailure(RuntimeError):
+            pass
+
+        class SearchFailure(RuntimeError):
+            pass
+
+        class FailingBackend(_FixtureBackend):
+            def __init__(self, namespace):
+                super().__init__(namespace)
+                self.search_failed = threading.Event()
+
+            def read(self, memory_id, *args, **kwargs):
+                if not self.search_failed.wait(timeout=5):
+                    raise AssertionError("search failure was not observed")
+                raise ReadFailure("read failed after search")
+
+            def search(self, query, *args, **kwargs):
+                self.search_failed.set()
+                raise SearchFailure("search failed first")
+
+        for attempt in range(3):
+            with self.subTest(attempt=attempt):
+                with self.assertRaises(FormalEligibilityError) as raised:
+                    run_matrix_cell(
+                        lambda namespace: FailingBackend(namespace),
+                        graph,
+                        concurrency=2,
+                        repetitions=1,
+                        operations_per_type=1,
+                        run_id=f"deterministic-failure-selection-{attempt}",
+                        formal=True,
+                    )
+
+                operation_failure = raised.exception.__cause__
+                self.assertEqual(
+                    getattr(operation_failure, "_txnmem_operation", None),
+                    "read",
+                )
+                self.assertIsInstance(operation_failure.__cause__, ReadFailure)
+
+    def test_diagnostic_report_drops_private_exception_before_serialization(self):
+        graph = build_layered_dag(2, seed=17)
+
+        class FailingReadBackend(_FixtureBackend):
+            def read(self, memory_id, *args, **kwargs):
+                raise RuntimeError("diagnostic-secret-marker")
+
+        report = run_matrix_cell(
+            lambda namespace: FailingReadBackend(namespace),
+            graph,
+            concurrency=1,
+            repetitions=1,
+            operations_per_type=1,
+            run_id="diagnostic-private-field-scrub",
+            formal=False,
+        )
+
+        serialized = json.dumps(report)
+        self.assertNotIn("diagnostic-secret-marker", serialized)
+
+        def assert_public(value):
+            if isinstance(value, dict):
+                self.assertNotIn("_failure", value)
+                for nested in value.values():
+                    assert_public(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    assert_public(nested)
+            else:
+                self.assertNotIsInstance(value, BaseException)
+
+        assert_public(report)
+
 
 class ProvenanceAggregationTests(unittest.TestCase):
     AUTHORIZATION_NONCE = b"provenance-fixture-authorization-nonce-0001"
