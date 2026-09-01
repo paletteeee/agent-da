@@ -282,6 +282,7 @@ class TxnMemCliOutputTests(unittest.TestCase):
 
         cases = (
             ("operation", "healthcheck"),
+            ("_txnmem_operation", "invalidate_repair"),
             ("_txnmem_operation", "private-token"),
             ("_txnmem_operation", "localhost:6333"),
         )
@@ -333,6 +334,89 @@ class TxnMemCliOutputTests(unittest.TestCase):
                 self.assertIsNone(blocked["failure_provenance"]["operation"])
                 if attribute == "_txnmem_operation":
                     self.assertNotIn(value, blocked_text)
+
+    def test_provenance_blocked_report_attributes_measured_failure_without_payload(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_backend import InstrumentedMemoryBackend
+        from txnmem_experiment import main
+
+        class QdrantBoundaryFailure(RuntimeError):
+            pass
+
+        class FailingInvalidateBackend(InstrumentedMemoryBackend):
+            max_retries = 0
+            neo4j_max_transaction_retry_time_seconds = 0.0
+
+            def healthcheck(self):
+                return {
+                    "qdrant": {"available": True, "version": "1.15.4"},
+                    "neo4j": {"available": True, "version": "5.26.0"},
+                }
+
+            def metrics(self):
+                return {"retry_count": 0}
+
+            def invalidate(self, memory_id, **fields):
+                failure = QdrantBoundaryFailure(
+                    f"private-token at http://203.0.113.10 for {memory_id}"
+                )
+                failure._txnmem_service = "qdrant"
+                failure._txnmem_operation = "canonical-invalidate"
+                raise failure
+
+        with TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", {"TXNMEM_NEO4J_PASSWORD": "runtime-only"}, clear=False
+        ), patch(
+            "txnmem_provenance_performance.make_vector_graph_backend_factory",
+            return_value=lambda _namespace: FailingInvalidateBackend(),
+        ):
+            root = Path(tmp).resolve()
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(self._small_provenance_config()), encoding="utf-8"
+            )
+            attestation = root / "environment.json"
+            attestation.write_text(
+                json.dumps(self._provenance_environment()), encoding="utf-8"
+            )
+            out_dir = root / "out"
+
+            exit_code = main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "vector-graph",
+                    "--config",
+                    str(config),
+                    "--run-id",
+                    "measured-failure-attribution-fixture",
+                    "--environment-attestation",
+                    str(attestation),
+                    "--out-dir",
+                    str(out_dir),
+                ],
+                _require_formal_eligibility=True,
+            )
+            blocked_text = (
+                out_dir / "results" / "provenance_performance_blocked.json"
+            ).read_text(encoding="utf-8")
+
+        self.assertEqual(exit_code, 2)
+        self.assertNotIn("private-token", blocked_text)
+        self.assertNotIn("203.0.113.10", blocked_text)
+        self.assertNotIn("perf-invalid-000000", blocked_text)
+        blocked = json.loads(blocked_text)
+        self.assertEqual(
+            blocked["failure_reason_code"], "repetition_state_ineligible"
+        )
+        self.assertEqual(
+            blocked["failure_provenance"]["operation"], "invalidate_repair"
+        )
+        self.assertEqual(blocked["failure_provenance"]["service"], "qdrant")
+        self.assertEqual(
+            blocked["failure_provenance"]["root_error_class"],
+            "QdrantBoundaryFailure",
+        )
 
     def test_provenance_blocked_report_handles_unhashable_failure_metadata(self):
         sys.path.insert(0, str(ROOT / "src"))

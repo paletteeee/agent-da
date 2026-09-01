@@ -1047,6 +1047,44 @@ class ProvenanceMatrixTests(unittest.TestCase):
         peak = report["repetitions"][0]["observed_peak_concurrency"]
         self.assertEqual(peak, 2)
 
+    def test_formal_measured_failure_retains_private_cause_and_closed_operation(self):
+        graph = build_layered_dag(2, seed=17)
+        observed_failures = []
+
+        class InvalidationBoundaryFailure(RuntimeError):
+            pass
+
+        class FailingInvalidateBackend(_FixtureBackend):
+            def invalidate(self, memory_id, **fields):
+                failure = InvalidationBoundaryFailure(
+                    f"private-token for {memory_id}"
+                )
+                failure._txnmem_service = "qdrant"
+                failure._txnmem_operation = "canonical-invalidate"
+                observed_failures.append(failure)
+                raise failure
+
+        with self.assertRaises(FormalEligibilityError) as raised:
+            run_matrix_cell(
+                lambda namespace: FailingInvalidateBackend(namespace),
+                graph,
+                concurrency=1,
+                repetitions=1,
+                operations_per_type=1,
+                run_id="measured-failure-cause-fixture",
+                formal=True,
+            )
+
+        self.assertEqual(raised.exception.reason_code, "repetition_state_ineligible")
+        operation_failure = raised.exception.__cause__
+        self.assertIsNotNone(operation_failure)
+        self.assertEqual(
+            getattr(operation_failure, "_txnmem_operation", None),
+            "invalidate_repair",
+        )
+        self.assertIs(operation_failure.__cause__, observed_failures[0])
+        self.assertNotIn("private-token", str(operation_failure))
+
 
 class ProvenanceAggregationTests(unittest.TestCase):
     AUTHORIZATION_NONCE = b"provenance-fixture-authorization-nonce-0001"
