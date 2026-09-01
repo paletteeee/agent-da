@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -838,6 +839,11 @@ class FormalSmokeV2ContractTests(unittest.TestCase):
             "total_samples": 14400,
             "update_sequence": sequence,
             "status": status,
+            "outcome": (
+                "starting" if sequence == 0 else "repetition_completed"
+            ),
+            "skipped_repetitions": 0,
+            "timed_out_cell_count": 0,
             "last_update_age_seconds": 0,
         }
         if reason is not None:
@@ -3330,6 +3336,237 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
         self.assertIs(termination_state.stop_requested, True)
         for descriptor in (ready_read, progress_read, receipt_read):
             os.close(descriptor)
+
+    def test_runner_installs_cell_executor_and_forwards_timeout_progress(self):
+        import txnmem_experiment
+        from txnmem_provenance_progress import decode_progress_line
+
+        gate_read, gate_write = os.pipe()
+        ready_read, ready_write = os.pipe()
+        receipt_read, receipt_write = os.pipe()
+        progress_read, progress_write = os.pipe()
+        os.write(gate_write, b"G")
+        os.close(gate_write)
+        observed_hooks = []
+
+        def experiment_main(_arguments, **hooks):
+            observed_hooks.append(hooks)
+            hooks["_progress_callback"](
+                {
+                    "cell_index": 1,
+                    "cell_count": 15,
+                    "graph_size": 100,
+                    "concurrency": 1,
+                    "repetition_index": 0,
+                    "repetition_count": 30,
+                    "completed_repetitions": 0,
+                    "total_repetitions": 450,
+                    "completed_samples": 0,
+                    "total_samples": 14400,
+                    "update_sequence": 1,
+                    "outcome": "cell_timed_out",
+                    "skipped_repetitions": 30,
+                    "timed_out_cell_count": 1,
+                }
+            )
+            return 2
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_site = Path(tmp).resolve() / "runtime"
+            runtime_site.mkdir()
+            candidate = Path(tmp).resolve() / "candidate"
+            candidate.mkdir()
+            environment = {
+                "TXNMEM_PROVENANCE_START_GATE_FD": str(gate_read),
+                "TXNMEM_PROVENANCE_READY_FD": str(ready_write),
+                "TXNMEM_PROVENANCE_COMPLETION_FD": str(receipt_write),
+                "TXNMEM_PROVENANCE_PROGRESS_FD": str(progress_write),
+                "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256": "a" * 64,
+                "TXNMEM_PROVENANCE_RUNTIME_SITE": str(runtime_site),
+            }
+            with patch.dict(os.environ, environment, clear=True), patch.object(
+                txnmem_experiment, "main", side_effect=experiment_main
+            ), patch(
+                "txnmem_provenance_performance.formal_matrix_config_sha256",
+                return_value="b" * 64,
+            ):
+                status = runner.main(
+                    [
+                        "provenance-performance",
+                        "--backend",
+                        "vector-graph",
+                        "--config",
+                        "/immutable/config.json",
+                        "--run-id",
+                        "runner-timeout-progress-fixture",
+                        "--out-dir",
+                        str(candidate),
+                        "--service-url",
+                        "http://127.0.0.1:19000",
+                    ]
+                )
+
+        self.assertEqual(status, 2)
+        self.assertEqual(os.read(ready_read, 2), b"R")
+        progress_payload = os.read(progress_read, 4097)
+        event = decode_progress_line(progress_payload)
+        self.assertEqual(event["outcome"], "cell_timed_out")
+        self.assertEqual(event["skipped_repetitions"], 30)
+        self.assertEqual(event["timed_out_cell_count"], 1)
+        self.assertEqual(os.read(receipt_read, 1), b"")
+        self.assertEqual(len(observed_hooks), 1)
+        self.assertTrue(callable(observed_hooks[0]["_cell_executor"]))
+        for descriptor in (ready_read, progress_read, receipt_read):
+            os.close(descriptor)
+
+    def test_isolated_cell_executor_rejects_invalid_timeout_before_fork(self):
+        with self.assertRaisesRegex(RuntimeError, "stall timeout"):
+            runner._run_isolated_matrix_cell(
+                lambda **_kwargs: {},
+                cell_index=1,
+                cell_count=15,
+                graph_size=100,
+                concurrency=1,
+                repetitions=30,
+                operations_per_type=8,
+                stall_timeout_seconds=0.0,
+                progress_callback=lambda _snapshot: None,
+                interruption_check=lambda: None,
+                close_fds=(),
+            )
+
+    def test_stall_watchdog_reaps_worker_that_exits_before_kill_signal(self):
+        status = 0
+        with patch.object(
+            runner.signal,
+            "pidfd_send_signal",
+            side_effect=ProcessLookupError(errno.ESRCH, "already exited"),
+            create=True,
+        ) as send_signal, patch.object(
+            runner.os, "waitpid", return_value=(4322, status)
+        ) as waitpid:
+            signalled, observed_status = runner._kill_and_reap_stalled_worker(
+                51, 4322
+            )
+
+        self.assertFalse(signalled)
+        self.assertEqual(observed_status, status)
+        send_signal.assert_called_once_with(51, signal.SIGKILL, None, 0)
+        waitpid.assert_called_once_with(4322, 0)
+
+    def test_stall_watchdog_records_exact_successful_kill_and_reap(self):
+        status = signal.SIGKILL
+        with patch.object(
+            runner.signal,
+            "pidfd_send_signal",
+            return_value=None,
+            create=True,
+        ), patch.object(
+            runner.os, "waitpid", return_value=(4322, status)
+        ):
+            signalled, observed_status = runner._kill_and_reap_stalled_worker(
+                51, 4322
+            )
+
+        self.assertTrue(signalled)
+        self.assertEqual(observed_status, status)
+
+    def test_stall_watchdog_does_not_claim_an_accepted_signal_caused_normal_exit(self):
+        status = 0
+        with patch.object(
+            runner.signal,
+            "pidfd_send_signal",
+            return_value=None,
+            create=True,
+        ), patch.object(
+            runner.os, "waitpid", return_value=(4322, status)
+        ):
+            killed_by_sigkill, observed_status = (
+                runner._kill_and_reap_stalled_worker(51, 4322)
+            )
+
+        self.assertFalse(killed_by_sigkill)
+        self.assertEqual(observed_status, status)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and hasattr(os, "pidfd_open")
+        and hasattr(signal, "pidfd_send_signal"),
+        "Linux pidfd supervision only",
+    )
+    def test_isolated_cell_stall_kills_worker_and_returns_timeout(self):
+        def stalled_cell(*, progress_callback_override=None):
+            progress_callback_override(
+                {
+                    "completed_repetition_count": 1,
+                    "completed_operation_sample_count": 32,
+                }
+            )
+            time.sleep(60)
+
+        started = time.monotonic()
+        result = runner._run_isolated_matrix_cell(
+            stalled_cell,
+            cell_index=1,
+            cell_count=15,
+            graph_size=100,
+            concurrency=1,
+            repetitions=30,
+            operations_per_type=8,
+            stall_timeout_seconds=0.1,
+            progress_callback=lambda _snapshot: None,
+            interruption_check=lambda: None,
+            close_fds=(),
+        )
+
+        self.assertLess(time.monotonic() - started, 5.0)
+        self.assertEqual(
+            result,
+            {
+                "schema": "txnmem-provenance-cell-execution-v1",
+                "outcome": "cell_timed_out",
+                "completed_repetition_count": 1,
+                "timeout_class": "cell_stall_timeout",
+            },
+        )
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and hasattr(os, "pidfd_open")
+        and hasattr(signal, "pidfd_send_signal"),
+        "Linux pidfd supervision only",
+    )
+    def test_final_heartbeat_is_not_committed_until_cell_result_arrives(self):
+        published = []
+
+        def stalled_after_measurement(*, progress_callback_override=None):
+            for repetition in range(1, 31):
+                progress_callback_override(
+                    {
+                        "completed_repetition_count": repetition,
+                        "completed_operation_sample_count": repetition * 32,
+                    }
+                )
+            time.sleep(60)
+
+        result = runner._run_isolated_matrix_cell(
+            stalled_after_measurement,
+            cell_index=1,
+            cell_count=15,
+            graph_size=100,
+            concurrency=1,
+            repetitions=30,
+            operations_per_type=8,
+            stall_timeout_seconds=0.1,
+            progress_callback=published.append,
+            interruption_check=lambda: None,
+            close_fds=(),
+        )
+
+        self.assertEqual(len(published), 29)
+        self.assertEqual(published[-1]["completed_repetition_count"], 29)
+        self.assertEqual(result["outcome"], "cell_timed_out")
+        self.assertEqual(result["completed_repetition_count"], 29)
 
     def test_runner_uses_exact_loopback_probes_and_both_must_succeed(self):
         runtime_site = Path("/runtime-fixture")

@@ -293,7 +293,7 @@ class FormalControllerCleanupTests(unittest.TestCase):
     def _progress_line() -> bytes:
         return progress_protocol.canonical_snapshot_line(
             {
-                "schema": "txnmem-provenance-progress-snapshot-v1",
+                "schema": "txnmem-provenance-progress-snapshot-v2",
                 "run_binding_sha256": "a" * 64,
                 "config_sha256": "b" * 64,
                 "phase": "measurement",
@@ -309,6 +309,9 @@ class FormalControllerCleanupTests(unittest.TestCase):
                 "total_samples": 14400,
                 "update_sequence": 1,
                 "status": "running",
+                "outcome": "repetition_completed",
+                "skipped_repetitions": 0,
+                "timed_out_cell_count": 0,
                 "last_update_age_seconds": 0,
             }
         )
@@ -929,6 +932,7 @@ class FormalControllerCleanupTests(unittest.TestCase):
                 "completed_samples": 0,
                 "update_sequence": 0,
                 "status": "starting",
+                "outcome": "starting",
             }
         )
         self.assertEqual(
@@ -993,6 +997,66 @@ class FormalControllerCleanupTests(unittest.TestCase):
             + b"\n"
         )
         self.assertEqual(controller._validate_progress_output(payload), payload)
+
+    def test_progress_output_gate_accepts_cell_timeout_only_as_incomplete_block(self):
+        timed_out = json.loads(self._progress_line())
+        timed_out.update(
+            {
+                "repetition_index": 0,
+                "completed_repetitions": 0,
+                "completed_samples": 0,
+                "skipped_repetitions": 30,
+                "timed_out_cell_count": 1,
+                "update_sequence": 1,
+                "outcome": "cell_timed_out",
+                "status": "blocked",
+                "terminal_reason_class": "cell_timeout",
+            }
+        )
+        payload = (
+            json.dumps(timed_out, sort_keys=True, separators=(",", ":")).encode()
+            + b"\n"
+        )
+        self.assertEqual(controller._validate_progress_output(payload), payload)
+
+        falsely_completed = {
+            **timed_out,
+            "status": "completed",
+            "terminal_reason_class": "completed",
+        }
+        with self.assertRaises(controller.FormalControllerError):
+            controller._validate_progress_output(
+                json.dumps(
+                    falsely_completed, sort_keys=True, separators=(",", ":")
+                ).encode()
+                + b"\n"
+            )
+
+    def test_progress_output_gate_rejects_timeout_count_without_skips(self):
+        impossible = json.loads(self._progress_line())
+        impossible.update(
+            {
+                "cell_index": 15,
+                "graph_size": 10000,
+                "concurrency": 16,
+                "repetition_index": 30,
+                "completed_repetitions": 450,
+                "completed_samples": 14400,
+                "update_sequence": 465,
+                "outcome": "repetition_completed",
+                "skipped_repetitions": 0,
+                "timed_out_cell_count": 15,
+                "status": "blocked",
+                "terminal_reason_class": "cell_timeout",
+            }
+        )
+        payload = (
+            json.dumps(impossible, sort_keys=True, separators=(",", ":")).encode()
+            + b"\n"
+        )
+
+        with self.assertRaises(controller.FormalControllerError):
+            controller._validate_progress_output(payload)
 
     def test_main_progress_sanitizes_project_root_expansion_failure(self):
         raw_failure = "seeded private root /private/project"

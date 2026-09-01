@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import ctypes
 import enum
+import errno
 import hashlib
 import importlib
 import json
+import math
 import os
 from pathlib import Path
 import re
+import select
 import signal
 import sys
 import time
@@ -33,6 +36,11 @@ _SMOKE_V2_SCENARIOS = frozenset(
     }
 )
 _SMOKE_V2_RECEIPT_SCHEMA = "txnmem-provenance-smoke-child-receipt-v2"
+_CELL_EXECUTION_SCHEMA = "txnmem-provenance-cell-execution-v1"
+_CELL_WORKER_RESULT_SCHEMA = "txnmem-provenance-cell-worker-result-v1"
+_CELL_HEARTBEAT_SCHEMA = "txnmem-provenance-cell-heartbeat-v1"
+_MAX_CELL_RESULT_BYTES = 64 * 1024 * 1024
+_MAX_CELL_HEARTBEAT_BYTES = 4096
 
 
 class _RunnerInterruption(BaseException):
@@ -286,6 +294,495 @@ def _completion_payload(material: dict) -> bytes:
         separators=(",", ":"),
         allow_nan=False,
     ).encode("utf-8")
+
+
+def _canonical_cell_payload(value: dict) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise RuntimeError("isolated cell result is not canonical") from exc
+
+
+def _closed_cell_timeout_class(exc: BaseException) -> str | None:
+    current: BaseException | None = exc
+    observed: set[int] = set()
+    for _depth in range(16):
+        if current is None or id(current) in observed:
+            break
+        observed.add(id(current))
+        if type(current) is TimeoutError:
+            return "backend_timeout"
+        if type(current) is urllib.error.URLError and type(
+            getattr(current, "reason", None)
+        ) is TimeoutError:
+            return "backend_timeout"
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _decode_cell_worker_result(payload: bytes) -> dict:
+    if (
+        type(payload) is not bytes
+        or not payload.endswith(b"\n")
+        or payload[:-1].find(b"\n") != -1
+        or len(payload) > _MAX_CELL_RESULT_BYTES
+    ):
+        raise RuntimeError("isolated cell result framing is invalid")
+
+    def reject_duplicates(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise RuntimeError("isolated cell result is invalid")
+            result[key] = value
+        return result
+
+    try:
+        document = json.loads(
+            payload[:-1].decode("utf-8", errors="strict"),
+            object_pairs_hook=reject_duplicates,
+            parse_constant=lambda _value: (_ for _ in ()).throw(
+                RuntimeError("isolated cell result is invalid")
+            ),
+        )
+    except RuntimeError:
+        raise
+    except (UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise RuntimeError("isolated cell result is invalid") from exc
+    if (
+        type(document) is not dict
+        or _canonical_cell_payload(document) + b"\n" != payload
+        or document.get("schema") != _CELL_WORKER_RESULT_SCHEMA
+    ):
+        raise RuntimeError("isolated cell result is invalid")
+    return document
+
+
+def _decode_cell_heartbeat(payload: bytes) -> dict:
+    if (
+        type(payload) is not bytes
+        or not payload.endswith(b"\n")
+        or payload[:-1].find(b"\n") != -1
+        or len(payload) > _MAX_CELL_HEARTBEAT_BYTES
+    ):
+        raise RuntimeError("isolated cell heartbeat is invalid")
+    try:
+        document = json.loads(payload[:-1].decode("ascii", errors="strict"))
+    except (UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise RuntimeError("isolated cell heartbeat is invalid") from exc
+    if (
+        type(document) is not dict
+        or set(document)
+        != {
+            "schema",
+            "completed_repetition_count",
+            "completed_operation_sample_count",
+        }
+        or document.get("schema") != _CELL_HEARTBEAT_SCHEMA
+        or _canonical_cell_payload(document) + b"\n" != payload
+    ):
+        raise RuntimeError("isolated cell heartbeat is invalid")
+    return document
+
+
+def _kill_and_reap_stalled_worker(pidfd: int, worker_pid: int) -> tuple[bool, int]:
+    """Kill one exact worker and prove whether SIGKILL caused its exit."""
+
+    if (
+        type(pidfd) is not int
+        or pidfd < 0
+        or type(worker_pid) is not int
+        or worker_pid <= 0
+    ):
+        raise RuntimeError("isolated cell worker identity is invalid")
+    signal_accepted = True
+    try:
+        signal.pidfd_send_signal(pidfd, signal.SIGKILL, None, 0)
+    except ProcessLookupError:
+        signal_accepted = False
+    except OSError as exc:
+        if exc.errno != errno.ESRCH:
+            raise
+        signal_accepted = False
+    waited_pid, worker_status = os.waitpid(worker_pid, 0)
+    if waited_pid != worker_pid:
+        raise RuntimeError("isolated cell worker identity changed")
+    killed_by_sigkill = bool(
+        signal_accepted
+        and os.WIFSIGNALED(worker_status)
+        and os.WTERMSIG(worker_status) == signal.SIGKILL
+    )
+    return killed_by_sigkill, worker_status
+
+
+def _run_isolated_matrix_cell(
+    run_cell,
+    *,
+    cell_index: int,
+    cell_count: int,
+    graph_size: int,
+    concurrency: int,
+    repetitions: int,
+    operations_per_type: int,
+    stall_timeout_seconds: float,
+    progress_callback,
+    interruption_check,
+    close_fds: tuple[int, ...],
+) -> dict:
+    """Run one cell in an exactly supervised child and bound no-progress stalls."""
+
+    if (
+        isinstance(stall_timeout_seconds, bool)
+        or type(stall_timeout_seconds) not in {int, float}
+        or not math.isfinite(float(stall_timeout_seconds))
+        or float(stall_timeout_seconds) <= 0.0
+    ):
+        raise RuntimeError("isolated cell stall timeout is invalid")
+    if not callable(run_cell) or not callable(progress_callback) or not callable(
+        interruption_check
+    ):
+        raise RuntimeError("isolated cell callbacks are invalid")
+    for name, value in (
+        ("cell_index", cell_index),
+        ("cell_count", cell_count),
+        ("graph_size", graph_size),
+        ("concurrency", concurrency),
+        ("repetitions", repetitions),
+        ("operations_per_type", operations_per_type),
+    ):
+        if type(value) is not int or value <= 0:
+            raise RuntimeError(f"isolated cell {name} is invalid")
+    if cell_index > cell_count:
+        raise RuntimeError("isolated cell index is outside the matrix")
+    if (
+        type(close_fds) is not tuple
+        or len(set(close_fds)) != len(close_fds)
+        or any(type(value) is not int or value < 0 for value in close_fds)
+    ):
+        raise RuntimeError("isolated cell descriptor closure is invalid")
+    if (
+        not sys.platform.startswith("linux")
+        or not hasattr(os, "fork")
+        or not hasattr(os, "pidfd_open")
+        or not hasattr(signal, "pidfd_send_signal")
+    ):
+        raise RuntimeError("isolated cell supervision requires Linux pidfd support")
+
+    result_read, result_write = os.pipe()
+    heartbeat_read, heartbeat_write = os.pipe()
+    worker_pid: int | None = None
+    pidfd: int | None = None
+    waited = False
+
+    def close_descriptor(descriptor: int | None) -> None:
+        if descriptor is None:
+            return
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+
+    try:
+        worker_pid = os.fork()
+        if worker_pid == 0:
+            exit_code = 74
+            completed_repetitions = 0
+            try:
+                close_descriptor(result_read)
+                close_descriptor(heartbeat_read)
+                for descriptor in close_fds:
+                    if descriptor not in {result_write, heartbeat_write}:
+                        close_descriptor(descriptor)
+                parent_pid = os.getppid()
+                _set_and_require_parent_death_sigkill(parent_pid)
+
+                def emit_heartbeat(snapshot) -> None:
+                    nonlocal completed_repetitions
+                    if not isinstance(snapshot, dict):
+                        raise RuntimeError("isolated cell progress is invalid")
+                    completed = snapshot.get("completed_repetition_count")
+                    completed_samples = snapshot.get(
+                        "completed_operation_sample_count"
+                    )
+                    if (
+                        type(completed) is not int
+                        or completed != completed_repetitions + 1
+                        or completed > repetitions
+                        or type(completed_samples) is not int
+                        or completed_samples
+                        != completed * operations_per_type * 4
+                    ):
+                        raise RuntimeError("isolated cell progress is invalid")
+                    heartbeat = {
+                        "schema": _CELL_HEARTBEAT_SCHEMA,
+                        "completed_repetition_count": completed,
+                        "completed_operation_sample_count": completed_samples,
+                    }
+                    _write_all(
+                        heartbeat_write,
+                        _canonical_cell_payload(heartbeat) + b"\n",
+                    )
+                    completed_repetitions = completed
+
+                try:
+                    report = run_cell(
+                        progress_callback_override=emit_heartbeat
+                    )
+                    result = {
+                        "schema": _CELL_WORKER_RESULT_SCHEMA,
+                        "outcome": "completed",
+                        "completed_repetition_count": completed_repetitions,
+                        "report": report,
+                    }
+                    exit_code = 0
+                except BaseException as exc:
+                    timeout_class = _closed_cell_timeout_class(exc)
+                    if timeout_class is not None:
+                        result = {
+                            "schema": _CELL_WORKER_RESULT_SCHEMA,
+                            "outcome": "cell_timed_out",
+                            "completed_repetition_count": completed_repetitions,
+                            "timeout_class": timeout_class,
+                        }
+                        exit_code = 0
+                    else:
+                        error_class = type(exc).__name__
+                        if re.fullmatch(
+                            r"[A-Za-z_][A-Za-z0-9_]{0,127}", error_class
+                        ) is None:
+                            error_class = "RuntimeError"
+                        result = {
+                            "schema": _CELL_WORKER_RESULT_SCHEMA,
+                            "outcome": "failed",
+                            "error_class": error_class,
+                        }
+                _write_all(
+                    result_write,
+                    _canonical_cell_payload(result) + b"\n",
+                )
+            except BaseException:
+                exit_code = 74
+            finally:
+                close_descriptor(heartbeat_write)
+                close_descriptor(result_write)
+            os._exit(exit_code)
+
+        close_descriptor(result_write)
+        result_write = -1
+        close_descriptor(heartbeat_write)
+        heartbeat_write = -1
+        pidfd = os.pidfd_open(worker_pid, 0)
+        os.set_blocking(result_read, False)
+        os.set_blocking(heartbeat_read, False)
+        result_buffer = bytearray()
+        heartbeat_buffer = bytearray()
+        received_repetitions = 0
+        completed_repetitions = 0
+        deadline = time.monotonic() + float(stall_timeout_seconds)
+        worker_status: int | None = None
+        result_open = True
+        heartbeat_open = True
+
+        def drain(descriptor: int, target: bytearray, limit: int) -> bool:
+            still_open = True
+            while True:
+                try:
+                    chunk = os.read(descriptor, 65536)
+                except BlockingIOError:
+                    break
+                if not chunk:
+                    still_open = False
+                    break
+                target.extend(chunk)
+                if len(target) > limit:
+                    raise RuntimeError("isolated cell IPC exceeded its bound")
+            return still_open
+
+        def consume_heartbeats() -> None:
+            nonlocal completed_repetitions, deadline, received_repetitions
+            while True:
+                newline = heartbeat_buffer.find(b"\n")
+                if newline < 0:
+                    break
+                payload = bytes(heartbeat_buffer[: newline + 1])
+                del heartbeat_buffer[: newline + 1]
+                heartbeat = _decode_cell_heartbeat(payload)
+                expected = received_repetitions + 1
+                if (
+                    heartbeat["completed_repetition_count"] != expected
+                    or expected > repetitions
+                ):
+                    raise RuntimeError("isolated cell heartbeat order is invalid")
+                received_repetitions = expected
+                if expected < repetitions:
+                    progress_callback(
+                        {
+                            "completed_repetition_count": expected,
+                            "completed_operation_sample_count": heartbeat[
+                                "completed_operation_sample_count"
+                            ],
+                        }
+                    )
+                    completed_repetitions = expected
+                deadline = time.monotonic() + float(stall_timeout_seconds)
+
+        while worker_status is None:
+            interruption_check()
+            remaining = max(0.0, deadline - time.monotonic())
+            watched = [pidfd]
+            if result_open:
+                watched.append(result_read)
+            if heartbeat_open:
+                watched.append(heartbeat_read)
+            readable, _writable, _exceptional = select.select(
+                watched, [], [], min(remaining, 0.25)
+            )
+            if result_open and result_read in readable:
+                result_open = drain(
+                    result_read, result_buffer, _MAX_CELL_RESULT_BYTES
+                )
+            if heartbeat_open and heartbeat_read in readable:
+                heartbeat_open = drain(
+                    heartbeat_read,
+                    heartbeat_buffer,
+                    _MAX_CELL_HEARTBEAT_BYTES * repetitions,
+                )
+                consume_heartbeats()
+            if pidfd in readable:
+                waited_pid, worker_status = os.waitpid(worker_pid, 0)
+                if waited_pid != worker_pid:
+                    raise RuntimeError("isolated cell worker identity changed")
+                waited = True
+                if result_open:
+                    result_open = drain(
+                        result_read, result_buffer, _MAX_CELL_RESULT_BYTES
+                    )
+                if heartbeat_open:
+                    heartbeat_open = drain(
+                        heartbeat_read,
+                        heartbeat_buffer,
+                        _MAX_CELL_HEARTBEAT_BYTES * repetitions,
+                    )
+                consume_heartbeats()
+                break
+            if time.monotonic() >= deadline:
+                killed_by_watchdog, worker_status = _kill_and_reap_stalled_worker(
+                    pidfd, worker_pid
+                )
+                waited = True
+                if killed_by_watchdog:
+                    return {
+                        "schema": _CELL_EXECUTION_SCHEMA,
+                        "outcome": "cell_timed_out",
+                        "completed_repetition_count": completed_repetitions,
+                        "timeout_class": "cell_stall_timeout",
+                    }
+                if result_open:
+                    result_open = drain(
+                        result_read, result_buffer, _MAX_CELL_RESULT_BYTES
+                    )
+                if heartbeat_open:
+                    heartbeat_open = drain(
+                        heartbeat_read,
+                        heartbeat_buffer,
+                        _MAX_CELL_HEARTBEAT_BYTES * repetitions,
+                    )
+                consume_heartbeats()
+                break
+
+        if heartbeat_buffer:
+            raise RuntimeError("isolated cell heartbeat was truncated")
+        document = _decode_cell_worker_result(bytes(result_buffer))
+        if (
+            not os.WIFEXITED(worker_status)
+            or os.WEXITSTATUS(worker_status) != 0
+        ):
+            raise RuntimeError("isolated cell worker failed")
+        if document.get("outcome") == "completed":
+            if (
+                set(document)
+                != {
+                    "schema",
+                    "outcome",
+                    "completed_repetition_count",
+                    "report",
+                }
+                or document.get("completed_repetition_count")
+                != received_repetitions
+                or received_repetitions != repetitions
+                or type(document.get("report")) is not dict
+            ):
+                raise RuntimeError("isolated completed cell result is invalid")
+            progress_callback(
+                {
+                    "completed_repetition_count": repetitions,
+                    "completed_operation_sample_count": (
+                        repetitions * operations_per_type * 4
+                    ),
+                }
+            )
+            completed_repetitions = repetitions
+            return {
+                "schema": _CELL_EXECUTION_SCHEMA,
+                "outcome": "completed",
+                "completed_repetition_count": completed_repetitions,
+                "report": document["report"],
+            }
+        if document.get("outcome") == "cell_timed_out":
+            if (
+                set(document)
+                != {
+                    "schema",
+                    "outcome",
+                    "completed_repetition_count",
+                    "timeout_class",
+                }
+                or document.get("completed_repetition_count")
+                != received_repetitions
+                or completed_repetitions >= repetitions
+                or document.get("timeout_class") != "backend_timeout"
+            ):
+                raise RuntimeError("isolated timed-out cell result is invalid")
+            return {
+                "schema": _CELL_EXECUTION_SCHEMA,
+                "outcome": "cell_timed_out",
+                "completed_repetition_count": completed_repetitions,
+                "timeout_class": "backend_timeout",
+            }
+        raise RuntimeError("isolated cell worker failed")
+    except BaseException:
+        if worker_pid is not None and worker_pid > 0 and not waited:
+            if pidfd is not None:
+                try:
+                    signal.pidfd_send_signal(pidfd, signal.SIGKILL, None, 0)
+                except (OSError, ProcessLookupError):
+                    pass
+            else:
+                try:
+                    os.kill(worker_pid, signal.SIGKILL)
+                except (OSError, ProcessLookupError):
+                    pass
+            try:
+                waited_pid, _status = os.waitpid(worker_pid, 0)
+                waited = waited_pid == worker_pid
+            except (ChildProcessError, OSError):
+                pass
+        raise
+    finally:
+        for descriptor in (
+            result_read,
+            None if result_write == -1 else result_write,
+            heartbeat_read,
+            None if heartbeat_write == -1 else heartbeat_write,
+            pidfd,
+        ):
+            close_descriptor(descriptor)
 
 
 def _load_smoke_graph_database(runtime_site: Path):
@@ -1069,14 +1566,26 @@ def main(argv: list[str] | None = None) -> int:
                 completed_repetitions=snapshot["completed_repetitions"],
                 completed_samples=snapshot["completed_samples"],
                 update_sequence=snapshot["update_sequence"],
+                outcome=snapshot["outcome"],
+                skipped_repetitions=snapshot["skipped_repetitions"],
+                timed_out_cell_count=snapshot["timed_out_cell_count"],
             )
             _write_all(progress_fd, canonical_progress_line(event))
+
+        def execute_cell(run_cell, **kwargs):
+            return _run_isolated_matrix_cell(
+                run_cell,
+                interruption_check=termination_state.raise_if_requested,
+                close_fds=(completion_fd, progress_fd),
+                **kwargs,
+            )
 
         result = experiment_main(
             arguments,
             _progress_callback=emit_progress,
             _require_formal_eligibility=True,
             _interruption_check=termination_state.raise_if_requested,
+            _cell_executor=execute_cell,
         )
         if type(result) is not int:
             return 73

@@ -430,15 +430,24 @@ class TxnMemProvenanceProgressTests(unittest.TestCase):
     def test_valid_progress_is_canonical_and_monotonic(self):
         state = FormalProgressState("a" * 64, "b" * 64)
         first_event = self.event()
+        self.assertEqual(
+            first_event["schema"], "txnmem-provenance-progress-event-v2"
+        )
+        self.assertEqual(first_event["outcome"], "repetition_completed")
+        self.assertEqual(first_event["skipped_repetitions"], 0)
+        self.assertEqual(first_event["timed_out_cell_count"], 0)
         expected_first_line = (
             '{"cell_count":15,"cell_index":1,"completed_repetitions":1,'
             '"completed_samples":32,"concurrency":1,"config_sha256":"'
             + "b" * 64
-            + '","graph_size":100,"phase":"measurement","repetition_count":30,'
+            + '","graph_size":100,"outcome":"repetition_completed",'
+            '"phase":"measurement","repetition_count":30,'
             '"repetition_index":1,"run_binding_sha256":"'
             + "a" * 64
-            + '","schema":"txnmem-provenance-progress-event-v1","status":"running",'
-            '"total_repetitions":450,"total_samples":14400,"update_sequence":1}\n'
+            + '","schema":"txnmem-provenance-progress-event-v2",'
+            '"skipped_repetitions":0,"status":"running",'
+            '"timed_out_cell_count":0,"total_repetitions":450,'
+            '"total_samples":14400,"update_sequence":1}\n'
         ).encode()
         self.assertEqual(canonical_progress_line(first_event), expected_first_line)
 
@@ -496,6 +505,119 @@ class TxnMemProvenanceProgressTests(unittest.TestCase):
         self.assertEqual(last["completed_repetitions"], 450)
         self.assertEqual(last["completed_samples"], 14400)
         self.assertEqual(last["update_sequence"], 450)
+
+    def test_cell_timeout_skips_only_the_unfinished_repetitions_and_advances(self):
+        state = FormalProgressState("a" * 64, "b" * 64)
+        first = state.consume(self.event())
+        timeout_event = {
+            **first,
+            "schema": "txnmem-provenance-progress-event-v2",
+            "outcome": "cell_timed_out",
+            "repetition_index": 1,
+            "completed_repetitions": 1,
+            "completed_samples": 32,
+            "skipped_repetitions": 29,
+            "timed_out_cell_count": 1,
+            "update_sequence": 2,
+        }
+        try:
+            timed_out = state.consume(timeout_event)
+        except ProgressProtocolError as exc:
+            self.fail(f"cell timeout transition was rejected: {exc}")
+
+        next_graph_size, next_concurrency = FORMAL_MATRIX_CELLS[1]
+        next_repetition = {
+            **timed_out,
+            "outcome": "repetition_completed",
+            "cell_index": 2,
+            "graph_size": next_graph_size,
+            "concurrency": next_concurrency,
+            "repetition_index": 1,
+            "completed_repetitions": 2,
+            "completed_samples": 64,
+            "update_sequence": 3,
+        }
+        continued = state.consume(next_repetition)
+
+        self.assertEqual(timed_out["skipped_repetitions"], 29)
+        self.assertEqual(timed_out["timed_out_cell_count"], 1)
+        self.assertEqual(continued["cell_index"], 2)
+        self.assertEqual(continued["repetition_index"], 1)
+        self.assertEqual(continued["completed_repetitions"], 2)
+        self.assertEqual(continued["skipped_repetitions"], 29)
+        self.assertEqual(continued["update_sequence"], 3)
+
+    def test_cell_may_time_out_before_its_first_repetition(self):
+        state = FormalProgressState("a" * 64, "b" * 64)
+        timeout_event = build_progress_event(
+            run_binding_sha256="a" * 64,
+            config_sha256="b" * 64,
+            cell_index=1,
+            graph_size=100,
+            concurrency=1,
+            repetition_index=0,
+            completed_repetitions=0,
+            completed_samples=0,
+            update_sequence=1,
+            outcome="cell_timed_out",
+            skipped_repetitions=30,
+            timed_out_cell_count=1,
+        )
+
+        consumed = state.consume(timeout_event)
+
+        self.assertEqual(consumed["repetition_index"], 0)
+        self.assertEqual(consumed["completed_repetitions"], 0)
+        self.assertEqual(consumed["skipped_repetitions"], 30)
+        self.assertEqual(consumed["timed_out_cell_count"], 1)
+
+    def test_all_fifteen_cells_can_time_out_without_reusing_a_cell(self):
+        state = FormalProgressState("a" * 64, "b" * 64)
+        last = None
+        for cell_index, (graph_size, concurrency) in enumerate(
+            FORMAL_MATRIX_CELLS, start=1
+        ):
+            last = state.consume(
+                build_progress_event(
+                    run_binding_sha256="a" * 64,
+                    config_sha256="b" * 64,
+                    cell_index=cell_index,
+                    graph_size=graph_size,
+                    concurrency=concurrency,
+                    repetition_index=0,
+                    completed_repetitions=0,
+                    completed_samples=0,
+                    update_sequence=cell_index,
+                    outcome="cell_timed_out",
+                    skipped_repetitions=cell_index * 30,
+                    timed_out_cell_count=cell_index,
+                )
+            )
+
+        self.assertEqual(last["cell_index"], 15)
+        self.assertEqual(last["completed_repetitions"], 0)
+        self.assertEqual(last["skipped_repetitions"], 450)
+        self.assertEqual(last["timed_out_cell_count"], 15)
+        self.assertEqual(last["update_sequence"], 15)
+        with self.assertRaises(ProgressProtocolError):
+            state.consume(last)
+
+    def test_timeout_count_cannot_exist_without_skipped_repetitions(self):
+        with self.assertRaises(ProgressProtocolError):
+            build_progress_event(
+                run_binding_sha256="a" * 64,
+                config_sha256="b" * 64,
+                cell_index=15,
+                graph_size=10000,
+                concurrency=16,
+                repetition_index=30,
+                completed_repetitions=450,
+                completed_samples=14400,
+                update_sequence=465,
+                outcome="repetition_completed",
+                skipped_repetitions=0,
+                timed_out_cell_count=15,
+            )
 
     def test_unknown_or_missing_fields_are_rejected(self):
         valid = self.event()
@@ -572,7 +694,14 @@ class TxnMemProvenanceProgressTests(unittest.TestCase):
             {**valid_second, "graph_size": 1000},
             {**valid_second, "concurrency": 2},
             {
-                **self.event(cell=2, repetition=1, completed=2, sequence=2),
+                **valid_second,
+                "cell_index": 2,
+                "graph_size": 100,
+                "concurrency": 2,
+                "repetition_index": 1,
+                "skipped_repetitions": 29,
+                "timed_out_cell_count": 1,
+                "update_sequence": 3,
             },
             {**valid_second, "completed_repetitions": 451},
         ]
@@ -683,6 +812,10 @@ class TxnMemProgressSnapshotStoreTests(unittest.TestCase):
         self.store.write_starting("a" * 64, "b" * 64)
         persisted = json.loads(self.path.read_text())
         view = self.store.read_view()
+        self.assertEqual(
+            view["schema"], "txnmem-provenance-progress-snapshot-v2"
+        )
+        self.assertEqual(view["outcome"], "starting")
         self.assertEqual(persisted["last_update_age_seconds"], 0)
         self.assertEqual(view["cell_index"], 1)
         self.assertEqual(view["graph_size"], 100)
@@ -690,10 +823,40 @@ class TxnMemProgressSnapshotStoreTests(unittest.TestCase):
         self.assertEqual(view["repetition_index"], 0)
         self.assertEqual(view["completed_repetitions"], 0)
         self.assertEqual(view["completed_samples"], 0)
+        self.assertEqual(view["skipped_repetitions"], 0)
+        self.assertEqual(view["timed_out_cell_count"], 0)
         self.assertEqual(view["update_sequence"], 0)
         self.assertEqual(set(view), progress.SNAPSHOT_FIELDS)
         self.assertNotIn("timestamp", view)
         self.assertNotIn("path", view)
+
+    def test_timeout_snapshot_can_be_blocked_without_losing_sanitized_counts(self):
+        self.store.write_starting("a" * 64, "b" * 64)
+        timeout_event = build_progress_event(
+            run_binding_sha256="a" * 64,
+            config_sha256="b" * 64,
+            cell_index=1,
+            graph_size=100,
+            concurrency=1,
+            repetition_index=0,
+            completed_repetitions=0,
+            completed_samples=0,
+            update_sequence=1,
+            outcome="cell_timed_out",
+            skipped_repetitions=30,
+            timed_out_cell_count=1,
+        )
+        self.store.write_running(timeout_event)
+        self.store.write_terminal("blocked", "cell_timeout")
+
+        view = self.store.read_view()
+
+        self.assertEqual(view["status"], "blocked")
+        self.assertEqual(view["terminal_reason_class"], "cell_timeout")
+        self.assertEqual(view["outcome"], "cell_timed_out")
+        self.assertEqual(view["completed_repetitions"], 0)
+        self.assertEqual(view["skipped_repetitions"], 30)
+        self.assertEqual(view["timed_out_cell_count"], 1)
 
     def test_read_view_derives_age_from_same_validated_file_metadata(self):
         self.store.write_running(self.event())

@@ -24,7 +24,8 @@ class ProgressProtocolError(RuntimeError):
 
 
 PROGRESS_EVENT_SCHEMA = "txnmem-provenance-progress-event-v1"
-PROGRESS_SNAPSHOT_SCHEMA = "txnmem-provenance-progress-snapshot-v1"
+PROGRESS_EVENT_SCHEMA_V2 = "txnmem-provenance-progress-event-v2"
+PROGRESS_SNAPSHOT_SCHEMA = "txnmem-provenance-progress-snapshot-v2"
 MAX_PROGRESS_LINE_BYTES = 4096
 FORMAL_MATRIX_CELLS: tuple[tuple[int, int], ...] = tuple(
     (graph_size, concurrency)
@@ -51,13 +52,21 @@ EVENT_FIELDS = frozenset(
         "status",
     }
 )
-SNAPSHOT_FIELDS = frozenset((EVENT_FIELDS - {"schema"}) | {"schema", "last_update_age_seconds"})
+EVENT_V2_FIELDS = EVENT_FIELDS | {
+    "outcome",
+    "skipped_repetitions",
+    "timed_out_cell_count",
+}
+SNAPSHOT_FIELDS = frozenset(
+    (EVENT_V2_FIELDS - {"schema"}) | {"schema", "last_update_age_seconds"}
+)
 TERMINAL_STATUSES = frozenset({"completed", "blocked", "interrupted"})
 TERMINAL_REASON_CLASSES = frozenset(
     {
         "completed",
         "formal_eligibility_failed",
         "backend_timeout",
+        "cell_timeout",
         "progress_protocol_failed",
         "collector_interrupted",
         "resource_cleanup_failed",
@@ -91,6 +100,10 @@ _INTEGER_FIELDS = frozenset(
         "update_sequence",
     }
 )
+_SNAPSHOT_INTEGER_FIELDS = _INTEGER_FIELDS | {
+    "skipped_repetitions",
+    "timed_out_cell_count",
+}
 
 
 def _store_writer_lock(parent_identity: tuple[int, int], target_name: str) -> _StoreWriterLock:
@@ -122,9 +135,15 @@ def _validate_event(event: Mapping[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         _protocol_error("progress event must be a plain mapping")
 
-    if actual_fields != EVENT_FIELDS:
-        unknown = sorted(actual_fields - EVENT_FIELDS, key=repr)
-        missing = sorted(EVENT_FIELDS - actual_fields)
+    schema = normalized.get("schema")
+    expected_fields = (
+        EVENT_V2_FIELDS
+        if schema == PROGRESS_EVENT_SCHEMA_V2
+        else EVENT_FIELDS
+    )
+    if actual_fields != expected_fields:
+        unknown = sorted(actual_fields - expected_fields, key=repr)
+        missing = sorted(expected_fields - actual_fields)
         details = []
         if unknown:
             details.append(f"unknown fields: {unknown!r}")
@@ -133,13 +152,14 @@ def _validate_event(event: Mapping[str, Any]) -> dict[str, Any]:
         _protocol_error("invalid progress event fields (" + "; ".join(details) + ")")
 
     string_values = {
-        "schema": PROGRESS_EVENT_SCHEMA,
         "phase": "measurement",
         "status": "running",
     }
     for name, expected in string_values.items():
         if type(normalized[name]) is not str or normalized[name] != expected:
             _protocol_error(f"{name} has an invalid value")
+    if schema not in {PROGRESS_EVENT_SCHEMA, PROGRESS_EVENT_SCHEMA_V2}:
+        _protocol_error("schema has an invalid value")
 
     _validate_hash("run_binding_sha256", normalized["run_binding_sha256"])
     _validate_hash("config_sha256", normalized["config_sha256"])
@@ -157,22 +177,77 @@ def _validate_event(event: Mapping[str, Any]) -> dict[str, Any]:
         _protocol_error("graph_size does not match cell_index")
     if normalized["concurrency"] != expected_concurrency:
         _protocol_error("concurrency does not match cell_index")
-    if not 1 <= normalized["repetition_index"] <= 30:
-        _protocol_error("repetition_index is outside the formal repetition count")
     if normalized["repetition_count"] != 30:
         _protocol_error("repetition_count must be 30")
-    if not 1 <= normalized["completed_repetitions"] <= 450:
-        _protocol_error("completed_repetitions is outside the formal count")
     if normalized["total_repetitions"] != 450:
         _protocol_error("total_repetitions must be 450")
-    if not 1 <= normalized["completed_samples"] <= 14400:
-        _protocol_error("completed_samples is outside the formal count")
     if normalized["total_samples"] != 14400:
         _protocol_error("total_samples must be 14400")
-    if not 1 <= normalized["update_sequence"] <= 450:
-        _protocol_error("update_sequence is outside the formal count")
     if normalized["completed_samples"] != normalized["completed_repetitions"] * 32:
         _protocol_error("completed_samples must equal completed_repetitions times 32")
+
+    if schema == PROGRESS_EVENT_SCHEMA_V2:
+        for name in ("skipped_repetitions", "timed_out_cell_count"):
+            if type(normalized[name]) is not int:
+                _protocol_error(f"{name} must be an integer")
+        outcome = normalized["outcome"]
+        if type(outcome) is not str or outcome not in {
+            "repetition_completed",
+            "cell_timed_out",
+        }:
+            _protocol_error("outcome has an invalid value")
+        if not 0 <= normalized["skipped_repetitions"] <= 450:
+            _protocol_error("skipped_repetitions is outside the formal count")
+        if not 0 <= normalized["timed_out_cell_count"] <= 15:
+            _protocol_error("timed_out_cell_count is outside the formal count")
+        if not (
+            normalized["timed_out_cell_count"]
+            <= normalized["skipped_repetitions"]
+            <= 30 * normalized["timed_out_cell_count"]
+        ):
+            _protocol_error(
+                "skipped repetitions do not match timed-out cell count"
+            )
+        if not 1 <= normalized["update_sequence"] <= 450:
+            _protocol_error("update_sequence is outside the formal event count")
+        if normalized["update_sequence"] != (
+            normalized["completed_repetitions"]
+            + normalized["timed_out_cell_count"]
+        ):
+            _protocol_error("update_sequence must equal completed repetitions plus timed-out cells")
+        if not 0 <= normalized["completed_repetitions"] <= 450:
+            _protocol_error("completed_repetitions is outside the formal count")
+        if not 0 <= normalized["completed_samples"] <= 14400:
+            _protocol_error("completed_samples is outside the formal count")
+        processed_repetitions = (
+            normalized["completed_repetitions"]
+            + normalized["skipped_repetitions"]
+        )
+        if outcome == "cell_timed_out":
+            if not 0 <= normalized["repetition_index"] < 30:
+                _protocol_error("timeout repetition_index is invalid")
+            if processed_repetitions != normalized["cell_index"] * 30:
+                _protocol_error("timeout event does not close exactly one formal cell")
+        else:
+            if not 1 <= normalized["repetition_index"] <= 30:
+                _protocol_error("repetition_index is outside the formal repetition count")
+            if not 1 <= normalized["completed_repetitions"] <= 450:
+                _protocol_error("completed_repetitions is outside the formal count")
+            expected_processed = (
+                (normalized["cell_index"] - 1) * 30
+                + normalized["repetition_index"]
+            )
+            if processed_repetitions != expected_processed:
+                _protocol_error("completed event does not match its formal cell position")
+    else:
+        if not 1 <= normalized["repetition_index"] <= 30:
+            _protocol_error("repetition_index is outside the formal repetition count")
+        if not 1 <= normalized["completed_repetitions"] <= 450:
+            _protocol_error("completed_repetitions is outside the formal count")
+        if not 1 <= normalized["completed_samples"] <= 14400:
+            _protocol_error("completed_samples is outside the formal count")
+        if not 1 <= normalized["update_sequence"] <= 450:
+            _protocol_error("update_sequence is outside the formal count")
 
     return normalized
 
@@ -250,11 +325,14 @@ def build_progress_event(
     completed_repetitions: int,
     completed_samples: int,
     update_sequence: int,
+    outcome: str = "repetition_completed",
+    skipped_repetitions: int = 0,
+    timed_out_cell_count: int = 0,
 ) -> dict[str, Any]:
     """Build one event using the fixed formal experiment dimensions."""
 
     event = {
-        "schema": PROGRESS_EVENT_SCHEMA,
+        "schema": PROGRESS_EVENT_SCHEMA_V2,
         "run_binding_sha256": run_binding_sha256,
         "config_sha256": config_sha256,
         "phase": "measurement",
@@ -270,6 +348,9 @@ def build_progress_event(
         "total_samples": 14400,
         "update_sequence": update_sequence,
         "status": "running",
+        "outcome": outcome,
+        "skipped_repetitions": skipped_repetitions,
+        "timed_out_cell_count": timed_out_cell_count,
     }
     return copy.deepcopy(_validate_event(event))
 
@@ -321,10 +402,13 @@ def _validate_snapshot(snapshot: Mapping[str, Any], *, persisted: bool = False) 
         _protocol_error("non-terminal snapshot cannot have a terminal reason class")
 
     event_like = {key: value for key, value in normalized.items() if key not in {"last_update_age_seconds", "terminal_reason_class"}}
-    event_like["schema"] = PROGRESS_EVENT_SCHEMA
+    event_like["schema"] = PROGRESS_EVENT_SCHEMA_V2
     event_like["status"] = "running"
     if normalized["update_sequence"] == 0:
-        if any(type(normalized[name]) is not int for name in _INTEGER_FIELDS):
+        if any(
+            type(normalized[name]) is not int
+            for name in _SNAPSHOT_INTEGER_FIELDS
+        ):
             _protocol_error("snapshot starting counts must be integers")
         zero_values = {
             "cell_index": 1,
@@ -338,6 +422,9 @@ def _validate_snapshot(snapshot: Mapping[str, Any], *, persisted: bool = False) 
             "completed_samples": 0,
             "total_samples": 14400,
             "update_sequence": 0,
+            "outcome": "starting",
+            "skipped_repetitions": 0,
+            "timed_out_cell_count": 0,
         }
         if status == "running" or any(normalized.get(name) != value for name, value in zero_values.items()):
             _protocol_error("snapshot starting counts are invalid")
@@ -373,6 +460,11 @@ class FormalProgressState:
     config_sha256: str
     _last_sequence: int = field(default=0, init=False, repr=False)
     _last_event: dict[str, Any] | None = field(default=None, init=False, repr=False)
+    _completed_repetitions: int = field(default=0, init=False, repr=False)
+    _skipped_repetitions: int = field(default=0, init=False, repr=False)
+    _timed_out_cell_count: int = field(default=0, init=False, repr=False)
+    _current_cell_index: int = field(default=1, init=False, repr=False)
+    _completed_in_cell: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         _validate_hash("run_binding_sha256", self.run_binding_sha256)
@@ -381,13 +473,32 @@ class FormalProgressState:
     def consume(self, event: Mapping[str, Any]) -> dict[str, Any]:
         normalized = _validate_event(event)
         expected_sequence = self._last_sequence + 1
-        if expected_sequence > 450:
+        if expected_sequence > 450 or self._current_cell_index > 15:
             _protocol_error("progress state is already complete")
 
-        expected_cell_index = (expected_sequence - 1) // 30 + 1
-        expected_repetition_index = (expected_sequence - 1) % 30 + 1
-        expected_graph_size, expected_concurrency = FORMAL_MATRIX_CELLS[expected_cell_index - 1]
-        expected_samples = expected_sequence * 32
+        expected_cell_index = self._current_cell_index
+        expected_graph_size, expected_concurrency = FORMAL_MATRIX_CELLS[
+            expected_cell_index - 1
+        ]
+        schema = normalized["schema"]
+        outcome = (
+            normalized["outcome"]
+            if schema == PROGRESS_EVENT_SCHEMA_V2
+            else "repetition_completed"
+        )
+        if outcome == "repetition_completed":
+            expected_repetition_index = self._completed_in_cell + 1
+            expected_completed = self._completed_repetitions + 1
+            expected_skipped = self._skipped_repetitions
+            expected_timed_out = self._timed_out_cell_count
+        else:
+            expected_repetition_index = self._completed_in_cell
+            expected_completed = self._completed_repetitions
+            expected_skipped = self._skipped_repetitions + (
+                30 - self._completed_in_cell
+            )
+            expected_timed_out = self._timed_out_cell_count + 1
+        expected_samples = expected_completed * 32
         expected = {
             "run_binding_sha256": self.run_binding_sha256,
             "config_sha256": self.config_sha256,
@@ -395,15 +506,32 @@ class FormalProgressState:
             "graph_size": expected_graph_size,
             "concurrency": expected_concurrency,
             "repetition_index": expected_repetition_index,
-            "completed_repetitions": expected_sequence,
+            "completed_repetitions": expected_completed,
             "completed_samples": expected_samples,
             "update_sequence": expected_sequence,
         }
+        if schema == PROGRESS_EVENT_SCHEMA_V2:
+            expected.update(
+                {
+                    "skipped_repetitions": expected_skipped,
+                    "timed_out_cell_count": expected_timed_out,
+                }
+            )
+        elif self._skipped_repetitions or self._timed_out_cell_count:
+            _protocol_error("legacy progress cannot follow a timeout")
         for name, expected_value in expected.items():
             if normalized[name] != expected_value:
                 _protocol_error(f"{name} is not the legal successor value")
 
         self._last_sequence = expected_sequence
+        self._completed_repetitions = expected_completed
+        self._skipped_repetitions = expected_skipped
+        self._timed_out_cell_count = expected_timed_out
+        if outcome == "cell_timed_out" or expected_repetition_index == 30:
+            self._current_cell_index += 1
+            self._completed_in_cell = 0
+        else:
+            self._completed_in_cell = expected_repetition_index
         self._last_event = copy.deepcopy(normalized)
         return copy.deepcopy(self._last_event)
 
@@ -654,6 +782,9 @@ class ProgressSnapshotStore:
             "total_samples": 14400,
             "update_sequence": 0,
             "status": "starting",
+            "outcome": "starting",
+            "skipped_repetitions": 0,
+            "timed_out_cell_count": 0,
             "last_update_age_seconds": 0,
         }
         with self._transition_lock:
@@ -666,6 +797,13 @@ class ProgressSnapshotStore:
 
     def write_running(self, event: Mapping[str, Any]) -> None:
         normalized = _validate_event(event)
+        if normalized["schema"] == PROGRESS_EVENT_SCHEMA:
+            normalized = {
+                **normalized,
+                "outcome": "repetition_completed",
+                "skipped_repetitions": 0,
+                "timed_out_cell_count": 0,
+            }
         snapshot = dict(normalized)
         snapshot["schema"] = PROGRESS_SNAPSHOT_SCHEMA
         snapshot["last_update_age_seconds"] = 0

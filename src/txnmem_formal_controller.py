@@ -37,7 +37,7 @@ _COMMIT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _APPROVAL_SCHEMA = "txnmem-formal-approved-source-v1"
 _CONTEXT_SCHEMA = "txnmem-formal-controller-context-v1"
-_PROGRESS_SNAPSHOT_SCHEMA = "txnmem-provenance-progress-snapshot-v1"
+_PROGRESS_SNAPSHOT_SCHEMA = "txnmem-provenance-progress-snapshot-v2"
 _PROGRESS_READER_SCHEMA = "txnmem-provenance-progress-reader-v1"
 _PROGRESS_SNAPSHOT_FIELDS = frozenset(
     {
@@ -57,6 +57,9 @@ _PROGRESS_SNAPSHOT_FIELDS = frozenset(
         "total_samples",
         "update_sequence",
         "status",
+        "outcome",
+        "skipped_repetitions",
+        "timed_out_cell_count",
         "last_update_age_seconds",
     }
 )
@@ -73,6 +76,8 @@ _PROGRESS_INTEGER_FIELDS = frozenset(
         "completed_samples",
         "total_samples",
         "update_sequence",
+        "skipped_repetitions",
+        "timed_out_cell_count",
     }
 )
 _PROGRESS_TERMINAL_STATUSES = frozenset({"completed", "blocked", "interrupted"})
@@ -81,6 +86,7 @@ _PROGRESS_TERMINAL_REASON_CLASSES = frozenset(
         "completed",
         "formal_eligibility_failed",
         "backend_timeout",
+        "cell_timeout",
         "progress_protocol_failed",
         "collector_interrupted",
         "resource_cleanup_failed",
@@ -242,6 +248,9 @@ def _validate_progress_output(value: Any, *, allow_blocked: bool = True) -> byte
             "repetition_index": 0,
             "completed_repetitions": 0,
             "completed_samples": 0,
+            "outcome": "starting",
+            "skipped_repetitions": 0,
+            "timed_out_cell_count": 0,
         }
         if (
             status == "running"
@@ -252,29 +261,67 @@ def _validate_progress_output(value: Any, *, allow_blocked: bool = True) -> byte
     else:
         if status == "starting" or not 1 <= sequence <= 450:
             raise FormalControllerError("formal progress output is invalid")
-        expected_cell_index = (sequence - 1) // 30 + 1
-        expected_repetition_index = (sequence - 1) % 30 + 1
+        outcome = document.get("outcome")
+        if outcome not in {"repetition_completed", "cell_timed_out"}:
+            raise FormalControllerError("formal progress output is invalid")
+        completed_repetitions = document["completed_repetitions"]
+        skipped_repetitions = document["skipped_repetitions"]
+        timed_out_cell_count = document["timed_out_cell_count"]
+        if (
+            not 0 <= completed_repetitions <= 450
+            or not 0 <= skipped_repetitions <= 450
+            or not 0 <= timed_out_cell_count <= 15
+            or not timed_out_cell_count
+            <= skipped_repetitions
+            <= 30 * timed_out_cell_count
+            or document["completed_samples"] != completed_repetitions * 32
+            or sequence != completed_repetitions + timed_out_cell_count
+            or not 1 <= document["cell_index"] <= len(_PROGRESS_FORMAL_MATRIX_CELLS)
+        ):
+            raise FormalControllerError("formal progress output is invalid")
+        expected_cell_index = document["cell_index"]
         expected_graph_size, expected_concurrency = _PROGRESS_FORMAL_MATRIX_CELLS[
             expected_cell_index - 1
         ]
         expected_values = {
-            "cell_index": expected_cell_index,
             "graph_size": expected_graph_size,
             "concurrency": expected_concurrency,
-            "repetition_index": expected_repetition_index,
-            "completed_repetitions": sequence,
-            "completed_samples": sequence * 32,
         }
         if any(
             document[name] != expected for name, expected in expected_values.items()
         ):
             raise FormalControllerError("formal progress output is invalid")
+        processed_repetitions = completed_repetitions + skipped_repetitions
+        repetition_index = document["repetition_index"]
+        if outcome == "cell_timed_out":
+            if (
+                not 0 <= repetition_index < 30
+                or processed_repetitions != expected_cell_index * 30
+            ):
+                raise FormalControllerError("formal progress output is invalid")
+        elif (
+            not 1 <= repetition_index <= 30
+            or completed_repetitions == 0
+            or processed_repetitions
+            != (expected_cell_index - 1) * 30 + repetition_index
+        ):
+            raise FormalControllerError("formal progress output is invalid")
 
     terminal_reason = document.get("terminal_reason_class")
     if status == "completed":
-        if sequence != 450 or terminal_reason != "completed":
+        if (
+            sequence != 450
+            or terminal_reason != "completed"
+            or document["completed_repetitions"] != 450
+            or document["completed_samples"] != 14400
+            or document["skipped_repetitions"] != 0
+            or document["timed_out_cell_count"] != 0
+            or document["outcome"] != "repetition_completed"
+        ):
             raise FormalControllerError("formal progress output is invalid")
     elif terminal_reason == "completed":
+        raise FormalControllerError("formal progress output is invalid")
+    if terminal_reason == "cell_timeout" and document["timed_out_cell_count"] == 0:
         raise FormalControllerError("formal progress output is invalid")
     return value
 

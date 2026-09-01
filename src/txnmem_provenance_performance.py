@@ -51,8 +51,10 @@ FORMAL_MATRIX_CONFIG = {
     "bootstrap_repetitions": 10_000,
     "bootstrap_seed": 17,
     "request_timeout_seconds": 30.0,
+    "cell_stall_timeout_seconds": 3600.0,
 }
 _CONFIG_FIELDS = frozenset(FORMAL_MATRIX_CONFIG)
+_DIAGNOSTIC_CONFIG_FIELDS = _CONFIG_FIELDS - {"cell_stall_timeout_seconds"}
 _ENVIRONMENT_FIELDS = frozenset(
     {
         "schema",
@@ -300,9 +302,21 @@ def validate_matrix_config(config: Mapping[str, Any], *, formal: bool) -> dict[s
         raise ValueError("formal must be a boolean")
     if not isinstance(config, Mapping):
         raise ValueError("provenance performance config must be a mapping")
-    if set(config) != _CONFIG_FIELDS:
+    actual_fields = set(config)
+    if (
+        (formal and actual_fields != _CONFIG_FIELDS)
+        or (
+            not formal
+            and actual_fields != _CONFIG_FIELDS
+            and actual_fields != _DIAGNOSTIC_CONFIG_FIELDS
+        )
+    ):
         raise ValueError("provenance performance config fields do not match schema")
     normalized = copy.deepcopy(dict(config))
+    normalized.setdefault(
+        "cell_stall_timeout_seconds",
+        FORMAL_MATRIX_CONFIG["cell_stall_timeout_seconds"],
+    )
     if normalized.get("schema") != MATRIX_SCHEMA:
         raise ValueError("provenance performance config schema mismatch")
     expand_matrix(normalized)
@@ -318,6 +332,16 @@ def validate_matrix_config(config: Mapping[str, Any], *, formal: bool) -> dict[s
         or float(timeout) <= 0.0
     ):
         raise ValueError("request_timeout_seconds must be a positive finite number")
+    cell_timeout = normalized.get("cell_stall_timeout_seconds")
+    if (
+        isinstance(cell_timeout, bool)
+        or not isinstance(cell_timeout, (int, float))
+        or not math.isfinite(float(cell_timeout))
+        or float(cell_timeout) <= 0.0
+    ):
+        raise ValueError(
+            "cell_stall_timeout_seconds must be a positive finite number"
+        )
     _canonical_json_bytes(normalized)
     if formal and _canonical_json_bytes(normalized) != _canonical_json_bytes(
         FORMAL_MATRIX_CONFIG

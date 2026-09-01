@@ -167,6 +167,10 @@ class CollectorError(RuntimeError):
     """The collector could not establish a trustworthy execution boundary."""
 
 
+class _TransientFormalProcessObservation(CollectorError):
+    """A bound process is crossing a short fork/exit observation boundary."""
+
+
 class _IntegratedLifecycleFault(enum.Enum):
     """The sole private fault accepted by the protected lifecycle gate."""
 
@@ -345,6 +349,9 @@ _FINAL_PROGRESS_FIELDS = frozenset(
         "completed_samples",
         "total_samples",
         "update_sequence",
+        "outcome",
+        "skipped_repetitions",
+        "timed_out_cell_count",
         "status",
         "last_update_age_seconds",
     }
@@ -374,6 +381,9 @@ def _expected_final_running_progress(
         "completed_samples": 14400,
         "total_samples": 14400,
         "update_sequence": 450,
+        "outcome": "repetition_completed",
+        "skipped_repetitions": 0,
+        "timed_out_cell_count": 0,
         "status": "running",
         "last_update_age_seconds": last_update_age_seconds,
     }
@@ -433,6 +443,7 @@ _DIAGNOSTIC_BLOCK_REASON_CLASSES = frozenset(
     {
         "formal_eligibility_failed",
         "backend_timeout",
+        "cell_timeout",
         "progress_protocol_failed",
     }
 )
@@ -1137,6 +1148,122 @@ class _GatedCandidate:
         return exit_code, _decode_completion_receipt(bytes(payload))
 
 
+def _is_completed_matrix_timeout_progress(
+    value: Any,
+    progress_state: FormalProgressState,
+) -> bool:
+    """Recognize only a complete-matrix, non-promotable timeout closure."""
+
+    if not isinstance(value, Mapping) or not isinstance(
+        progress_state, FormalProgressState
+    ):
+        return False
+    snapshot = dict(value)
+    if set(snapshot) != _FINAL_PROGRESS_FIELDS:
+        return False
+    exact_strings = {
+        "schema": PROGRESS_SNAPSHOT_SCHEMA,
+        "run_binding_sha256": progress_state.run_binding_sha256,
+        "config_sha256": progress_state.config_sha256,
+        "phase": "measurement",
+        "status": "running",
+    }
+    if any(
+        type(snapshot.get(field)) is not str
+        or snapshot[field] != expected
+        for field, expected in exact_strings.items()
+    ):
+        return False
+    if snapshot.get("outcome") not in {
+        "repetition_completed",
+        "cell_timed_out",
+    }:
+        return False
+    integer_fields = _FINAL_PROGRESS_FIELDS - {
+        "schema",
+        "run_binding_sha256",
+        "config_sha256",
+        "phase",
+        "status",
+        "outcome",
+    }
+    if any(type(snapshot.get(field)) is not int for field in integer_fields):
+        return False
+    if snapshot["last_update_age_seconds"] < 0:
+        return False
+    if (
+        snapshot["cell_index"] != 15
+        or snapshot["cell_count"] != 15
+        or snapshot["graph_size"] != 10000
+        or snapshot["concurrency"] != 16
+        or snapshot["repetition_count"] != 30
+        or snapshot["total_repetitions"] != 450
+        or snapshot["total_samples"] != 14400
+    ):
+        return False
+    completed = snapshot["completed_repetitions"]
+    skipped = snapshot["skipped_repetitions"]
+    timed_out = snapshot["timed_out_cell_count"]
+    repetition = snapshot["repetition_index"]
+    if (
+        not 0 <= completed < 450
+        or not 1 <= timed_out <= 15
+        or not timed_out <= skipped <= 30 * timed_out
+        or completed + skipped != 450
+        or snapshot["completed_samples"] != completed * 32
+        or snapshot["update_sequence"] != completed + timed_out
+    ):
+        return False
+    if snapshot["outcome"] == "repetition_completed":
+        return repetition == 30
+    return 0 <= repetition < 30
+
+
+def _run_gated_candidate_with_progress(
+    child: _GatedCandidate,
+    *,
+    interrupt_latch: _SignalLatch,
+) -> tuple[int, Mapping[str, Any]]:
+    """Run one gated candidate and terminalize its trusted progress state."""
+
+    try:
+        child.release()
+        exit_code, receipt = child.wait_with_receipt(
+            interrupt_latch=interrupt_latch
+        )
+        snapshot = child.finish_progress(2.0)
+    except _CollectorInterruption:
+        try:
+            child.interrupt_progress()
+        except BaseException:
+            pass
+        raise
+    except BaseException:
+        _attempt_progress_blocker(child.block_progress)
+        raise
+    if exit_code != 0:
+        reason_class = (
+            "cell_timeout"
+            if _is_completed_matrix_timeout_progress(
+                snapshot, child._progress_state
+            )
+            else "progress_protocol_failed"
+        )
+        child.block_progress(reason_class)
+        return exit_code, receipt
+    if not isinstance(child._progress_state, FormalProgressState):
+        child.block_progress()
+        raise CollectorError("candidate progress did not reach formal completion")
+    try:
+        _validate_final_running_progress(snapshot, child._progress_state)
+    except CollectorError:
+        child.block_progress()
+        raise CollectorError(
+            "candidate progress did not reach formal completion"
+        ) from None
+    return exit_code, receipt
+
+
 def _decode_completion_receipt(payload: bytes) -> dict[str, Any]:
     if not payload or len(payload) > 65536:
         raise CollectorError("candidate completion receipt is unavailable")
@@ -1203,7 +1330,7 @@ def _normalize_execution_monitor_probe(value: Any) -> dict[str, Any]:
     if not isinstance(routes, list) or len(routes) != 2:
         raise CollectorError("execution integrity monitor routes are incomplete")
     process_rows = value.get("runner_uid_processes")
-    if not isinstance(process_rows, list) or len(process_rows) > 1:
+    if not isinstance(process_rows, list) or len(process_rows) > 2:
         raise CollectorError("execution integrity monitor process set is invalid")
     normalized_processes: list[dict[str, Any]] = []
     for row in process_rows:
@@ -1217,6 +1344,11 @@ def _normalize_execution_monitor_probe(value: Any) -> dict[str, Any]:
         ):
             raise CollectorError("execution integrity monitor process set is invalid")
         normalized_processes.append(dict(row))
+    process_pids = [row["pid"] for row in normalized_processes]
+    if process_pids != sorted(process_pids) or len(set(process_pids)) != len(
+        process_pids
+    ):
+        raise CollectorError("execution integrity monitor process set is invalid")
     host = value.get("host_environment")
     if (
         not isinstance(host, Mapping)
@@ -5792,15 +5924,41 @@ def _observe_formal_child_process(
         raise CollectorError("formal child expected command is invalid")
     process_root = proc_root.expanduser().absolute() / str(pid)
     try:
+        stat_line = (process_root / "stat").read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        raise _TransientFormalProcessObservation(
+            "formal child process is crossing an exit boundary"
+        ) from None
+    except (OSError, UnicodeError) as exc:
+        raise CollectorError("cannot observe formal child process") from exc
+    closing_parenthesis = stat_line.rfind(")")
+    stat_fields = stat_line[closing_parenthesis + 2 :].split()
+    if closing_parenthesis < 0 or len(stat_fields) <= 19:
+        raise CollectorError("formal child start identity is malformed")
+    if stat_fields[0] == "Z":
+        raise _TransientFormalProcessObservation(
+            "formal child process is crossing an exit boundary"
+        )
+    start_ticks = stat_fields[19]
+    if not start_ticks.isdigit():
+        raise CollectorError("formal child start identity is malformed")
+    try:
         executable_link = process_root / "exe"
         if not executable_link.is_symlink():
-            raise CollectorError("formal child executable is not kernel observed")
+            raise _TransientFormalProcessObservation(
+                "formal child process is crossing an exit boundary"
+            )
         executable = executable_link.resolve(strict=True)
         command_line = _read_regular_file_bytes(
             process_root / "cmdline", "formal child command line"
         )
         status = (process_root / "status").read_text(encoding="utf-8")
-        stat_line = (process_root / "stat").read_text(encoding="utf-8").strip()
+    except _TransientFormalProcessObservation:
+        raise
+    except FileNotFoundError:
+        raise _TransientFormalProcessObservation(
+            "formal child process is crossing an exit boundary"
+        ) from None
     except CollectorError:
         raise
     except (OSError, UnicodeError) as exc:
@@ -5817,13 +5975,6 @@ def _observe_formal_child_process(
         raise CollectorError("formal child UID is malformed") from exc
     if len(observed_uids) != 4 or any(uid != expected_uid for uid in observed_uids):
         raise CollectorError("formal child UID mismatch")
-    closing_parenthesis = stat_line.rfind(")")
-    stat_fields = stat_line[closing_parenthesis + 2 :].split()
-    if closing_parenthesis < 0 or len(stat_fields) <= 19:
-        raise CollectorError("formal child start identity is malformed")
-    start_ticks = stat_fields[19]
-    if not start_ticks.isdigit():
-        raise CollectorError("formal child start identity is malformed")
     argv_hash = hashlib.sha256("\0".join(command).encode("utf-8")).hexdigest()
     return {
         "pid": pid,
@@ -5853,23 +6004,62 @@ def _read_process_group_identity(
     process_root = proc_root.expanduser().absolute() / str(pid)
     try:
         stat_line = (process_root / "stat").read_text(encoding="utf-8").strip()
-        command_line = _read_regular_file_bytes(
-            process_root / "cmdline", "candidate process command line"
-        )
-    except CollectorError:
-        raise
+    except FileNotFoundError:
+        raise _TransientFormalProcessObservation(
+            "formal child process is crossing an exit boundary"
+        ) from None
     except (OSError, UnicodeError):
         raise CollectorError("candidate process identity is unavailable") from None
     closing_parenthesis = stat_line.rfind(")")
     fields = stat_line[closing_parenthesis + 2 :].split()
     if closing_parenthesis < 0 or len(fields) <= 19:
         raise CollectorError("candidate process identity is malformed")
+    if fields[0] == "Z":
+        raise _TransientFormalProcessObservation(
+            "formal child process is crossing an exit boundary"
+        )
+    try:
+        command_line = _read_regular_file_bytes(
+            process_root / "cmdline", "candidate process command line"
+        )
+    except CollectorError as exc:
+        if isinstance(exc.__cause__, FileNotFoundError):
+            raise _TransientFormalProcessObservation(
+                "formal child process is crossing an exit boundary"
+            ) from None
+        raise
     expected_cmdline = b"\0".join(
         item.encode("utf-8") for item in command
     ) + b"\0"
     if command_line != expected_cmdline:
+        if command_line == b"":
+            try:
+                exit_stat_line = (process_root / "stat").read_text(
+                    encoding="utf-8"
+                ).strip()
+            except FileNotFoundError:
+                raise _TransientFormalProcessObservation(
+                    "formal child process is crossing an exit boundary"
+                ) from None
+            except (OSError, UnicodeError):
+                raise CollectorError(
+                    "candidate process identity is unavailable"
+                ) from None
+            exit_closing_parenthesis = exit_stat_line.rfind(")")
+            exit_fields = exit_stat_line[
+                exit_closing_parenthesis + 2 :
+            ].split()
+            if exit_closing_parenthesis < 0 or len(exit_fields) <= 19:
+                raise CollectorError(
+                    "candidate process identity is malformed"
+                )
+            if exit_fields[0] == "Z":
+                raise _TransientFormalProcessObservation(
+                    "formal child process is crossing an exit boundary"
+                )
         raise CollectorError("candidate command line mismatch")
     try:
+        ppid = int(fields[1])
         pgid = int(fields[2])
         sid = int(fields[3])
     except ValueError:
@@ -5880,6 +6070,7 @@ def _read_process_group_identity(
     return {
         "pid": pid,
         "start_identity": f"candidate:{pid}:{start_ticks}",
+        "ppid": ppid,
         "pgid": pgid,
         "sid": sid,
     }
@@ -5983,6 +6174,154 @@ def _formal_uid_processes(
             raise CollectorError("Linux process start identity is malformed")
         observed[int(process.name)] = fields[19]
     return observed
+
+
+def _observe_monitored_formal_processes(
+    *,
+    runner_pid: int,
+    runner_start_ticks: str,
+    expected_command: Sequence[str],
+    expected_uid: int,
+    expected_executable_sha256: str,
+    proc_root: Path = Path("/proc"),
+) -> list[dict[str, Any]]:
+    """Observe the runner and its optional single direct cell worker."""
+
+    if (
+        type(runner_pid) is not int
+        or runner_pid <= 0
+        or type(runner_start_ticks) is not str
+        or not runner_start_ticks.isdigit()
+        or type(expected_uid) is not int
+        or expected_uid <= 0
+        or type(expected_executable_sha256) is not str
+        or _SHA256.fullmatch(expected_executable_sha256) is None
+    ):
+        raise CollectorError("formal monitored process identity is invalid")
+    command = tuple(expected_command)
+    if not command or any(not isinstance(item, str) or not item for item in command):
+        raise CollectorError("formal monitored process command is invalid")
+
+    for _attempt in range(5):
+        inventory_before = _formal_uid_processes(
+            expected_uid, proc_root=proc_root
+        )
+        try:
+            group_members = _process_group_members(
+                runner_pid, runner_pid, proc_root=proc_root
+            )
+            if group_members != inventory_before:
+                confirmed_inventory = _formal_uid_processes(
+                    expected_uid, proc_root=proc_root
+                )
+                confirmed_group = _process_group_members(
+                    runner_pid, runner_pid, proc_root=proc_root
+                )
+                if confirmed_group != confirmed_inventory:
+                    raise CollectorError(
+                        "formal monitored process group is not isolated"
+                    )
+                if (
+                    len(confirmed_inventory) > 2
+                    or (
+                        runner_pid in confirmed_inventory
+                        and confirmed_inventory[runner_pid]
+                        != runner_start_ticks
+                    )
+                ):
+                    raise CollectorError(
+                        "formal monitored process set is not isolated"
+                    )
+                raise _TransientFormalProcessObservation(
+                    "formal monitored process set changed between snapshots"
+                )
+            if not inventory_before or runner_pid not in inventory_before:
+                raise _TransientFormalProcessObservation(
+                    "formal monitored process is crossing an exit boundary"
+                )
+            if (
+                len(inventory_before) not in {1, 2}
+                or inventory_before.get(runner_pid) != runner_start_ticks
+            ):
+                raise CollectorError(
+                    "formal monitored process set is not isolated"
+                )
+            rows: list[dict[str, Any]] = []
+            for pid, start_ticks in sorted(inventory_before.items()):
+                launch_identity = _observe_formal_child_process(
+                    pid,
+                    expected_command=command,
+                    expected_uid=expected_uid,
+                    proc_root=proc_root,
+                )
+                tree_identity = _read_process_group_identity(
+                    pid, command, proc_root=proc_root
+                )
+                expected_start_identity = f"candidate:{pid}:{start_ticks}"
+                if (
+                    launch_identity.get("start_identity")
+                    != expected_start_identity
+                    or tree_identity.get("start_identity")
+                    != expected_start_identity
+                    or launch_identity.get("executable_sha256")
+                    != expected_executable_sha256
+                    or tree_identity.get("pgid") != runner_pid
+                    or tree_identity.get("sid") != runner_pid
+                ):
+                    raise CollectorError(
+                        "formal monitored process identity changed"
+                    )
+                if pid != runner_pid and tree_identity.get("ppid") != runner_pid:
+                    raise CollectorError(
+                        "formal cell worker is not a direct child"
+                    )
+                rows.append(
+                    {"pid": pid, "start_identity": start_ticks}
+                )
+        except _TransientFormalProcessObservation:
+            if _attempt == 4:
+                raise
+            time.sleep(0.01)
+            continue
+        inventory_after = _formal_uid_processes(
+            expected_uid, proc_root=proc_root
+        )
+        if inventory_after == inventory_before:
+            return rows
+    raise CollectorError("formal monitored process set was unstable")
+
+
+def _observe_execution_monitor_processes(
+    *,
+    process: Any,
+    runner_start_ticks: str,
+    expected_command: Sequence[str],
+    expected_uid: int,
+    expected_executable_sha256: str,
+    proc_root: Path = Path("/proc"),
+) -> list[dict[str, Any]]:
+    """Convert only a proven transient, fully quiescent runner exit."""
+
+    try:
+        return _observe_monitored_formal_processes(
+            runner_pid=process.pid,
+            runner_start_ticks=runner_start_ticks,
+            expected_command=expected_command,
+            expected_uid=expected_uid,
+            expected_executable_sha256=expected_executable_sha256,
+            proc_root=proc_root,
+        )
+    except _TransientFormalProcessObservation:
+        if (
+            process.poll() is not None
+            and _formal_uid_processes(expected_uid, proc_root=proc_root) == {}
+            and _process_group_members(
+                process.pid, process.pid, proc_root=proc_root
+            )
+            == {}
+        ):
+            raise _MonitorCandidateExited() from None
+        raise
 
 
 def _require_formal_uid_processes(
@@ -9934,16 +10273,15 @@ def collect_formal_execution(
         def monitor_probe() -> Mapping[str, Any]:
             assert child is not None
             assert network_guard is not None
-            if child.process.poll() is not None:
-                raise _MonitorCandidateExited()
-            observed_processes = _formal_uid_processes(FORMAL_RUNNER_UID)
-            expected_processes = {child.process.pid: child_start_ticks}
-            if observed_processes != expected_processes:
-                if child.process.poll() is not None and observed_processes == {}:
-                    raise _MonitorCandidateExited()
-                raise CollectorError(
-                    "execution integrity monitor found formal UID process drift"
-                )
+            process_rows = _observe_execution_monitor_processes(
+                process=child.process,
+                runner_start_ticks=child_start_ticks,
+                expected_command=child_spec.command,
+                expected_uid=FORMAL_RUNNER_UID,
+                expected_executable_sha256=str(
+                    child_process["executable_sha256"]
+                ),
+            )
             return {
                 "network_guard": network_guard.verify(),
                 "toxiproxy_routes": observe_formal_toxiproxy_routes(
@@ -9956,12 +10294,7 @@ def collect_formal_execution(
                     neo4j_container=_FORMAL_NEO4J_CONTAINER,
                     toxiproxy_container=_FORMAL_TOXIPROXY_CONTAINER,
                 ),
-                "runner_uid_processes": [
-                    {
-                        "pid": child.process.pid,
-                        "start_identity": child_start_ticks,
-                    }
-                ],
+                "runner_uid_processes": process_rows,
                 "host_environment": _formal_host_environment_snapshot(
                     workspace.root
                 ),
@@ -10002,35 +10335,9 @@ def collect_formal_execution(
 
         def run_candidate() -> tuple[int, Mapping[str, Any]]:
             assert child is not None
-            try:
-                child.release()
-                exit_code, receipt = child.wait_with_receipt(
-                    interrupt_latch=signal_latch
-                )
-                snapshot = child.finish_progress(2.0)
-            except _CollectorInterruption:
-                try:
-                    child.interrupt_progress()
-                except BaseException:
-                    pass
-                raise
-            except BaseException:
-                _attempt_progress_blocker(child.block_progress)
-                raise
-            if exit_code != 0:
-                child.block_progress()
-                return exit_code, receipt
-            if (
-                snapshot.get("status") != "running"
-                or snapshot.get("update_sequence") != 450
-                or snapshot.get("completed_repetitions") != 450
-                or snapshot.get("completed_samples") != 14400
-            ):
-                child.block_progress()
-                raise CollectorError(
-                    "candidate progress did not reach formal completion"
-                )
-            return exit_code, receipt
+            return _run_gated_candidate_with_progress(
+                child, interrupt_latch=signal_latch
+            )
 
         def seal_candidate(
             candidate: Path, receipt: Mapping[str, Any]

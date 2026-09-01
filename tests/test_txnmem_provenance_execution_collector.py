@@ -1819,7 +1819,11 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 )
                 return child, store
 
-            for reason in ("formal_eligibility_failed", "backend_timeout"):
+            for reason in (
+                "formal_eligibility_failed",
+                "backend_timeout",
+                "cell_timeout",
+            ):
                 child, store = candidate_for(reason)
                 terminal = child.block_progress(reason)
                 self.assertEqual(terminal, store.read_view())
@@ -3418,7 +3422,7 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
         *, run_binding_sha256="a" * 64, config_sha256="b" * 64
     ):
         return {
-            "schema": "txnmem-provenance-progress-snapshot-v1",
+            "schema": "txnmem-provenance-progress-snapshot-v2",
             "run_binding_sha256": run_binding_sha256,
             "config_sha256": config_sha256,
             "phase": "measurement",
@@ -3434,6 +3438,36 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             "completed_repetitions": 450,
             "completed_samples": 14400,
             "total_samples": 14400,
+            "outcome": "repetition_completed",
+            "skipped_repetitions": 0,
+            "timed_out_cell_count": 0,
+            "last_update_age_seconds": 0,
+        }
+
+    @staticmethod
+    def _final_incomplete_timeout_progress_snapshot(
+        *, run_binding_sha256="a" * 64, config_sha256="b" * 64
+    ):
+        return {
+            "schema": "txnmem-provenance-progress-snapshot-v2",
+            "run_binding_sha256": run_binding_sha256,
+            "config_sha256": config_sha256,
+            "phase": "measurement",
+            "cell_index": 15,
+            "cell_count": 15,
+            "graph_size": 10000,
+            "concurrency": 16,
+            "repetition_index": 30,
+            "repetition_count": 30,
+            "total_repetitions": 450,
+            "status": "running",
+            "update_sequence": 422,
+            "completed_repetitions": 421,
+            "completed_samples": 13472,
+            "total_samples": 14400,
+            "outcome": "repetition_completed",
+            "skipped_repetitions": 29,
+            "timed_out_cell_count": 1,
             "last_update_age_seconds": 0,
         }
 
@@ -3452,6 +3486,92 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             run_binding_sha256, config_sha256
         )
         return child
+
+    def test_failed_candidate_with_completed_matrix_timeout_is_classified_incomplete(self):
+        events = []
+
+        class Child:
+            _progress_state = collector_module.FormalProgressState(
+                "a" * 64, "b" * 64
+            )
+
+            def release(self):
+                events.append("release")
+
+            def wait_with_receipt(self, *, interrupt_latch):
+                events.append(("wait", interrupt_latch))
+                return 2, {}
+
+            def finish_progress(self, timeout):
+                events.append(("progress", timeout))
+                return ProvenanceExecutionCollectorTests._final_incomplete_timeout_progress_snapshot()
+
+            def block_progress(self, reason_class="progress_protocol_failed"):
+                events.append(("block", reason_class))
+
+        latch = object()
+        result = collector_module._run_gated_candidate_with_progress(
+            Child(), interrupt_latch=latch
+        )
+
+        self.assertEqual(result, (2, {}))
+        self.assertEqual(
+            events,
+            [
+                "release",
+                ("wait", latch),
+                ("progress", 2.0),
+                ("block", "cell_timeout"),
+            ],
+        )
+
+    def test_last_cell_timeout_is_a_complete_incomplete_matrix_closure(self):
+        snapshot = self._final_incomplete_timeout_progress_snapshot()
+        snapshot.update(
+            {
+                "repetition_index": 20,
+                "update_sequence": 441,
+                "completed_repetitions": 440,
+                "completed_samples": 14080,
+                "outcome": "cell_timed_out",
+                "skipped_repetitions": 10,
+            }
+        )
+
+        self.assertTrue(
+            collector_module._is_completed_matrix_timeout_progress(
+                snapshot,
+                collector_module.FormalProgressState("a" * 64, "b" * 64),
+            )
+        )
+
+    def test_failed_candidate_does_not_misclassify_malformed_timeout_progress(self):
+        events = []
+        malformed = self._final_incomplete_timeout_progress_snapshot()
+        malformed["skipped_repetitions"] = 28
+
+        class Child:
+            _progress_state = collector_module.FormalProgressState(
+                "a" * 64, "b" * 64
+            )
+
+            def release(self):
+                pass
+
+            def wait_with_receipt(self, *, interrupt_latch):
+                return 2, {}
+
+            def finish_progress(self, timeout):
+                return dict(malformed)
+
+            def block_progress(self, reason_class="progress_protocol_failed"):
+                events.append(reason_class)
+
+        collector_module._run_gated_candidate_with_progress(
+            Child(), interrupt_latch=object()
+        )
+
+        self.assertEqual(events, ["progress_protocol_failed"])
 
     def test_completed_write_is_the_final_normal_path_store_operation(self):
         class Store:
@@ -3659,6 +3779,8 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             "completed_samples": 14400,
             "total_samples": 14400,
             "update_sequence": 450,
+            "skipped_repetitions": 0,
+            "timed_out_cell_count": 0,
             "last_update_age_seconds": 0,
         }
         substitutions = [
@@ -3760,6 +3882,8 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
             "completed_samples": 14400,
             "total_samples": 14400,
             "update_sequence": 450,
+            "skipped_repetitions": 0,
+            "timed_out_cell_count": 0,
             "last_update_age_seconds": 0,
         }
         substitutions = [
@@ -3939,6 +4063,633 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 collector_module._require_formal_uid_processes(
                     65532, expected={}, proc_root=proc
                 )
+
+    def test_monitor_accepts_only_one_exact_direct_cell_worker(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            proc = root / "proc"
+            executable = root / "python"
+            executable.write_bytes(b"pinned-python-binary")
+            executable.chmod(0o500)
+            command = (str(executable), "-I", "-S", "-B", "/sealed/runner.py")
+
+            def write_process(
+                pid,
+                *,
+                parent_pid,
+                pgid=4321,
+                sid=4321,
+                start_ticks,
+                uids=(65532, 65532, 65532, 65532),
+                observed_executable=executable,
+                observed_command=command,
+            ):
+                process = proc / str(pid)
+                process.mkdir(parents=True)
+                (process / "exe").symlink_to(observed_executable)
+                (process / "cmdline").write_bytes(
+                    b"\0".join(item.encode("utf-8") for item in observed_command)
+                    + b"\0"
+                )
+                (process / "status").write_text(
+                    "Name:\tpython\nUid:\t" + "\t".join(str(uid) for uid in uids) + "\n",
+                    encoding="utf-8",
+                )
+                fields = ["0"] * 22
+                fields[0] = "S"
+                fields[1] = str(parent_pid)
+                fields[2] = str(pgid)
+                fields[3] = str(sid)
+                fields[19] = str(start_ticks)
+                (process / "stat").write_text(
+                    f"{pid} (python) " + " ".join(fields) + "\n",
+                    encoding="utf-8",
+                )
+
+            write_process(4321, parent_pid=1, start_ticks=100)
+            write_process(4322, parent_pid=4321, start_ticks=101)
+            executable_hash = hashlib.sha256(executable.read_bytes()).hexdigest()
+
+            observed = collector_module._observe_monitored_formal_processes(
+                runner_pid=4321,
+                runner_start_ticks="100",
+                expected_command=command,
+                expected_uid=65532,
+                expected_executable_sha256=executable_hash,
+                proc_root=proc,
+            )
+
+            self.assertEqual(
+                observed,
+                [
+                    {"pid": 4321, "start_identity": "100"},
+                    {"pid": 4322, "start_identity": "101"},
+                ],
+            )
+
+            worker_stat = proc / "4322" / "stat"
+            stat_line = worker_stat.read_text(encoding="utf-8").strip()
+            closing_parenthesis = stat_line.rfind(")")
+            fields = stat_line[closing_parenthesis + 2 :].split()
+            fields[1] = "1"
+            worker_stat.write_text(
+                "4322 (python) " + " ".join(fields) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(CollectorError, "direct child"):
+                collector_module._observe_monitored_formal_processes(
+                    runner_pid=4321,
+                    runner_start_ticks="100",
+                    expected_command=command,
+                    expected_uid=65532,
+                    expected_executable_sha256=executable_hash,
+                    proc_root=proc,
+                )
+
+    def test_monitor_retries_a_stable_zombie_exit_transition(self):
+        both = {4321: "100", 4322: "101"}
+        runner_only = {4321: "100"}
+        executable_hash = "e" * 64
+        command = ("/sealed/python", "-I", "-S", "-B", "/sealed/runner.py")
+
+        def observe_process(pid, **_kwargs):
+            if pid == 4322:
+                raise collector_module._TransientFormalProcessObservation(
+                    "formal child process is crossing an exit boundary"
+                )
+            return {
+                "start_identity": "candidate:4321:100",
+                "executable_sha256": executable_hash,
+            }
+
+        with patch.object(
+            collector_module,
+            "_formal_uid_processes",
+            side_effect=[both, runner_only, runner_only],
+        ), patch.object(
+            collector_module,
+            "_process_group_members",
+            side_effect=[both, runner_only],
+        ), patch.object(
+            collector_module,
+            "_observe_formal_child_process",
+            side_effect=observe_process,
+        ), patch.object(
+            collector_module,
+            "_read_process_group_identity",
+            return_value={
+                "start_identity": "candidate:4321:100",
+                "ppid": 1,
+                "pgid": 4321,
+                "sid": 4321,
+            },
+        ), patch.object(collector_module.time, "sleep") as sleep:
+            observed = collector_module._observe_monitored_formal_processes(
+                runner_pid=4321,
+                runner_start_ticks="100",
+                expected_command=command,
+                expected_uid=65532,
+                expected_executable_sha256=executable_hash,
+            )
+
+        self.assertEqual(
+            observed, [{"pid": 4321, "start_identity": "100"}]
+        )
+        sleep.assert_called_once()
+
+    def test_monitor_retries_worker_fork_between_uid_and_group_snapshots(self):
+        runner_only = {4321: "100"}
+        both = {4321: "100", 4322: "101"}
+        executable_hash = "e" * 64
+        command = ("/sealed/python", "-I", "-S", "-B", "/sealed/runner.py")
+
+        def observe_process(pid, **_kwargs):
+            return {
+                "start_identity": f"candidate:{pid}:{100 if pid == 4321 else 101}",
+                "executable_sha256": executable_hash,
+            }
+
+        def tree_identity(pid, *_args, **_kwargs):
+            return {
+                "start_identity": f"candidate:{pid}:{100 if pid == 4321 else 101}",
+                "ppid": 1 if pid == 4321 else 4321,
+                "pgid": 4321,
+                "sid": 4321,
+            }
+
+        with patch.object(
+            collector_module,
+            "_formal_uid_processes",
+            side_effect=[runner_only, both, both, both],
+        ), patch.object(
+            collector_module,
+            "_process_group_members",
+            side_effect=[both, both, both],
+        ), patch.object(
+            collector_module,
+            "_observe_formal_child_process",
+            side_effect=observe_process,
+        ), patch.object(
+            collector_module,
+            "_read_process_group_identity",
+            side_effect=tree_identity,
+        ), patch.object(collector_module.time, "sleep") as sleep:
+            observed = collector_module._observe_monitored_formal_processes(
+                runner_pid=4321,
+                runner_start_ticks="100",
+                expected_command=command,
+                expected_uid=65532,
+                expected_executable_sha256=executable_hash,
+            )
+
+        self.assertEqual(
+            observed,
+            [
+                {"pid": 4321, "start_identity": "100"},
+                {"pid": 4322, "start_identity": "101"},
+            ],
+        )
+        sleep.assert_called_once()
+
+    def test_monitor_retries_worker_reap_between_uid_and_group_snapshots(self):
+        both = {4321: "100", 4322: "101"}
+        runner_only = {4321: "100"}
+        executable_hash = "e" * 64
+        command = ("/sealed/python", "-I", "-S", "-B", "/sealed/runner.py")
+
+        with patch.object(
+            collector_module,
+            "_formal_uid_processes",
+            side_effect=[both, runner_only, runner_only, runner_only],
+        ), patch.object(
+            collector_module,
+            "_process_group_members",
+            side_effect=[runner_only, runner_only, runner_only],
+        ), patch.object(
+            collector_module,
+            "_observe_formal_child_process",
+            return_value={
+                "start_identity": "candidate:4321:100",
+                "executable_sha256": executable_hash,
+            },
+        ), patch.object(
+            collector_module,
+            "_read_process_group_identity",
+            return_value={
+                "start_identity": "candidate:4321:100",
+                "ppid": 1,
+                "pgid": 4321,
+                "sid": 4321,
+            },
+        ), patch.object(collector_module.time, "sleep") as sleep:
+            observed = collector_module._observe_monitored_formal_processes(
+                runner_pid=4321,
+                runner_start_ticks="100",
+                expected_command=command,
+                expected_uid=65532,
+                expected_executable_sha256=executable_hash,
+            )
+
+        self.assertEqual(
+            observed, [{"pid": 4321, "start_identity": "100"}]
+        )
+        sleep.assert_called_once()
+
+    def test_monitor_rejects_stable_group_inventory_mismatch_without_retry(self):
+        runner_only = {4321: "100"}
+        both = {4321: "100", 4322: "101"}
+        command = ("/sealed/python", "-I", "-S", "-B", "/sealed/runner.py")
+
+        for inventory, group in ((runner_only, both), (both, runner_only)):
+            with self.subTest(inventory=inventory, group=group), patch.object(
+                collector_module,
+                "_formal_uid_processes",
+                return_value=inventory,
+            ) as observe_uid, patch.object(
+                collector_module,
+                "_process_group_members",
+                return_value=group,
+            ) as observe_group, patch.object(
+                collector_module.time, "sleep"
+            ) as sleep:
+                with self.assertRaises(CollectorError) as caught:
+                    collector_module._observe_monitored_formal_processes(
+                        runner_pid=4321,
+                        runner_start_ticks="100",
+                        expected_command=command,
+                        expected_uid=65532,
+                        expected_executable_sha256="e" * 64,
+                    )
+
+            self.assertIs(type(caught.exception), CollectorError)
+            self.assertEqual(observe_uid.call_count, 2)
+            self.assertEqual(observe_group.call_count, 2)
+            sleep.assert_not_called()
+
+    def test_process_group_identity_missing_or_zombie_is_transient(self):
+        command = ("/sealed/python", "-I", "-S", "-B", "/sealed/runner.py")
+        with TemporaryDirectory() as tmp:
+            proc = Path(tmp) / "proc"
+            proc.mkdir()
+
+            with self.assertRaises(
+                collector_module._TransientFormalProcessObservation
+            ):
+                collector_module._read_process_group_identity(
+                    4322, command, proc_root=proc
+                )
+
+            process = proc / "4322"
+            process.mkdir()
+            fields = ["0"] * 22
+            fields[0] = "S"
+            fields[1] = "4321"
+            fields[2] = "4321"
+            fields[3] = "4321"
+            fields[19] = "101"
+            (process / "stat").write_text(
+                "4322 (python) " + " ".join(fields) + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(
+                collector_module._TransientFormalProcessObservation
+            ):
+                collector_module._read_process_group_identity(
+                    4322, command, proc_root=proc
+                )
+
+            fields[0] = "Z"
+            (process / "stat").write_text(
+                "4322 (python) " + " ".join(fields) + "\n",
+                encoding="utf-8",
+            )
+            (process / "cmdline").write_bytes(
+                b"\0".join(item.encode("utf-8") for item in command) + b"\0"
+            )
+
+            with self.assertRaises(
+                collector_module._TransientFormalProcessObservation
+            ):
+                collector_module._read_process_group_identity(
+                    4322, command, proc_root=proc
+                )
+
+    def test_process_group_identity_rechecks_empty_cmdline_exit_boundary(self):
+        command = ("/sealed/python", "-I", "-S", "-B", "/sealed/runner.py")
+
+        def stat_line(state):
+            fields = ["0"] * 22
+            fields[0] = state
+            fields[1] = "4321"
+            fields[2] = "4321"
+            fields[3] = "4321"
+            fields[19] = "101"
+            return "4322 (python) " + " ".join(fields) + "\n"
+
+        with patch.object(
+            Path,
+            "read_text",
+            side_effect=[stat_line("S"), stat_line("Z")],
+        ) as read_stat, patch.object(
+            collector_module,
+            "_read_regular_file_bytes",
+            return_value=b"",
+        ):
+            with self.assertRaises(
+                collector_module._TransientFormalProcessObservation
+            ):
+                collector_module._read_process_group_identity(
+                    4322, command
+                )
+        self.assertEqual(read_stat.call_count, 2)
+
+        with patch.object(
+            Path,
+            "read_text",
+            side_effect=[stat_line("S"), stat_line("S")],
+        ) as read_stat, patch.object(
+            collector_module,
+            "_read_regular_file_bytes",
+            return_value=b"",
+        ):
+            with self.assertRaises(CollectorError) as caught:
+                collector_module._read_process_group_identity(
+                    4322, command
+                )
+        self.assertIs(type(caught.exception), CollectorError)
+        self.assertEqual(read_stat.call_count, 2)
+
+    def test_monitor_never_discards_identity_drift_when_worker_exits(self):
+        both = {4321: "100", 4322: "101"}
+        runner_only = {4321: "100"}
+        executable_hash = "e" * 64
+        command = ("/sealed/python", "-I", "-S", "-B", "/sealed/runner.py")
+
+        def observe_process(pid, **_kwargs):
+            return {
+                "start_identity": f"candidate:{pid}:{100 if pid == 4321 else 101}",
+                "executable_sha256": (
+                    executable_hash if pid == 4321 else "f" * 64
+                ),
+            }
+
+        def tree_identity(pid, *_args, **_kwargs):
+            return {
+                "start_identity": f"candidate:{pid}:{100 if pid == 4321 else 101}",
+                "ppid": 1 if pid == 4321 else 4321,
+                "pgid": 4321,
+                "sid": 4321,
+            }
+
+        with patch.object(
+            collector_module,
+            "_formal_uid_processes",
+            side_effect=[both, runner_only, runner_only],
+        ), patch.object(
+            collector_module,
+            "_process_group_members",
+            side_effect=[both, runner_only],
+        ), patch.object(
+            collector_module,
+            "_observe_formal_child_process",
+            side_effect=observe_process,
+        ), patch.object(
+            collector_module,
+            "_read_process_group_identity",
+            side_effect=tree_identity,
+        ):
+            with self.assertRaisesRegex(CollectorError, "identity changed"):
+                collector_module._observe_monitored_formal_processes(
+                    runner_pid=4321,
+                    runner_start_ticks="100",
+                    expected_command=command,
+                    expected_uid=65532,
+                    expected_executable_sha256=executable_hash,
+                )
+
+    def test_monitor_exit_conversion_is_limited_to_transient_observation(self):
+        command = ("/sealed/python", "-I", "-S", "-B", "/sealed/runner.py")
+
+        class Process:
+            pid = 4321
+
+            def __init__(self, states):
+                self._states = iter(states)
+
+            def poll(self):
+                return next(self._states)
+
+        strict = Process([None])
+        with patch.object(
+            collector_module,
+            "_observe_monitored_formal_processes",
+            side_effect=CollectorError("formal monitored process identity changed"),
+        ), patch.object(
+            collector_module, "_formal_uid_processes"
+        ) as inventory:
+            with self.assertRaisesRegex(CollectorError, "identity changed"):
+                collector_module._observe_execution_monitor_processes(
+                    process=strict,
+                    runner_start_ticks="100",
+                    expected_command=command,
+                    expected_uid=65532,
+                    expected_executable_sha256="e" * 64,
+                )
+        inventory.assert_not_called()
+
+        exiting = Process([0])
+        with patch.object(
+            collector_module,
+            "_observe_monitored_formal_processes",
+            side_effect=collector_module._TransientFormalProcessObservation(
+                "formal child process is crossing an exit boundary"
+            ),
+        ), patch.object(
+            collector_module,
+            "_formal_uid_processes",
+            return_value={},
+        ), patch.object(
+            collector_module,
+            "_process_group_members",
+            return_value={},
+        ):
+            with self.assertRaises(collector_module._MonitorCandidateExited):
+                collector_module._observe_execution_monitor_processes(
+                    process=exiting,
+                    runner_start_ticks="100",
+                    expected_command=command,
+                    expected_uid=65532,
+                    expected_executable_sha256="e" * 64,
+                )
+
+    def test_monitor_already_exited_runner_requires_empty_uid_inventory(self):
+        command = ("/sealed/python", "-I", "-S", "-B", "/sealed/runner.py")
+
+        class Process:
+            pid = 4321
+
+            @staticmethod
+            def poll():
+                return 0
+
+        transient = collector_module._TransientFormalProcessObservation(
+            "formal monitored process is crossing an exit boundary"
+        )
+        with patch.object(
+            collector_module,
+            "_observe_monitored_formal_processes",
+            side_effect=transient,
+        ) as observe, patch.object(
+            collector_module,
+            "_formal_uid_processes",
+            return_value={4322: "101"},
+        ) as inventory:
+            with self.assertRaises(
+                collector_module._TransientFormalProcessObservation
+            ):
+                collector_module._observe_execution_monitor_processes(
+                    process=Process(),
+                    runner_start_ticks="100",
+                    expected_command=command,
+                    expected_uid=65532,
+                    expected_executable_sha256="e" * 64,
+                )
+
+        observe.assert_called_once()
+        inventory.assert_called_once()
+
+    def test_monitor_never_converts_uid_empty_group_residue_to_exit(self):
+        command = ("/sealed/python", "-I", "-S", "-B", "/sealed/runner.py")
+
+        class Process:
+            pid = 4321
+
+            @staticmethod
+            def poll():
+                return 0
+
+        with patch.object(
+            collector_module,
+            "_formal_uid_processes",
+            return_value={},
+        ) as observe_uid, patch.object(
+            collector_module,
+            "_process_group_members",
+            return_value={4322: "101"},
+        ) as observe_group, patch.object(
+            collector_module.time, "sleep"
+        ) as sleep:
+            with self.assertRaises(CollectorError) as caught:
+                collector_module._observe_execution_monitor_processes(
+                    process=Process(),
+                    runner_start_ticks="100",
+                    expected_command=command,
+                    expected_uid=65532,
+                    expected_executable_sha256="e" * 64,
+                )
+
+        self.assertIs(type(caught.exception), CollectorError)
+        self.assertEqual(observe_uid.call_count, 2)
+        self.assertEqual(observe_group.call_count, 2)
+        sleep.assert_not_called()
+
+    def test_monitor_rejects_extra_or_identity_drifted_cell_workers(self):
+        cases = (
+            "extra_worker",
+            "uid_drift",
+            "executable_drift",
+            "command_drift",
+            "process_group_drift",
+            "session_drift",
+        )
+        for case in cases:
+            with self.subTest(case=case), TemporaryDirectory() as tmp:
+                root = Path(tmp).resolve()
+                proc = root / "proc"
+                executable = root / "python"
+                executable.write_bytes(b"pinned-python-binary")
+                executable.chmod(0o500)
+                other_executable = root / "other-python"
+                other_executable.write_bytes(b"different-python-binary")
+                other_executable.chmod(0o500)
+                command = (
+                    str(executable),
+                    "-I",
+                    "-S",
+                    "-B",
+                    "/sealed/runner.py",
+                )
+
+                def write_process(
+                    pid,
+                    *,
+                    parent_pid,
+                    start_ticks,
+                    pgid=4321,
+                    sid=4321,
+                    uids=(65532, 65532, 65532, 65532),
+                    observed_executable=executable,
+                    observed_command=command,
+                ):
+                    process = proc / str(pid)
+                    process.mkdir(parents=True)
+                    (process / "exe").symlink_to(observed_executable)
+                    (process / "cmdline").write_bytes(
+                        b"\0".join(
+                            item.encode("utf-8") for item in observed_command
+                        )
+                        + b"\0"
+                    )
+                    (process / "status").write_text(
+                        "Name:\tpython\nUid:\t"
+                        + "\t".join(str(uid) for uid in uids)
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    fields = ["0"] * 22
+                    fields[0] = "S"
+                    fields[1] = str(parent_pid)
+                    fields[2] = str(pgid)
+                    fields[3] = str(sid)
+                    fields[19] = str(start_ticks)
+                    (process / "stat").write_text(
+                        f"{pid} (python) " + " ".join(fields) + "\n",
+                        encoding="utf-8",
+                    )
+
+                write_process(4321, parent_pid=1, start_ticks=100)
+                worker_kwargs = {}
+                if case == "uid_drift":
+                    worker_kwargs["uids"] = (65532, 65532, 65532, 1000)
+                elif case == "executable_drift":
+                    worker_kwargs["observed_executable"] = other_executable
+                elif case == "command_drift":
+                    worker_kwargs["observed_command"] = (str(executable), "different")
+                elif case == "process_group_drift":
+                    worker_kwargs["pgid"] = 9999
+                elif case == "session_drift":
+                    worker_kwargs["sid"] = 9999
+                write_process(
+                    4322,
+                    parent_pid=4321,
+                    start_ticks=101,
+                    **worker_kwargs,
+                )
+                if case == "extra_worker":
+                    write_process(4323, parent_pid=4321, start_ticks=102)
+
+                with self.assertRaises(CollectorError):
+                    collector_module._observe_monitored_formal_processes(
+                        runner_pid=4321,
+                        runner_start_ticks="100",
+                        expected_command=command,
+                        expected_uid=65532,
+                        expected_executable_sha256=hashlib.sha256(
+                            executable.read_bytes()
+                        ).hexdigest(),
+                        proc_root=proc,
+                    )
 
     def test_formal_child_sets_and_verifies_no_new_privileges(self):
         calls = []
@@ -5911,6 +6662,9 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     "completed_samples": 32,
                     "total_samples": 14400,
                     "update_sequence": 1,
+                    "outcome": "repetition_completed",
+                    "skipped_repetitions": 0,
+                    "timed_out_cell_count": 0,
                 }
             )
             return 0
@@ -5968,7 +6722,8 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 "cell_index", "cell_count", "graph_size", "concurrency",
                 "repetition_index", "repetition_count", "completed_repetitions",
                 "total_repetitions", "completed_samples", "total_samples",
-                "update_sequence", "status",
+                "update_sequence", "outcome", "skipped_repetitions",
+                "timed_out_cell_count", "status",
             },
         )
         self.assertEqual(observed_hooks[0]["_require_formal_eligibility"], True)
@@ -5988,6 +6743,9 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                     "repetition_count": 30, "completed_repetitions": 1,
                     "total_repetitions": 450, "completed_samples": 32,
                     "total_samples": 14400, "update_sequence": 1,
+                    "outcome": "repetition_completed",
+                    "skipped_repetitions": 0,
+                    "timed_out_cell_count": 0,
                 }
             )
             return 0
@@ -6451,6 +7209,42 @@ class ProvenanceExecutionCollectorTests(unittest.TestCase):
                 gate_release_monotonic_ns=gate_release,
                 child_exit_monotonic_ns=child_exit,
             )
+
+    def test_execution_monitor_probe_accepts_runner_plus_one_worker_only(self):
+        probe = {
+            "network_guard": self._network_guard(),
+            "toxiproxy_routes": self._snapshot()["proxy_routes"],
+            "backend_isolation": self._backend_isolation(),
+            "runner_uid_processes": [
+                {"pid": 7, "start_identity": "42"},
+                {"pid": 8, "start_identity": "43"},
+            ],
+            "host_environment": {
+                "host_identity_sha256": "4" * 64,
+                "cpu_logical_count": 8,
+                "memory_total_bytes": 1024,
+                "disk_medium": "ssd",
+            },
+            "load1_milli": 100,
+        }
+
+        normalized = collector_module._normalize_execution_monitor_probe(probe)
+        self.assertEqual(normalized["runner_uid_processes"], probe["runner_uid_processes"])
+
+        duplicate = copy.deepcopy(probe)
+        duplicate["runner_uid_processes"][1] = {
+            "pid": 7,
+            "start_identity": "42",
+        }
+        with self.assertRaisesRegex(CollectorError, "process set"):
+            collector_module._normalize_execution_monitor_probe(duplicate)
+
+        extra = copy.deepcopy(probe)
+        extra["runner_uid_processes"].append(
+            {"pid": 9, "start_identity": "44"}
+        )
+        with self.assertRaisesRegex(CollectorError, "process set"):
+            collector_module._normalize_execution_monitor_probe(extra)
 
     def test_execution_monitor_rejects_excessive_load_and_terminal_drift(self):
         baseline = {

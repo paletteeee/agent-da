@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import hashlib
 import json
@@ -14,7 +15,7 @@ import subprocess
 from collections import Counter
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from txnmem_invariants import check_invariants
 from txnmem_metrics import (
@@ -885,12 +886,67 @@ def _run_core_experiment(
     return 0
 
 
+_CELL_EXECUTION_SCHEMA = "txnmem-provenance-cell-execution-v1"
+_CELL_TIMEOUT_CLASSES = frozenset({"cell_stall_timeout", "backend_timeout"})
+
+
+def _normalize_cell_execution_result(
+    value,
+    *,
+    expected_repetitions: int,
+):
+    if not isinstance(value, Mapping):
+        raise ValueError("cell executor result must be a mapping")
+    result = dict(value)
+    outcome = result.get("outcome")
+    expected_fields = (
+        {
+            "schema",
+            "outcome",
+            "completed_repetition_count",
+            "report",
+        }
+        if outcome == "completed"
+        else {
+            "schema",
+            "outcome",
+            "completed_repetition_count",
+            "timeout_class",
+        }
+    )
+    completed = result.get("completed_repetition_count")
+    if (
+        set(result) != expected_fields
+        or result.get("schema") != _CELL_EXECUTION_SCHEMA
+        or type(completed) is not int
+        or completed < 0
+        or completed > expected_repetitions
+    ):
+        raise ValueError("cell executor result is invalid")
+    if outcome == "completed":
+        if completed != expected_repetitions or not isinstance(
+            result.get("report"), Mapping
+        ):
+            raise ValueError("completed cell executor result is invalid")
+        result["report"] = copy.deepcopy(dict(result["report"]))
+    elif outcome == "cell_timed_out":
+        if (
+            completed >= expected_repetitions
+            or result.get("timeout_class") not in _CELL_TIMEOUT_CLASSES
+        ):
+            raise ValueError("timed-out cell executor result is invalid")
+    else:
+        raise ValueError("cell executor outcome is invalid")
+    return copy.deepcopy(result)
+
+
 def main(
     argv: list[str] | None = None,
     *,
     _progress_callback=None,
     _require_formal_eligibility: bool = False,
     _interruption_check=None,
+    _cell_executor=None,
 ) -> int:
     if _progress_callback is not None and not callable(_progress_callback):
         raise TypeError("_progress_callback must be callable or None")
@@ -898,6 +954,8 @@ def main(
         raise TypeError("_require_formal_eligibility must be an exact boolean")
     if _interruption_check is not None and not callable(_interruption_check):
         raise TypeError("_interruption_check must be callable or None")
+    if _cell_executor is not None and not callable(_cell_executor):
+        raise TypeError("_cell_executor must be callable or None")
 
     def check_interruption() -> None:
         if _interruption_check is not None:
@@ -1385,6 +1443,9 @@ def main(
             "completed_repetition_count": 0,
             "completed_operation_sample_count": 0,
         }
+        processed_cell_count = 0
+        skipped_repetition_count = 0
+        timed_out_cells = []
         try:
             config_document, config_raw = load_strict_json_document(args.config)
             config = validate_matrix_config(config_document, formal=args.formal)
@@ -1450,27 +1511,35 @@ def main(
             if args.backend == "memory":
                 from txnmem_backend import InstrumentedMemoryBackend
 
-                def backend_factory(_namespace):
-                    return InstrumentedMemoryBackend()
+                def build_backend_factory():
+                    def memory_backend_factory(_namespace):
+                        return InstrumentedMemoryBackend()
+
+                    return memory_backend_factory
 
             else:
                 neo4j_password = os.environ.get("TXNMEM_NEO4J_PASSWORD")
                 if not neo4j_password:
                     raise ValueError("TXNMEM_NEO4J_PASSWORD is required")
-                backend_factory = make_vector_graph_backend_factory(
-                    qdrant_url=args.service_url,
-                    neo4j_uri=os.environ.get(
-                        "TXNMEM_NEO4J_URI", "bolt://127.0.0.1:7687"
-                    ),
-                    neo4j_auth=(
-                        os.environ.get("TXNMEM_NEO4J_USER", "neo4j"),
-                        neo4j_password,
-                    ),
-                    environment_attestation=environment,
-                    request_timeout_seconds=float(
-                        config.get("request_timeout_seconds", 30.0)
-                    ),
+                neo4j_uri = os.environ.get(
+                    "TXNMEM_NEO4J_URI", "bolt://127.0.0.1:7687"
                 )
+                neo4j_user = os.environ.get("TXNMEM_NEO4J_USER", "neo4j")
+
+                def build_backend_factory():
+                    return make_vector_graph_backend_factory(
+                        qdrant_url=args.service_url,
+                        neo4j_uri=neo4j_uri,
+                        neo4j_auth=(neo4j_user, neo4j_password),
+                        environment_attestation=environment,
+                        request_timeout_seconds=float(
+                            config.get("request_timeout_seconds", 30.0)
+                        ),
+                    )
+
+            backend_factory = (
+                build_backend_factory() if _cell_executor is None else None
+            )
 
             failure_stage = "matrix_execution"
             matrix_failure: BaseException | None = None
@@ -1483,58 +1552,193 @@ def main(
                     )
                     base_repetitions = progress["completed_repetition_count"]
                     base_samples = progress["completed_operation_sample_count"]
+                    base_skipped = skipped_repetition_count
+                    base_timeouts = len(timed_out_cells)
+                    operations_per_repetition = (
+                        int(cell["operations_per_type"]) * 4
+                    )
 
                     def record_progress(snapshot):
-                        progress["completed_repetition_count"] = (
-                            base_repetitions
-                            + int(snapshot["completed_repetition_count"])
+                        local_repetitions = snapshot.get(
+                            "completed_repetition_count"
                         )
-                        progress["completed_operation_sample_count"] = (
-                            base_samples
-                            + int(snapshot["completed_operation_sample_count"])
+                        local_samples = snapshot.get(
+                            "completed_operation_sample_count"
                         )
+                        if (
+                            type(local_repetitions) is not int
+                            or not 1 <= local_repetitions <= int(cell["repetitions"])
+                            or type(local_samples) is not int
+                            or local_samples
+                            != local_repetitions * operations_per_repetition
+                        ):
+                            raise ValueError("cell progress snapshot is invalid")
+                        global_repetitions = base_repetitions + local_repetitions
+                        global_samples = base_samples + local_samples
+                        progress["completed_repetition_count"] = global_repetitions
+                        progress["completed_operation_sample_count"] = global_samples
                         if _progress_callback is not None:
-                            repetition_index = int(
-                                snapshot["completed_repetition_count"]
-                            )
                             _progress_callback(
                                 {
                                     "cell_index": cell_index,
                                     "cell_count": len(cells),
                                     "graph_size": int(cell["graph_node_count"]),
                                     "concurrency": int(cell["concurrency"]),
-                                    "repetition_index": repetition_index,
+                                    "repetition_index": local_repetitions,
                                     "repetition_count": int(cell["repetitions"]),
-                                    "completed_repetitions": progress[
-                                        "completed_repetition_count"
-                                    ],
+                                    "completed_repetitions": global_repetitions,
                                     "total_repetitions": total_repetitions,
-                                    "completed_samples": progress[
-                                        "completed_operation_sample_count"
-                                    ],
+                                    "completed_samples": global_samples,
                                     "total_samples": total_samples,
-                                    "update_sequence": progress[
-                                        "completed_repetition_count"
-                                    ],
+                                    "update_sequence": (
+                                        global_repetitions + base_timeouts
+                                    ),
+                                    "outcome": "repetition_completed",
+                                    "skipped_repetitions": base_skipped,
+                                    "timed_out_cell_count": base_timeouts,
                                 }
                             )
 
-                    cell_report = run_matrix_cell(
-                        backend_factory,
-                        graph,
-                        concurrency=int(cell["concurrency"]),
-                        repetitions=int(cell["repetitions"]),
-                        operations_per_type=int(cell["operations_per_type"]),
-                        run_id=args.run_id,
-                        formal=args.formal,
-                        require_formal_eligibility=_require_formal_eligibility,
-                        environment_attestation=(
-                            environment if args.backend == "vector-graph" else None
-                        ),
-                        progress_callback=record_progress,
+                    def run_cell_measurement(*, progress_callback_override=None):
+                        cell_backend_factory = backend_factory
+                        owns_factory = _cell_executor is not None
+                        if owns_factory:
+                            cell_backend_factory = build_backend_factory()
+                        measurement_failure: BaseException | None = None
+                        measurement_traceback = None
+                        report = None
+                        cleanup_failure: BaseException | None = None
+                        try:
+                            report = run_matrix_cell(
+                                cell_backend_factory,
+                                graph,
+                                concurrency=int(cell["concurrency"]),
+                                repetitions=int(cell["repetitions"]),
+                                operations_per_type=int(
+                                    cell["operations_per_type"]
+                                ),
+                                run_id=args.run_id,
+                                formal=args.formal,
+                                require_formal_eligibility=(
+                                    _require_formal_eligibility
+                                ),
+                                environment_attestation=(
+                                    environment
+                                    if args.backend == "vector-graph"
+                                    else None
+                                ),
+                                progress_callback=(
+                                    record_progress
+                                    if progress_callback_override is None
+                                    else progress_callback_override
+                                ),
+                            )
+                        except BaseException as exc:
+                            measurement_failure = exc
+                            measurement_traceback = exc.__traceback__
+                        finally:
+                            if owns_factory:
+                                close_factory = getattr(
+                                    cell_backend_factory, "close", None
+                                )
+                                if callable(close_factory):
+                                    try:
+                                        close_factory()
+                                    except BaseException as exc:
+                                        cleanup_failure = exc
+                        if measurement_failure is not None:
+                            raise measurement_failure.with_traceback(
+                                measurement_traceback
+                            )
+                        if cleanup_failure is not None:
+                            raise RuntimeError(
+                                "cell backend factory cleanup failed"
+                            ) from None
+                        return report
+
+                    if _cell_executor is None:
+                        raw_execution = {
+                            "schema": _CELL_EXECUTION_SCHEMA,
+                            "outcome": "completed",
+                            "completed_repetition_count": int(
+                                cell["repetitions"]
+                            ),
+                            "report": run_cell_measurement(),
+                        }
+                    else:
+                        raw_execution = _cell_executor(
+                            run_cell_measurement,
+                            cell_index=cell_index,
+                            cell_count=len(cells),
+                            graph_size=int(cell["graph_node_count"]),
+                            concurrency=int(cell["concurrency"]),
+                            repetitions=int(cell["repetitions"]),
+                            operations_per_type=int(cell["operations_per_type"]),
+                            stall_timeout_seconds=float(
+                                config["cell_stall_timeout_seconds"]
+                            ),
+                            progress_callback=record_progress,
+                        )
+                    execution = _normalize_cell_execution_result(
+                        raw_execution,
+                        expected_repetitions=int(cell["repetitions"]),
                     )
-                    cell_reports.append(cell_report)
-                    progress["completed_cell_count"] += 1
+                    local_completed = execution[
+                        "completed_repetition_count"
+                    ]
+                    progress["completed_repetition_count"] = (
+                        base_repetitions + local_completed
+                    )
+                    progress["completed_operation_sample_count"] = (
+                        base_samples
+                        + local_completed * operations_per_repetition
+                    )
+                    processed_cell_count += 1
+                    if execution["outcome"] == "completed":
+                        cell_reports.append(execution["report"])
+                        progress["completed_cell_count"] += 1
+                        continue
+
+                    skipped_in_cell = int(cell["repetitions"]) - local_completed
+                    skipped_repetition_count += skipped_in_cell
+                    timed_out_cells.append(
+                        {
+                            "cell_index": cell_index,
+                            "graph_size": int(cell["graph_node_count"]),
+                            "concurrency": int(cell["concurrency"]),
+                            "completed_repetition_count": local_completed,
+                            "skipped_repetition_count": skipped_in_cell,
+                            "timeout_class": execution["timeout_class"],
+                        }
+                    )
+                    if _progress_callback is not None:
+                        _progress_callback(
+                            {
+                                "cell_index": cell_index,
+                                "cell_count": len(cells),
+                                "graph_size": int(cell["graph_node_count"]),
+                                "concurrency": int(cell["concurrency"]),
+                                "repetition_index": local_completed,
+                                "repetition_count": int(cell["repetitions"]),
+                                "completed_repetitions": progress[
+                                    "completed_repetition_count"
+                                ],
+                                "total_repetitions": total_repetitions,
+                                "completed_samples": progress[
+                                    "completed_operation_sample_count"
+                                ],
+                                "total_samples": total_samples,
+                                "update_sequence": (
+                                    progress["completed_repetition_count"]
+                                    + len(timed_out_cells)
+                                ),
+                                "outcome": "cell_timed_out",
+                                "skipped_repetitions": (
+                                    skipped_repetition_count
+                                ),
+                                "timed_out_cell_count": len(timed_out_cells),
+                            }
+                        )
             except BaseException as exc:
                 matrix_failure = exc
                 matrix_traceback = exc.__traceback__
@@ -1550,6 +1754,27 @@ def main(
             if backend_cleanup_failure is not None:
                 raise RuntimeError("backend factory cleanup failed") from None
             check_interruption()
+            if timed_out_cells:
+                incomplete = {
+                    "schema": "txnmem-provenance-performance-incomplete-v1",
+                    "status": "blocked",
+                    "backend": args.backend,
+                    "formal_requested": args.formal,
+                    "reason_code": "matrix_incomplete_due_to_cell_timeout",
+                    "failure_stage": "matrix_execution",
+                    **progress,
+                    "processed_cell_count": processed_cell_count,
+                    "skipped_repetition_count": skipped_repetition_count,
+                    "timed_out_cell_count": len(timed_out_cells),
+                    "timed_out_cells": copy.deepcopy(timed_out_cells),
+                    "production_backend_claim": False,
+                }
+                try:
+                    write_provenance_blocked_report(args.out_dir, incomplete)
+                except (OSError, ValueError):
+                    pass
+                print("provenance performance incomplete: cell timeout")
+                return 2
             operation_samples = [
                 row for report in cell_reports for row in report["samples"]
             ]

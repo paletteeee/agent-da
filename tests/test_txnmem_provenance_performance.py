@@ -293,6 +293,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
 
     def test_formal_config_is_closed_exact_and_finite(self):
         config = self._formal_config()
+        self.assertEqual(config["cell_stall_timeout_seconds"], 3600.0)
         validated = validate_matrix_config(config, formal=True)
         self.assertEqual(validated, config)
 
@@ -304,6 +305,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
             ("bootstrap_repetitions", True),
             ("bootstrap_seed", 17.0),
             ("request_timeout_seconds", math.nan),
+            ("cell_stall_timeout_seconds", math.nan),
         ):
             changed = copy.deepcopy(config)
             changed[key] = value
@@ -1325,6 +1327,7 @@ class ProvenanceAggregationTests(unittest.TestCase):
             "bootstrap_repetitions": 100,
             "bootstrap_seed": 17,
             "request_timeout_seconds": 30.0,
+            "cell_stall_timeout_seconds": 3600.0,
         }
 
     def _topology_attestation(self, reports, config, service_versions=None):

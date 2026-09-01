@@ -655,12 +655,152 @@ class TxnMemCliOutputTests(unittest.TestCase):
                 "completed_samples": 4,
                 "total_samples": 16,
                 "update_sequence": 1,
+                "outcome": "repetition_completed",
+                "skipped_repetitions": 0,
+                "timed_out_cell_count": 0,
             },
         )
         self.assertEqual(events[-1]["completed_repetitions"], 4)
         self.assertEqual(events[-1]["update_sequence"], 4)
         forbidden = {"run_id", "namespace", "address", "path", "payload"}
         self.assertFalse(forbidden & set().union(*(event.keys() for event in events)))
+
+    def test_cell_timeout_is_recorded_skipped_and_later_cells_continue(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_experiment import main
+
+        events = []
+        executed_cells = []
+
+        def execute_cell(_run_cell, **kwargs):
+            cell_index = kwargs["cell_index"]
+            executed_cells.append(cell_index)
+            emit = kwargs["progress_callback"]
+            if cell_index == 1:
+                emit(
+                    {
+                        "completed_repetition_count": 1,
+                        "completed_operation_sample_count": 4,
+                    }
+                )
+                return {
+                    "schema": "txnmem-provenance-cell-execution-v1",
+                    "outcome": "cell_timed_out",
+                    "completed_repetition_count": 1,
+                    "timeout_class": "cell_stall_timeout",
+                }
+            for repetition in (1, 2):
+                emit(
+                    {
+                        "completed_repetition_count": repetition,
+                        "completed_operation_sample_count": repetition * 4,
+                    }
+                )
+            return {
+                "schema": "txnmem-provenance-cell-execution-v1",
+                "outcome": "completed",
+                "completed_repetition_count": 2,
+                "report": {
+                    "graph": {"node_count": 2},
+                    "samples": [],
+                    "repetitions": [],
+                },
+            }
+
+        with TemporaryDirectory() as tmp, patch(
+            "txnmem_provenance_performance.aggregate_matrix"
+        ) as aggregate, patch(
+            "txnmem_provenance_performance.publish_provenance_bundle"
+        ) as publish:
+            root = Path(tmp).resolve()
+            config = root / "config.json"
+            config.write_text(
+                json.dumps(
+                    {
+                        "schema": "txnmem-provenance-performance-v2",
+                        "graph_node_counts": [2],
+                        "concurrency_levels": [1, 2],
+                        "repetitions": 2,
+                        "graph_seed": 17,
+                        "operations_per_type": 1,
+                        "bootstrap_repetitions": 10,
+                        "bootstrap_seed": 17,
+                        "request_timeout_seconds": 30.0,
+                        "cell_stall_timeout_seconds": 60.0,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            out_dir = root / "out"
+            result = main(
+                [
+                    "provenance-performance",
+                    "--backend",
+                    "memory",
+                    "--config",
+                    str(config),
+                    "--run-id",
+                    "cell-timeout-fixture",
+                    "--out-dir",
+                    str(out_dir),
+                ],
+                _progress_callback=events.append,
+                _require_formal_eligibility=True,
+                _cell_executor=execute_cell,
+            )
+            incomplete = json.loads(
+                (
+                    out_dir
+                    / "results"
+                    / "provenance_performance_blocked.json"
+                ).read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(result, 2)
+        self.assertEqual(executed_cells, [1, 2])
+        aggregate.assert_not_called()
+        publish.assert_not_called()
+        self.assertEqual(
+            [event["outcome"] for event in events],
+            [
+                "repetition_completed",
+                "cell_timed_out",
+                "repetition_completed",
+                "repetition_completed",
+            ],
+        )
+        self.assertEqual(events[-1]["completed_repetitions"], 3)
+        self.assertEqual(events[-1]["skipped_repetitions"], 1)
+        self.assertEqual(events[-1]["timed_out_cell_count"], 1)
+        self.assertEqual(events[-1]["update_sequence"], 4)
+        self.assertEqual(
+            incomplete,
+            {
+                "schema": "txnmem-provenance-performance-incomplete-v1",
+                "status": "blocked",
+                "backend": "memory",
+                "formal_requested": False,
+                "reason_code": "matrix_incomplete_due_to_cell_timeout",
+                "failure_stage": "matrix_execution",
+                "completed_cell_count": 1,
+                "processed_cell_count": 2,
+                "completed_repetition_count": 3,
+                "skipped_repetition_count": 1,
+                "completed_operation_sample_count": 12,
+                "timed_out_cell_count": 1,
+                "timed_out_cells": [
+                    {
+                        "cell_index": 1,
+                        "graph_size": 2,
+                        "concurrency": 1,
+                        "completed_repetition_count": 1,
+                        "skipped_repetition_count": 1,
+                        "timeout_class": "cell_stall_timeout",
+                    }
+                ],
+                "production_backend_claim": False,
+            },
+        )
 
     def test_provenance_progress_hooks_are_python_only_and_strictly_typed(self):
         sys.path.insert(0, str(ROOT / "src"))
@@ -674,11 +814,14 @@ class TxnMemCliOutputTests(unittest.TestCase):
             main([], _require_formal_eligibility=1)
         with self.assertRaises(TypeError):
             main([], _interruption_check="not-callable")
+        with self.assertRaises(TypeError):
+            main([], _cell_executor="not-callable")
 
         config = self._small_provenance_config()
         config["_progress_callback"] = "forbidden"
         config["_require_formal_eligibility"] = True
         config["_interruption_check"] = "forbidden"
+        config["_cell_executor"] = "forbidden"
         with TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             config_path = root / "config.json"
