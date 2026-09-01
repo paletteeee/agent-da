@@ -119,6 +119,16 @@ class FormalEligibilityError(ProvenancePerformanceError):
         return self._reason.value
 
 
+class _MeasuredOperationFailure(ProvenancePerformanceError):
+    """Attach one closed operation name without retaining public payload text."""
+
+    def __init__(self, operation: str) -> None:
+        if type(operation) is not str or operation not in OPERATION_TYPES:
+            raise TypeError("measured failure operation must be closed")
+        super().__init__("measured provenance operation failed")
+        self._txnmem_operation = operation
+
+
 class _PrivatePublicationMode(enum.Enum):
     """One invocation-scoped publication mode for the protected lifecycle gate."""
 
@@ -1044,6 +1054,7 @@ def run_matrix_cell(
                     )
                 started_ns: int | None = None
                 error_class = None
+                failure = None
                 success = True
                 try:
                     ordinal = (
@@ -1057,6 +1068,7 @@ def run_matrix_cell(
                 except Exception as exc:  # failures are retained as aggregate-safe classes
                     success = False
                     error_class = _safe_error_name(exc)
+                    failure = exc
                 finally:
                     latency_ns = (
                         0
@@ -1080,6 +1092,8 @@ def run_matrix_cell(
                 }
                 if error_class is not None:
                     row["error_class"] = error_class
+                if failure is not None:
+                    row["_failure"] = failure
                 return row
 
             repetition_started_ns = time.perf_counter_ns()
@@ -1095,9 +1109,18 @@ def run_matrix_cell(
             measured_rows.sort(
                 key=lambda row: (row["_operation_rank"], row["_operation_index"])
             )
+            measured_failure = next(
+                (
+                    (str(row["operation"]), row["_failure"])
+                    for row in measured_rows
+                    if isinstance(row.get("_failure"), Exception)
+                ),
+                None,
+            )
             for row in measured_rows:
                 row.pop("_operation_rank", None)
                 row.pop("_operation_index", None)
+                row.pop("_failure", None)
 
             final_inventory = _inventory(backend, limit=len(expected_nodes) + 1)
             state_closed = _inventory_matches(
@@ -1181,10 +1204,17 @@ def run_matrix_cell(
                 "final_inventory": final_inventory,
             }
             if enforce_formal_eligibility and not eligible:
-                raise FormalEligibilityError(
+                eligibility_error = FormalEligibilityError(
                     FormalEligibilityReason.REPETITION_STATE_INELIGIBLE,
                     "formal repetition has failures or non-closed persistent state"
                 )
+                if measured_failure is None:
+                    raise eligibility_error
+                failed_operation, failure = measured_failure
+                try:
+                    raise _MeasuredOperationFailure(failed_operation) from failure
+                except _MeasuredOperationFailure as operation_failure:
+                    raise eligibility_error from operation_failure
             all_samples.extend(measured_rows)
             repetition_rows.append(repetition_row)
         finally:

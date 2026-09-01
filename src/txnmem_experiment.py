@@ -84,10 +84,15 @@ CORE_WORKLOADS = (
 
 _SAFE_FAILURE_CLASS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 _SAFE_FAILURE_OPERATIONS = frozenset({"healthcheck"})
+_SAFE_MEASURED_FAILURE_OPERATIONS = frozenset(
+    {"read", "search", "derive", "invalidate_repair"}
+)
 
 
 def _safe_failure_provenance(exc: BaseException) -> dict[str, Any]:
     """Retain only closed exception classes and backend attribution fields."""
+
+    from txnmem_provenance_performance import _MeasuredOperationFailure
 
     error_classes: list[str] = []
     service = None
@@ -114,12 +119,14 @@ def _safe_failure_provenance(exc: BaseException) -> dict[str, Any]:
             and candidate_service in {"qdrant", "neo4j"}
         ):
             service = candidate_service
-        if (
-            operation is None
-            and type(candidate_operation) is str
-            and candidate_operation in _SAFE_FAILURE_OPERATIONS
-        ):
-            operation = candidate_operation
+        if operation is None and type(candidate_operation) is str:
+            if candidate_operation in _SAFE_FAILURE_OPERATIONS:
+                operation = candidate_operation
+            elif (
+                type(current) is _MeasuredOperationFailure
+                and candidate_operation in _SAFE_MEASURED_FAILURE_OPERATIONS
+            ):
+                operation = candidate_operation
         current = current.__cause__ or current.__context__
     return {
         "error_classes": error_classes,
