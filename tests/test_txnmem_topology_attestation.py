@@ -146,6 +146,14 @@ class TopologyAttestationTests(unittest.TestCase):
             "0b890110478cc7acc4381662ff7696b80835c1ce2dabcdfc6031545002379b36",
         )
 
+    def test_fresh_formal_v10_run_nonce_is_pre_registered(self):
+        self.assertEqual(
+            FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN.get(
+                "afb5aef37a8d25f84e0eff97cad94c2b541750da8501175d0825e60836cac3ec"
+            ),
+            "dbceeef6aabbc8d9f621b4cde82656837b8a5966d2d527a57496b52b1252f233",
+        )
+
     def test_runtime_manifest_accepts_registered_system_python_3_10_12(self):
         launch, _completion = self._documents()
         runtime_manifest = copy.deepcopy(

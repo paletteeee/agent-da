@@ -492,6 +492,9 @@ FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN: dict[str, str] = {
     # Fresh one-time formal registration v9; underlying identity remains private.
     "eacadaef09241cf2d1018318166882ebbc30a57070f093fa5adae85b802b0b07":
         "0b890110478cc7acc4381662ff7696b80835c1ce2dabcdfc6031545002379b36",
+    # Fresh one-time formal registration v10; underlying identity remains private.
+    "afb5aef37a8d25f84e0eff97cad94c2b541750da8501175d0825e60836cac3ec":
+        "dbceeef6aabbc8d9f621b4cde82656837b8a5966d2d527a57496b52b1252f233",
 }
 
 
