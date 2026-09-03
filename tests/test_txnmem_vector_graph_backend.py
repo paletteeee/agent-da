@@ -1833,12 +1833,22 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
     def test_qdrant_raw_readback_creates_a_missing_collection_before_scroll(self):
         client = _QdrantHTTPClient("http://qdrant")
         created = False
+        indexed_fields = set()
+        requests = []
 
         def request(method, path, payload=None):
             nonlocal created
+            requests.append((method, path, payload))
             if method == "PUT" and path == "/collections/txnmem_memory":
                 created = True
                 return {}
+            if (
+                method == "PUT"
+                and path == "/collections/txnmem_memory/index?wait=true"
+            ):
+                self.assertEqual(payload["field_schema"], "keyword")
+                indexed_fields.add(payload["field_name"])
+                return {"result": {"status": "completed"}}
             if method == "GET" and path == "/collections/txnmem_memory":
                 return {
                     "result": {
@@ -1846,12 +1856,20 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
                             "params": {
                                 "vectors": {"size": 32, "distance": "Cosine"}
                             }
-                        }
+                        },
+                        "payload_schema": {
+                            field: {"data_type": "keyword"}
+                            for field in indexed_fields
+                        },
                     }
                 }
             if path.endswith("/points/scroll"):
-                if not created:
-                    raise RuntimeError("collection missing")
+                if not created or indexed_fields != {
+                    "memory_id",
+                    "namespace",
+                    "txn_id",
+                }:
+                    raise RuntimeError("collection schema incomplete")
                 return {"result": {"points": []}}
             raise AssertionError((method, path, payload))
 
@@ -1860,6 +1878,30 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.assertEqual(
             client.retrieve_many_by_txn("tenant", "txn-empty"),
             {"read_ok": True, "rows": []},
+        )
+        self.assertEqual(
+            [
+                payload
+                for method, path, payload in requests
+                if path.endswith("/index?wait=true")
+            ],
+            [
+                {"field_name": "memory_id", "field_schema": "keyword"},
+                {"field_name": "namespace", "field_schema": "keyword"},
+                {"field_name": "txn_id", "field_schema": "keyword"},
+            ],
+        )
+        self.assertEqual(
+            [(method, path) for method, path, _payload in requests],
+            [
+                ("PUT", "/collections/txnmem_memory"),
+                ("GET", "/collections/txnmem_memory"),
+                ("PUT", "/collections/txnmem_memory/index?wait=true"),
+                ("PUT", "/collections/txnmem_memory/index?wait=true"),
+                ("PUT", "/collections/txnmem_memory/index?wait=true"),
+                ("GET", "/collections/txnmem_memory"),
+                ("POST", "/collections/txnmem_memory/points/scroll"),
+            ],
         )
 
     def test_qdrant_collection_readiness_is_cached_after_exact_conflict(self):
@@ -1882,7 +1924,12 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
                         "params": {
                             "vectors": {"size": 32, "distance": "Cosine"}
                         }
-                    }
+                    },
+                    "payload_schema": {
+                        "memory_id": {"data_type": "keyword"},
+                        "namespace": {"data_type": "keyword"},
+                        "txn_id": {"data_type": "keyword"},
+                    },
                 }
             }
 
@@ -1898,6 +1945,82 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
                 ("GET", "/collections/txnmem_memory"),
             ],
         )
+
+    def test_qdrant_collection_readiness_rejects_incompatible_payload_index(self):
+        client = _QdrantHTTPClient("http://qdrant")
+        requests = []
+
+        def request(method, path, payload=None):
+            requests.append((method, path, payload))
+            if method == "PUT":
+                raise HTTPError(path, 409, "Conflict", None, None)
+            return {
+                "result": {
+                    "config": {
+                        "params": {
+                            "vectors": {"size": 32, "distance": "Cosine"}
+                        }
+                    },
+                    "payload_schema": {
+                        "memory_id": {"data_type": "keyword"},
+                        "namespace": {"data_type": "integer"},
+                        "txn_id": {"data_type": "keyword"},
+                    },
+                }
+            }
+
+        client._request = request
+
+        for _ in range(2):
+            with self.assertRaisesRegex(
+                VectorGraphBackendError,
+                "payload index",
+            ):
+                client._ensure_collection()
+
+        self.assertEqual(
+            [(method, path) for method, path, _payload in requests],
+            [
+                ("PUT", "/collections/txnmem_memory"),
+                ("GET", "/collections/txnmem_memory"),
+                ("PUT", "/collections/txnmem_memory"),
+                ("GET", "/collections/txnmem_memory"),
+            ],
+        )
+
+    def test_qdrant_collection_readiness_rejects_unconfirmed_payload_indexes(self):
+        client = _QdrantHTTPClient("http://qdrant")
+        requests = []
+
+        def request(method, path, payload=None):
+            requests.append((method, path, payload))
+            if method == "PUT" and path == "/collections/txnmem_memory":
+                return {}
+            if method == "PUT" and path.endswith("/index?wait=true"):
+                return {"result": {"status": "completed"}}
+            if method == "GET":
+                return {
+                    "result": {
+                        "config": {
+                            "params": {
+                                "vectors": {"size": 32, "distance": "Cosine"}
+                            }
+                        },
+                        "payload_schema": {},
+                    }
+                }
+            raise AssertionError((method, path, payload))
+
+        client._request = request
+
+        for _ in range(2):
+            with self.assertRaisesRegex(
+                VectorGraphBackendError,
+                "payload indexes",
+            ):
+                client._ensure_collection()
+
+        self.assertEqual(len(requests), 12)
 
     def test_qdrant_collection_readiness_rejects_lookalike_409_text(self):
         client = _QdrantHTTPClient("http://qdrant")
@@ -1967,7 +2090,12 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
                         "params": {
                             "vectors": {"size": 32, "distance": "Cosine"}
                         }
-                    }
+                    },
+                    "payload_schema": {
+                        "memory_id": {"data_type": "keyword"},
+                        "namespace": {"data_type": "keyword"},
+                        "txn_id": {"data_type": "keyword"},
+                    },
                 }
             }
 
@@ -1994,7 +2122,12 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
                             "params": {
                                 "vectors": {"size": 32, "distance": "Cosine"}
                             }
-                        }
+                        },
+                        "payload_schema": {
+                            "memory_id": {"data_type": "keyword"},
+                            "namespace": {"data_type": "keyword"},
+                            "txn_id": {"data_type": "keyword"},
+                        },
                     }
                 }
             self.assertTrue(path.endswith("/points/scroll"))
@@ -2035,7 +2168,12 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
                             "params": {
                                 "vectors": {"size": 32, "distance": "Cosine"}
                             }
-                        }
+                        },
+                        "payload_schema": {
+                            "memory_id": {"data_type": "keyword"},
+                            "namespace": {"data_type": "keyword"},
+                            "txn_id": {"data_type": "keyword"},
+                        },
                     }
                 }
             self.assertTrue(path.endswith("/points/scroll"))

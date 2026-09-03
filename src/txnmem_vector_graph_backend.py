@@ -122,6 +122,8 @@ def _embedding(value: Any, dimension: int = 32) -> list[float]:
 
 
 class _QdrantHTTPClient:
+    _REQUIRED_PAYLOAD_INDEXES = ("memory_id", "namespace", "txn_id")
+
     def __init__(self, base_url: str, dimension: int = 32, timeout_seconds: float = 15.0):
         self.base_url = str(base_url).rstrip("/")
         self.dimension = int(dimension)
@@ -141,6 +143,46 @@ class _QdrantHTTPClient:
         with urlopen(request, timeout=self.timeout_seconds) as response:  # noqa: S310 - endpoint is explicit experiment config
             raw = response.read()
         return json.loads(raw.decode("utf-8")) if raw else {}
+
+    def _missing_required_payload_indexes(
+        self,
+        configuration: Mapping[str, Any],
+    ) -> tuple[str, ...]:
+        try:
+            result = configuration["result"]
+            vectors = result["config"]["params"]["vectors"]
+            payload_schema = result["payload_schema"]
+        except (KeyError, TypeError):
+            vectors = None
+            payload_schema = None
+        if (
+            not isinstance(vectors, Mapping)
+            or type(vectors.get("size")) is not int
+            or vectors.get("size") != self.dimension
+            or vectors.get("distance") != "Cosine"
+        ):
+            raise VectorGraphBackendError(
+                "Qdrant collection configuration is incompatible"
+            )
+        if not isinstance(payload_schema, Mapping):
+            raise VectorGraphBackendError(
+                "Qdrant payload index configuration is incompatible"
+            )
+
+        missing = []
+        for field_name in self._REQUIRED_PAYLOAD_INDEXES:
+            if field_name not in payload_schema:
+                missing.append(field_name)
+                continue
+            field_schema = payload_schema[field_name]
+            if (
+                not isinstance(field_schema, Mapping)
+                or field_schema.get("data_type") != "keyword"
+            ):
+                raise VectorGraphBackendError(
+                    "Qdrant payload index configuration is incompatible"
+                )
+        return tuple(missing)
 
     def _ensure_collection(self) -> None:
         if self._collection_ready:
@@ -165,19 +207,28 @@ class _QdrantHTTPClient:
             configuration = self._request(
                 "GET", f"/collections/{self.collection}"
             )
-            try:
-                vectors = configuration["result"]["config"]["params"]["vectors"]
-            except (KeyError, TypeError):
-                vectors = None
-            if (
-                not isinstance(vectors, Mapping)
-                or type(vectors.get("size")) is not int
-                or vectors.get("size") != self.dimension
-                or vectors.get("distance") != "Cosine"
-            ):
-                raise VectorGraphBackendError(
-                    "Qdrant collection configuration is incompatible"
+            missing_indexes = self._missing_required_payload_indexes(
+                configuration
+            )
+            for field_name in missing_indexes:
+                self._request(
+                    "PUT",
+                    f"/collections/{self.collection}/index?wait=true",
+                    {
+                        "field_name": field_name,
+                        "field_schema": "keyword",
+                    },
                 )
+            if missing_indexes:
+                confirmed_configuration = self._request(
+                    "GET", f"/collections/{self.collection}"
+                )
+                if self._missing_required_payload_indexes(
+                    confirmed_configuration
+                ):
+                    raise VectorGraphBackendError(
+                        "Qdrant required payload indexes are missing"
+                    )
             self._collection_ready = True
 
     def upsert(self, namespace, point_id, vector, payload, idempotency_key):
