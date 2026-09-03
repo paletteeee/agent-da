@@ -1904,6 +1904,249 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
             ],
         )
 
+    def test_qdrant_public_data_operations_require_collection_readiness(self):
+        operations = (
+            (
+                "retrieve",
+                lambda client: client.retrieve("tenant", "memory"),
+            ),
+            (
+                "search",
+                lambda client: client.search("tenant", [0.0] * 32, 1),
+            ),
+            (
+                "delete",
+                lambda client: client.delete("tenant", "memory", "key"),
+            ),
+            (
+                "delete_many_by_txn",
+                lambda client: client.delete_many_by_txn(
+                    "tenant", "txn", "key"
+                ),
+            ),
+        )
+
+        for name, operation in operations:
+            with self.subTest(operation=name):
+                client = _QdrantHTTPClient("http://qdrant")
+                collection_ready = False
+                collection_create_count = 0
+
+                def request(method, path, payload=None):
+                    nonlocal collection_create_count, collection_ready
+                    if method == "PUT" and path == "/collections/txnmem_memory":
+                        collection_create_count += 1
+                        return {}
+                    if method == "GET" and path == "/collections/txnmem_memory":
+                        collection_ready = True
+                        return {
+                            "result": {
+                                "config": {
+                                    "params": {
+                                        "vectors": {
+                                            "size": 32,
+                                            "distance": "Cosine",
+                                        }
+                                    }
+                                },
+                                "payload_schema": {
+                                    "memory_id": {"data_type": "keyword"},
+                                    "namespace": {"data_type": "keyword"},
+                                    "txn_id": {"data_type": "keyword"},
+                                },
+                            }
+                        }
+                    if not collection_ready:
+                        raise RuntimeError("data request preceded schema setup")
+                    if path == "/collections/txnmem_memory/points":
+                        return {"result": []}
+                    if path.endswith("/points/search"):
+                        return {"result": []}
+                    if path.endswith("/points/delete?wait=true"):
+                        return {"result": {"status": "completed"}}
+                    raise AssertionError((method, path, payload))
+
+                client._request = request
+
+                operation(client)
+
+                self.assertEqual(collection_create_count, 1)
+
+    def test_qdrant_preload_builds_indexes_before_first_projection_read(self):
+        client = _QdrantHTTPClient("http://qdrant")
+        created = False
+        indexed_fields = set()
+        points = {}
+        requests = []
+
+        def request(method, path, payload=None):
+            nonlocal created
+            requests.append((method, path, payload))
+            if method == "PUT" and path == "/collections/txnmem_memory":
+                created = True
+                return {}
+            if method == "GET" and path == "/collections/txnmem_memory":
+                return {
+                    "result": {
+                        "config": {
+                            "params": {
+                                "vectors": {"size": 32, "distance": "Cosine"}
+                            }
+                        },
+                        "payload_schema": {
+                            field: {"data_type": "keyword"}
+                            for field in indexed_fields
+                        },
+                    }
+                }
+            if method == "PUT" and path.endswith("/index?wait=true"):
+                indexed_fields.add(payload["field_name"])
+                return {"result": {"status": "completed"}}
+            if not created or indexed_fields != {
+                "memory_id",
+                "namespace",
+                "txn_id",
+            }:
+                raise RuntimeError("projection request preceded schema setup")
+            if method == "POST" and path.endswith("/points"):
+                return {
+                    "result": [
+                        {"payload": dict(points[point_id])}
+                        for point_id in payload["ids"]
+                        if point_id in points
+                    ]
+                }
+            if method == "PUT" and path.endswith("/points?wait=true"):
+                for point in payload["points"]:
+                    points[point["id"]] = dict(point["payload"])
+                return {"result": {"status": "completed"}}
+            raise AssertionError((method, path, payload))
+
+        client._request = request
+        backend = VectorGraphMemoryBackend(
+            "preload-schema",
+            "http://qdrant",
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            qdrant_client=client,
+            neo4j_client=_FakeNeo4j(),
+            max_retries=0,
+        )
+
+        self.assertEqual(
+            backend.preload_provenance_record(
+                "m0", [], value="provenance:m0"
+            ),
+            0,
+        )
+        first_data_request = next(
+            index
+            for index, (_method, path, _payload) in enumerate(requests)
+            if "/points" in path
+        )
+        final_schema_probe = max(
+            index
+            for index, (method, path, _payload) in enumerate(requests)
+            if method == "GET" and path == "/collections/txnmem_memory"
+        )
+        self.assertGreater(first_data_request, final_schema_probe)
+
+    def test_qdrant_existing_partial_schema_is_migrated_before_read(self):
+        client = _QdrantHTTPClient("http://qdrant")
+        indexed_fields = {"namespace"}
+        created_indexes = []
+
+        def request(method, path, payload=None):
+            if method == "PUT" and path == "/collections/txnmem_memory":
+                raise HTTPError(path, 409, "Conflict", None, None)
+            if method == "GET" and path == "/collections/txnmem_memory":
+                return {
+                    "result": {
+                        "config": {
+                            "params": {
+                                "vectors": {"size": 32, "distance": "Cosine"}
+                            }
+                        },
+                        "payload_schema": {
+                            field: {"data_type": "keyword"}
+                            for field in indexed_fields
+                        },
+                    }
+                }
+            if method == "PUT" and path.endswith("/index?wait=true"):
+                created_indexes.append(payload["field_name"])
+                indexed_fields.add(payload["field_name"])
+                return {"result": {"status": "completed"}}
+            if indexed_fields != {"memory_id", "namespace", "txn_id"}:
+                raise RuntimeError("legacy collection read preceded migration")
+            if method == "POST" and path.endswith("/points"):
+                return {"result": []}
+            raise AssertionError((method, path, payload))
+
+        client._request = request
+
+        self.assertIsNone(client.retrieve("tenant", "memory"))
+        self.assertEqual(created_indexes, ["memory_id", "txn_id"])
+
+    def test_qdrant_concurrent_first_reads_share_one_schema_setup(self):
+        client = _QdrantHTTPClient("http://qdrant")
+        start = threading.Barrier(3)
+        request_lock = threading.Lock()
+        collection_ready = False
+        collection_create_count = 0
+        results = []
+        errors = []
+
+        def request(method, path, payload=None):
+            nonlocal collection_create_count, collection_ready
+            if method == "PUT" and path == "/collections/txnmem_memory":
+                with request_lock:
+                    collection_create_count += 1
+                time.sleep(0.02)
+                return {}
+            if method == "GET" and path == "/collections/txnmem_memory":
+                collection_ready = True
+                return {
+                    "result": {
+                        "config": {
+                            "params": {
+                                "vectors": {"size": 32, "distance": "Cosine"}
+                            }
+                        },
+                        "payload_schema": {
+                            "memory_id": {"data_type": "keyword"},
+                            "namespace": {"data_type": "keyword"},
+                            "txn_id": {"data_type": "keyword"},
+                        },
+                    }
+                }
+            if not collection_ready:
+                raise RuntimeError("concurrent read preceded schema setup")
+            if method == "POST" and path.endswith("/points"):
+                return {"result": []}
+            raise AssertionError((method, path, payload))
+
+        client._request = request
+
+        def read() -> None:
+            start.wait(timeout=2)
+            try:
+                results.append(client.retrieve("tenant", "memory"))
+            except BaseException as exc:
+                errors.append(exc)
+
+        workers = [threading.Thread(target=read) for _ in range(2)]
+        for worker in workers:
+            worker.start()
+        start.wait(timeout=2)
+        for worker in workers:
+            worker.join(timeout=2)
+
+        self.assertFalse(any(worker.is_alive() for worker in workers))
+        self.assertEqual(errors, [])
+        self.assertEqual(results, [None, None])
+        self.assertEqual(collection_create_count, 1)
+
     def test_qdrant_collection_readiness_is_cached_after_exact_conflict(self):
         client = _QdrantHTTPClient("http://qdrant")
         requests = []

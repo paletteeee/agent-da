@@ -240,6 +240,7 @@ class _QdrantHTTPClient:
         )
 
     def retrieve(self, namespace, point_id):
+        self._ensure_collection()
         result = self._request("POST", f"/collections/{self.collection}/points", {"ids": [_qdrant_point_id(namespace, point_id)], "with_payload": True})
         rows = result.get("result", []) if isinstance(result, Mapping) else []
         for row in rows:
@@ -249,6 +250,7 @@ class _QdrantHTTPClient:
         return None
 
     def search(self, namespace, vector, limit):
+        self._ensure_collection()
         result = self._request(
             "POST",
             f"/collections/{self.collection}/points/search",
@@ -258,6 +260,7 @@ class _QdrantHTTPClient:
         return [dict(row.get("payload", {})) for row in rows]
 
     def delete(self, namespace, point_id, idempotency_key):
+        self._ensure_collection()
         self._request("POST", f"/collections/{self.collection}/points/delete?wait=true", {"points": [_qdrant_point_id(namespace, point_id)]})
 
     @staticmethod
@@ -342,6 +345,7 @@ class _QdrantHTTPClient:
         return {"read_ok": True, "rows": rows}
 
     def delete_many_by_txn(self, namespace, txn_id, idempotency_key):
+        self._ensure_collection()
         self._request(
             "POST",
             f"/collections/{self.collection}/points/delete?wait=true",
