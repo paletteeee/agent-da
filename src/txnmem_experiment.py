@@ -93,7 +93,28 @@ _SAFE_MEASURED_FAILURE_OPERATIONS = frozenset(
 def _safe_failure_provenance(exc: BaseException) -> dict[str, Any]:
     """Retain only closed exception classes and backend attribution fields."""
 
-    from txnmem_provenance_performance import _MeasuredOperationFailure
+    from txnmem_provenance_performance import (
+        _IsolatedCellWorkerFailure,
+        _MeasuredOperationFailure,
+    )
+
+    if type(exc) is _IsolatedCellWorkerFailure:
+        worker = exc.failure_provenance
+        worker_classes = worker["error_classes"]
+        if len(worker_classes) <= 7:
+            error_classes = ["_IsolatedCellWorkerFailure"] + worker_classes
+        else:
+            error_classes = (
+                ["_IsolatedCellWorkerFailure"]
+                + worker_classes[:6]
+                + [worker_classes[-1]]
+            )
+        return {
+            "error_classes": error_classes,
+            "operation": worker["operation"],
+            "root_error_class": error_classes[-1],
+            "service": worker["service"],
+        }
 
     error_classes: list[str] = []
     service = None
@@ -143,7 +164,11 @@ def _safe_failure_reason_code(exc: BaseException) -> str:
     from txnmem_provenance_performance import (
         FormalEligibilityError,
         FormalEligibilityReason,
+        _IsolatedCellWorkerFailure,
     )
+
+    if type(exc) is _IsolatedCellWorkerFailure:
+        return exc.failure_reason_code
 
     current: BaseException | None = exc
     seen: set[int] = set()

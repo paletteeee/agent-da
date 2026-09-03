@@ -39,6 +39,33 @@ PROVENANCE_PRELOAD_WORKERS = 8
 PROVENANCE_PRELOAD_REPAIR_LIMIT_PER_RECORD = 1
 PRELOAD_RETRY_SCOPE = "measured_operations_only"
 _SAFE_ERROR_CLASS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+_ISOLATED_CELL_FAILURE_CLASSES = frozenset(
+    {
+        "AssertionError",
+        "BackendError",
+        "BrokenPipeError",
+        "ConnectionError",
+        "ConnectionRefusedError",
+        "ConnectionResetError",
+        "FormalEligibilityError",
+        "HTTPError",
+        "JSONDecodeError",
+        "KeyError",
+        "MemoryError",
+        "OSError",
+        "ProvenancePerformanceError",
+        "RuntimeError",
+        "TimeoutError",
+        "TypeError",
+        "URLError",
+        "ValueError",
+        "VectorGraphBackendError",
+        "VectorGraphCommitConflict",
+        "_IsolatedCellWorkerFailure",
+        "_MeasuredOperationFailure",
+        "_ServiceBoundaryFailure",
+    }
+)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 ENVIRONMENT_SCHEMA = "txnmem-provenance-environment-v1"
 FORMAL_MATRIX_CONFIG = {
@@ -119,6 +146,128 @@ class FormalEligibilityError(ProvenancePerformanceError):
     @property
     def reason_code(self) -> str:
         return self._reason.value
+
+
+class _IsolatedCellWorkerFailure(ProvenancePerformanceError):
+    """Carry only validated, publication-safe failure metadata across IPC."""
+
+    _OPERATIONS = frozenset(
+        {"healthcheck", "read", "search", "derive", "invalidate_repair"}
+    )
+    _SERVICES = frozenset({"qdrant", "neo4j"})
+
+    def __init__(
+        self,
+        *,
+        failure_reason_code: str,
+        failure_provenance: Mapping[str, Any],
+    ) -> None:
+        allowed_reasons = {
+            reason.value for reason in FormalEligibilityReason
+        } | {"unclassified_failure"}
+        if (
+            type(failure_reason_code) is not str
+            or failure_reason_code not in allowed_reasons
+            or type(failure_provenance) is not dict
+            or set(failure_provenance)
+            != {"error_classes", "operation", "root_error_class", "service"}
+        ):
+            raise TypeError("isolated worker failure metadata must be closed")
+        error_classes = failure_provenance.get("error_classes")
+        operation = failure_provenance.get("operation")
+        root_error_class = failure_provenance.get("root_error_class")
+        service = failure_provenance.get("service")
+        if (
+            type(error_classes) is not list
+            or not 1 <= len(error_classes) <= 8
+            or any(
+                type(name) is not str
+                or name not in _ISOLATED_CELL_FAILURE_CLASSES
+                for name in error_classes
+            )
+            or type(root_error_class) is not str
+            or root_error_class != error_classes[-1]
+            or (
+                operation is not None
+                and (
+                    type(operation) is not str
+                    or operation not in self._OPERATIONS
+                )
+            )
+            or (
+                service is not None
+                and (type(service) is not str or service not in self._SERVICES)
+            )
+        ):
+            raise TypeError("isolated worker failure metadata must be closed")
+        super().__init__("isolated cell worker failed")
+        self._failure_reason_code = failure_reason_code
+        self._failure_error_classes = tuple(error_classes)
+        self._failure_operation = operation
+        self._failure_root_error_class = root_error_class
+        self._failure_service = service
+
+    @property
+    def failure_reason_code(self) -> str:
+        return self._failure_reason_code
+
+    @property
+    def failure_provenance(self) -> dict[str, Any]:
+        return {
+            "error_classes": list(self._failure_error_classes),
+            "operation": self._failure_operation,
+            "root_error_class": self._failure_root_error_class,
+            "service": self._failure_service,
+        }
+
+
+def _close_isolated_cell_failure_provenance(
+    failure_provenance: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Map open exception names to one finite IPC-safe vocabulary."""
+
+    if (
+        type(failure_provenance) is not dict
+        or set(failure_provenance)
+        != {"error_classes", "operation", "root_error_class", "service"}
+    ):
+        raise TypeError("isolated worker failure metadata must be closed")
+    error_classes = failure_provenance.get("error_classes")
+    operation = failure_provenance.get("operation")
+    root_error_class = failure_provenance.get("root_error_class")
+    service = failure_provenance.get("service")
+    if (
+        type(error_classes) is not list
+        or not 1 <= len(error_classes) <= 8
+        or any(type(name) is not str for name in error_classes)
+        or type(root_error_class) is not str
+        or root_error_class != error_classes[-1]
+        or (
+            operation is not None
+            and (
+                type(operation) is not str
+                or operation not in _IsolatedCellWorkerFailure._OPERATIONS
+            )
+        )
+        or (
+            service is not None
+            and (
+                type(service) is not str
+                or service not in _IsolatedCellWorkerFailure._SERVICES
+            )
+        )
+    ):
+        raise TypeError("isolated worker failure metadata must be closed")
+    closed_classes = [
+        name if name in _ISOLATED_CELL_FAILURE_CLASSES else "BackendError"
+        for name in error_classes
+    ]
+    return {
+        "error_classes": closed_classes,
+        "operation": operation,
+        "root_error_class": closed_classes[-1],
+        "service": service,
+    }
 
 
 class _MeasuredOperationFailure(ProvenancePerformanceError):

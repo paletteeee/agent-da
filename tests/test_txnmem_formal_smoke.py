@@ -3435,6 +3435,148 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
                 close_fds=(),
             )
 
+    def test_failed_cell_worker_result_rejects_unknown_fields(self):
+        document = {
+            "schema": "txnmem-provenance-cell-worker-result-v1",
+            "outcome": "failed",
+            "completed_repetition_count": 0,
+            "failure_reason_code": "unclassified_failure",
+            "failure_provenance": {
+                "error_classes": ["RuntimeError"],
+                "operation": None,
+                "root_error_class": "RuntimeError",
+                "service": None,
+            },
+            "raw_message": "token=must-not-cross-the-cell-boundary",
+        }
+        payload = runner._canonical_cell_payload(document) + b"\n"
+
+        with self.assertRaisesRegex(RuntimeError, "isolated cell result is invalid"):
+            runner._decode_cell_worker_result(payload)
+
+    def test_isolated_worker_failure_is_closed_and_copy_safe(self):
+        import txnmem_experiment
+
+        failure = performance._IsolatedCellWorkerFailure(
+            failure_reason_code="service_health_unavailable",
+            failure_provenance={
+                "error_classes": ["FormalEligibilityError"],
+                "operation": "healthcheck",
+                "root_error_class": "FormalEligibilityError",
+                "service": "qdrant",
+            },
+        )
+        first = failure.failure_provenance
+        first["error_classes"].append("InjectedClass")
+        first["service"] = "neo4j"
+
+        self.assertEqual(
+            failure.failure_provenance,
+            {
+                "error_classes": ["FormalEligibilityError"],
+                "operation": "healthcheck",
+                "root_error_class": "FormalEligibilityError",
+                "service": "qdrant",
+            },
+        )
+        self.assertEqual(
+            txnmem_experiment._safe_failure_reason_code(failure),
+            "service_health_unavailable",
+        )
+        self.assertEqual(
+            txnmem_experiment._safe_failure_provenance(failure),
+            {
+                "error_classes": [
+                    "_IsolatedCellWorkerFailure",
+                    "FormalEligibilityError",
+                ],
+                "operation": "healthcheck",
+                "root_error_class": "FormalEligibilityError",
+                "service": "qdrant",
+            },
+        )
+        serialized = f"{failure!s}\n{failure!r}\n{failure.args!r}"
+        self.assertNotIn("token=", serialized)
+        self.assertNotIn("qdrant", serialized)
+
+    def test_isolated_worker_failure_rejects_open_error_class_channel(self):
+        with self.assertRaisesRegex(TypeError, "metadata must be closed"):
+            performance._IsolatedCellWorkerFailure(
+                failure_reason_code="unclassified_failure",
+                failure_provenance={
+                    "error_classes": ["SecretTokenABC123"],
+                    "operation": None,
+                    "root_error_class": "SecretTokenABC123",
+                    "service": None,
+                },
+            )
+
+    def test_unknown_worker_error_class_is_closed_before_ipc(self):
+        closed = performance._close_isolated_cell_failure_provenance(
+            {
+                "error_classes": ["RuntimeError", "SecretTokenABC123"],
+                "operation": None,
+                "root_error_class": "SecretTokenABC123",
+                "service": None,
+            }
+        )
+
+        self.assertEqual(
+            closed,
+            {
+                "error_classes": ["RuntimeError", "BackendError"],
+                "operation": None,
+                "root_error_class": "BackendError",
+                "service": None,
+            },
+        )
+
+    def test_isolated_worker_failure_preserves_root_at_maximum_depth(self):
+        import txnmem_experiment
+
+        failure = performance._IsolatedCellWorkerFailure(
+            failure_reason_code="unclassified_failure",
+            failure_provenance={
+                "error_classes": [
+                    "RuntimeError",
+                    "OSError",
+                    "ConnectionError",
+                    "TimeoutError",
+                    "ValueError",
+                    "TypeError",
+                    "ProvenancePerformanceError",
+                    "FormalEligibilityError",
+                ],
+                "operation": None,
+                "root_error_class": "FormalEligibilityError",
+                "service": None,
+            },
+        )
+
+        provenance = txnmem_experiment._safe_failure_provenance(failure)
+
+        self.assertEqual(len(provenance["error_classes"]), 8)
+        self.assertEqual(
+            provenance["error_classes"],
+            [
+                "_IsolatedCellWorkerFailure",
+                "RuntimeError",
+                "OSError",
+                "ConnectionError",
+                "TimeoutError",
+                "ValueError",
+                "TypeError",
+                "FormalEligibilityError",
+            ],
+        )
+        self.assertEqual(
+            provenance["root_error_class"], "FormalEligibilityError"
+        )
+
+    def test_nonzero_cell_worker_exit_is_rejected_before_outcome(self):
+        with self.assertRaisesRegex(RuntimeError, "isolated cell worker failed"):
+            runner._require_successful_cell_worker_exit(74 << 8)
+
     def test_stall_watchdog_reaps_worker_that_exits_before_kill_signal(self):
         status = 0
         with patch.object(
@@ -3567,6 +3709,107 @@ class ProvenanceSmokeRunnerTests(unittest.TestCase):
         self.assertEqual(published[-1]["completed_repetition_count"], 29)
         self.assertEqual(result["outcome"], "cell_timed_out")
         self.assertEqual(result["completed_repetition_count"], 29)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and hasattr(os, "pidfd_open")
+        and hasattr(signal, "pidfd_send_signal"),
+        "Linux pidfd supervision only",
+    )
+    def test_isolated_cell_preserves_only_sanitized_worker_failure(self):
+        published = []
+
+        def failing_cell(*, progress_callback_override=None):
+            progress_callback_override(
+                {
+                    "completed_repetition_count": 1,
+                    "completed_operation_sample_count": 32,
+                }
+            )
+            failure = performance.FormalEligibilityError(
+                performance.FormalEligibilityReason.SERVICE_HEALTH_UNAVAILABLE,
+                "token=private at http://203.0.113.10:6333",
+            )
+            secret_class = type("SecretTokenABC123", (RuntimeError,), {})
+            failure.__cause__ = secret_class("private worker root")
+            raise failure
+
+        with self.assertRaises(
+            performance._IsolatedCellWorkerFailure
+        ) as raised:
+            runner._run_isolated_matrix_cell(
+                failing_cell,
+                cell_index=1,
+                cell_count=15,
+                graph_size=100,
+                concurrency=1,
+                repetitions=30,
+                operations_per_type=8,
+                stall_timeout_seconds=5.0,
+                progress_callback=published.append,
+                interruption_check=lambda: None,
+                close_fds=(),
+            )
+
+        self.assertEqual(len(published), 1)
+        self.assertEqual(published[0]["completed_repetition_count"], 1)
+        self.assertEqual(
+            raised.exception.failure_reason_code,
+            "service_health_unavailable",
+        )
+        self.assertEqual(
+            raised.exception.failure_provenance,
+            {
+                "error_classes": ["FormalEligibilityError", "BackendError"],
+                "operation": None,
+                "root_error_class": "BackendError",
+                "service": None,
+            },
+        )
+        serialized = (
+            f"{raised.exception!s}\n{raised.exception!r}\n"
+            f"{raised.exception.args!r}\n"
+            f"{raised.exception.failure_provenance!r}"
+        )
+        self.assertNotIn("private", serialized)
+        self.assertNotIn("203.0.113.10", serialized)
+        self.assertNotIn("SecretTokenABC123", serialized)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and hasattr(os, "pidfd_open")
+        and hasattr(signal, "pidfd_send_signal"),
+        "Linux pidfd supervision only",
+    )
+    def test_isolated_cell_rejects_valid_failure_frame_from_nonzero_worker(self):
+        original_write_all = runner._write_all
+
+        def write_then_exit_nonzero(descriptor, payload):
+            original_write_all(descriptor, payload)
+            if b'"outcome":"failed"' in payload:
+                os._exit(74)
+
+        def failing_cell(*, progress_callback_override=None):
+            raise RuntimeError("private worker detail")
+
+        with patch.object(
+            runner, "_write_all", side_effect=write_then_exit_nonzero
+        ), self.assertRaises(RuntimeError) as raised:
+            runner._run_isolated_matrix_cell(
+                failing_cell,
+                cell_index=1,
+                cell_count=15,
+                graph_size=100,
+                concurrency=1,
+                repetitions=30,
+                operations_per_type=8,
+                stall_timeout_seconds=5.0,
+                progress_callback=lambda _snapshot: None,
+                interruption_check=lambda: None,
+                close_fds=(),
+            )
+
+        self.assertIs(type(raised.exception), RuntimeError)
 
     def test_runner_uses_exact_loopback_probes_and_both_must_succeed(self):
         runtime_site = Path("/runtime-fixture")

@@ -361,7 +361,72 @@ def _decode_cell_worker_result(payload: bytes) -> dict:
         or document.get("schema") != _CELL_WORKER_RESULT_SCHEMA
     ):
         raise RuntimeError("isolated cell result is invalid")
+    outcome = document.get("outcome")
+    if outcome == "completed":
+        valid = (
+            set(document)
+            == {
+                "schema",
+                "outcome",
+                "completed_repetition_count",
+                "report",
+            }
+            and type(document.get("completed_repetition_count")) is int
+            and document["completed_repetition_count"] >= 0
+            and type(document.get("report")) is dict
+        )
+    elif outcome == "cell_timed_out":
+        valid = (
+            set(document)
+            == {
+                "schema",
+                "outcome",
+                "completed_repetition_count",
+                "timeout_class",
+            }
+            and type(document.get("completed_repetition_count")) is int
+            and document["completed_repetition_count"] >= 0
+            and document.get("timeout_class") == "backend_timeout"
+        )
+    elif outcome == "failed":
+        valid = (
+            set(document)
+            == {
+                "schema",
+                "outcome",
+                "completed_repetition_count",
+                "failure_reason_code",
+                "failure_provenance",
+            }
+            and type(document.get("completed_repetition_count")) is int
+            and document["completed_repetition_count"] >= 0
+        )
+        if valid:
+            try:
+                from txnmem_provenance_performance import (
+                    _IsolatedCellWorkerFailure,
+                )
+
+                _IsolatedCellWorkerFailure(
+                    failure_reason_code=document["failure_reason_code"],
+                    failure_provenance=document["failure_provenance"],
+                )
+            except (KeyError, TypeError, ValueError):
+                valid = False
+    else:
+        valid = False
+    if not valid:
+        raise RuntimeError("isolated cell result is invalid")
     return document
+
+
+def _require_successful_cell_worker_exit(worker_status: int) -> None:
+    if (
+        type(worker_status) is not int
+        or not os.WIFEXITED(worker_status)
+        or os.WEXITSTATUS(worker_status) != 0
+    ):
+        raise RuntimeError("isolated cell worker failed")
 
 
 def _decode_cell_heartbeat(payload: bytes) -> dict:
@@ -552,16 +617,26 @@ def _run_isolated_matrix_cell(
                         }
                         exit_code = 0
                     else:
-                        error_class = type(exc).__name__
-                        if re.fullmatch(
-                            r"[A-Za-z_][A-Za-z0-9_]{0,127}", error_class
-                        ) is None:
-                            error_class = "RuntimeError"
+                        from txnmem_experiment import (
+                            _safe_failure_provenance,
+                            _safe_failure_reason_code,
+                        )
+                        from txnmem_provenance_performance import (
+                            _close_isolated_cell_failure_provenance,
+                        )
+
                         result = {
                             "schema": _CELL_WORKER_RESULT_SCHEMA,
                             "outcome": "failed",
-                            "error_class": error_class,
+                            "completed_repetition_count": completed_repetitions,
+                            "failure_reason_code": _safe_failure_reason_code(exc),
+                            "failure_provenance": (
+                                _close_isolated_cell_failure_provenance(
+                                    _safe_failure_provenance(exc)
+                                )
+                            ),
                         }
+                        exit_code = 0
                 _write_all(
                     result_write,
                     _canonical_cell_payload(result) + b"\n",
@@ -698,12 +773,17 @@ def _run_isolated_matrix_cell(
 
         if heartbeat_buffer:
             raise RuntimeError("isolated cell heartbeat was truncated")
+        _require_successful_cell_worker_exit(worker_status)
         document = _decode_cell_worker_result(bytes(result_buffer))
-        if (
-            not os.WIFEXITED(worker_status)
-            or os.WEXITSTATUS(worker_status) != 0
-        ):
-            raise RuntimeError("isolated cell worker failed")
+        if document.get("outcome") == "failed":
+            if document.get("completed_repetition_count") != received_repetitions:
+                raise RuntimeError("isolated failed cell result is invalid")
+            from txnmem_provenance_performance import _IsolatedCellWorkerFailure
+
+            raise _IsolatedCellWorkerFailure(
+                failure_reason_code=document["failure_reason_code"],
+                failure_provenance=document["failure_provenance"],
+            )
         if document.get("outcome") == "completed":
             if (
                 set(document)
