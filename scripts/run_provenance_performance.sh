@@ -13,6 +13,11 @@ authorization_nonce=$4
 run_id=$5
 transport=$6
 
+if [[ "$transport" != "local_loopback" ]]; then
+  echo "protected formal wrapper requires local_loopback transport" >&2
+  exit 64
+fi
+
 : "${TXNMEM_NEO4J_PASSWORD:?TXNMEM_NEO4J_PASSWORD must be set}"
 
 /usr/bin/env -i \

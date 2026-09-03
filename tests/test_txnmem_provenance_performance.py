@@ -257,6 +257,12 @@ class ProvenanceMatrixTests(unittest.TestCase):
         self.assertIn("diagnostic candidate", script)
         self.assertIn("TXNMEM_NEO4J_PASSWORD", script)
         self.assertNotIn("txnmem-local-only", script)
+        transport_gate = 'if [[ "$transport" != "local_loopback" ]]'
+        self.assertIn(transport_gate, script)
+        self.assertLess(
+            script.index(transport_gate),
+            script.index("/usr/bin/env -i"),
+        )
 
     def test_formal_matrix_has_exactly_fifteen_cells_and_thirty_repetitions(self):
         cells = expand_matrix(
