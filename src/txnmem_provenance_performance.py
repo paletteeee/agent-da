@@ -80,8 +80,30 @@ FORMAL_MATRIX_CONFIG = {
     "request_timeout_seconds": 30.0,
     "cell_stall_timeout_seconds": 3600.0,
 }
+PROVENANCE_ABLATION_SCHEMA = "txnmem-provenance-ablation-v1"
+PROVENANCE_ABLATION_VARIANTS = ("TxnMem", "MemoryOnly-NoProvenance")
+FORMAL_ABLATION_CONFIG = {
+    "schema": PROVENANCE_ABLATION_SCHEMA,
+    "run_identity": "provenance-ablation-v10",
+    "cells": [
+        {"graph_node_count": 100, "concurrency": 1},
+        {"graph_node_count": 1000, "concurrency": 4},
+        {"graph_node_count": 10000, "concurrency": 16},
+    ],
+    "variants": list(PROVENANCE_ABLATION_VARIANTS),
+    "repetitions": 30,
+    "repetition_seeds": [17 + 1000 * index for index in range(30)],
+    "graph_seed": 17,
+    "operations_per_type": 8,
+    "bootstrap_repetitions": 10_000,
+    "bootstrap_seed": 1701,
+    "variant_order_seed": 1702,
+    "request_timeout_seconds": 30.0,
+    "cell_stall_timeout_seconds": 3600.0,
+}
 _CONFIG_FIELDS = frozenset(FORMAL_MATRIX_CONFIG)
 _DIAGNOSTIC_CONFIG_FIELDS = _CONFIG_FIELDS - {"cell_stall_timeout_seconds"}
+_ABLATION_CONFIG_FIELDS = frozenset(FORMAL_ABLATION_CONFIG)
 _ENVIRONMENT_FIELDS = frozenset(
     {
         "schema",
@@ -497,6 +519,107 @@ def validate_matrix_config(config: Mapping[str, Any], *, formal: bool) -> dict[s
     ):
         raise ValueError("formal provenance performance config must match the frozen config")
     return normalized
+
+
+def validate_provenance_ablation_config(
+    config: Mapping[str, Any], *, formal: bool
+) -> dict[str, Any]:
+    """Validate the closed two-variant provenance ablation contract."""
+
+    if type(formal) is not bool:
+        raise ValueError("formal must be a boolean")
+    if not isinstance(config, Mapping) or set(config) != _ABLATION_CONFIG_FIELDS:
+        raise ValueError("provenance ablation config fields do not match schema")
+    normalized = copy.deepcopy(dict(config))
+    if normalized.get("schema") != PROVENANCE_ABLATION_SCHEMA:
+        raise ValueError("provenance ablation config schema mismatch")
+    run_identity = normalized.get("run_identity")
+    if not isinstance(run_identity, str) or not run_identity.strip():
+        raise ValueError("provenance ablation run identity must be non-empty")
+    if normalized.get("variants") != list(PROVENANCE_ABLATION_VARIANTS):
+        raise ValueError("provenance ablation variants do not match closed domain")
+
+    raw_cells = normalized.get("cells")
+    if not isinstance(raw_cells, list) or not raw_cells:
+        raise ValueError("provenance ablation cells must be a non-empty list")
+    cell_coordinates: list[tuple[int, int]] = []
+    for raw_cell in raw_cells:
+        if not isinstance(raw_cell, Mapping) or set(raw_cell) != {
+            "graph_node_count",
+            "concurrency",
+        }:
+            raise ValueError("provenance ablation cell fields do not match schema")
+        cell_coordinates.append(
+            (
+                _strict_positive_integer(
+                    raw_cell.get("graph_node_count"), "graph_node_count"
+                ),
+                _strict_positive_integer(raw_cell.get("concurrency"), "concurrency"),
+            )
+        )
+    if len(set(cell_coordinates)) != len(cell_coordinates):
+        raise ValueError("provenance ablation cells must not contain duplicates")
+
+    repetitions = _strict_positive_integer(
+        normalized.get("repetitions"), "repetitions"
+    )
+    raw_repetition_seeds = normalized.get("repetition_seeds")
+    if not isinstance(raw_repetition_seeds, list):
+        raise ValueError("repetition_seeds must be a list")
+    repetition_seeds = [
+        _strict_integer(value, "repetition_seed")
+        for value in raw_repetition_seeds
+    ]
+    if len(repetition_seeds) != repetitions:
+        raise ValueError("repetition_seeds must match repetitions")
+    if len(set(repetition_seeds)) != len(repetition_seeds):
+        raise ValueError("repetition_seeds must not contain duplicates")
+    _strict_integer(normalized.get("graph_seed"), "graph_seed")
+    _strict_positive_integer(
+        normalized.get("operations_per_type"), "operations_per_type"
+    )
+    _strict_positive_integer(
+        normalized.get("bootstrap_repetitions"), "bootstrap_repetitions"
+    )
+    _strict_integer(normalized.get("bootstrap_seed"), "bootstrap_seed")
+    _strict_integer(normalized.get("variant_order_seed"), "variant_order_seed")
+    for field in ("request_timeout_seconds", "cell_stall_timeout_seconds"):
+        timeout = normalized.get(field)
+        if (
+            type(timeout) not in (int, float)
+            or not math.isfinite(timeout)
+            or timeout <= 0.0
+        ):
+            raise ValueError(f"{field} must be a positive finite number")
+    _canonical_json_bytes(normalized)
+    if formal and _canonical_json_bytes(normalized) != _canonical_json_bytes(
+        FORMAL_ABLATION_CONFIG
+    ):
+        raise ValueError("formal provenance ablation config must match frozen config")
+    return normalized
+
+
+def expand_provenance_ablation(
+    config: Mapping[str, Any],
+) -> list[dict[str, int | str]]:
+    """Expand the closed ablation cells and variants in stable paired order."""
+
+    normalized = validate_provenance_ablation_config(config, formal=False)
+    rows: list[dict[str, int | str]] = []
+    for raw_cell in normalized["cells"]:
+        node_count = int(raw_cell["graph_node_count"])
+        concurrency = int(raw_cell["concurrency"])
+        for variant in PROVENANCE_ABLATION_VARIANTS:
+            rows.append(
+                {
+                    "cell_id": f"n{node_count}-c{concurrency}",
+                    "graph_node_count": node_count,
+                    "concurrency": concurrency,
+                    "variant": variant,
+                    "repetitions": int(normalized["repetitions"]),
+                }
+            )
+    return rows
 
 
 def formal_matrix_config_sha256() -> str:
@@ -2258,6 +2381,343 @@ def aggregate_matrix(
     return result
 
 
+class _Neo4jHealthClient:
+    """Read-only Neo4j health boundary with no graph schema initialization."""
+
+    def __init__(
+        self,
+        uri: str,
+        auth: Sequence[str],
+        *,
+        request_timeout_seconds: float,
+    ) -> None:
+        try:
+            from neo4j import GraphDatabase, Query
+        except ImportError as exc:  # pragma: no cover - exercised on remote host
+            raise RuntimeError("neo4j driver is required for health attestation") from exc
+        self.request_timeout_seconds = request_timeout_seconds
+        self.max_transaction_retry_time_seconds = 0.0
+        self._Query = Query
+        self.driver = GraphDatabase.driver(
+            str(uri),
+            auth=tuple(auth),
+            max_transaction_retry_time=0.0,
+            connection_timeout=request_timeout_seconds,
+            connection_acquisition_timeout=request_timeout_seconds,
+            notifications_min_severity="OFF",
+        )
+
+    def healthcheck(self) -> dict[str, Any]:
+        query = self._Query(
+            "CALL dbms.components() YIELD versions "
+            "RETURN 1 AS ok, versions[0] AS version",
+            timeout=self.request_timeout_seconds,
+        )
+        with self.driver.session() as session:
+            record = session.run(query).single()
+        return {
+            "available": bool(record and record.get("ok") == 1),
+            "version": record.get("version") if record else None,
+        }
+
+    def close(self) -> None:
+        self.driver.close()
+
+
+class _MemoryOnlyNoProvenanceBackend(InstrumentedMemoryBackend):
+    """Persist memory objects in Qdrant without any provenance projection."""
+
+    performance_variant = "MemoryOnly-NoProvenance"
+    provenance_enabled = False
+    max_retries = 0
+
+    def __init__(
+        self,
+        namespace: str,
+        *,
+        qdrant_client: Any,
+        neo4j_health_client: Any,
+        embedder: Callable[[Any], list[float]],
+    ) -> None:
+        super().__init__()
+        self.db_namespace = str(namespace)
+        self.qdrant = qdrant_client
+        self.neo4j_health = neo4j_health_client
+        self.embedder = embedder
+        self.neo4j_max_transaction_retry_time_seconds = getattr(
+            neo4j_health_client,
+            "max_transaction_retry_time_seconds",
+            None,
+        )
+        self._state_lock = threading.RLock()
+        self._event_lock = threading.Lock()
+        self._metrics_lock = threading.Lock()
+        self._metrics: dict[str, Any] = {
+            "request_count": 0,
+            "retry_count": 0,
+            "error_count": 0,
+            "operation_counts": {},
+            "timing_ms": {},
+        }
+
+    def _event(self, kind: str, **fields: Any) -> dict[str, Any]:
+        with self._event_lock:
+            return super()._event(kind, **fields)
+
+    def _rewrite_last_event(self, kind: str, **fields: Any) -> None:
+        with self._event_lock:
+            if not self.events:
+                raise RuntimeError("memory operation event is missing")
+            self.events[-1]["kind"] = str(kind)
+            self.events[-1].update(copy.deepcopy(fields))
+
+    def _key(self, operation: str, memory_id: str) -> str:
+        return hashlib.sha256(
+            json.dumps(
+                [self.db_namespace, str(operation), str(memory_id)],
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
+    def _call(self, operation: str, function: Callable[[], Any]) -> Any:
+        started = time.perf_counter()
+        with self._metrics_lock:
+            self._metrics["request_count"] += 1
+            counts = self._metrics["operation_counts"]
+            counts[operation] = counts.get(operation, 0) + 1
+        try:
+            return function()
+        except Exception:
+            with self._metrics_lock:
+                self._metrics["error_count"] += 1
+            raise
+        finally:
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            with self._metrics_lock:
+                self._metrics["timing_ms"].setdefault(operation, []).append(
+                    elapsed_ms
+                )
+
+    def _retrieve(self, memory_id: str, *, operation: str) -> dict[str, Any] | None:
+        row = self._call(
+            operation,
+            lambda: self.qdrant.retrieve(self.db_namespace, str(memory_id)),
+        )
+        return copy.deepcopy(dict(row)) if isinstance(row, Mapping) else None
+
+    def write(
+        self, memory_id: str, value: Any = None, **fields: Any
+    ) -> dict[str, Any]:
+        memory_id = str(memory_id)
+        with self._state_lock:
+            previous = self._retrieve(memory_id, operation="memory_version_read")
+            memory = {
+                "memory_id": memory_id,
+                "value": value if value is not None else memory_id,
+                "status": "active",
+                "agent_id": fields.get("agent_id", "agent_1"),
+                "scope": fields.get("scope", "tenant:user_001"),
+                "version": int(previous.get("version", 0)) + 1
+                if previous is not None
+                else 1,
+            }
+            key = self._key("write", memory_id)
+            self._call(
+                "memory_write",
+                lambda: self.qdrant.upsert(
+                    self.db_namespace,
+                    memory_id,
+                    self.embedder(memory["value"]),
+                    memory,
+                    key,
+                ),
+            )
+            self.memories[memory_id] = copy.deepcopy(memory)
+        self._event("memory_write", memory_id=memory_id, value=memory["value"])
+        return copy.deepcopy(memory)
+
+    def read(
+        self, memory_id: str | None = None, **fields: Any
+    ) -> dict[str, Any] | None:
+        row = (
+            self._retrieve(str(memory_id), operation="memory_read")
+            if memory_id is not None
+            else None
+        )
+        self._event("memory_read", memory_id=memory_id, **fields)
+        if row is None or row.get("status") != "active":
+            return None
+        with self._state_lock:
+            self.memories[str(memory_id)] = copy.deepcopy(row)
+        return row
+
+    def search(self, query: str | None = None, **fields: Any) -> list[dict[str, Any]]:
+        rows = self._call(
+            "memory_search",
+            lambda: self.qdrant.search(
+                self.db_namespace,
+                self.embedder(query),
+                1000,
+            ),
+        )
+        matches = [
+            copy.deepcopy(dict(row))
+            for row in rows
+            if isinstance(row, Mapping) and row.get("status") == "active"
+        ]
+        with self._state_lock:
+            for row in matches:
+                if row.get("memory_id") is not None:
+                    self.memories[str(row["memory_id"])] = copy.deepcopy(row)
+        self._event("memory_search", query=query, **fields)
+        return matches
+
+    def derive(
+        self,
+        memory_id: str,
+        source_ids: Iterable[str],
+        value: Any = None,
+        **fields: Any,
+    ) -> dict[str, Any]:
+        canonical_sources = [str(source_id) for source_id in source_ids]
+        for source_id in canonical_sources:
+            source = self._retrieve(source_id, operation="derive_source_read")
+            if source is None or source.get("status") != "active":
+                raise KeyError("derive source is missing")
+        memory = self.write(memory_id, value=value, **fields)
+        self._rewrite_last_event(
+            "memory_derive",
+            source_ids=canonical_sources,
+        )
+        return memory
+
+    def propagate(
+        self,
+        memory_id: str,
+        source_id: str,
+        value: Any = None,
+        **fields: Any,
+    ) -> dict[str, Any]:
+        memory = self.derive(memory_id, [source_id], value=value, **fields)
+        self._rewrite_last_event(
+            "memory_propagate",
+            source_id=str(source_id),
+        )
+        return memory
+
+    def invalidate(self, memory_id: str, **fields: Any) -> None:
+        memory_id = str(memory_id)
+        with self._state_lock:
+            memory = self._retrieve(memory_id, operation="invalidate_read")
+            if memory is not None:
+                memory["status"] = "invalid"
+                memory["version"] = int(memory.get("version", 1)) + 1
+                key = self._key("invalidate", memory_id)
+                self._call(
+                    "memory_invalidate",
+                    lambda: self.qdrant.upsert(
+                        self.db_namespace,
+                        memory_id,
+                        self.embedder(memory.get("value")),
+                        memory,
+                        key,
+                    ),
+                )
+                self.memories[memory_id] = copy.deepcopy(memory)
+        self._event("invalidate", memory_id=memory_id, **fields)
+
+    def delete(self, memory_id: str, **fields: Any) -> None:
+        memory_id = str(memory_id)
+        key = self._key("delete", memory_id)
+        self._call(
+            "memory_delete",
+            lambda: self.qdrant.delete(self.db_namespace, memory_id, key),
+        )
+        with self._state_lock:
+            self.memories.pop(memory_id, None)
+        self._event("memory_delete", memory_id=memory_id, **fields)
+
+    def performance_inventory(self, limit: int = 1000) -> dict[str, Any]:
+        if type(limit) is not int or limit <= 0:
+            raise ValueError("memory inventory limit must be a positive integer")
+        scan = getattr(self.qdrant, "scan_namespace", None)
+        if not callable(scan):
+            return {
+                "classification": "unknown",
+                "node_count": None,
+                "edge_count": None,
+                "graph_sha256": None,
+                "status_counts": {},
+            }
+        try:
+            result = self._call(
+                "memory_inventory",
+                lambda: scan(self.db_namespace, limit=limit),
+            )
+        except Exception:
+            result = None
+        rows = result.get("rows") if isinstance(result, Mapping) else None
+        if (
+            not isinstance(result, Mapping)
+            or result.get("read_ok") is not True
+            or not isinstance(rows, list)
+        ):
+            return {
+                "classification": "unknown",
+                "node_count": None,
+                "edge_count": None,
+                "graph_sha256": None,
+                "status_counts": {},
+            }
+        forbidden = {"derived_from", "source_ids", "supersedes_id"}
+        if any(
+            not isinstance(row, Mapping)
+            or row.get("memory_id") is None
+            or forbidden.intersection(row)
+            for row in rows
+        ):
+            return {
+                "classification": "unknown",
+                "node_count": None,
+                "edge_count": None,
+                "graph_sha256": None,
+                "status_counts": {},
+            }
+        nodes = sorted(str(row["memory_id"]) for row in rows)
+        if len(nodes) != len(set(nodes)):
+            return {
+                "classification": "unknown",
+                "node_count": None,
+                "edge_count": None,
+                "graph_sha256": None,
+                "status_counts": {},
+            }
+        statuses = [str(row.get("status", "unknown")) for row in rows]
+        return {
+            "classification": "complete",
+            "node_count": len(nodes),
+            "edge_count": 0,
+            "graph_sha256": canonical_graph_sha256(nodes, ()),
+            "status_counts": {
+                status: statuses.count(status) for status in sorted(set(statuses))
+            },
+        }
+
+    def healthcheck(self) -> dict[str, Any]:
+        return {
+            "namespace": self.db_namespace,
+            "qdrant": self.qdrant.healthcheck(),
+            "neo4j": self.neo4j_health.healthcheck(),
+        }
+
+    def metrics(self) -> dict[str, Any]:
+        with self._metrics_lock:
+            return copy.deepcopy(self._metrics)
+
+    def close(self) -> None:
+        return None
+
+
 class _ReusableVectorGraphBackendFactory:
     def __init__(
         self,
@@ -2326,6 +2786,57 @@ class _ReusableVectorGraphBackendFactory:
             self._closed = True
 
 
+class _ReusableMemoryOnlyBackendFactory:
+    def __init__(
+        self,
+        *,
+        qdrant_url: str,
+        neo4j_uri: str,
+        neo4j_auth: Sequence[str],
+        environment_attestation: Mapping[str, Any],
+        request_timeout_seconds: float,
+    ) -> None:
+        from txnmem_vector_graph_backend import _QdrantHTTPClient, _embedding
+
+        self.attestation = copy.deepcopy(dict(environment_attestation))
+        self.qdrant = _QdrantHTTPClient(
+            str(qdrant_url),
+            timeout_seconds=request_timeout_seconds,
+        )
+        self.neo4j = _Neo4jHealthClient(
+            str(neo4j_uri),
+            tuple(str(item) for item in neo4j_auth),
+            request_timeout_seconds=request_timeout_seconds,
+        )
+        self.embedder = _embedding
+        self._closed = False
+        self._close_lock = threading.Lock()
+
+    def __call__(self, namespace: str) -> _MemoryOnlyNoProvenanceBackend:
+        with self._close_lock:
+            if self._closed:
+                raise RuntimeError("memory-only backend factory is closed")
+            backend = _MemoryOnlyNoProvenanceBackend(
+                namespace,
+                qdrant_client=self.qdrant,
+                neo4j_health_client=self.neo4j,
+                embedder=self.embedder,
+            )
+            backend.performance_environment = lambda: copy.deepcopy(
+                self.attestation
+            )
+            return backend
+
+    def close(self) -> None:
+        with self._close_lock:
+            if self._closed:
+                return
+            close = getattr(self.neo4j, "close", None)
+            if callable(close):
+                close()
+            self._closed = True
+
+
 def make_vector_graph_backend_factory(
     *,
     qdrant_url: str,
@@ -2344,6 +2855,43 @@ def make_vector_graph_backend_factory(
         raise ValueError("request_timeout_seconds must be a positive finite number")
     validate_environment_attestation(environment_attestation)
     return _ReusableVectorGraphBackendFactory(
+        qdrant_url=qdrant_url,
+        neo4j_uri=neo4j_uri,
+        neo4j_auth=neo4j_auth,
+        environment_attestation=environment_attestation,
+        request_timeout_seconds=request_timeout_seconds,
+    )
+
+
+def make_provenance_ablation_backend_factory(
+    *,
+    variant: str,
+    qdrant_url: str,
+    neo4j_uri: str,
+    neo4j_auth: Sequence[str],
+    environment_attestation: Mapping[str, Any],
+    request_timeout_seconds: float = 30.0,
+) -> _ReusableVectorGraphBackendFactory | _ReusableMemoryOnlyBackendFactory:
+    """Build exactly one registered ablation backend without fallback."""
+
+    if type(variant) is not str or variant not in PROVENANCE_ABLATION_VARIANTS:
+        raise ValueError("provenance ablation variant is not registered")
+    if variant == "TxnMem":
+        return make_vector_graph_backend_factory(
+            qdrant_url=qdrant_url,
+            neo4j_uri=neo4j_uri,
+            neo4j_auth=neo4j_auth,
+            environment_attestation=environment_attestation,
+            request_timeout_seconds=request_timeout_seconds,
+        )
+    if (
+        type(request_timeout_seconds) not in (int, float)
+        or not math.isfinite(request_timeout_seconds)
+        or request_timeout_seconds <= 0.0
+    ):
+        raise ValueError("request_timeout_seconds must be a positive finite number")
+    validate_environment_attestation(environment_attestation)
+    return _ReusableMemoryOnlyBackendFactory(
         qdrant_url=qdrant_url,
         neo4j_uri=neo4j_uri,
         neo4j_auth=neo4j_auth,

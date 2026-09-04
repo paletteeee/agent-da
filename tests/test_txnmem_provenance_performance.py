@@ -13,10 +13,13 @@ import sys
 import threading
 import time
 import unittest
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
 
 import txnmem_provenance_performance as provenance_module
 import txnmem_provenance_execution_collector as collector_module
@@ -263,6 +266,91 @@ class ProvenanceMatrixTests(unittest.TestCase):
             script.index(transport_gate),
             script.index("/usr/bin/env -i"),
         )
+
+    def test_repository_ablation_config_is_closed_three_cell_contract(self):
+        self.assertTrue(
+            hasattr(provenance_module, "validate_provenance_ablation_config")
+        )
+        config = load_strict_json_file(
+            Path(__file__).resolve().parents[1]
+            / "configs"
+            / "provenance_ablation_v10.json"
+        )
+
+        validated = provenance_module.validate_provenance_ablation_config(
+            config,
+            formal=True,
+        )
+
+        self.assertEqual(validated, provenance_module.FORMAL_ABLATION_CONFIG)
+        self.assertEqual(validated["schema"], "txnmem-provenance-ablation-v1")
+        self.assertEqual(validated["run_identity"], "provenance-ablation-v10")
+        self.assertEqual(
+            validated["variants"],
+            ["TxnMem", "MemoryOnly-NoProvenance"],
+        )
+        self.assertEqual(
+            validated["cells"],
+            [
+                {"graph_node_count": 100, "concurrency": 1},
+                {"graph_node_count": 1000, "concurrency": 4},
+                {"graph_node_count": 10000, "concurrency": 16},
+            ],
+        )
+        self.assertEqual(validated["repetitions"], 30)
+        self.assertEqual(
+            validated["repetition_seeds"],
+            [
+                17, 1017, 2017, 3017, 4017, 5017, 6017, 7017, 8017, 9017,
+                10017, 11017, 12017, 13017, 14017, 15017, 16017, 17017,
+                18017, 19017, 20017, 21017, 22017, 23017, 24017, 25017,
+                26017, 27017, 28017, 29017,
+            ],
+        )
+        self.assertEqual(validated["bootstrap_repetitions"], 10_000)
+        self.assertEqual(validated["graph_seed"], 17)
+        self.assertEqual(validated["bootstrap_seed"], 1701)
+        self.assertEqual(validated["variant_order_seed"], 1702)
+        self.assertEqual(validated["request_timeout_seconds"], 30.0)
+        self.assertEqual(validated["cell_stall_timeout_seconds"], 3600.0)
+        self.assertEqual(
+            provenance_module.expand_provenance_ablation(validated),
+            [
+                {"cell_id": "n100-c1", "graph_node_count": 100, "concurrency": 1, "variant": "TxnMem", "repetitions": 30},
+                {"cell_id": "n100-c1", "graph_node_count": 100, "concurrency": 1, "variant": "MemoryOnly-NoProvenance", "repetitions": 30},
+                {"cell_id": "n1000-c4", "graph_node_count": 1000, "concurrency": 4, "variant": "TxnMem", "repetitions": 30},
+                {"cell_id": "n1000-c4", "graph_node_count": 1000, "concurrency": 4, "variant": "MemoryOnly-NoProvenance", "repetitions": 30},
+                {"cell_id": "n10000-c16", "graph_node_count": 10000, "concurrency": 16, "variant": "TxnMem", "repetitions": 30},
+                {"cell_id": "n10000-c16", "graph_node_count": 10000, "concurrency": 16, "variant": "MemoryOnly-NoProvenance", "repetitions": 30},
+            ],
+        )
+
+        for field, value in (
+            ("schema", "txnmem-provenance-performance-v2"),
+            ("run_identity", "formal-provenance-v10"),
+            ("variants", ["TxnMem"]),
+            ("repetitions", 29),
+            ("repetition_seeds", validated["repetition_seeds"][:-1]),
+            ("bootstrap_repetitions", 9999),
+            ("request_timeout_seconds", float("nan")),
+            ("cell_stall_timeout_seconds", 0.0),
+        ):
+            changed = copy.deepcopy(validated)
+            changed[field] = value
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError):
+                    provenance_module.validate_provenance_ablation_config(
+                        changed,
+                        formal=True,
+                    )
+
+        extra = copy.deepcopy(validated)
+        extra["unknown"] = True
+        with self.assertRaises(ValueError):
+            provenance_module.validate_provenance_ablation_config(
+                extra,
+                formal=True,
+            )
 
     def test_formal_matrix_has_exactly_fifteen_cells_and_thirty_repetitions(self):
         cells = expand_matrix(
@@ -788,6 +876,323 @@ class ProvenanceMatrixTests(unittest.TestCase):
         self.assertFalse(closer.is_alive())
         self.assertEqual(len(created), 1)
         self.assertEqual(shared_neo4j.close_count, 1)
+
+    def test_ablation_factory_preserves_full_txnmem_backend_path(self):
+        self.assertTrue(
+            hasattr(provenance_module, "make_provenance_ablation_backend_factory")
+        )
+        shared_qdrant = object()
+
+        class SharedNeo4j:
+            max_transaction_retry_time_seconds = 0.0
+
+            def __init__(self):
+                self.close_count = 0
+
+            def close(self):
+                self.close_count += 1
+
+        shared_neo4j = SharedNeo4j()
+        backend = SimpleNamespace()
+        environment = _FixtureBackend("factory-full").performance_environment()
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient",
+            return_value=shared_qdrant,
+        ), patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient",
+            return_value=shared_neo4j,
+        ), patch(
+            "txnmem_vector_graph_backend.VectorGraphMemoryBackend",
+            return_value=backend,
+        ) as full_constructor:
+            factory = provenance_module.make_provenance_ablation_backend_factory(
+                variant="TxnMem",
+                qdrant_url="http://qdrant",
+                neo4j_uri="bolt://neo4j",
+                neo4j_auth=("neo4j", "password"),
+                environment_attestation=environment,
+            )
+            self.assertIs(factory("full-namespace"), backend)
+            factory.close()
+
+        full_constructor.assert_called_once()
+        self.assertIs(full_constructor.call_args.kwargs["qdrant_client"], shared_qdrant)
+        self.assertIs(full_constructor.call_args.kwargs["neo4j_client"], shared_neo4j)
+        self.assertEqual(shared_neo4j.close_count, 1)
+
+    def test_memory_only_neo4j_health_client_is_read_only(self):
+        self.assertTrue(hasattr(provenance_module, "_Neo4jHealthClient"))
+        constructed = []
+        queries = []
+
+        class Query(str):
+            def __new__(cls, text, *, timeout):
+                value = super().__new__(cls, text)
+                value.timeout = timeout
+                return value
+
+        class Result:
+            @staticmethod
+            def single():
+                return {"ok": 1, "version": "5.26.0"}
+
+        class Session:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+            @staticmethod
+            def run(query):
+                queries.append(query)
+                return Result()
+
+        class Driver:
+            def __init__(self):
+                self.close_count = 0
+
+            @staticmethod
+            def session():
+                return Session()
+
+            def close(self):
+                self.close_count += 1
+
+        driver = Driver()
+
+        class GraphDatabase:
+            @staticmethod
+            def driver(uri, **kwargs):
+                constructed.append((uri, kwargs))
+                return driver
+
+        neo4j_module = ModuleType("neo4j")
+        neo4j_module.GraphDatabase = GraphDatabase
+        neo4j_module.Query = Query
+        with patch.dict(sys.modules, {"neo4j": neo4j_module}):
+            client = provenance_module._Neo4jHealthClient(
+                "bolt://neo4j",
+                ("neo4j", "password"),
+                request_timeout_seconds=30.0,
+            )
+            self.assertEqual(
+                client.healthcheck(),
+                {"available": True, "version": "5.26.0"},
+            )
+            client.close()
+
+        self.assertEqual(
+            constructed,
+            [
+                (
+                    "bolt://neo4j",
+                    {
+                        "auth": ("neo4j", "password"),
+                        "max_transaction_retry_time": 0.0,
+                        "connection_timeout": 30.0,
+                        "connection_acquisition_timeout": 30.0,
+                        "notifications_min_severity": "OFF",
+                    },
+                )
+            ],
+        )
+        self.assertEqual(len(queries), 1)
+        self.assertEqual(queries[0].timeout, 30.0)
+        self.assertIn("CALL dbms.components()", queries[0])
+        self.assertNotIn("CREATE", queries[0])
+        self.assertNotIn("CONSTRAINT", queries[0])
+        self.assertNotIn("INDEX", queries[0])
+        self.assertEqual(driver.close_count, 1)
+
+    def test_memory_only_factory_persists_crud_without_provenance_side_effects(self):
+        self.assertTrue(
+            hasattr(provenance_module, "make_provenance_ablation_backend_factory")
+        )
+        class MemoryQdrant:
+            def __init__(self):
+                self.points = {}
+                self.upsert_payloads = []
+
+            def upsert(self, namespace, point_id, vector, payload, idempotency_key):
+                stored = copy.deepcopy(payload)
+                self.points[(namespace, point_id)] = stored
+                self.upsert_payloads.append(stored)
+
+            def retrieve(self, namespace, point_id):
+                row = self.points.get((namespace, point_id))
+                return copy.deepcopy(row) if row is not None else None
+
+            def search(self, namespace, vector, limit):
+                return [
+                    copy.deepcopy(row)
+                    for (row_namespace, _point_id), row in self.points.items()
+                    if row_namespace == namespace and row.get("status") == "active"
+                ][:limit]
+
+            def scan_namespace(self, namespace, limit=1000):
+                return {
+                    "read_ok": True,
+                    "rows": [
+                        copy.deepcopy(row)
+                        for (row_namespace, _point_id), row in self.points.items()
+                        if row_namespace == namespace
+                    ][:limit],
+                }
+
+            def delete(self, namespace, point_id, idempotency_key):
+                self.points.pop((namespace, point_id), None)
+
+            def healthcheck(self):
+                return {"available": True, "version": "1.15.4"}
+
+        class HealthOnlyNeo4j:
+            max_transaction_retry_time_seconds = 0.0
+
+            def __init__(self):
+                self.calls = []
+
+            def healthcheck(self):
+                self.calls.append("healthcheck")
+                return {"available": True, "version": "5.26.0"}
+
+            def close(self):
+                self.calls.append("close")
+
+            def __getattr__(self, name):
+                raise AssertionError(
+                    f"memory-only backend reached Neo4j provenance method {name}"
+                )
+
+        qdrant = MemoryQdrant()
+        neo4j = HealthOnlyNeo4j()
+        environment = _FixtureBackend("factory-control").performance_environment()
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient",
+            return_value=qdrant,
+        ), patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient",
+            side_effect=AssertionError(
+                "memory-only mode must not initialize graph schema"
+            ),
+        ) as graph_client_constructor, patch.object(
+            provenance_module,
+            "_Neo4jHealthClient",
+            return_value=neo4j,
+            create=True,
+        ), patch(
+            "txnmem_vector_graph_backend.VectorGraphMemoryBackend",
+            side_effect=AssertionError("full backend must not be instantiated"),
+        ) as full_constructor:
+            factory = provenance_module.make_provenance_ablation_backend_factory(
+                variant="MemoryOnly-NoProvenance",
+                qdrant_url="http://qdrant",
+                neo4j_uri="bolt://neo4j",
+                neo4j_auth=("neo4j", "password"),
+                environment_attestation=environment,
+            )
+            backend = factory("control-namespace")
+
+            created = backend.write("root", value="root-v1")
+            updated = backend.write("root", value="root-v2")
+            derived = backend.derive("derived", ["root"], value="derived-v1")
+            propagated = backend.propagate(
+                "propagated", "root", value="propagated-v1"
+            )
+
+            self.assertEqual(created["version"], 1)
+            self.assertEqual(updated["version"], 2)
+            self.assertEqual(backend.read("root")["value"], "root-v2")
+            self.assertEqual(derived["memory_id"], "derived")
+            self.assertEqual(propagated["memory_id"], "propagated")
+            self.assertEqual(
+                {row["memory_id"] for row in backend.search("root-v2")},
+                {"root", "derived", "propagated"},
+            )
+
+            backend.invalidate("derived")
+            self.assertIsNone(backend.read("derived"))
+            backend.delete("propagated")
+            self.assertIsNone(backend.read("propagated"))
+            self.assertEqual(
+                backend.performance_inventory(),
+                {
+                    "classification": "complete",
+                    "node_count": 2,
+                    "edge_count": 0,
+                    "graph_sha256": canonical_graph_sha256(
+                        ("derived", "root"), ()
+                    ),
+                    "status_counts": {"active": 1, "invalid": 1},
+                },
+            )
+            self.assertEqual(
+                backend.healthcheck(),
+                {
+                    "namespace": "control-namespace",
+                    "qdrant": {"available": True, "version": "1.15.4"},
+                    "neo4j": {"available": True, "version": "5.26.0"},
+                },
+            )
+            self.assertEqual(backend.metrics()["retry_count"], 0)
+            self.assertFalse(hasattr(backend, "provenance_inventory"))
+            self.assertFalse(hasattr(backend, "preload_provenance_record"))
+            self.assertFalse(hasattr(backend, "traverse_provenance"))
+            self.assertFalse(hasattr(backend, "repair_provenance"))
+            self.assertEqual(
+                [event["kind"] for event in backend.events],
+                [
+                    "memory_write",
+                    "memory_write",
+                    "memory_derive",
+                    "memory_propagate",
+                    "memory_read",
+                    "memory_search",
+                    "invalidate",
+                    "memory_read",
+                    "memory_delete",
+                    "memory_read",
+                ],
+            )
+            factory.close()
+
+        full_constructor.assert_not_called()
+        graph_client_constructor.assert_not_called()
+        self.assertEqual(neo4j.calls, ["healthcheck", "close"])
+        for payload in qdrant.upsert_payloads:
+            self.assertFalse(
+                {"derived_from", "source_ids", "supersedes_id"}.intersection(
+                    payload
+                )
+            )
+
+    def test_ablation_factory_rejects_unregistered_variant_before_clients(self):
+        self.assertTrue(
+            hasattr(provenance_module, "make_provenance_ablation_backend_factory")
+        )
+        environment = _FixtureBackend("factory-invalid").performance_environment()
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient"
+        ) as qdrant_constructor, patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient"
+        ) as neo4j_constructor, patch.object(
+            provenance_module,
+            "_Neo4jHealthClient",
+            create=True,
+        ) as neo4j_health_constructor:
+            for variant in ("txnmem", "MemoryOnly", "", None, True):
+                with self.subTest(variant=variant):
+                    with self.assertRaisesRegex(ValueError, "variant"):
+                        provenance_module.make_provenance_ablation_backend_factory(
+                            variant=variant,
+                            qdrant_url="http://qdrant",
+                            neo4j_uri="bolt://neo4j",
+                            neo4j_auth=("neo4j", "password"),
+                            environment_attestation=environment,
+                        )
+        qdrant_constructor.assert_not_called()
+        neo4j_constructor.assert_not_called()
+        neo4j_health_constructor.assert_not_called()
 
     def test_formal_run_fails_closed_on_health_isolation_or_inventory(self):
         graph = build_layered_dag(10, seed=17)
