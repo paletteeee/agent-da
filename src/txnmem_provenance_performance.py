@@ -2083,6 +2083,364 @@ def _bootstrap_throughput(
     }
 
 
+_ABLATION_COMMON_OPERATIONS = frozenset({"read", "write", "derive", "propagate"})
+_ABLATION_OPERATIONS = _ABLATION_COMMON_OPERATIONS | {"traverse"}
+
+
+def _bootstrap_ablation_metric(
+    values: Sequence[Any],
+    *,
+    count: int,
+    seed: int,
+    identity: str,
+    statistic: Callable[[Sequence[Any]], float],
+) -> dict[str, float]:
+    estimate = statistic(values)
+    derived_seed = int.from_bytes(
+        hashlib.sha256(f"{seed}\0{identity}".encode("utf-8")).digest()[:8], "big"
+    )
+    generator = random.Random(derived_seed)
+    draws = [
+        statistic([values[generator.randrange(len(values))] for _ in values])
+        for _ in range(count)
+    ]
+    return {
+        "estimate": estimate,
+        "lower": _percentile(draws, 0.025),
+        "upper": _percentile(draws, 0.975),
+    }
+
+
+def aggregate_ablation(
+    evidence: Mapping[str, Any],
+    *,
+    bootstrap_repetitions: int = 10_000,
+    seed: int = 1701,
+) -> dict[str, Any]:
+    """Aggregate a two-variant ablation using repetition-level uncertainty."""
+
+    bootstrap_repetitions = _strict_positive_integer(
+        bootstrap_repetitions, "bootstrap_repetitions"
+    )
+    seed = _strict_integer(seed, "seed")
+    if not isinstance(evidence, Mapping) or set(evidence) != {
+        "samples",
+        "repetitions",
+    }:
+        raise ProvenancePerformanceError("ablation evidence fields do not match schema")
+    raw_samples = evidence.get("samples")
+    raw_repetitions = evidence.get("repetitions")
+    if not isinstance(raw_samples, list) or not isinstance(raw_repetitions, list):
+        raise ProvenancePerformanceError("ablation evidence rows must be lists")
+    if not raw_samples or not raw_repetitions:
+        raise ProvenancePerformanceError("ablation evidence must not be empty")
+
+    repetitions: dict[tuple[str, str, int, int], dict[str, Any]] = {}
+    coordinates_by_cell: dict[str, set[tuple[int, int]]] = {}
+    for raw in raw_repetitions:
+        if not isinstance(raw, Mapping):
+            raise ProvenancePerformanceError("ablation repetition is malformed")
+        variant = raw.get("variant")
+        if variant not in PROVENANCE_ABLATION_VARIANTS:
+            raise ProvenancePerformanceError("ablation repetition variant is invalid")
+        cell_id = raw.get("cell_id")
+        if not isinstance(cell_id, str) or not cell_id:
+            raise ProvenancePerformanceError("ablation repetition cell is invalid")
+        repetition = _exact_int_field(raw, "repetition", minimum=0)
+        repetition_seed = _exact_int_field(raw, "repetition_seed")
+        for field, minimum in (
+            ("graph_node_count", 1),
+            ("concurrency", 1),
+            ("elapsed_ns", 1),
+            ("success_count", 0),
+            ("failure_count", 0),
+            ("timeout_count", 0),
+        ):
+            _exact_int_field(raw, field, minimum=minimum)
+        if type(raw.get("eligible_for_formal")) is not bool:
+            raise ProvenancePerformanceError("ablation eligibility must be boolean")
+        key = (cell_id, str(variant), repetition, repetition_seed)
+        if key in repetitions:
+            raise ProvenancePerformanceError("duplicate ablation repetition identity")
+        repetitions[key] = dict(raw)
+        coordinates_by_cell.setdefault(cell_id, set()).add(
+            (repetition, repetition_seed)
+        )
+
+    samples_by_repetition: dict[tuple[str, str, int, int], list[dict[str, Any]]] = {
+        key: [] for key in repetitions
+    }
+    for raw in raw_samples:
+        if not isinstance(raw, Mapping):
+            raise ProvenancePerformanceError("ablation sample is malformed")
+        variant = raw.get("variant")
+        cell_id = raw.get("cell_id")
+        repetition = raw.get("repetition")
+        repetition_seed = raw.get("repetition_seed")
+        if (
+            variant not in PROVENANCE_ABLATION_VARIANTS
+            or not isinstance(cell_id, str)
+            or isinstance(repetition, bool)
+            or not isinstance(repetition, int)
+            or isinstance(repetition_seed, bool)
+            or not isinstance(repetition_seed, int)
+        ):
+            raise ProvenancePerformanceError("ablation sample identity is invalid")
+        key = (cell_id, str(variant), repetition, repetition_seed)
+        if key not in repetitions:
+            raise ProvenancePerformanceError("ablation sample has unknown repetition")
+        operation = raw.get("operation")
+        if operation not in _ABLATION_OPERATIONS:
+            raise ProvenancePerformanceError("ablation sample operation is invalid")
+        if variant == "MemoryOnly-NoProvenance" and operation == "traverse":
+            raise ProvenancePerformanceError(
+                "memory-only control must not contain traversal samples"
+            )
+        _exact_int_field(raw, "latency_ns", minimum=0)
+        if type(raw.get("success")) is not bool or type(raw.get("timeout")) is not bool:
+            raise ProvenancePerformanceError("ablation sample outcome is invalid")
+        samples_by_repetition[key].append(dict(raw))
+
+    for key, repetition_row in repetitions.items():
+        rows = samples_by_repetition[key]
+        successes = sum(row["success"] is True for row in rows)
+        failures = len(rows) - successes
+        timeouts = sum(row["timeout"] is True for row in rows)
+        if (
+            successes != repetition_row["success_count"]
+            or failures != repetition_row["failure_count"]
+            or timeouts != repetition_row["timeout_count"]
+        ):
+            raise ProvenancePerformanceError(
+                "ablation sample and repetition accounting disagree"
+            )
+
+    variant_cells: list[dict[str, Any]] = []
+    for cell_id in sorted(coordinates_by_cell):
+        for variant in PROVENANCE_ABLATION_VARIANTS:
+            cell_rows = [
+                row
+                for key, row in repetitions.items()
+                if key[0] == cell_id and key[1] == variant
+            ]
+            eligible = [row for row in cell_rows if row["eligible_for_formal"] is True]
+            eligible_samples = [
+                sample
+                for key, rows in samples_by_repetition.items()
+                if key[0] == cell_id
+                and key[1] == variant
+                and repetitions[key]["eligible_for_formal"] is True
+                for sample in rows
+            ]
+            successful = [row for row in eligible_samples if row["success"] is True]
+            common = [
+                row for row in successful if row["operation"] in _ABLATION_COMMON_OPERATIONS
+            ]
+            traversal = [row for row in successful if row["operation"] == "traverse"]
+            throughput_interval = None
+            wall_clock_interval = None
+            if eligible and sum(int(row["success_count"]) for row in eligible) > 0:
+                throughput_interval = _bootstrap_ablation_metric(
+                    eligible,
+                    count=bootstrap_repetitions,
+                    seed=seed,
+                    identity=f"variant-throughput\0{cell_id}\0{variant}",
+                    statistic=lambda selected: sum(
+                        int(row["success_count"]) for row in selected
+                    )
+                    * 1_000_000_000.0
+                    / sum(int(row["elapsed_ns"]) for row in selected),
+                )
+            if eligible:
+                wall_clock_interval = _bootstrap_ablation_metric(
+                    eligible,
+                    count=bootstrap_repetitions,
+                    seed=seed,
+                    identity=f"variant-wall-clock\0{cell_id}\0{variant}",
+                    statistic=lambda selected: sum(
+                        int(row["elapsed_ns"]) for row in selected
+                    )
+                    / len(selected),
+                )
+            operation_breakdown = []
+            for operation in sorted(_ABLATION_OPERATIONS):
+                operation_rows = [
+                    row for row in eligible_samples if row["operation"] == operation
+                ]
+                operation_success = [
+                    int(row["latency_ns"])
+                    for row in operation_rows
+                    if row["success"] is True
+                ]
+                if not operation_rows:
+                    continue
+                operation_breakdown.append(
+                    {
+                        "operation": operation,
+                        "successful_count": len(operation_success),
+                        "failed_count": len(operation_rows) - len(operation_success),
+                        "latency_ns": {
+                            "p50": _percentile(operation_success, 0.50),
+                            "p95": _percentile(operation_success, 0.95),
+                            "p99": _percentile(operation_success, 0.99),
+                        }
+                        if operation_success
+                        else None,
+                    }
+                )
+            first = cell_rows[0] if cell_rows else None
+            variant_cells.append(
+                {
+                    "cell_id": cell_id,
+                    "variant": variant,
+                    "graph_node_count": int(first["graph_node_count"]) if first else None,
+                    "concurrency": int(first["concurrency"]) if first else None,
+                    "attempted_repetition_count": len(cell_rows),
+                    "eligible_repetition_count": len(eligible),
+                    "excluded_repetition_count": len(cell_rows) - len(eligible),
+                    "successful_operation_count": len(successful),
+                    "failed_operation_count": len(eligible_samples) - len(successful),
+                    "timeout_count": sum(int(row["timeout_count"]) for row in cell_rows),
+                    "common_operation_sample_count": len(common),
+                    "common_latency_ns": {
+                        "p50": _percentile([int(row["latency_ns"]) for row in common], 0.50),
+                        "p95": _percentile([int(row["latency_ns"]) for row in common], 0.95),
+                        "p99": _percentile([int(row["latency_ns"]) for row in common], 0.99),
+                    }
+                    if common
+                    else None,
+                    "traversal_sample_count": len(traversal),
+                    "traversal_latency_ns": {
+                        "p50": _percentile([int(row["latency_ns"]) for row in traversal], 0.50),
+                        "p95": _percentile([int(row["latency_ns"]) for row in traversal], 0.95),
+                        "p99": _percentile([int(row["latency_ns"]) for row in traversal], 0.99),
+                    }
+                    if traversal
+                    else None,
+                    "mechanism_package_wall_clock_ns": sum(
+                        int(row["elapsed_ns"]) for row in eligible
+                    ),
+                    "mechanism_package_wall_clock_95ci_ns": wall_clock_interval,
+                    "successful_throughput_ops_per_second": (
+                        throughput_interval["estimate"]
+                        if throughput_interval is not None
+                        else None
+                    ),
+                    "successful_throughput_95ci": throughput_interval,
+                    "operations": operation_breakdown,
+                }
+            )
+
+    paired_cells: list[dict[str, Any]] = []
+    for cell_id in sorted(coordinates_by_cell):
+        pairs: list[tuple[dict[str, Any], dict[str, Any], float, float]] = []
+        missing = ineligible = zero_denominator = 0
+        for repetition, repetition_seed in sorted(coordinates_by_cell[cell_id]):
+            pair_rows = {
+                variant: repetitions.get((cell_id, variant, repetition, repetition_seed))
+                for variant in PROVENANCE_ABLATION_VARIANTS
+            }
+            if any(row is None for row in pair_rows.values()):
+                missing += 1
+                continue
+            full = pair_rows["TxnMem"]
+            control = pair_rows["MemoryOnly-NoProvenance"]
+            assert full is not None and control is not None
+            if not full["eligible_for_formal"] or not control["eligible_for_formal"]:
+                ineligible += 1
+                continue
+            common_means: dict[str, float] = {}
+            for variant in PROVENANCE_ABLATION_VARIANTS:
+                key = (cell_id, variant, repetition, repetition_seed)
+                values = [
+                    int(row["latency_ns"])
+                    for row in samples_by_repetition[key]
+                    if row["success"] is True
+                    and row["operation"] in _ABLATION_COMMON_OPERATIONS
+                ]
+                common_means[variant] = sum(values) / len(values) if values else 0.0
+            control_throughput = (
+                int(control["success_count"]) * 1_000_000_000.0
+                / int(control["elapsed_ns"])
+            )
+            full_throughput = (
+                int(full["success_count"]) * 1_000_000_000.0
+                / int(full["elapsed_ns"])
+            )
+            if common_means["MemoryOnly-NoProvenance"] <= 0 or control_throughput <= 0:
+                zero_denominator += 1
+                continue
+            pairs.append(
+                (full, control, common_means["TxnMem"], common_means["MemoryOnly-NoProvenance"])
+            )
+
+        latency_interval = throughput_interval = None
+        if pairs:
+            latency_interval = _bootstrap_ablation_metric(
+                pairs,
+                count=bootstrap_repetitions,
+                seed=seed,
+                identity=f"pair-latency\0{cell_id}",
+                statistic=lambda selected: (
+                    sum(row[2] for row in selected) / len(selected)
+                    - sum(row[3] for row in selected) / len(selected)
+                )
+                / (sum(row[3] for row in selected) / len(selected))
+                * 100.0,
+            )
+            throughput_interval = _bootstrap_ablation_metric(
+                pairs,
+                count=bootstrap_repetitions,
+                seed=seed,
+                identity=f"pair-throughput\0{cell_id}",
+                statistic=lambda selected: (
+                    sum(
+                        int(row[0]["success_count"]) * 1_000_000_000.0
+                        / int(row[0]["elapsed_ns"])
+                        for row in selected
+                    )
+                    / len(selected)
+                    - sum(
+                        int(row[1]["success_count"]) * 1_000_000_000.0
+                        / int(row[1]["elapsed_ns"])
+                        for row in selected
+                    )
+                    / len(selected)
+                )
+                / (
+                    sum(
+                        int(row[1]["success_count"]) * 1_000_000_000.0
+                        / int(row[1]["elapsed_ns"])
+                        for row in selected
+                    )
+                    / len(selected)
+                )
+                * 100.0,
+            )
+        paired_cells.append(
+            {
+                "cell_id": cell_id,
+                "eligible_pair_count": len(pairs),
+                "missing_pair_count": missing,
+                "ineligible_pair_count": ineligible,
+                "zero_denominator_pair_count": zero_denominator,
+                "common_latency_overhead_pct": latency_interval,
+                "throughput_change_pct": throughput_interval,
+            }
+        )
+
+    return {
+        "schema": "txnmem-provenance-ablation-aggregate-v1",
+        "bootstrap_unit": "whole_repetition_pair",
+        "bootstrap_repetitions": bootstrap_repetitions,
+        "bootstrap_seed": seed,
+        "common_operations": sorted(_ABLATION_COMMON_OPERATIONS),
+        "traversal_reporting": "txnmem_absolute_only",
+        "variant_cells": variant_cells,
+        "paired_cells": paired_cells,
+    }
+
+
 def aggregate_matrix(
     samples: Mapping[str, Any] | Sequence[Mapping[str, Any]],
     *,

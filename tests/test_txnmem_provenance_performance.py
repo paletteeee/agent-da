@@ -30,6 +30,7 @@ from txnmem_provenance_performance import (
     FormalEligibilityReason,
     ProvenancePerformanceError,
     aggregate_matrix,
+    aggregate_ablation,
     build_layered_dag,
     candidate_attestation_material,
     canonical_graph_sha256,
@@ -5171,6 +5172,188 @@ class ProvenanceAggregationTests(unittest.TestCase):
         self.assertTrue(material["evidence_manifest_sha256"])
         self.assertEqual(len(formal_pointers), 1)
         self.assertTrue(str(formal_path).endswith("provenance_performance.json"))
+
+
+class ProvenanceAblationAggregationTests(unittest.TestCase):
+    @staticmethod
+    def _evidence(*, repetitions=2):
+        rows = []
+        samples = []
+        for repetition in range(repetitions):
+            seed = 17 + repetition * 1000
+            for variant, elapsed_ns, common_latency in (
+                ("TxnMem", 2_000_000_000, 20 + repetition),
+                ("MemoryOnly-NoProvenance", 1_000_000_000, 10 + repetition),
+            ):
+                operations = ["read", "write", "derive", "propagate"]
+                if variant == "TxnMem":
+                    operations.append("traverse")
+                variant_samples = [
+                    {
+                        "cell_id": "n100-c1",
+                        "variant": variant,
+                        "repetition": repetition,
+                        "repetition_seed": seed,
+                        "operation": operation,
+                        "latency_ns": (
+                            50 + repetition if operation == "traverse" else common_latency
+                        ),
+                        "success": True,
+                        "timeout": False,
+                    }
+                    for operation in operations
+                ]
+                samples.extend(variant_samples)
+                rows.append(
+                    {
+                        "cell_id": "n100-c1",
+                        "variant": variant,
+                        "repetition": repetition,
+                        "repetition_seed": seed,
+                        "graph_node_count": 100,
+                        "concurrency": 1,
+                        "eligible_for_formal": True,
+                        "elapsed_ns": elapsed_ns,
+                        "success_count": len(variant_samples),
+                        "failure_count": 0,
+                        "timeout_count": 0,
+                    }
+                )
+        return {"samples": samples, "repetitions": rows}
+
+    def test_pairs_equal_cell_repetition_and_seed_with_expected_signs(self):
+        result = aggregate_ablation(
+            self._evidence(), bootstrap_repetitions=250, seed=41
+        )
+        paired = result["paired_cells"][0]
+        self.assertEqual(paired["eligible_pair_count"], 2)
+        self.assertEqual(paired["missing_pair_count"], 0)
+        self.assertGreater(paired["common_latency_overhead_pct"]["estimate"], 0)
+        self.assertLess(paired["throughput_change_pct"]["estimate"], 0)
+
+    def test_missing_ineligible_and_zero_denominator_pairs_are_separated(self):
+        evidence = self._evidence(repetitions=4)
+        evidence["repetitions"] = [
+            row
+            for row in evidence["repetitions"]
+            if not (
+                row["repetition"] == 1
+                and row["variant"] == "MemoryOnly-NoProvenance"
+            )
+        ]
+        evidence["samples"] = [
+            row
+            for row in evidence["samples"]
+            if not (
+                row["repetition"] == 1
+                and row["variant"] == "MemoryOnly-NoProvenance"
+            )
+        ]
+        next(
+            row
+            for row in evidence["repetitions"]
+            if row["repetition"] == 2 and row["variant"] == "TxnMem"
+        )["eligible_for_formal"] = False
+        for sample in evidence["samples"]:
+            if (
+                sample["repetition"] == 3
+                and sample["variant"] == "MemoryOnly-NoProvenance"
+                and sample["operation"] in {"read", "write", "derive", "propagate"}
+            ):
+                sample["latency_ns"] = 0
+
+        paired = aggregate_ablation(
+            evidence, bootstrap_repetitions=100, seed=11
+        )["paired_cells"][0]
+        self.assertEqual(paired["eligible_pair_count"], 1)
+        self.assertEqual(paired["missing_pair_count"], 1)
+        self.assertEqual(paired["ineligible_pair_count"], 1)
+        self.assertEqual(paired["zero_denominator_pair_count"], 1)
+
+    def test_control_has_no_synthetic_traversal_distribution(self):
+        result = aggregate_ablation(
+            self._evidence(), bootstrap_repetitions=100, seed=7
+        )
+        control = next(
+            row
+            for row in result["variant_cells"]
+            if row["variant"] == "MemoryOnly-NoProvenance"
+        )
+        full = next(
+            row for row in result["variant_cells"] if row["variant"] == "TxnMem"
+        )
+        self.assertEqual(control["traversal_sample_count"], 0)
+        self.assertIsNone(control["traversal_latency_ns"])
+        self.assertEqual(full["traversal_sample_count"], 2)
+        self.assertIsNotNone(full["traversal_latency_ns"])
+
+    def test_control_traversal_sample_is_rejected_not_treated_as_zero(self):
+        evidence = self._evidence(repetitions=1)
+        fake = copy.deepcopy(evidence["samples"][0])
+        fake.update(
+            {
+                "variant": "MemoryOnly-NoProvenance",
+                "operation": "traverse",
+                "latency_ns": 0,
+            }
+        )
+        evidence["samples"].append(fake)
+        with self.assertRaisesRegex(ProvenancePerformanceError, "traversal"):
+            aggregate_ablation(evidence, bootstrap_repetitions=10, seed=7)
+
+    def test_bootstrap_is_deterministic_and_uses_whole_repetitions(self):
+        evidence = self._evidence(repetitions=3)
+        first = aggregate_ablation(evidence, bootstrap_repetitions=500, seed=23)
+        second = aggregate_ablation(evidence, bootstrap_repetitions=500, seed=23)
+        self.assertEqual(first, second)
+        self.assertEqual(first["bootstrap_unit"], "whole_repetition_pair")
+        interval = first["paired_cells"][0]["common_latency_overhead_pct"]
+        self.assertLessEqual(interval["lower"], interval["estimate"])
+        self.assertLessEqual(interval["estimate"], interval["upper"])
+
+    def test_variant_cell_reports_operation_and_wall_clock_distributions(self):
+        result = aggregate_ablation(
+            self._evidence(repetitions=3), bootstrap_repetitions=100, seed=29
+        )
+        full = next(
+            row for row in result["variant_cells"] if row["variant"] == "TxnMem"
+        )
+        self.assertEqual(
+            [row["operation"] for row in full["operations"]],
+            ["derive", "propagate", "read", "traverse", "write"],
+        )
+        self.assertEqual(full["operations"][0]["successful_count"], 3)
+        self.assertIn("p99", full["operations"][0]["latency_ns"])
+        wall_clock = full["mechanism_package_wall_clock_95ci_ns"]
+        self.assertEqual(wall_clock["estimate"], 2_000_000_000.0)
+        self.assertLessEqual(wall_clock["lower"], wall_clock["estimate"])
+        self.assertLessEqual(wall_clock["estimate"], wall_clock["upper"])
+        self.assertIsInstance(
+            full["successful_throughput_ops_per_second"], float
+        )
+        self.assertEqual(
+            full["successful_throughput_ops_per_second"],
+            full["successful_throughput_95ci"]["estimate"],
+        )
+
+    def test_seed_mismatch_is_not_paired_by_repetition_number_alone(self):
+        evidence = self._evidence(repetitions=1)
+        control = next(
+            row
+            for row in evidence["repetitions"]
+            if row["variant"] == "MemoryOnly-NoProvenance"
+        )
+        control["repetition_seed"] = 999
+        for sample in evidence["samples"]:
+            if sample["variant"] == "MemoryOnly-NoProvenance":
+                sample["repetition_seed"] = 999
+
+        paired = aggregate_ablation(
+            evidence, bootstrap_repetitions=10, seed=29
+        )["paired_cells"][0]
+        self.assertEqual(paired["eligible_pair_count"], 0)
+        self.assertEqual(paired["missing_pair_count"], 2)
+        self.assertIsNone(paired["common_latency_overhead_pct"])
 
 
 if __name__ == "__main__":

@@ -39,6 +39,61 @@ class TxnMemCliOutputTests(unittest.TestCase):
             "request_timeout_seconds": 30.0,
         }
 
+    def test_provenance_ablation_aggregate_is_json_serializable_without_fake_traversal(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from txnmem_provenance_performance import aggregate_ablation
+
+        repetitions = []
+        samples = []
+        for variant, elapsed_ns in (
+            ("TxnMem", 20),
+            ("MemoryOnly-NoProvenance", 10),
+        ):
+            operations = ["read", "write", "derive", "propagate"]
+            if variant == "TxnMem":
+                operations.append("traverse")
+            repetitions.append(
+                {
+                    "cell_id": "n100-c1",
+                    "variant": variant,
+                    "repetition": 0,
+                    "repetition_seed": 17,
+                    "graph_node_count": 100,
+                    "concurrency": 1,
+                    "eligible_for_formal": True,
+                    "elapsed_ns": elapsed_ns,
+                    "success_count": len(operations),
+                    "failure_count": 0,
+                    "timeout_count": 0,
+                }
+            )
+            samples.extend(
+                {
+                    "cell_id": "n100-c1",
+                    "variant": variant,
+                    "repetition": 0,
+                    "repetition_seed": 17,
+                    "operation": operation,
+                    "latency_ns": elapsed_ns,
+                    "success": True,
+                    "timeout": False,
+                }
+                for operation in operations
+            )
+
+        result = aggregate_ablation(
+            {"samples": samples, "repetitions": repetitions},
+            bootstrap_repetitions=10,
+            seed=17,
+        )
+        round_trip = json.loads(json.dumps(result, sort_keys=True))
+        control = next(
+            row
+            for row in round_trip["variant_cells"]
+            if row["variant"] == "MemoryOnly-NoProvenance"
+        )
+        self.assertIsNone(control["traversal_latency_ns"])
+
     def test_provenance_blocked_report_does_not_persist_backend_exception_text(self):
         sys.path.insert(0, str(ROOT / "src"))
         from txnmem_experiment import main
