@@ -5314,6 +5314,49 @@ class ProvenanceAblationAggregationTests(unittest.TestCase):
         self.assertLessEqual(interval["lower"], interval["estimate"])
         self.assertLessEqual(interval["estimate"], interval["upper"])
 
+    def test_variant_and_paired_bootstrap_are_input_order_invariant(self):
+        evidence = self._evidence(repetitions=4)
+        elapsed_by_repetition = [100, 1_000, 100_000, 10_000_000]
+        latency_by_repetition = [1, 9, 200, 50_000]
+        for row in evidence["repetitions"]:
+            row["elapsed_ns"] = elapsed_by_repetition[row["repetition"]] * (
+                2 if row["variant"] == "TxnMem" else 1
+            )
+        for row in evidence["samples"]:
+            if row["operation"] != "traverse":
+                row["latency_ns"] = latency_by_repetition[row["repetition"]] * (
+                    2 if row["variant"] == "TxnMem" else 1
+                )
+        canonical = aggregate_ablation(
+            evidence, bootstrap_repetitions=37, seed=24
+        )
+        reversed_evidence = {
+            "samples": list(reversed(evidence["samples"])),
+            "repetitions": list(reversed(evidence["repetitions"])),
+        }
+        shuffled_evidence = {
+            "samples": sorted(
+                evidence["samples"],
+                key=lambda row: (
+                    row["operation_id"],
+                    -row["repetition"],
+                    row["variant"],
+                ),
+            ),
+            "repetitions": sorted(
+                evidence["repetitions"],
+                key=lambda row: (-row["repetition"], row["variant"]),
+            ),
+        }
+
+        for permuted in (reversed_evidence, shuffled_evidence):
+            result = aggregate_ablation(
+                permuted, bootstrap_repetitions=37, seed=24
+            )
+            self.assertEqual(result["variant_cells"], canonical["variant_cells"])
+            self.assertEqual(result["paired_cells"], canonical["paired_cells"])
+            self.assertEqual(result, canonical)
+
     def test_variant_cell_reports_operation_and_wall_clock_distributions(self):
         result = aggregate_ablation(
             self._evidence(repetitions=3), bootstrap_repetitions=100, seed=29

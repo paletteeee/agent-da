@@ -2302,11 +2302,16 @@ def aggregate_ablation(
     variant_cells: list[dict[str, Any]] = []
     for cell_id in sorted(coordinates_by_cell):
         for variant in PROVENANCE_ABLATION_VARIANTS:
-            cell_rows = [
-                row
-                for key, row in repetitions.items()
-                if key[0] == cell_id and key[1] == variant
-            ]
+            cell_rows = sorted(
+                (
+                    row
+                    for key, row in repetitions.items()
+                    if key[0] == cell_id and key[1] == variant
+                ),
+                key=lambda row: (
+                    int(row["repetition"]), int(row["repetition_seed"])
+                ),
+            )
             eligible = [row for row in cell_rows if row["eligible_for_formal"] is True]
             eligible_samples = [
                 sample
@@ -2437,7 +2442,7 @@ def aggregate_ablation(
 
     paired_cells: list[dict[str, Any]] = []
     for cell_id in sorted(coordinates_by_cell):
-        pairs: list[tuple[float, float]] = []
+        pairs: list[tuple[int, int, float, float]] = []
         missing = ineligible = incomparable = zero_denominator = 0
         for repetition, repetition_seed in sorted(coordinates_by_cell[cell_id]):
             pair_rows = {
@@ -2498,6 +2503,8 @@ def aggregate_ablation(
                 continue
             pairs.append(
                 (
+                    repetition,
+                    repetition_seed,
                     (
                         common_means["TxnMem"]
                         - common_means["MemoryOnly-NoProvenance"]
@@ -2510,6 +2517,8 @@ def aggregate_ablation(
                 )
             )
 
+        pairs.sort(key=lambda row: (row[0], row[1]))
+
         latency_interval = throughput_interval = None
         if pairs:
             latency_interval = _bootstrap_ablation_metric(
@@ -2517,7 +2526,7 @@ def aggregate_ablation(
                 count=bootstrap_repetitions,
                 seed=seed,
                 identity=f"pair-latency\0{cell_id}",
-                statistic=lambda selected: sum(row[0] for row in selected)
+                statistic=lambda selected: sum(row[2] for row in selected)
                 / len(selected),
             )
             throughput_interval = _bootstrap_ablation_metric(
@@ -2525,7 +2534,7 @@ def aggregate_ablation(
                 count=bootstrap_repetitions,
                 seed=seed,
                 identity=f"pair-throughput\0{cell_id}",
-                statistic=lambda selected: sum(row[1] for row in selected)
+                statistic=lambda selected: sum(row[3] for row in selected)
                 / len(selected),
             )
         paired_cells.append(
