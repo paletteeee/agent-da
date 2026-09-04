@@ -117,6 +117,50 @@ class FormalAblationSmokeReceiptTests(unittest.TestCase):
                 produced["document_sha256"],
             )
 
+    def test_real_smoke_projection_matches_exact_ablation_taxonomy(self):
+        raw_operations = ["read", "search", "derive", "invalidate_repair"]
+        report = {
+            "samples": [
+                {"operation": operation, "success": True}
+                for operation in raw_operations
+            ],
+            "repetitions": [{
+                "namespace_initially_empty": True, "state_closed": True,
+                "service_health": {
+                    "qdrant": {"version": "1.15.4"},
+                    "neo4j": {"version": "5.26.0"},
+                },
+            }],
+        }
+        class Backend:
+            def provenance_inventory(self, limit):
+                return {"node_count": limit - 1}
+            def close(self):
+                pass
+        class Factory:
+            def __call__(self, namespace):
+                return Backend()
+            def close(self):
+                pass
+        environment = {
+            "isolation_verified": True, "co_tenant_load_detected": False,
+            "source": "collector-observation-v2", "cpu_logical_count": 8,
+            "memory_total_bytes": 1_000_000, "disk_medium": "ssd",
+            "toxiproxy_version": "2.5.0",
+        }
+        with patch.object(smoke, "_collect_formal_environment_attestation", return_value=environment), patch.object(
+            smoke, "make_provenance_ablation_backend_factory", side_effect=lambda **_kwargs: Factory()
+        ), patch.object(smoke, "run_matrix_cell", return_value=report), patch.object(
+            smoke, "_preload_graph", return_value={}
+        ), patch.object(smoke, "_observe_ablation_timeout_cleanup", return_value={"attempt_count": 1, "failure_count": 0}):
+            with patch.dict(os.environ, {"TXNMEM_NEO4J_PASSWORD": "password"}):
+                observed = smoke._execute_formal_ablation_smoke_observations()
+        by_variant = {row["variant"]: row for row in observed["variant_executions"]}
+        self.assertTrue(by_variant["TxnMem"]["memory_crud_verified"])
+        self.assertTrue(by_variant["TxnMem"]["traversal_executed"])
+        self.assertTrue(by_variant["MemoryOnly-NoProvenance"]["memory_crud_verified"])
+        self.assertFalse(by_variant["MemoryOnly-NoProvenance"]["traversal_executed"])
+
 
 ROUTES = [
     {

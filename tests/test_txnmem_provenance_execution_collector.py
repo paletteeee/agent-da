@@ -349,7 +349,7 @@ class FormalAblationLifecycleTests(unittest.TestCase):
                 "complete": False,
                 "environment": {"isolation_verified": True, "co_tenant_load_detected": False, "source": "protected_host_probe", "cpu_logical_count": 8, "memory_total_bytes": 16_000_000_000, "disk_medium": "ssd", "toxiproxy_version": "2.5.0"},
                 "services": [{"role": "qdrant", "version": "1.15.4", "image_manifest_digest_sha256": collector_module.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["qdrant"]}, {"role": "neo4j", "version": "5.26.0", "image_manifest_digest_sha256": collector_module.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["neo4j"]}],
-                "cleanup": {"namespace_residue_count": 0, "timeout_cleanup_attempt_count": 0, "timeout_cleanup_failure_count": 0, "all_workers_quiescent": True},
+                "cleanup": {"namespace_residue_count": 0, "timeout_cleanup_attempt_count": 90, "timeout_cleanup_failure_count": 0, "all_workers_quiescent": True},
             },
             {
                 "samples": evidence["samples"][sample_midpoint:],
@@ -357,7 +357,7 @@ class FormalAblationLifecycleTests(unittest.TestCase):
                 "complete": True,
                 "environment": {"isolation_verified": True, "co_tenant_load_detected": False, "source": "protected_host_probe", "cpu_logical_count": 8, "memory_total_bytes": 16_000_000_000, "disk_medium": "ssd", "toxiproxy_version": "2.5.0"},
                 "services": [{"role": "qdrant", "version": "1.15.4", "image_manifest_digest_sha256": collector_module.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["qdrant"]}, {"role": "neo4j", "version": "5.26.0", "image_manifest_digest_sha256": collector_module.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["neo4j"]}],
-                "cleanup": {"namespace_residue_count": 0, "timeout_cleanup_attempt_count": 0, "timeout_cleanup_failure_count": 0, "all_workers_quiescent": True},
+                "cleanup": {"namespace_residue_count": 0, "timeout_cleanup_attempt_count": 90, "timeout_cleanup_failure_count": 0, "all_workers_quiescent": True},
             },
         ))
         context = {
@@ -437,6 +437,99 @@ class FormalAblationLifecycleTests(unittest.TestCase):
                     expected_source_commit="a" * 40,
                     expected_config_file_sha256="b" * 64, out_dir=second,
                 )
+
+    def test_atomic_checkpoint_replace_failure_resumes_exact_committed_prefix(self):
+        evidence = self._evidence()
+        first_repetition = evidence["repetitions"][:1]
+        first_samples = evidence["samples"][:40]
+        batch = {
+            "samples": first_samples, "repetitions": first_repetition,
+            "complete": False,
+            "environment": {"isolation_verified": True, "co_tenant_load_detected": False, "source": "protected_host_probe", "cpu_logical_count": 8, "memory_total_bytes": 16_000_000_000, "disk_medium": "ssd", "toxiproxy_version": "2.5.0"},
+            "services": [{"role": "qdrant", "version": "1.15.4", "image_manifest_digest_sha256": collector_module.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["qdrant"]}, {"role": "neo4j", "version": "5.26.0", "image_manifest_digest_sha256": collector_module.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["neo4j"]}],
+            "cleanup": {"namespace_residue_count": 0, "timeout_cleanup_attempt_count": 1, "timeout_cleanup_failure_count": 0, "all_workers_quiescent": True},
+        }
+        context = {"source_commit": "a" * 40, "approval_manifest_sha256": "c" * 64, "config_file_sha256": "b" * 64}
+        with TemporaryDirectory() as tmp, patch.object(collector_module, "_FORMAL_ABLATION_RUNTIME_ROOT", Path(tmp) / "runtime"):
+            runtime = collector_module._FORMAL_ABLATION_RUNTIME_ROOT
+            (runtime / "candidates").mkdir(parents=True, mode=0o700); runtime.chmod(0o700)
+            (runtime / "promotion-registry").mkdir(mode=0o700)
+            candidate = collector_module.create_protected_ablation_candidate(formal_out_dir=Path(tmp) / "formal", controller_context=context)
+            with patch.object(collector_module.os, "replace", side_effect=OSError("crash boundary")), self.assertRaises(OSError):
+                collector_module.run_protected_ablation_candidate(candidate, controller_context=context, _observation_batch=lambda _state: batch)
+            _candidate, state, _context, samples, repetitions, generation = collector_module._load_protected_ablation_state(candidate, context)
+            self.assertEqual((generation, len(samples), len(repetitions), state["status"]), (0, 0, 0, "created"))
+            collector_module.resume_protected_ablation_candidate(candidate, controller_context=context, _observation_batch=lambda _state: batch)
+            _candidate, state, _context, samples, repetitions, generation = collector_module._load_protected_ablation_state(candidate, context)
+            self.assertEqual((generation, len(samples), len(repetitions)), (1, 40, 1))
+
+    def test_atomic_checkpoint_temporary_write_failure_keeps_previous_generation(self):
+        context = {"source_commit": "a" * 40, "approval_manifest_sha256": "c" * 64, "config_file_sha256": "b" * 64}
+        with TemporaryDirectory() as tmp, patch.object(collector_module, "_FORMAL_ABLATION_RUNTIME_ROOT", Path(tmp) / "runtime"):
+            runtime = collector_module._FORMAL_ABLATION_RUNTIME_ROOT
+            (runtime / "candidates").mkdir(parents=True, mode=0o700); runtime.chmod(0o700)
+            (runtime / "promotion-registry").mkdir(mode=0o700)
+            candidate = collector_module.create_protected_ablation_candidate(formal_out_dir=Path(tmp) / "formal", controller_context=context)
+            with patch.object(collector_module, "_write_private_json", side_effect=OSError("temporary write crash")), self.assertRaises(OSError):
+                collector_module._write_ablation_checkpoint(candidate, state={"completed_repetition_count": 1, "completed_operation_sample_count": 0, "namespace_observation_count": 1}, samples=[], repetitions=[], generation=1)
+            _candidate, state, _context, samples, repetitions, generation = collector_module._load_protected_ablation_state(candidate, context)
+            self.assertEqual((generation, len(samples), len(repetitions), state["status"]), (0, 0, 0, "created"))
+
+    def test_cleanup_observation_failure_blocks_seal(self):
+        evidence = self._evidence()
+        batch = {
+            "samples": evidence["samples"], "repetitions": evidence["repetitions"], "complete": True,
+            "environment": {"isolation_verified": True, "co_tenant_load_detected": False, "source": "protected_host_probe", "cpu_logical_count": 8, "memory_total_bytes": 16_000_000_000, "disk_medium": "ssd", "toxiproxy_version": "2.5.0"},
+            "services": [{"role": "qdrant", "version": "1.15.4", "image_manifest_digest_sha256": collector_module.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["qdrant"]}, {"role": "neo4j", "version": "5.26.0", "image_manifest_digest_sha256": collector_module.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["neo4j"]}],
+            "cleanup": {"namespace_residue_count": 1, "timeout_cleanup_attempt_count": 180, "timeout_cleanup_failure_count": 1, "all_workers_quiescent": False},
+        }
+        context = {"source_commit": "a" * 40, "approval_manifest_sha256": "c" * 64, "config_file_sha256": "b" * 64}
+        with TemporaryDirectory() as tmp, patch.object(collector_module, "_FORMAL_ABLATION_RUNTIME_ROOT", Path(tmp) / "runtime"):
+            runtime = collector_module._FORMAL_ABLATION_RUNTIME_ROOT
+            (runtime / "candidates").mkdir(parents=True, mode=0o700); runtime.chmod(0o700)
+            (runtime / "promotion-registry").mkdir(mode=0o700)
+            candidate = collector_module.create_protected_ablation_candidate(formal_out_dir=Path(tmp) / "formal", controller_context=context)
+            collector_module.run_protected_ablation_candidate(candidate, controller_context=context, _observation_batch=lambda _state: batch)
+            with self.assertRaises(collector_module.CollectorError):
+                collector_module.seal_protected_ablation_candidate(candidate, controller_context=context)
+
+    def test_production_shaped_projection_runs_all_180_and_seals(self):
+        environment = {"schema": "txnmem-provenance-environment-v1", "isolation_verified": True, "co_tenant_load_detected": False, "source": "collector-observation-v2", "cpu_logical_count": 8, "memory_total_bytes": 16_000_000_000, "disk_medium": "ssd", "toxiproxy_version": "2.5.0"}
+        class Backend:
+            def provenance_inventory(self, limit): return {"node_count": limit - 1}
+            def close(self): pass
+        class Factory:
+            def __init__(self, variant): self.variant = variant
+            def __call__(self, _namespace): return Backend()
+            def close(self): pass
+        def make_factory(**kwargs): return Factory(kwargs["variant"])
+        def run_cell(factory, graph, *, concurrency, **_kwargs):
+            samples = []
+            for operation in ("read", "search", "derive", "invalidate_repair"):
+                samples.extend({"operation": operation, "success": True, "latency_ns": 100} for _ in range(8))
+            return {"cell_id": f"n{graph.node_count}-c{concurrency}", "samples": samples, "repetitions": [{"elapsed_ns": 10_000, "eligible_for_formal": True, "state_closed": True, "service_health": {"qdrant": {"version": "1.15.4"}, "neo4j": {"version": "5.26.0"}}}]}
+        context = {"source_commit": "a" * 40, "approval_manifest_sha256": "c" * 64, "config_file_sha256": "b" * 64}
+        with TemporaryDirectory() as tmp, patch.object(collector_module, "_FORMAL_ABLATION_RUNTIME_ROOT", Path(tmp) / "runtime"), patch.object(
+            collector_module, "_collect_formal_environment_attestation", return_value=environment
+        ), patch.object(collector_module, "make_provenance_ablation_backend_factory", side_effect=make_factory), patch.object(
+            collector_module, "run_matrix_cell", side_effect=run_cell
+        ), patch.object(collector_module, "_preload_graph", return_value={}), patch.object(
+            collector_module, "_observe_ablation_timeout_cleanup", return_value={"attempt_count": 1, "failure_count": 0}
+        ), patch.dict(os.environ, {"TXNMEM_NEO4J_PASSWORD": "password"}):
+            runtime = collector_module._FORMAL_ABLATION_RUNTIME_ROOT
+            (runtime / "candidates").mkdir(parents=True, mode=0o700); runtime.chmod(0o700)
+            (runtime / "promotion-registry").mkdir(mode=0o700)
+            candidate = collector_module.create_protected_ablation_candidate(formal_out_dir=Path(tmp) / "formal", controller_context=context)
+            for index in range(180):
+                state = collector_module.run_protected_ablation_candidate(candidate, controller_context=context) if index == 0 else collector_module.resume_protected_ablation_candidate(candidate, controller_context=context)
+            self.assertEqual(state["status"], "complete_unsealed")
+            sealed = collector_module.seal_protected_ablation_candidate(candidate, controller_context=context)
+            self.assertEqual(sealed["status"], "sealed_complete")
+            checkpoint = collector_module._load_ablation_json(candidate / "checkpoint.json")
+            identities = {(row["operation"], row["operation_id"]) for row in checkpoint["samples"][:40]}
+            self.assertIn(("read", "read:7"), identities)
+            self.assertIn(("write", "write:7"), identities)
+            self.assertNotIn(("write", "write:8"), identities)
 
 
 

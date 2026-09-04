@@ -61,6 +61,7 @@ from txnmem_provenance_execution_collector import (
     _normalize_docker_backend_isolation,
     _normalize_docker_network_guard_profile,
     _observe_formal_child_process,
+    _observe_ablation_timeout_cleanup,
     _parse_toxiproxy_version,
     _publish_formal_input_tree,
     _require_formal_uid_processes,
@@ -92,6 +93,7 @@ from txnmem_provenance_performance import (
     formal_matrix_config_sha256,
     load_strict_json_document,
     make_provenance_ablation_backend_factory,
+    _preload_graph,
     run_matrix_cell,
     validate_environment_attestation,
 )
@@ -295,6 +297,7 @@ def _execute_formal_ablation_smoke_observations() -> dict[str, Any]:
             neo4j_auth=("neo4j", password), environment_attestation=environment,
             request_timeout_seconds=30.0,
         )
+        traversal_executed = False
         try:
             report = run_matrix_cell(
                 factory, graph, concurrency=1, repetitions=1,
@@ -302,6 +305,16 @@ def _execute_formal_ablation_smoke_observations() -> dict[str, Any]:
                 run_id=f"provenance-ablation-v10-smoke-{variant}",
                 formal=True, environment_attestation=environment,
             )
+            if variant == "TxnMem":
+                traversal_backend = factory("provenance-ablation-v10-smoke-traversal")
+                try:
+                    _preload_graph(traversal_backend, graph)
+                    traversal_executed = isinstance(
+                        traversal_backend.provenance_inventory(limit=graph.node_count + 1),
+                        Mapping,
+                    )
+                finally:
+                    traversal_backend.close()
         finally:
             factory.close()
         repetitions = report.get("repetitions")
@@ -323,15 +336,23 @@ def _execute_formal_ablation_smoke_observations() -> dict[str, Any]:
         if service_identities is not None and service_identities != observed_services:
             raise FormalSmokeError("formal ablation smoke service identity drifted")
         service_identities = observed_services
-        operations = {str(row.get("operation")) for row in samples if row.get("success") is True}
+        projection = {"read": "read", "search": "write", "derive": "derive", "invalidate_repair": "propagate"}
+        operations = {
+            projection[str(row.get("operation"))]
+            for row in samples
+            if row.get("success") is True and str(row.get("operation")) in projection
+        }
+        if traversal_executed:
+            operations.add("traverse")
+        timeout_cleanup = _observe_ablation_timeout_cleanup()
         executions.append({
             "variant": variant,
             "memory_crud_verified": {"read", "write", "derive", "propagate"}.issubset(operations),
             "provenance_edge_count": graph.edge_count if variant == "TxnMem" else 0,
-            "traversal_executed": "traverse" in operations,
+            "traversal_executed": traversal_executed,
             "namespace_empty_before": repetition.get("namespace_initially_empty") is True,
             "namespace_empty_after": repetition.get("state_closed") is True,
-            "timeout_cleanup_verified": repetition.get("state_closed") is True,
+            "timeout_cleanup_verified": timeout_cleanup == {"attempt_count": 1, "failure_count": 0},
         })
     return {"service_identities": service_identities, "variant_executions": executions}
 

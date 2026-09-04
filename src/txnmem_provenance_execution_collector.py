@@ -302,21 +302,70 @@ def create_protected_ablation_candidate(
         "completed_operation_sample_count": 0,
         "namespace_observation_count": 0,
     }
-    _write_private_json(candidate / "controller-state.json", state)
-    _write_private_json(candidate / "samples.partial.json", {"rows": []})
-    _write_private_json(candidate / "repetitions.partial.json", {"rows": []})
+    _write_ablation_checkpoint(candidate, state=state, samples=[], repetitions=[], generation=0)
     return candidate
+
+
+def _write_ablation_checkpoint(
+    candidate: Path, *, state: Mapping[str, Any], samples: Sequence[Mapping[str, Any]],
+    repetitions: Sequence[Mapping[str, Any]], generation: int,
+) -> None:
+    checkpoint = {
+        "schema": "txnmem-provenance-ablation-checkpoint-v1",
+        "generation": generation,
+        "state": dict(state),
+        "samples": [dict(row) for row in samples],
+        "repetitions": [dict(row) for row in repetitions],
+        "samples_sha256": canonical_ablation_jsonl_sha256(samples),
+        "repetitions_sha256": canonical_ablation_jsonl_sha256(repetitions),
+    }
+    path = candidate / "checkpoint.json"
+    if path.exists():
+        _replace_private_json(path, checkpoint)
+    else:
+        _write_private_json(path, checkpoint)
+
+
+def _load_ablation_checkpoint(candidate: Path) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], int]:
+    value = _load_ablation_json(candidate / "checkpoint.json")
+    if not isinstance(value, Mapping) or set(value) != {
+        "schema", "generation", "state", "samples", "repetitions",
+        "samples_sha256", "repetitions_sha256",
+    } or value.get("schema") != "txnmem-provenance-ablation-checkpoint-v1":
+        raise CollectorError("formal ablation checkpoint schema is invalid")
+    generation = value.get("generation")
+    state, samples, repetitions = value.get("state"), value.get("samples"), value.get("repetitions")
+    if type(generation) is not int or generation < 0 or not isinstance(state, Mapping) or not isinstance(samples, list) or not isinstance(repetitions, list):
+        raise CollectorError("formal ablation checkpoint is invalid")
+    if value.get("samples_sha256") != canonical_ablation_jsonl_sha256(samples) or value.get("repetitions_sha256") != canonical_ablation_jsonl_sha256(repetitions):
+        raise CollectorError("formal ablation checkpoint hash is invalid")
+    if state.get("completed_repetition_count") != len(repetitions) or state.get("completed_operation_sample_count") != len(samples) or state.get("namespace_observation_count") != len(repetitions):
+        raise CollectorError("formal ablation checkpoint counts drifted")
+    expected_coordinates = []
+    config = validate_provenance_ablation_config(FORMAL_ABLATION_CONFIG, formal=True)
+    for cell in config["cells"]:
+        for repetition, repetition_seed in enumerate(config["repetition_seeds"]):
+            for variant in config["variants"]:
+                expected_coordinates.append((f"n{cell['graph_node_count']}-c{cell['concurrency']}", variant, repetition, repetition_seed))
+    observed = [(row.get("cell_id"), row.get("variant"), row.get("repetition"), row.get("repetition_seed")) for row in repetitions]
+    if observed != expected_coordinates[:len(observed)]:
+        raise CollectorError("formal ablation checkpoint coordinate prefix is invalid")
+    sample_coordinates = [(row.get("cell_id"), row.get("variant"), row.get("repetition"), row.get("repetition_seed")) for row in samples]
+    allowed = set(observed)
+    if any(key not in allowed for key in sample_coordinates):
+        raise CollectorError("formal ablation checkpoint contains uncommitted samples")
+    return dict(state), [dict(row) for row in samples], [dict(row) for row in repetitions], generation
 
 
 def _load_protected_ablation_state(
     candidate_root: str | Path, controller_context: Mapping[str, Any]
-) -> tuple[Path, dict[str, Any], dict[str, str]]:
+) -> tuple[Path, dict[str, Any], dict[str, str], list[dict[str, Any]], list[dict[str, Any]], int]:
     context = _controller_ablation_context(controller_context)
     _root, candidates, _registry = _protected_ablation_runtime()
     candidate = Path(candidate_root).expanduser().absolute().resolve(strict=True)
     if candidate.parent != candidates or candidate.is_symlink() or not candidate.is_dir():
         raise CollectorError("formal ablation candidate is outside controller policy")
-    state = _load_ablation_json(candidate / "controller-state.json")
+    state, samples, repetitions, generation = _load_ablation_checkpoint(candidate)
     if (
         not isinstance(state, Mapping)
         or state.get("controller_execution_id_sha256") != candidate.name
@@ -325,7 +374,7 @@ def _load_protected_ablation_state(
         or state.get("config_file_sha256") != context["config_file_sha256"]
     ):
         raise CollectorError("formal ablation controller state binding is invalid")
-    return candidate, dict(state), context
+    return candidate, dict(state), context, samples, repetitions, generation
 
 
 def _default_ablation_observation_batch(state: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -352,7 +401,7 @@ def _default_ablation_observation_batch(state: Mapping[str, Any]) -> Mapping[str
     # One coordinate per durable batch: a signal between batches leaves an
     # authenticated partial state that the controller can resume exactly.
     for cell, repetition, repetition_seed, variant in plan[completed:completed + 1]:
-        graph = build_layered_dag(int(cell["graph_node_count"]), int(config["graph_seed"]))
+        graph = _cached_ablation_graph(int(cell["graph_node_count"]), int(config["graph_seed"]))
         factory = make_provenance_ablation_backend_factory(
             variant=str(variant), qdrant_url="http://127.0.0.1:19000",
             neo4j_uri="bolt://127.0.0.1:19001", neo4j_auth=("neo4j", password),
@@ -382,16 +431,20 @@ def _default_ablation_observation_batch(state: Mapping[str, Any]) -> Mapping[str
             "read": "read", "search": "write", "derive": "derive",
             "invalidate_repair": "propagate",
         }
+        operation_indices = {name: 0 for name in operation_projection.values()}
         coordinate_samples: list[dict[str, Any]] = []
-        for index, raw in enumerate(report["samples"]):
+        for raw in report["samples"]:
             success = raw.get("success") is True
             error_name = raw.get("error_class")
             timeout = not success and error_name == "TimeoutError"
+            projected_operation = operation_projection[str(raw["operation"])]
+            operation_index = operation_indices[projected_operation]
+            operation_indices[projected_operation] += 1
             coordinate_samples.append({
                 "cell_id": report["cell_id"], "variant": variant,
                 "repetition": repetition, "repetition_seed": repetition_seed,
-                "operation": operation_projection[str(raw["operation"])],
-                "operation_id": f"{operation_projection[str(raw['operation'])]}:{index}",
+                "operation": projected_operation,
+                "operation_id": f"{projected_operation}:{operation_index}",
                 "latency_ns": int(raw["latency_ns"]), "success": success,
                 "timeout": timeout,
                 "error_category": None if success else ("timeout" if timeout else "backend_error"),
@@ -436,6 +489,12 @@ def _default_ablation_observation_batch(state: Mapping[str, Any]) -> Mapping[str
             "error_count": operation_count - success_count - timeout_count,
             "eligible_for_formal": raw_repetition["eligible_for_formal"] is True,
         })
+    timeout_cleanup = _observe_ablation_timeout_cleanup()
+    workers_quiescent = not any(
+        thread.is_alive() and thread.name.startswith("ThreadPoolExecutor")
+        for thread in threading.enumerate()
+    )
+    namespace_residue = 0 if raw_repetition.get("state_closed") is True else 1
     return {
         "samples": samples, "repetitions": repetitions,
         "complete": completed + len(repetitions) == len(plan),
@@ -449,18 +508,60 @@ def _default_ablation_observation_batch(state: Mapping[str, Any]) -> Mapping[str
             "toxiproxy_version": environment["toxiproxy_version"],
         },
         "services": services,
-        "cleanup": {"namespace_residue_count": 0,
-                    "timeout_cleanup_attempt_count": 0,
-                    "timeout_cleanup_failure_count": 0,
-                    "all_workers_quiescent": True},
+        "cleanup": {"namespace_residue_count": namespace_residue,
+                    "timeout_cleanup_attempt_count": timeout_cleanup["attempt_count"],
+                    "timeout_cleanup_failure_count": timeout_cleanup["failure_count"],
+                    "all_workers_quiescent": workers_quiescent},
     }
+
+
+@functools.lru_cache(maxsize=3)
+def _cached_ablation_graph(node_count: int, seed: int) -> Any:
+    return build_layered_dag(node_count, seed)
+
+
+def _observe_ablation_timeout_cleanup() -> dict[str, int]:
+    """Inject a real proxy timeout and prove the toxic was removed."""
+    base = "http://127.0.0.1:8474"
+    name = "txnmem-formal-ablation-timeout"
+    toxic_path = "/proxies/txnmem-qdrant/toxics/" + urllib.parse.quote(name, safe="")
+    failure_count = 0
+    installed = False
+    try:
+        _toxiproxy_json_request(
+            base, "/proxies/txnmem-qdrant/toxics", method="POST",
+            payload={"name": name, "type": "timeout", "stream": "downstream",
+                     "toxicity": 1.0, "attributes": {"timeout": 1}},
+        )
+        installed = True
+        request = urllib.request.Request("http://127.0.0.1:19000/collections", method="GET")
+        try:
+            with urllib.request.urlopen(request, timeout=0.25) as response:
+                response.read(1)
+        except (TimeoutError, socket.timeout, urllib.error.URLError):
+            pass
+        else:
+            failure_count += 1
+    finally:
+        try:
+            _toxiproxy_json_request(
+                base, toxic_path, method="DELETE", allow_not_found=not installed
+            )
+            observe_formal_toxiproxy_routes(
+                base, qdrant_proxy="txnmem-qdrant", neo4j_proxy="txnmem-neo4j"
+            )
+        except BaseException:
+            failure_count += 1
+    if failure_count:
+        raise CollectorError("formal ablation timeout cleanup observation failed")
+    return {"attempt_count": 1, "failure_count": 0}
 
 
 def _advance_protected_ablation_candidate(
     candidate_root: str | Path, *, controller_context: Mapping[str, Any],
     _observation_batch: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None,
 ) -> dict[str, Any]:
-    candidate, state, _context = _load_protected_ablation_state(
+    candidate, state, _context, old_samples, old_repetitions, generation = _load_protected_ablation_state(
         candidate_root, controller_context
     )
     if state.get("status") not in {"created", "partial"}:
@@ -470,20 +571,34 @@ def _advance_protected_ablation_candidate(
     batch_fields = {"samples", "repetitions", "complete", "environment", "services", "cleanup"}
     if not isinstance(batch, Mapping) or set(batch) != batch_fields:
         raise CollectorError("formal ablation observation batch is invalid")
-    old_samples = _load_ablation_json(candidate / "samples.partial.json").get("rows")
-    old_repetitions = _load_ablation_json(candidate / "repetitions.partial.json").get("rows")
     samples, repetitions = batch["samples"], batch["repetitions"]
     if not isinstance(old_samples, list) or not isinstance(old_repetitions, list) or not isinstance(samples, list) or not isinstance(repetitions, list) or type(batch["complete"]) is not bool:
         raise CollectorError("formal ablation observation batch rows are invalid")
     combined_samples = [*old_samples, *samples]
     combined_repetitions = [*old_repetitions, *repetitions]
+    batch_cleanup = batch["cleanup"]
+    if not isinstance(batch_cleanup, Mapping) or set(batch_cleanup) != {
+        "namespace_residue_count", "timeout_cleanup_attempt_count",
+        "timeout_cleanup_failure_count", "all_workers_quiescent",
+    }:
+        raise CollectorError("formal ablation cleanup observation is invalid")
+    previous_observation = state.get("observations")
+    previous_cleanup = previous_observation.get("cleanup") if isinstance(previous_observation, Mapping) else None
+    cleanup = {
+        "namespace_residue_count": int(batch_cleanup["namespace_residue_count"]) + (int(previous_cleanup["namespace_residue_count"]) if isinstance(previous_cleanup, Mapping) else 0),
+        "timeout_cleanup_attempt_count": int(batch_cleanup["timeout_cleanup_attempt_count"]) + (int(previous_cleanup["timeout_cleanup_attempt_count"]) if isinstance(previous_cleanup, Mapping) else 0),
+        "timeout_cleanup_failure_count": int(batch_cleanup["timeout_cleanup_failure_count"]) + (int(previous_cleanup["timeout_cleanup_failure_count"]) if isinstance(previous_cleanup, Mapping) else 0),
+        "all_workers_quiescent": batch_cleanup["all_workers_quiescent"] is True and (previous_cleanup is None or previous_cleanup.get("all_workers_quiescent") is True),
+    }
     observation = {
         "environment": batch["environment"],
         "services": batch["services"],
-        "cleanup": batch["cleanup"],
+        "cleanup": cleanup,
     }
-    previous_observation = state.get("observations")
-    if previous_observation is not None and previous_observation != observation:
+    if previous_observation is not None and (
+        previous_observation.get("environment") != observation["environment"]
+        or previous_observation.get("services") != observation["services"]
+    ):
         raise CollectorError("formal ablation protected observations drifted")
     state.update({
         "status": "complete_unsealed" if batch["complete"] else "partial",
@@ -492,9 +607,10 @@ def _advance_protected_ablation_candidate(
         "namespace_observation_count": len(combined_repetitions),
         "observations": observation,
     })
-    _replace_private_json(candidate / "samples.partial.json", {"rows": combined_samples})
-    _replace_private_json(candidate / "repetitions.partial.json", {"rows": combined_repetitions})
-    _replace_private_json(candidate / "controller-state.json", state)
+    _write_ablation_checkpoint(
+        candidate, state=state, samples=combined_samples,
+        repetitions=combined_repetitions, generation=generation + 1,
+    )
     return dict(state)
 
 
@@ -542,13 +658,11 @@ def seal_protected_ablation_candidate(
     candidate_root: str | Path, *, controller_context: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Seal only a complete candidate observed by this controller lifecycle."""
-    candidate, state, context = _load_protected_ablation_state(
+    candidate, state, context, samples, repetitions, generation = _load_protected_ablation_state(
         candidate_root, controller_context
     )
     if state.get("status") != "complete_unsealed":
         raise CollectorError("formal ablation candidate is not complete")
-    samples = _load_ablation_json(candidate / "samples.partial.json").get("rows")
-    repetitions = _load_ablation_json(candidate / "repetitions.partial.json").get("rows")
     evidence = {"samples": samples, "repetitions": repetitions}
     aggregate = aggregate_ablation(
         evidence,
@@ -573,6 +687,13 @@ def seal_protected_ablation_candidate(
     raw_cleanup = observations.get("cleanup")
     if not isinstance(raw_environment, Mapping) or not isinstance(raw_services, list) or not isinstance(raw_cleanup, Mapping):
         raise CollectorError("formal ablation protected observations are invalid")
+    if (
+        raw_cleanup.get("namespace_residue_count") != 0
+        or raw_cleanup.get("timeout_cleanup_attempt_count") != 180
+        or raw_cleanup.get("timeout_cleanup_failure_count") != 0
+        or raw_cleanup.get("all_workers_quiescent") is not True
+    ):
+        raise CollectorError("formal ablation observed cleanup is ineligible")
     environment = _hashed_ablation_document({
         "schema": "txnmem-provenance-ablation-environment-v1",
         "candidate_id": candidate_id,
@@ -650,14 +771,17 @@ def seal_protected_ablation_candidate(
     _write_private_json(candidate / "attestations.json", attestations)
     _write_private_json(candidate / "receipt.json", receipt)
     state.update({"status": "sealed_complete", "candidate_id": candidate_id})
-    _replace_private_json(candidate / "controller-state.json", state)
+    _write_ablation_checkpoint(
+        candidate, state=state, samples=samples, repetitions=repetitions,
+        generation=generation + 1,
+    )
     return dict(state)
 
 
 def validate_protected_ablation_candidate(
     candidate_root: str | Path, *, controller_context: Mapping[str, Any]
 ) -> dict[str, Any]:
-    candidate, state, context = _load_protected_ablation_state(
+    candidate, state, context, _samples, _repetitions, _generation = _load_protected_ablation_state(
         candidate_root, controller_context
     )
     if state.get("status") != "sealed_complete":
