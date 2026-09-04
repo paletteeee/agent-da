@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from types import ModuleType, SimpleNamespace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -1112,18 +1113,18 @@ class ProvenanceMatrixTests(unittest.TestCase):
 
             backend.invalidate("derived")
             self.assertIsNone(backend.read("derived"))
-            backend.delete("propagated")
+            backend.invalidate("propagated")
             self.assertIsNone(backend.read("propagated"))
             self.assertEqual(
                 backend.performance_inventory(),
                 {
                     "classification": "complete",
-                    "node_count": 2,
+                    "node_count": 3,
                     "edge_count": 0,
                     "graph_sha256": canonical_graph_sha256(
-                        ("derived", "root"), ()
+                        ("derived", "propagated", "root"), ()
                     ),
-                    "status_counts": {"active": 1, "invalid": 1},
+                    "status_counts": {"active": 1, "invalid": 2},
                 },
             )
             self.assertEqual(
@@ -1150,7 +1151,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
                     "memory_search",
                     "invalidate",
                     "memory_read",
-                    "memory_delete",
+                    "invalidate",
                     "memory_read",
                 ],
             )
@@ -1165,6 +1166,241 @@ class ProvenanceMatrixTests(unittest.TestCase):
                     payload
                 )
             )
+
+    def test_memory_only_independent_writes_overlap_and_same_key_updates_serialize(self):
+        class ConcurrentQdrant:
+            def __init__(self):
+                self.points = {}
+                self.lock = threading.Lock()
+                self.independent_release = threading.Event()
+                self.active_upserts = 0
+                self.peak_upserts = 0
+                self.active_by_id = {}
+                self.peak_by_id = {}
+
+            def retrieve(self, namespace, point_id):
+                with self.lock:
+                    row = self.points.get((namespace, point_id))
+                    return copy.deepcopy(row) if row is not None else None
+
+            def upsert(self, namespace, point_id, vector, payload, idempotency_key):
+                with self.lock:
+                    self.active_upserts += 1
+                    self.peak_upserts = max(
+                        self.peak_upserts,
+                        self.active_upserts,
+                    )
+                    active = self.active_by_id.get(point_id, 0) + 1
+                    self.active_by_id[point_id] = active
+                    self.peak_by_id[point_id] = max(
+                        self.peak_by_id.get(point_id, 0),
+                        active,
+                    )
+                    if point_id.startswith("independent-") and self.active_upserts == 4:
+                        self.independent_release.set()
+                if point_id.startswith("independent-"):
+                    self.independent_release.wait(timeout=0.2)
+                else:
+                    time.sleep(0.02)
+                with self.lock:
+                    self.points[(namespace, point_id)] = copy.deepcopy(payload)
+                    self.active_upserts -= 1
+                    self.active_by_id[point_id] -= 1
+
+        qdrant = ConcurrentQdrant()
+        backend = provenance_module._MemoryOnlyNoProvenanceBackend(
+            "concurrency-namespace",
+            qdrant_client=qdrant,
+            neo4j_health_client=SimpleNamespace(
+                max_transaction_retry_time_seconds=0.0
+            ),
+            embedder=lambda value: [float(len(str(value)))],
+        )
+
+        start = threading.Barrier(4)
+
+        def independent_write(index):
+            start.wait(timeout=2)
+            return backend.write(
+                f"independent-{index}",
+                value=f"value-{index}",
+            )
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            independent = list(executor.map(independent_write, range(4)))
+
+        self.assertEqual(qdrant.peak_upserts, 4)
+        self.assertEqual(
+            {row["memory_id"] for row in independent},
+            {"independent-0", "independent-1", "independent-2", "independent-3"},
+        )
+
+        qdrant.peak_upserts = 0
+        start = threading.Barrier(4)
+
+        def shared_write(index):
+            start.wait(timeout=2)
+            return backend.write("shared", value=f"revision-{index}")
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            shared = list(executor.map(shared_write, range(4)))
+
+        self.assertEqual(qdrant.peak_by_id["shared"], 1)
+        self.assertEqual(sorted(row["version"] for row in shared), [1, 2, 3, 4])
+        self.assertEqual(qdrant.points[("concurrency-namespace", "shared")]["version"], 4)
+        self.assertEqual(backend.snapshot()["shared"]["version"], 4)
+
+    def test_concurrent_derive_and_propagate_keep_operation_local_events(self):
+        class Qdrant:
+            def __init__(self):
+                self.points = {}
+                self.lock = threading.Lock()
+
+            def retrieve(self, namespace, point_id):
+                with self.lock:
+                    row = self.points.get((namespace, point_id))
+                    return copy.deepcopy(row) if row is not None else None
+
+            def upsert(self, namespace, point_id, vector, payload, idempotency_key):
+                with self.lock:
+                    self.points[(namespace, point_id)] = copy.deepcopy(payload)
+
+        backend = provenance_module._MemoryOnlyNoProvenanceBackend(
+            "event-namespace",
+            qdrant_client=Qdrant(),
+            neo4j_health_client=SimpleNamespace(
+                max_transaction_retry_time_seconds=0.0
+            ),
+            embedder=lambda _value: [0.0],
+        )
+        backend.write("root", value="root")
+        original_event = backend._event
+        write_events_appended = threading.Barrier(2)
+
+        def synchronized_event(kind, **fields):
+            event = original_event(kind, **fields)
+            if kind == "memory_write" and fields.get("memory_id") in {
+                "derived-a",
+                "propagated-b",
+            }:
+                write_events_appended.wait(timeout=2)
+            return event
+
+        backend._event = synchronized_event
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            derived_future = executor.submit(
+                backend.derive,
+                "derived-a",
+                ["root"],
+                "derived-value",
+            )
+            propagated_future = executor.submit(
+                backend.propagate,
+                "propagated-b",
+                "root",
+                "propagated-value",
+            )
+            derived_future.result(timeout=2)
+            propagated_future.result(timeout=2)
+
+        events = {
+            event.get("memory_id"): event
+            for event in backend.events
+            if event.get("memory_id") in {"derived-a", "propagated-b"}
+        }
+        self.assertEqual(
+            events["derived-a"],
+            {
+                "event_id": events["derived-a"]["event_id"],
+                "kind": "memory_derive",
+                "step": events["derived-a"]["step"],
+                "agent_id": "agent_1",
+                "memory_id": "derived-a",
+                "value": "derived-value",
+                "source_ids": ["root"],
+            },
+        )
+        self.assertEqual(
+            events["propagated-b"],
+            {
+                "event_id": events["propagated-b"]["event_id"],
+                "kind": "memory_propagate",
+                "step": events["propagated-b"]["step"],
+                "agent_id": "agent_1",
+                "memory_id": "propagated-b",
+                "value": "propagated-value",
+                "source_ids": ["root"],
+                "source_id": "root",
+            },
+        )
+
+    def test_both_ablation_factories_execute_the_same_logical_crud_surface(self):
+        from tests.test_txnmem_vector_graph_backend import (
+            _FakeNeo4j,
+            _FakeQdrant,
+        )
+
+        environment = _FixtureBackend("common-crud").performance_environment()
+        required_methods = {
+            "write",
+            "read",
+            "search",
+            "derive",
+            "propagate",
+            "invalidate",
+        }
+
+        def exercise(backend):
+            self.assertTrue(
+                all(callable(getattr(backend, name, None)) for name in required_methods)
+            )
+            self.assertFalse(hasattr(backend, "delete"))
+            self.assertEqual(backend.write("root", value="root-value")["memory_id"], "root")
+            self.assertEqual(backend.read("root")["value"], "root-value")
+            self.assertTrue(backend.search("root-value"))
+            self.assertEqual(
+                backend.derive("derived", ["root"], value="derived-value")[
+                    "memory_id"
+                ],
+                "derived",
+            )
+            self.assertEqual(
+                backend.propagate(
+                    "propagated",
+                    "root",
+                    value="propagated-value",
+                )["memory_id"],
+                "propagated",
+            )
+            backend.invalidate("derived")
+            self.assertIsNone(backend.read("derived"))
+
+        for variant in provenance_module.PROVENANCE_ABLATION_VARIANTS:
+            with self.subTest(variant=variant):
+                qdrant = _FakeQdrant()
+                neo4j = _FakeNeo4j()
+                with patch(
+                    "txnmem_vector_graph_backend._QdrantHTTPClient",
+                    return_value=qdrant,
+                ), patch(
+                    "txnmem_vector_graph_backend._Neo4jBoltClient",
+                    return_value=neo4j,
+                ), patch.object(
+                    provenance_module,
+                    "_Neo4jHealthClient",
+                    return_value=neo4j,
+                ):
+                    factory = provenance_module.make_provenance_ablation_backend_factory(
+                        variant=variant,
+                        qdrant_url="http://qdrant",
+                        neo4j_uri="bolt://neo4j",
+                        neo4j_auth=("neo4j", "password"),
+                        environment_attestation=environment,
+                    )
+                    try:
+                        exercise(factory(f"common-crud-{variant}"))
+                    finally:
+                        factory.close()
 
     def test_ablation_factory_rejects_unregistered_variant_before_clients(self):
         self.assertTrue(

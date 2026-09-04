@@ -2451,6 +2451,9 @@ class _MemoryOnlyNoProvenanceBackend(InstrumentedMemoryBackend):
         )
         self._state_lock = threading.RLock()
         self._event_lock = threading.Lock()
+        self._event_context = threading.local()
+        self._identity_locks_guard = threading.Lock()
+        self._identity_locks: dict[str, threading.Lock] = {}
         self._metrics_lock = threading.Lock()
         self._metrics: dict[str, Any] = {
             "request_count": 0,
@@ -2462,14 +2465,27 @@ class _MemoryOnlyNoProvenanceBackend(InstrumentedMemoryBackend):
 
     def _event(self, kind: str, **fields: Any) -> dict[str, Any]:
         with self._event_lock:
-            return super()._event(kind, **fields)
+            event = super()._event(kind, **fields)
+            self._event_context.last_write_event = event
+            return event
 
-    def _rewrite_last_event(self, kind: str, **fields: Any) -> None:
+    def _clear_thread_write_event(self) -> None:
+        self._event_context.last_write_event = None
+
+    def _rewrite_thread_write_event(self, kind: str, **fields: Any) -> None:
         with self._event_lock:
-            if not self.events:
-                raise RuntimeError("memory operation event is missing")
-            self.events[-1]["kind"] = str(kind)
-            self.events[-1].update(copy.deepcopy(fields))
+            event = getattr(self._event_context, "last_write_event", None)
+            if event is None:
+                return
+            event["kind"] = str(kind)
+            event.update(copy.deepcopy(fields))
+
+    def _identity_lock(self, memory_id: str) -> threading.Lock:
+        with self._identity_locks_guard:
+            return self._identity_locks.setdefault(
+                str(memory_id),
+                threading.Lock(),
+            )
 
     def _key(self, operation: str, memory_id: str) -> str:
         return hashlib.sha256(
@@ -2508,8 +2524,9 @@ class _MemoryOnlyNoProvenanceBackend(InstrumentedMemoryBackend):
     def write(
         self, memory_id: str, value: Any = None, **fields: Any
     ) -> dict[str, Any]:
+        self._clear_thread_write_event()
         memory_id = str(memory_id)
-        with self._state_lock:
+        with self._identity_lock(memory_id):
             previous = self._retrieve(memory_id, operation="memory_version_read")
             memory = {
                 "memory_id": memory_id,
@@ -2532,9 +2549,10 @@ class _MemoryOnlyNoProvenanceBackend(InstrumentedMemoryBackend):
                     key,
                 ),
             )
-            self.memories[memory_id] = copy.deepcopy(memory)
-        self._event("memory_write", memory_id=memory_id, value=memory["value"])
-        return copy.deepcopy(memory)
+            with self._state_lock:
+                self.memories[memory_id] = copy.deepcopy(memory)
+            self._event("memory_write", memory_id=memory_id, value=memory["value"])
+            return copy.deepcopy(memory)
 
     def read(
         self, memory_id: str | None = None, **fields: Any
@@ -2585,7 +2603,7 @@ class _MemoryOnlyNoProvenanceBackend(InstrumentedMemoryBackend):
             if source is None or source.get("status") != "active":
                 raise KeyError("derive source is missing")
         memory = self.write(memory_id, value=value, **fields)
-        self._rewrite_last_event(
+        self._rewrite_thread_write_event(
             "memory_derive",
             source_ids=canonical_sources,
         )
@@ -2599,7 +2617,7 @@ class _MemoryOnlyNoProvenanceBackend(InstrumentedMemoryBackend):
         **fields: Any,
     ) -> dict[str, Any]:
         memory = self.derive(memory_id, [source_id], value=value, **fields)
-        self._rewrite_last_event(
+        self._rewrite_thread_write_event(
             "memory_propagate",
             source_id=str(source_id),
         )
@@ -2607,7 +2625,7 @@ class _MemoryOnlyNoProvenanceBackend(InstrumentedMemoryBackend):
 
     def invalidate(self, memory_id: str, **fields: Any) -> None:
         memory_id = str(memory_id)
-        with self._state_lock:
+        with self._identity_lock(memory_id):
             memory = self._retrieve(memory_id, operation="invalidate_read")
             if memory is not None:
                 memory["status"] = "invalid"
@@ -2623,19 +2641,9 @@ class _MemoryOnlyNoProvenanceBackend(InstrumentedMemoryBackend):
                         key,
                     ),
                 )
-                self.memories[memory_id] = copy.deepcopy(memory)
+                with self._state_lock:
+                    self.memories[memory_id] = copy.deepcopy(memory)
         self._event("invalidate", memory_id=memory_id, **fields)
-
-    def delete(self, memory_id: str, **fields: Any) -> None:
-        memory_id = str(memory_id)
-        key = self._key("delete", memory_id)
-        self._call(
-            "memory_delete",
-            lambda: self.qdrant.delete(self.db_namespace, memory_id, key),
-        )
-        with self._state_lock:
-            self.memories.pop(memory_id, None)
-        self._event("memory_delete", memory_id=memory_id, **fields)
 
     def performance_inventory(self, limit: int = 1000) -> dict[str, Any]:
         if type(limit) is not int or limit <= 0:
