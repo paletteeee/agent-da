@@ -152,7 +152,9 @@ class FormalAblationSmokeReceiptTests(unittest.TestCase):
             smoke, "make_provenance_ablation_backend_factory", side_effect=lambda **_kwargs: Factory()
         ), patch.object(smoke, "run_matrix_cell", return_value=report), patch.object(
             smoke, "_preload_graph", return_value={}
-        ), patch.object(smoke, "_observe_ablation_timeout_cleanup", return_value={"attempt_count": 1, "failure_count": 0}):
+        ), patch.object(smoke, "_observe_ablation_timeout_cleanup", return_value={"attempt_count": 1, "failure_count": 0}), patch.object(
+            smoke, "_cleanup_and_observe_ablation_namespaces", side_effect=lambda backends, **_kwargs: {"observation_count": len(backends), "residue_count": 0}
+        ):
             with patch.dict(os.environ, {"TXNMEM_NEO4J_PASSWORD": "password"}):
                 observed = smoke._execute_formal_ablation_smoke_observations()
         by_variant = {row["variant"]: row for row in observed["variant_executions"]}

@@ -62,6 +62,8 @@ from txnmem_provenance_execution_collector import (
     _normalize_docker_network_guard_profile,
     _observe_formal_child_process,
     _observe_ablation_timeout_cleanup,
+    _NamespaceRecordingFactory,
+    _cleanup_and_observe_ablation_namespaces,
     _parse_toxiproxy_version,
     _publish_formal_input_tree,
     _require_formal_uid_processes,
@@ -292,12 +294,14 @@ def _execute_formal_ablation_smoke_observations() -> dict[str, Any]:
     executions = []
     service_identities = None
     for variant in ("TxnMem", "MemoryOnly-NoProvenance"):
-        factory = make_provenance_ablation_backend_factory(
+        raw_factory = make_provenance_ablation_backend_factory(
             variant=variant, qdrant_url=_QDRANT_URL, neo4j_uri=_NEO4J_URI,
             neo4j_auth=("neo4j", password), environment_attestation=environment,
             request_timeout_seconds=30.0,
         )
+        factory = _NamespaceRecordingFactory(raw_factory)
         traversal_executed = False
+        namespace_empty_after = False
         try:
             report = run_matrix_cell(
                 factory, graph, concurrency=1, repetitions=1,
@@ -316,7 +320,13 @@ def _execute_formal_ablation_smoke_observations() -> dict[str, Any]:
                 finally:
                     traversal_backend.close()
         finally:
-            factory.close()
+            cleanup = _cleanup_and_observe_ablation_namespaces(
+                factory.backends, factory=raw_factory, environment=environment,
+                neo4j_password=password,
+            )
+            namespace_empty_after = cleanup == {
+                "observation_count": len(factory.backends), "residue_count": 0,
+            }
         repetitions = report.get("repetitions")
         samples = report.get("samples")
         if not isinstance(repetitions, list) or len(repetitions) != 1 or not isinstance(samples, list):
@@ -351,7 +361,7 @@ def _execute_formal_ablation_smoke_observations() -> dict[str, Any]:
             "provenance_edge_count": graph.edge_count if variant == "TxnMem" else 0,
             "traversal_executed": traversal_executed,
             "namespace_empty_before": repetition.get("namespace_initially_empty") is True,
-            "namespace_empty_after": repetition.get("state_closed") is True,
+            "namespace_empty_after": namespace_empty_after,
             "timeout_cleanup_verified": timeout_cleanup == {"attempt_count": 1, "failure_count": 0},
         })
     return {"service_identities": service_identities, "variant_executions": executions}

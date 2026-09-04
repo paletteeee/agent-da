@@ -402,12 +402,14 @@ def _default_ablation_observation_batch(state: Mapping[str, Any]) -> Mapping[str
     # authenticated partial state that the controller can resume exactly.
     for cell, repetition, repetition_seed, variant in plan[completed:completed + 1]:
         graph = _cached_ablation_graph(int(cell["graph_node_count"]), int(config["graph_seed"]))
-        factory = make_provenance_ablation_backend_factory(
+        raw_factory = make_provenance_ablation_backend_factory(
             variant=str(variant), qdrant_url="http://127.0.0.1:19000",
             neo4j_uri="bolt://127.0.0.1:19001", neo4j_auth=("neo4j", password),
             environment_attestation=environment,
             request_timeout_seconds=float(config["request_timeout_seconds"]),
         )
+        factory = _NamespaceRecordingFactory(raw_factory)
+        namespace_cleanup = None
         try:
             report = run_matrix_cell(
                 factory, graph, concurrency=int(cell["concurrency"]), repetitions=1,
@@ -415,8 +417,12 @@ def _default_ablation_observation_batch(state: Mapping[str, Any]) -> Mapping[str
                 run_id=f"ablation-{state['controller_execution_id_sha256']}-{repetition_seed}-{variant}",
                 formal=True, environment_attestation=environment,
             )
+            namespace_cleanup = _cleanup_and_observe_ablation_namespaces(
+                factory.backends, factory=raw_factory, environment=environment,
+                neo4j_password=password,
+            )
         finally:
-            factory.close()
+            raw_factory.close()
         raw_repetition = report["repetitions"][0]
         health = raw_repetition["service_health"]
         observed_services = [
@@ -494,7 +500,9 @@ def _default_ablation_observation_batch(state: Mapping[str, Any]) -> Mapping[str
         thread.is_alive() and thread.name.startswith("ThreadPoolExecutor")
         for thread in threading.enumerate()
     )
-    namespace_residue = 0 if raw_repetition.get("state_closed") is True else 1
+    if namespace_cleanup is None:
+        raise CollectorError("formal ablation namespace cleanup was not observed")
+    namespace_residue = int(namespace_cleanup["residue_count"])
     return {
         "samples": samples, "repetitions": repetitions,
         "complete": completed + len(repetitions) == len(plan),
@@ -513,6 +521,73 @@ def _default_ablation_observation_batch(state: Mapping[str, Any]) -> Mapping[str
                     "timeout_cleanup_failure_count": timeout_cleanup["failure_count"],
                     "all_workers_quiescent": workers_quiescent},
     }
+
+
+class _NamespaceRecordingFactory:
+    def __init__(self, delegate: Callable[[str], Any]) -> None:
+        self.delegate = delegate
+        self.backends: list[Any] = []
+
+    def __call__(self, namespace: str) -> Any:
+        backend = self.delegate(namespace)
+        self.backends.append(backend)
+        return backend
+
+
+def _cleanup_and_observe_ablation_namespaces(
+    backends: Sequence[Any], *, factory: Any,
+    environment: Mapping[str, Any], neo4j_password: str,
+) -> dict[str, int]:
+    """Delete exact run namespaces, close their factory, then query both stores."""
+    namespaces: list[str] = []
+    for backend in backends:
+        namespace = getattr(backend, "db_namespace", None)
+        qdrant = getattr(backend, "qdrant", None)
+        if not isinstance(namespace, str) or not namespace or qdrant is None:
+            raise CollectorError("formal ablation namespace identity is unavailable")
+        scan = getattr(qdrant, "scan_namespace", None)
+        delete = getattr(qdrant, "delete", None)
+        if not callable(scan) or not callable(delete):
+            raise CollectorError("formal ablation Qdrant cleanup API is unavailable")
+        observed = scan(namespace, limit=None)
+        rows = observed.get("rows") if isinstance(observed, Mapping) and observed.get("read_ok") is True else None
+        if not isinstance(rows, list):
+            raise CollectorError("formal ablation Qdrant namespace observation failed")
+        neo4j = getattr(backend, "neo4j", None)
+        neo4j_delete = getattr(neo4j, "delete_memory", None)
+        for index, row in enumerate(rows):
+            memory_id = row.get("memory_id") if isinstance(row, Mapping) else None
+            if not isinstance(memory_id, str) or not memory_id:
+                raise CollectorError("formal ablation cleanup row identity is invalid")
+            key = hashlib.sha256(f"cleanup\0{namespace}\0{memory_id}\0{index}".encode()).hexdigest()
+            delete(namespace, memory_id, key)
+            if callable(neo4j_delete):
+                neo4j_delete(namespace, memory_id, key)
+        namespaces.append(namespace)
+    factory.close()
+    residue_count = 0
+    for namespace in namespaces:
+        observer_factory = make_provenance_ablation_backend_factory(
+            variant="TxnMem", qdrant_url="http://127.0.0.1:19000",
+            neo4j_uri="bolt://127.0.0.1:19001",
+            neo4j_auth=("neo4j", neo4j_password),
+            environment_attestation=environment, request_timeout_seconds=30.0,
+        )
+        observer = observer_factory(namespace)
+        try:
+            inventory = observer.provenance_inventory(limit=1)
+        finally:
+            observer.close()
+            observer_factory.close()
+        if not (
+            isinstance(inventory, Mapping)
+            and inventory.get("classification") == "complete"
+            and inventory.get("node_count") == 0
+            and inventory.get("edge_count") == 0
+            and inventory.get("status_counts") == {}
+        ):
+            residue_count += 1
+    return {"observation_count": len(namespaces), "residue_count": residue_count}
 
 
 @functools.lru_cache(maxsize=3)
@@ -534,22 +609,48 @@ def _observe_ablation_timeout_cleanup() -> dict[str, int]:
                      "toxicity": 1.0, "attributes": {"timeout": 1}},
         )
         installed = True
+        toxic = _toxiproxy_json_request(base, toxic_path, method="GET")
+        if not (
+            isinstance(toxic, Mapping) and toxic.get("name") == name
+            and toxic.get("type") == "timeout"
+            and toxic.get("stream") == "downstream"
+            and toxic.get("attributes") == {"timeout": 1}
+        ):
+            raise CollectorError("formal ablation timeout toxic identity is invalid")
         request = urllib.request.Request("http://127.0.0.1:19000/collections", method="GET")
+        started = time.monotonic()
         try:
             with urllib.request.urlopen(request, timeout=0.25) as response:
                 response.read(1)
-        except (TimeoutError, socket.timeout, urllib.error.URLError):
-            pass
+        except (TimeoutError, socket.timeout):
+            elapsed = time.monotonic() - started
+            if elapsed < 0.05 or elapsed > 1.0:
+                raise CollectorError("formal ablation injected timeout duration is invalid")
+        except urllib.error.URLError as exc:
+            elapsed = time.monotonic() - started
+            if not isinstance(exc.reason, (TimeoutError, socket.timeout)) or elapsed < 0.05 or elapsed > 1.0:
+                raise CollectorError("formal ablation probe failed without injected timeout") from exc
         else:
-            failure_count += 1
+            raise CollectorError("formal ablation timeout toxic did not isolate the request")
     finally:
         try:
             _toxiproxy_json_request(
                 base, toxic_path, method="DELETE", allow_not_found=not installed
             )
+            if _toxiproxy_json_request(
+                base, toxic_path, method="GET", allow_not_found=True
+            ) is not None:
+                raise CollectorError("formal ablation timeout toxic survived cleanup")
             observe_formal_toxiproxy_routes(
                 base, qdrant_proxy="txnmem-qdrant", neo4j_proxy="txnmem-neo4j"
             )
+            recovery = urllib.request.Request(
+                "http://127.0.0.1:19000/collections", method="GET"
+            )
+            with urllib.request.urlopen(recovery, timeout=1.0) as response:
+                if int(response.status) < 200 or int(response.status) >= 300:
+                    raise CollectorError("formal ablation service did not recover")
+                response.read(1)
         except BaseException:
             failure_count += 1
     if failure_count:

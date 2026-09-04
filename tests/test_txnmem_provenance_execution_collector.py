@@ -515,6 +515,8 @@ class FormalAblationLifecycleTests(unittest.TestCase):
             collector_module, "run_matrix_cell", side_effect=run_cell
         ), patch.object(collector_module, "_preload_graph", return_value={}), patch.object(
             collector_module, "_observe_ablation_timeout_cleanup", return_value={"attempt_count": 1, "failure_count": 0}
+        ), patch.object(
+            collector_module, "_cleanup_and_observe_ablation_namespaces", return_value={"observation_count": 1, "residue_count": 0}
         ), patch.dict(os.environ, {"TXNMEM_NEO4J_PASSWORD": "password"}):
             runtime = collector_module._FORMAL_ABLATION_RUNTIME_ROOT
             (runtime / "candidates").mkdir(parents=True, mode=0o700); runtime.chmod(0o700)
@@ -530,6 +532,55 @@ class FormalAblationLifecycleTests(unittest.TestCase):
             self.assertIn(("read", "read:7"), identities)
             self.assertIn(("write", "write:7"), identities)
             self.assertNotIn(("write", "write:8"), identities)
+
+    def test_timeout_observer_rejects_connection_refused(self):
+        toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 1}}
+        class Recovery:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self, _size): return b"{}"
+        with patch.object(
+            collector_module, "_toxiproxy_json_request",
+            side_effect=[{}, toxic, None, None],
+        ), patch.object(collector_module, "observe_formal_toxiproxy_routes", return_value=[]), patch.object(
+            collector_module.urllib.request, "urlopen",
+            side_effect=[collector_module.urllib.error.URLError(ConnectionRefusedError()), Recovery()],
+        ):
+            with self.assertRaises(collector_module.CollectorError):
+                collector_module._observe_ablation_timeout_cleanup()
+
+    def test_timeout_observer_rejects_named_toxic_residue(self):
+        toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 1}}
+        with patch.object(
+            collector_module, "_toxiproxy_json_request",
+            side_effect=[{}, toxic, None, toxic],
+        ), patch.object(collector_module.urllib.request, "urlopen", side_effect=socket.timeout()), patch.object(
+            collector_module.time, "monotonic", side_effect=[0.0, 0.1]
+        ):
+            with self.assertRaises(collector_module.CollectorError):
+                collector_module._observe_ablation_timeout_cleanup()
+
+    def test_post_close_namespace_observer_reports_qdrant_or_neo4j_residue(self):
+        class Qdrant:
+            def scan_namespace(self, _namespace, limit=None): return {"read_ok": True, "rows": [{"memory_id": "m1"}]}
+            def delete(self, *_args): pass
+        class Neo4j:
+            def delete_memory(self, *_args): pass
+        backend = SimpleNamespace(db_namespace="scope-1", qdrant=Qdrant(), neo4j=Neo4j())
+        class Factory:
+            def close(self): pass
+        class Observer:
+            def provenance_inventory(self, limit): return {"classification": "complete", "node_count": 1, "edge_count": 0, "status_counts": {"active": 1}}
+            def close(self): pass
+        class ObserverFactory:
+            def __call__(self, _namespace): return Observer()
+            def close(self): pass
+        with patch.object(collector_module, "make_provenance_ablation_backend_factory", return_value=ObserverFactory()):
+            observed = collector_module._cleanup_and_observe_ablation_namespaces(
+                [backend], factory=Factory(), environment={}, neo4j_password="password"
+            )
+        self.assertEqual(observed, {"observation_count": 1, "residue_count": 1})
 
 
 
