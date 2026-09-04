@@ -103,6 +103,7 @@ _PROGRESS_BLOCKED_DOCUMENT = {
     "status": "blocked",
 }
 _FORMAL_AUXILIARY_PATHS = (
+    "configs/provenance_ablation_v10.json",
     "configs/provenance_performance_matrix.json",
     "configs/provenance_runtime_lock.json",
     "infra/formal_controller/Dockerfile",
@@ -112,6 +113,7 @@ _FORMAL_AUXILIARY_PATHS = (
     "scripts/read_formal_provenance_progress.sh",
     "scripts/run_cross_host_provenance_performance.sh",
     "scripts/run_formal_provenance_smoke.sh",
+    "scripts/run_formal_provenance_ablation.sh",
     "scripts/run_provenance_performance.sh",
 )
 _REQUIRED_APPROVED_PATHS = frozenset(
@@ -812,6 +814,9 @@ def _dispatch(
         "material": "txnmem_experiment",
         "attest": "txnmem_topology_attestation",
         "promote": "txnmem_experiment",
+        "ablation-smoke": "txnmem_formal_smoke",
+        "ablation-validate": "txnmem_provenance_execution_collector",
+        "ablation-promote": "txnmem_provenance_execution_collector",
     }.get(action)
     if module_name is None:
         raise FormalControllerError("formal controller action is unsupported")
@@ -820,6 +825,8 @@ def _dispatch(
         forwarded.insert(0, "provenance-candidate-material")
     elif action == "promote":
         forwarded.insert(0, "provenance-promote")
+    elif action.startswith("ablation-"):
+        forwarded.insert(0, action)
     source_directory = export / "src"
     if module_name in sys.modules:
         raise FormalControllerError("formal controller target was pre-imported")
@@ -831,7 +838,10 @@ def _dispatch(
         entry = getattr(module, entry_name, None)
         if not callable(entry):
             raise FormalControllerError("formal controller target has no entry point")
-        if action in {"measure", "smoke", "progress"}:
+        if action in {
+            "measure", "smoke", "progress", "ablation-smoke",
+            "ablation-validate", "ablation-promote",
+        }:
             controller_context = {
                 "schema": _CONTEXT_SCHEMA,
                 "source_commit": approved.commit,

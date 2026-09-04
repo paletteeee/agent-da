@@ -34,6 +34,152 @@ from txnmem_topology_attestation import (
 )
 
 
+class FormalAblationLifecycleTests(unittest.TestCase):
+    def _evidence(self):
+        config = collector_module.validate_provenance_ablation_config(
+            collector_module.FORMAL_ABLATION_CONFIG, formal=True
+        )
+        repetitions = []
+        samples = []
+        for cell in config["cells"]:
+            cell_id = f"n{cell['graph_node_count']}-c{cell['concurrency']}"
+            for repetition, repetition_seed in enumerate(config["repetition_seeds"]):
+                for variant in config["variants"]:
+                    operations = ["read", "write", "derive", "propagate"]
+                    if variant == "TxnMem":
+                        operations.append("traverse")
+                    rows = []
+                    for operation in operations:
+                        for index in range(config["operations_per_type"]):
+                            rows.append({
+                                "cell_id": cell_id,
+                                "variant": variant,
+                                "repetition": repetition,
+                                "repetition_seed": repetition_seed,
+                                "operation": operation,
+                                "operation_id": f"{operation}:{index}",
+                                "latency_ns": 100,
+                                "success": True,
+                                "timeout": False,
+                                "error_category": None,
+                            })
+                    samples.extend(rows)
+                    repetitions.append({
+                        "cell_id": cell_id,
+                        "variant": variant,
+                        "repetition": repetition,
+                        "repetition_seed": repetition_seed,
+                        "graph_node_count": cell["graph_node_count"],
+                        "concurrency": cell["concurrency"],
+                        "elapsed_ns": 10_000,
+                        "success_count": len(rows),
+                        "failure_count": 0,
+                        "timeout_count": 0,
+                        "error_count": 0,
+                        "eligible_for_formal": True,
+                    })
+        return {"samples": samples, "repetitions": repetitions}
+
+    def _receipt(self, evidence):
+        config_hash = hashlib.sha256(
+            collector_module.canonical_json_bytes(
+                collector_module.FORMAL_ABLATION_CONFIG
+            )
+        ).hexdigest()
+        return {
+            "schema": "txnmem-provenance-ablation-candidate-receipt-v1",
+            "source_commit": "a" * 40,
+            "config_sha256": config_hash,
+            "config_file_sha256": "b" * 64,
+            "run_identity": "provenance-ablation-v10",
+            "base_cell_count": 3,
+            "variant_count": 2,
+            "variants": ["TxnMem", "MemoryOnly-NoProvenance"],
+            "repetition_count": 180,
+            "operation_sample_count": 6480,
+            "namespace_residue_count": 0,
+            "timeout_cleanup_failure_count": 0,
+            "environment_attestation_sha256": "c" * 64,
+            "topology_attestation_sha256": "d" * 64,
+            "samples_sha256": collector_module.canonical_ablation_jsonl_sha256(
+                evidence["samples"]
+            ),
+            "repetitions_sha256": collector_module.canonical_ablation_jsonl_sha256(
+                evidence["repetitions"]
+            ),
+            "status": "complete",
+        }
+
+    def test_candidate_validator_accepts_exact_closed_formal_contract(self):
+        evidence = self._evidence()
+        receipt = self._receipt(evidence)
+        validated = collector_module.validate_formal_ablation_candidate(
+            receipt,
+            evidence,
+            expected_source_commit="a" * 40,
+            expected_config_file_sha256="b" * 64,
+        )
+        self.assertEqual(validated["operation_sample_count"], 6480)
+        self.assertTrue(validated["aggregate"]["formal_contract_complete"])
+
+    def test_candidate_validator_rejects_all_fail_closed_mismatches(self):
+        evidence = self._evidence()
+        receipt = self._receipt(evidence)
+        cases = {
+            "source_commit": {**receipt, "source_commit": "e" * 40},
+            "config_sha256": {**receipt, "config_sha256": "e" * 64},
+            "missing_variant": {**receipt, "variants": ["TxnMem"]},
+            "cell_count": {**receipt, "base_cell_count": 15},
+            "namespace_residue": {**receipt, "namespace_residue_count": 1},
+            "timeout_cleanup": {**receipt, "timeout_cleanup_failure_count": 1},
+            "sample_mismatch": {**receipt, "operation_sample_count": 6479},
+            "v10_identity": {**receipt, "run_identity": "provenance-performance-v10"},
+        }
+        for label, candidate in cases.items():
+            with self.subTest(label=label), self.assertRaises(collector_module.CollectorError):
+                collector_module.validate_formal_ablation_candidate(
+                    candidate,
+                    evidence,
+                    expected_source_commit="a" * 40,
+                    expected_config_file_sha256="b" * 64,
+                )
+
+    def test_formal_output_preflight_and_promotion_are_one_time(self):
+        with TemporaryDirectory() as tmp:
+            output = Path(tmp) / "formal"
+            collector_module.preflight_formal_ablation_output(output)
+            output.mkdir()
+            with self.assertRaises(collector_module.CollectorError):
+                collector_module.preflight_formal_ablation_output(output)
+
+    def test_promotion_validates_then_publishes_exact_candidate_once(self):
+        evidence = self._evidence()
+        receipt = self._receipt(evidence)
+        with TemporaryDirectory() as tmp:
+            output = Path(tmp) / "formal"
+            promoted = collector_module.promote_formal_ablation_candidate(
+                receipt,
+                evidence,
+                expected_source_commit="a" * 40,
+                expected_config_file_sha256="b" * 64,
+                out_dir=output,
+            )
+            self.assertEqual(promoted, output.resolve())
+            self.assertTrue((promoted / "manifest.json").is_file())
+            self.assertTrue((promoted / "samples.jsonl").is_file())
+            self.assertTrue((promoted / "repetitions.jsonl").is_file())
+            self.assertTrue((promoted / "aggregate.json").is_file())
+            with self.assertRaises(collector_module.CollectorError):
+                collector_module.promote_formal_ablation_candidate(
+                    receipt,
+                    evidence,
+                    expected_source_commit="a" * 40,
+                    expected_config_file_sha256="b" * 64,
+                    out_dir=output,
+                )
+
+
+
 PROXY_ROUTES = [
     {
         "role": "qdrant",

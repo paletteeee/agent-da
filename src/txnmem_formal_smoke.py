@@ -101,6 +101,7 @@ _NEO4J_URI = "bolt://127.0.0.1:19001"
 _TOXIPROXY_URL = "http://127.0.0.1:8474"
 _TOXIPROXY_VERSION = "2.5.0"
 _REPORT_SCHEMA = "txnmem-formal-provenance-smoke-v2"
+_ABLATION_REPORT_SCHEMA = "txnmem-formal-provenance-ablation-smoke-v1"
 _CHILD_RECEIPT_SCHEMA = "txnmem-provenance-smoke-child-receipt-v1"
 _CHILD_RECEIPT_V2_SCHEMA = "txnmem-provenance-smoke-child-receipt-v2"
 _SMOKE_V2_SCENARIOS = (
@@ -170,6 +171,31 @@ _TRUE_REPORT_FIELDS = frozenset(
 
 class FormalSmokeError(RuntimeError):
     """The production same-path smoke could not prove its closed gate."""
+
+
+def validate_formal_ablation_smoke_report(value: Any) -> dict[str, Any]:
+    """Validate a protected-host ablation smoke receipt that is never evidence."""
+    fields = {
+        "schema", "run_identity", "variants_exercised", "base_cell_count",
+        "repetitions_per_variant", "namespace_residue_count",
+        "timeout_cleanup_failure_count", "candidate_created", "protected_host",
+        "status",
+    }
+    if (
+        not isinstance(value, Mapping) or set(value) != fields
+        or value.get("schema") != _ABLATION_REPORT_SCHEMA
+        or value.get("run_identity") != "provenance-ablation-v10-smoke"
+        or value.get("variants_exercised") != ["TxnMem", "MemoryOnly-NoProvenance"]
+        or type(value.get("base_cell_count")) is not int or value["base_cell_count"] != 1
+        or type(value.get("repetitions_per_variant")) is not int or value["repetitions_per_variant"] != 1
+        or type(value.get("namespace_residue_count")) is not int or value["namespace_residue_count"] != 0
+        or type(value.get("timeout_cleanup_failure_count")) is not int or value["timeout_cleanup_failure_count"] != 0
+        or value.get("candidate_created") is not False
+        or value.get("protected_host") is not True
+        or value.get("status") != "passed"
+    ):
+        raise FormalSmokeError("formal ablation smoke report is invalid")
+    return dict(value)
 
 
 @dataclass(frozen=True)
@@ -1986,13 +2012,27 @@ def main(
     *,
     _controller_context: Mapping[str, Any] | None = None,
 ) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "ablation-smoke":
+        ablation_parser = argparse.ArgumentParser(allow_abbrev=False)
+        ablation_parser.add_argument("action", choices=("ablation-smoke",))
+        ablation_parser.add_argument("--report", type=Path, required=True)
+        try:
+            ablation_args = ablation_parser.parse_args(arguments)
+            report, _raw = load_strict_json_document(ablation_args.report)
+            validate_formal_ablation_smoke_report(report)
+        except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
+            print(f"formal provenance ablation smoke blocked: {type(exc).__name__}")
+            return 2
+        print("formal provenance ablation smoke gate passed")
+        return 0
     parser = argparse.ArgumentParser(
         description="run the protected provenance ingress smoke gate",
         allow_abbrev=False,
     )
     parser.add_argument("--project-root", type=Path, default=Path("."))
     parser.add_argument("--out", type=Path, action="append", required=True)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     try:
         if len(args.out) != 1:
             raise FormalSmokeError("formal smoke output path is ambiguous")

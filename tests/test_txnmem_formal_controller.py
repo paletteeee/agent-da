@@ -14,6 +14,45 @@ import txnmem_formal_controller as controller
 import txnmem_provenance_progress as progress_protocol
 
 
+class FormalAblationDispatchTests(unittest.TestCase):
+    def test_ablation_actions_are_distinct_and_forwarded_without_v10_aliases(self):
+        class Target:
+            calls = []
+
+            @staticmethod
+            def main(arguments, **kwargs):
+                Target.calls.append((list(arguments), kwargs))
+                return 0
+
+        approved = controller._ApprovedSource(
+            commit="a" * 40, files=(), manifest={}, manifest_sha256="b" * 64
+        )
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            controller.importlib, "import_module", return_value=Target
+        ), patch.dict(controller.sys.modules, {
+            "txnmem_provenance_execution_collector": None,
+            "txnmem_formal_smoke": None,
+        }, clear=False):
+            controller.sys.modules.pop("txnmem_provenance_execution_collector", None)
+            controller.sys.modules.pop("txnmem_formal_smoke", None)
+            export = Path(tmp)
+            (export / "src").mkdir()
+            for action in ("ablation-smoke", "ablation-validate", "ablation-promote"):
+                self.assertEqual(controller._dispatch(action, ["--flag"], export, approved), 0)
+        self.assertEqual(
+            [call[0][0] for call in Target.calls],
+            ["ablation-smoke", "ablation-validate", "ablation-promote"],
+        )
+
+    def test_ablation_source_closure_is_protected(self):
+        self.assertIn("configs/provenance_ablation_v10.json", controller._REQUIRED_APPROVED_PATHS)
+        self.assertIn("scripts/run_formal_provenance_ablation.sh", controller._REQUIRED_APPROVED_PATHS)
+        installer = (Path(__file__).resolve().parents[1] / "scripts" / "install_formal_provenance_runtime.sh").read_text()
+        self.assertIn('"configs/provenance_ablation_v10.json"', installer)
+        self.assertIn('"scripts/run_formal_provenance_ablation.sh"', installer)
+
+
+
 class FormalControllerGitTests(unittest.TestCase):
     @staticmethod
     def _repository(root: Path, relative: str = "repository") -> Path:

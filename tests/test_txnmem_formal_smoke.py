@@ -29,6 +29,52 @@ from txnmem_formal_io import FormalStore, canonical_json_bytes
 from txnmem_toxiproxy_metrics import parse_toxiproxy_byte_counters
 
 
+class FormalAblationSmokeReceiptTests(unittest.TestCase):
+    def test_ablation_smoke_requires_both_variants_cleanup_and_no_candidate(self):
+        receipt = {
+            "schema": "txnmem-formal-provenance-ablation-smoke-v1",
+            "run_identity": "provenance-ablation-v10-smoke",
+            "variants_exercised": ["TxnMem", "MemoryOnly-NoProvenance"],
+            "base_cell_count": 1,
+            "repetitions_per_variant": 1,
+            "namespace_residue_count": 0,
+            "timeout_cleanup_failure_count": 0,
+            "candidate_created": False,
+            "protected_host": True,
+            "status": "passed",
+        }
+        self.assertEqual(smoke.validate_formal_ablation_smoke_report(receipt), receipt)
+        for field, bad in (
+            ("variants_exercised", ["TxnMem"]),
+            ("namespace_residue_count", 1),
+            ("timeout_cleanup_failure_count", 1),
+            ("candidate_created", True),
+            ("protected_host", False),
+        ):
+            mutated = dict(receipt)
+            mutated[field] = bad
+            with self.subTest(field=field), self.assertRaises(smoke.FormalSmokeError):
+                smoke.validate_formal_ablation_smoke_report(mutated)
+
+    def test_ablation_smoke_cli_validates_existing_protected_receipt(self):
+        receipt = {
+            "schema": "txnmem-formal-provenance-ablation-smoke-v1",
+            "run_identity": "provenance-ablation-v10-smoke",
+            "variants_exercised": ["TxnMem", "MemoryOnly-NoProvenance"],
+            "base_cell_count": 1,
+            "repetitions_per_variant": 1,
+            "namespace_residue_count": 0,
+            "timeout_cleanup_failure_count": 0,
+            "candidate_created": False,
+            "protected_host": True,
+            "status": "passed",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "smoke.json"
+            path.write_bytes(canonical_json_bytes(receipt) + b"\n")
+            self.assertEqual(smoke.main(["ablation-smoke", "--report", str(path.resolve())]), 0)
+
+
 ROUTES = [
     {
         "role": "qdrant",

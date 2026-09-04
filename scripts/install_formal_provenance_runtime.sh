@@ -191,6 +191,7 @@ staging = Path(os.environ["STAGING"]).resolve(strict=True)
 script_path = Path(os.environ["SCRIPT_PATH"]).resolve(strict=True)
 git = "/usr/bin/git"
 auxiliary = {
+    "configs/provenance_ablation_v10.json",
     "configs/provenance_performance_matrix.json",
     "configs/provenance_runtime_lock.json",
     "infra/formal_controller/Dockerfile",
@@ -200,6 +201,7 @@ auxiliary = {
     "scripts/read_formal_provenance_progress.sh",
     "scripts/run_cross_host_provenance_performance.sh",
     "scripts/run_formal_provenance_smoke.sh",
+    "scripts/run_formal_provenance_ablation.sh",
     "scripts/run_provenance_performance.sh",
 }
 required = auxiliary | {
