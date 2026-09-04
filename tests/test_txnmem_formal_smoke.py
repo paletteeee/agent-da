@@ -30,49 +30,68 @@ from txnmem_toxiproxy_metrics import parse_toxiproxy_byte_counters
 
 
 class FormalAblationSmokeReceiptTests(unittest.TestCase):
-    def test_ablation_smoke_requires_both_variants_cleanup_and_no_candidate(self):
-        receipt = {
-            "schema": "txnmem-formal-provenance-ablation-smoke-v1",
+    def _receipt(self):
+        execution_id = hashlib.sha256(
+            (("d" * 64) + "\0" + ("c" * 64) + "\0" + ("a" * 40)).encode()
+        ).hexdigest()
+        payload = {
+            "schema": "txnmem-formal-provenance-ablation-smoke-v2",
+            "trust_boundary": "root_owned_local_control_plane",
             "run_identity": "provenance-ablation-v10-smoke",
-            "variants_exercised": ["TxnMem", "MemoryOnly-NoProvenance"],
-            "base_cell_count": 1,
-            "repetitions_per_variant": 1,
-            "namespace_residue_count": 0,
-            "timeout_cleanup_failure_count": 0,
+            "source_commit": "a" * 40,
+            "config_sha256": collector._formal_ablation_config_sha256(),
+            "config_file_sha256": "b" * 64,
+            "approval_manifest_sha256": "c" * 64,
+            "authorization_nonce_sha256": "d" * 64,
+            "controller_execution_id_sha256": execution_id,
+            "service_identities": [
+                {"role": "qdrant", "version": "1.15.4", "image_manifest_digest_sha256": collector.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["qdrant"]},
+                {"role": "neo4j", "version": "5.26.0", "image_manifest_digest_sha256": "9317a2941a9641169aa2ea8470cdda184ff7a9ee1914b5429126d0db4828edd2"},
+            ],
+            "variant_executions": [
+                {"variant": "TxnMem", "memory_crud_verified": True, "provenance_edge_count": 1, "traversal_executed": True, "namespace_empty_before": True, "namespace_empty_after": True, "timeout_cleanup_verified": True},
+                {"variant": "MemoryOnly-NoProvenance", "memory_crud_verified": True, "provenance_edge_count": 0, "traversal_executed": False, "namespace_empty_before": True, "namespace_empty_after": True, "timeout_cleanup_verified": True},
+            ],
+            "actual_execution": True,
             "candidate_created": False,
-            "protected_host": True,
             "status": "passed",
         }
-        self.assertEqual(smoke.validate_formal_ablation_smoke_report(receipt), receipt)
+        payload["document_sha256"] = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+        return payload
+
+    def test_ablation_smoke_requires_both_variants_cleanup_and_no_candidate(self):
+        receipt = self._receipt()
+        context = {"source_commit": "a" * 40, "approval_manifest_sha256": "c" * 64, "config_file_sha256": "b" * 64}
+        self.assertEqual(smoke.validate_formal_ablation_smoke_report(receipt, controller_context=context), receipt)
         for field, bad in (
-            ("variants_exercised", ["TxnMem"]),
-            ("namespace_residue_count", 1),
-            ("timeout_cleanup_failure_count", 1),
+            ("actual_execution", False),
             ("candidate_created", True),
-            ("protected_host", False),
+            ("trust_boundary", "caller_report"),
         ):
             mutated = dict(receipt)
             mutated[field] = bad
             with self.subTest(field=field), self.assertRaises(smoke.FormalSmokeError):
-                smoke.validate_formal_ablation_smoke_report(mutated)
+                smoke.validate_formal_ablation_smoke_report(mutated, controller_context=context)
+
+        forged = self._receipt()
+        forged["variant_executions"][0]["memory_crud_verified"] = False
+        with self.assertRaises(smoke.FormalSmokeError):
+            smoke.validate_formal_ablation_smoke_report(forged, controller_context=context)
 
     def test_ablation_smoke_cli_validates_existing_protected_receipt(self):
-        receipt = {
-            "schema": "txnmem-formal-provenance-ablation-smoke-v1",
-            "run_identity": "provenance-ablation-v10-smoke",
-            "variants_exercised": ["TxnMem", "MemoryOnly-NoProvenance"],
-            "base_cell_count": 1,
-            "repetitions_per_variant": 1,
-            "namespace_residue_count": 0,
-            "timeout_cleanup_failure_count": 0,
-            "candidate_created": False,
-            "protected_host": True,
-            "status": "passed",
-        }
+        receipt = self._receipt()
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "smoke.json"
+            root = Path(tmp).resolve()
+            path = root / "smoke.json"
             path.write_bytes(canonical_json_bytes(receipt) + b"\n")
-            self.assertEqual(smoke.main(["ablation-smoke", "--report", str(path.resolve())]), 0)
+            path.chmod(0o400)
+            context = {"source_commit": "a" * 40, "approval_manifest_sha256": "c" * 64, "config_file_sha256": "b" * 64}
+            with patch.object(smoke, "_validate_formal_controller_context", return_value=context):
+                self.assertEqual(smoke.main(["ablation-smoke", "--report", str(path)], _controller_context=context), 0)
+
+            path.chmod(0o600)
+            with patch.object(smoke, "_validate_formal_controller_context", return_value=context):
+                self.assertEqual(smoke.main(["ablation-smoke", "--report", str(path)], _controller_context=context), 2)
 
 
 ROUTES = [

@@ -35,6 +35,14 @@ from txnmem_topology_attestation import (
 
 
 class FormalAblationLifecycleTests(unittest.TestCase):
+    @staticmethod
+    def _document(payload):
+        result = dict(payload)
+        result["document_sha256"] = hashlib.sha256(
+            collector_module.canonical_json_bytes(payload)
+        ).hexdigest()
+        return result
+
     def _evidence(self):
         config = collector_module.validate_provenance_ablation_config(
             collector_module.FORMAL_ABLATION_CONFIG, formal=True
@@ -80,7 +88,89 @@ class FormalAblationLifecycleTests(unittest.TestCase):
                     })
         return {"samples": samples, "repetitions": repetitions}
 
-    def _receipt(self, evidence):
+    def _attestations(self, evidence, *, candidate_root, out_dir):
+        samples_hash = collector_module.canonical_ablation_jsonl_sha256(evidence["samples"])
+        repetitions_hash = collector_module.canonical_ablation_jsonl_sha256(evidence["repetitions"])
+        aggregate = collector_module.aggregate_ablation(
+            evidence, bootstrap_repetitions=10000, seed=1701,
+            require_formal_contract=True,
+        )
+        aggregate_hash = hashlib.sha256(
+            collector_module.canonical_json_bytes(aggregate) + b"\n"
+        ).hexdigest()
+        nonce_hash = "9" * 64
+        candidate_id = hashlib.sha256(
+            f"{samples_hash}\0{repetitions_hash}\0{nonce_hash}".encode()
+        ).hexdigest()
+        candidate_root_hash = hashlib.sha256(
+            str(candidate_root.resolve()).encode()
+        ).hexdigest()
+        output_hash = hashlib.sha256(str(out_dir.resolve()).encode()).hexdigest()
+        environment = self._document({
+            "schema": "txnmem-provenance-ablation-environment-v1",
+            "candidate_id": candidate_id,
+            "authorization_nonce_sha256": nonce_hash,
+            "isolation_verified": True,
+            "co_tenant_load_detected": False,
+            "source": "protected_host_probe",
+            "cpu_logical_count": 8,
+            "memory_total_bytes": 16_000_000_000,
+            "disk_medium": "ssd",
+            "toxiproxy_version": "2.5.0",
+        })
+        topology = self._document({
+            "schema": "txnmem-provenance-ablation-topology-v1",
+            "candidate_id": candidate_id,
+            "authorization_nonce_sha256": nonce_hash,
+            "transport": "local_loopback",
+            "environment_document_sha256": environment["document_sha256"],
+            "services": [
+                {"role": "qdrant", "version": "1.15.4", "image_manifest_digest_sha256": collector_module.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["qdrant"]},
+                {"role": "neo4j", "version": "5.26.0", "image_manifest_digest_sha256": collector_module.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["neo4j"]},
+            ],
+        })
+        cleanup = self._document({
+            "schema": "txnmem-provenance-ablation-cleanup-v1",
+            "candidate_id": candidate_id,
+            "authorization_nonce_sha256": nonce_hash,
+            "namespace_observation_count": 180,
+            "namespace_residue_count": 0,
+            "timeout_cleanup_attempt_count": 0,
+            "timeout_cleanup_failure_count": 0,
+            "all_workers_quiescent": True,
+        })
+        seal = self._document({
+            "schema": "txnmem-provenance-ablation-candidate-seal-v1",
+            "candidate_id": candidate_id,
+            "authorization_nonce_sha256": nonce_hash,
+            "candidate_root_sha256": candidate_root_hash,
+            "formal_output_sha256": output_hash,
+            "samples_sha256": samples_hash,
+            "repetitions_sha256": repetitions_hash,
+            "aggregate_sha256": aggregate_hash,
+            "partial_resume_status": "sealed_complete",
+            "completed_repetition_count": 180,
+            "completed_operation_sample_count": 6480,
+        })
+        control = self._document({
+            "schema": "txnmem-provenance-ablation-control-plane-v1",
+            "trust_boundary": "root_owned_local_control_plane",
+            "candidate_id": candidate_id,
+            "authorization_nonce_sha256": nonce_hash,
+            "candidate_root_sha256": candidate_root_hash,
+            "formal_output_sha256": output_hash,
+            "source_commit": "a" * 40,
+            "config_sha256": collector_module._formal_ablation_config_sha256(),
+            "config_file_sha256": "b" * 64,
+            "environment_document_sha256": environment["document_sha256"],
+            "topology_document_sha256": topology["document_sha256"],
+            "cleanup_document_sha256": cleanup["document_sha256"],
+            "candidate_seal_sha256": seal["document_sha256"],
+        })
+        return {"control_plane": control, "environment": environment,
+                "topology": topology, "cleanup": cleanup, "candidate_seal": seal}
+
+    def _receipt(self, evidence, attestations):
         config_hash = hashlib.sha256(
             collector_module.canonical_json_bytes(
                 collector_module.FORMAL_ABLATION_CONFIG
@@ -99,8 +189,8 @@ class FormalAblationLifecycleTests(unittest.TestCase):
             "operation_sample_count": 6480,
             "namespace_residue_count": 0,
             "timeout_cleanup_failure_count": 0,
-            "environment_attestation_sha256": "c" * 64,
-            "topology_attestation_sha256": "d" * 64,
+            "environment_attestation_sha256": attestations["environment"]["document_sha256"],
+            "topology_attestation_sha256": attestations["topology"]["document_sha256"],
             "samples_sha256": collector_module.canonical_ablation_jsonl_sha256(
                 evidence["samples"]
             ),
@@ -108,23 +198,37 @@ class FormalAblationLifecycleTests(unittest.TestCase):
                 evidence["repetitions"]
             ),
             "status": "complete",
+            "candidate_id": attestations["control_plane"]["candidate_id"],
+            "authorization_nonce_sha256": attestations["control_plane"]["authorization_nonce_sha256"],
+            "control_plane_attestation_sha256": attestations["control_plane"]["document_sha256"],
         }
 
     def test_candidate_validator_accepts_exact_closed_formal_contract(self):
         evidence = self._evidence()
-        receipt = self._receipt(evidence)
-        validated = collector_module.validate_formal_ablation_candidate(
-            receipt,
-            evidence,
-            expected_source_commit="a" * 40,
-            expected_config_file_sha256="b" * 64,
-        )
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            candidate_root, output = root / "candidate", root / "formal"
+            candidate_root.mkdir(mode=0o700)
+            attestations = self._attestations(evidence, candidate_root=candidate_root, out_dir=output)
+            receipt = self._receipt(evidence, attestations)
+            validated = collector_module.validate_formal_ablation_candidate(
+                receipt, evidence, attestations=attestations,
+                candidate_root=candidate_root, formal_out_dir=output,
+                expected_source_commit="a" * 40,
+                expected_config_file_sha256="b" * 64,
+            )
         self.assertEqual(validated["operation_sample_count"], 6480)
         self.assertTrue(validated["aggregate"]["formal_contract_complete"])
 
     def test_candidate_validator_rejects_all_fail_closed_mismatches(self):
         evidence = self._evidence()
-        receipt = self._receipt(evidence)
+        root_context = TemporaryDirectory()
+        self.addCleanup(root_context.cleanup)
+        root = Path(root_context.name).resolve()
+        candidate_root, output = root / "candidate", root / "formal"
+        candidate_root.mkdir(mode=0o700)
+        attestations = self._attestations(evidence, candidate_root=candidate_root, out_dir=output)
+        receipt = self._receipt(evidence, attestations)
         cases = {
             "source_commit": {**receipt, "source_commit": "e" * 40},
             "config_sha256": {**receipt, "config_sha256": "e" * 64},
@@ -138,8 +242,8 @@ class FormalAblationLifecycleTests(unittest.TestCase):
         for label, candidate in cases.items():
             with self.subTest(label=label), self.assertRaises(collector_module.CollectorError):
                 collector_module.validate_formal_ablation_candidate(
-                    candidate,
-                    evidence,
+                    candidate, evidence, attestations=attestations,
+                    candidate_root=candidate_root, formal_out_dir=output,
                     expected_source_commit="a" * 40,
                     expected_config_file_sha256="b" * 64,
                 )
@@ -154,12 +258,16 @@ class FormalAblationLifecycleTests(unittest.TestCase):
 
     def test_promotion_validates_then_publishes_exact_candidate_once(self):
         evidence = self._evidence()
-        receipt = self._receipt(evidence)
         with TemporaryDirectory() as tmp:
-            output = Path(tmp) / "formal"
+            root = Path(tmp).resolve()
+            candidate_root, registry, output = root / "candidate", root / "registry", root / "formal"
+            candidate_root.mkdir(mode=0o700)
+            registry.mkdir(mode=0o700)
+            attestations = self._attestations(evidence, candidate_root=candidate_root, out_dir=output)
+            receipt = self._receipt(evidence, attestations)
             promoted = collector_module.promote_formal_ablation_candidate(
-                receipt,
-                evidence,
+                receipt, evidence, attestations=attestations,
+                candidate_root=candidate_root, promotion_registry=registry,
                 expected_source_commit="a" * 40,
                 expected_config_file_sha256="b" * 64,
                 out_dir=output,
@@ -169,14 +277,58 @@ class FormalAblationLifecycleTests(unittest.TestCase):
             self.assertTrue((promoted / "samples.jsonl").is_file())
             self.assertTrue((promoted / "repetitions.jsonl").is_file())
             self.assertTrue((promoted / "aggregate.json").is_file())
+            manifest = json.loads((promoted / "manifest.json").read_text())
+            self.assertEqual(manifest["aggregate_sha256"], hashlib.sha256((promoted / "aggregate.json").read_bytes()).hexdigest())
+            collector_module.verify_promoted_formal_ablation(promoted)
+            promoted.chmod(0o700)
+            aggregate_path = promoted / "aggregate.json"
+            aggregate_path.chmod(0o600)
+            aggregate_path.write_bytes(aggregate_path.read_bytes() + b" ")
+            with self.assertRaises(collector_module.CollectorError):
+                collector_module.verify_promoted_formal_ablation(promoted)
             with self.assertRaises(collector_module.CollectorError):
                 collector_module.promote_formal_ablation_candidate(
-                    receipt,
-                    evidence,
+                    receipt, evidence, attestations=attestations,
+                    candidate_root=candidate_root, promotion_registry=registry,
                     expected_source_commit="a" * 40,
                     expected_config_file_sha256="b" * 64,
                     out_dir=output,
                 )
+
+            second = root / "formal-second"
+            reissued = self._attestations(
+                evidence, candidate_root=candidate_root, out_dir=second
+            )
+            reissued_receipt = self._receipt(evidence, reissued)
+            with self.assertRaises(collector_module.CollectorError):
+                collector_module.promote_formal_ablation_candidate(
+                    reissued_receipt, evidence, attestations=reissued,
+                    candidate_root=candidate_root, promotion_registry=registry,
+                    expected_source_commit="a" * 40,
+                    expected_config_file_sha256="b" * 64, out_dir=second,
+                )
+
+    def test_fabricated_or_tampered_attestations_and_partial_seal_are_rejected(self):
+        evidence = self._evidence()
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            candidate_root, output = root / "candidate", root / "formal"
+            candidate_root.mkdir(mode=0o700)
+            attestations = self._attestations(evidence, candidate_root=candidate_root, out_dir=output)
+            receipt = self._receipt(evidence, attestations)
+            attacks = []
+            missing = dict(attestations); missing.pop("topology"); attacks.append(missing)
+            bad_service = copy.deepcopy(attestations); bad_service["topology"]["services"][0]["version"] = "forged"; attacks.append(bad_service)
+            partial = copy.deepcopy(attestations); partial["candidate_seal"]["partial_resume_status"] = "partial"; attacks.append(partial)
+            forged_cleanup = copy.deepcopy(attestations); forged_cleanup["cleanup"]["namespace_residue_count"] = 0; forged_cleanup["cleanup"]["document_sha256"] = "f" * 64; attacks.append(forged_cleanup)
+            for attack in attacks:
+                with self.subTest(attack=len(attack)), self.assertRaises(collector_module.CollectorError):
+                    collector_module.validate_formal_ablation_candidate(
+                        receipt, evidence, attestations=attack,
+                        candidate_root=candidate_root, formal_out_dir=output,
+                        expected_source_commit="a" * 40,
+                        expected_config_file_sha256="b" * 64,
+                    )
 
 
 

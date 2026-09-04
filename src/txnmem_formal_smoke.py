@@ -32,6 +32,7 @@ from txnmem_provenance_contract import (
     FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS,
     FORMAL_RUNNER_GID,
     FORMAL_RUNNER_UID,
+    is_registered_service_version,
 )
 from txnmem_provenance_execution_collector import (
     CollectorError,
@@ -45,6 +46,7 @@ from txnmem_provenance_execution_collector import (
     _FORMAL_RUNS_ROOT,
     _FORMAL_RUNTIME_WHEEL_DIRECTORY,
     _FORMAL_TOXIPROXY_CONTAINER,
+    _formal_ablation_config_sha256,
     _NftNetworkGuard,
     _cleanup_formal_execution_resources,
     _collect_formal_environment_attestation,
@@ -101,7 +103,7 @@ _NEO4J_URI = "bolt://127.0.0.1:19001"
 _TOXIPROXY_URL = "http://127.0.0.1:8474"
 _TOXIPROXY_VERSION = "2.5.0"
 _REPORT_SCHEMA = "txnmem-formal-provenance-smoke-v2"
-_ABLATION_REPORT_SCHEMA = "txnmem-formal-provenance-ablation-smoke-v1"
+_ABLATION_REPORT_SCHEMA = "txnmem-formal-provenance-ablation-smoke-v2"
 _CHILD_RECEIPT_SCHEMA = "txnmem-provenance-smoke-child-receipt-v1"
 _CHILD_RECEIPT_V2_SCHEMA = "txnmem-provenance-smoke-child-receipt-v2"
 _SMOKE_V2_SCENARIOS = (
@@ -173,28 +175,101 @@ class FormalSmokeError(RuntimeError):
     """The production same-path smoke could not prove its closed gate."""
 
 
-def validate_formal_ablation_smoke_report(value: Any) -> dict[str, Any]:
-    """Validate a protected-host ablation smoke receipt that is never evidence."""
+def validate_formal_ablation_smoke_report(
+    value: Any, *, controller_context: Mapping[str, Any],
+    report_path: Path | None = None,
+) -> dict[str, Any]:
+    """Authenticate a smoke receipt through the local root-owned control plane.
+
+    This is a filesystem/controller trust boundary, not a cryptographic signature.
+    """
     fields = {
-        "schema", "run_identity", "variants_exercised", "base_cell_count",
-        "repetitions_per_variant", "namespace_residue_count",
-        "timeout_cleanup_failure_count", "candidate_created", "protected_host",
-        "status",
+        "schema", "trust_boundary", "run_identity", "source_commit",
+        "config_sha256", "config_file_sha256", "approval_manifest_sha256",
+        "authorization_nonce_sha256", "controller_execution_id_sha256",
+        "service_identities", "variant_executions", "actual_execution",
+        "candidate_created", "status", "document_sha256",
     }
+    if not isinstance(controller_context, Mapping):
+        raise FormalSmokeError("formal ablation controller context is unavailable")
+    source_commit = controller_context.get("source_commit")
+    approval_hash = controller_context.get("approval_manifest_sha256")
+    config_file_hash = controller_context.get("config_file_sha256")
+    source_manifest = controller_context.get("source_manifest")
+    if config_file_hash is None and isinstance(source_manifest, Mapping):
+        rows = source_manifest.get("files")
+        if isinstance(rows, list):
+            config_file_hash = next(
+                (row.get("blob_sha256") for row in rows if isinstance(row, Mapping)
+                 and row.get("path") == "configs/provenance_ablation_v10.json"), None
+            )
+    material = dict(value) if isinstance(value, Mapping) else {}
+    document_hash = material.pop("document_sha256", None)
+    expected_execution_id = hashlib.sha256(
+        f"{value.get('authorization_nonce_sha256') if isinstance(value, Mapping) else ''}\0{approval_hash}\0{source_commit}".encode("utf-8")
+    ).hexdigest()
     if (
         not isinstance(value, Mapping) or set(value) != fields
         or value.get("schema") != _ABLATION_REPORT_SCHEMA
+        or value.get("trust_boundary") != "root_owned_local_control_plane"
         or value.get("run_identity") != "provenance-ablation-v10-smoke"
-        or value.get("variants_exercised") != ["TxnMem", "MemoryOnly-NoProvenance"]
-        or type(value.get("base_cell_count")) is not int or value["base_cell_count"] != 1
-        or type(value.get("repetitions_per_variant")) is not int or value["repetitions_per_variant"] != 1
-        or type(value.get("namespace_residue_count")) is not int or value["namespace_residue_count"] != 0
-        or type(value.get("timeout_cleanup_failure_count")) is not int or value["timeout_cleanup_failure_count"] != 0
+        or value.get("source_commit") != source_commit
+        or value.get("config_sha256") != _formal_ablation_config_sha256()
+        or value.get("config_file_sha256") != config_file_hash
+        or value.get("approval_manifest_sha256") != approval_hash
+        or not isinstance(value.get("authorization_nonce_sha256"), str)
+        or _SHA256.fullmatch(str(value["authorization_nonce_sha256"])) is None
+        or value.get("controller_execution_id_sha256") != expected_execution_id
+        or not isinstance(document_hash, str)
+        or hashlib.sha256(canonical_json_bytes(material)).hexdigest() != document_hash
+        or value.get("actual_execution") is not True
         or value.get("candidate_created") is not False
-        or value.get("protected_host") is not True
         or value.get("status") != "passed"
     ):
         raise FormalSmokeError("formal ablation smoke report is invalid")
+    services = value.get("service_identities")
+    if not isinstance(services, list) or len(services) != 2:
+        raise FormalSmokeError("formal ablation smoke service proof is invalid")
+    observed_roles = set()
+    for row in services:
+        if not isinstance(row, Mapping) or set(row) != {"role", "version", "image_manifest_digest_sha256"}:
+            raise FormalSmokeError("formal ablation smoke service proof is invalid")
+        role = row.get("role")
+        if role in observed_roles or role not in {"qdrant", "neo4j"} or not is_registered_service_version(str(role), row.get("version")) or row.get("image_manifest_digest_sha256") != FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS.get(str(role)):
+            raise FormalSmokeError("formal ablation smoke service proof is invalid")
+        observed_roles.add(role)
+    executions = value.get("variant_executions")
+    if not isinstance(executions, list) or len(executions) != 2:
+        raise FormalSmokeError("formal ablation smoke execution proof is invalid")
+    by_variant = {row.get("variant"): row for row in executions if isinstance(row, Mapping)}
+    expected_variants = {"TxnMem", "MemoryOnly-NoProvenance"}
+    if set(by_variant) != expected_variants:
+        raise FormalSmokeError("formal ablation smoke variant proof is invalid")
+    expected_execution_fields = {"variant", "memory_crud_verified", "provenance_edge_count", "traversal_executed", "namespace_empty_before", "namespace_empty_after", "timeout_cleanup_verified"}
+    for variant, row in by_variant.items():
+        if (
+            set(row) != expected_execution_fields
+            or row.get("memory_crud_verified") is not True
+            or type(row.get("provenance_edge_count")) is not int
+            or row["provenance_edge_count"] < 0
+            or row.get("namespace_empty_before") is not True
+            or row.get("namespace_empty_after") is not True
+            or row.get("timeout_cleanup_verified") is not True
+            or (variant == "TxnMem" and (row["provenance_edge_count"] <= 0 or row.get("traversal_executed") is not True))
+            or (variant == "MemoryOnly-NoProvenance" and (row["provenance_edge_count"] != 0 or row.get("traversal_executed") is not False))
+        ):
+            raise FormalSmokeError("formal ablation smoke execution proof is invalid")
+    if report_path is not None:
+        path = report_path.expanduser().absolute().resolve(strict=True)
+        metadata = path.stat()
+        parent_metadata = path.parent.stat()
+        if (
+            report_path.is_symlink() or not path.is_file()
+            or metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o400
+            or parent_metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(parent_metadata.st_mode) & 0o022
+        ):
+            raise FormalSmokeError("formal ablation smoke receipt is not control-plane protected")
     return dict(value)
 
 
@@ -2019,8 +2094,12 @@ def main(
         ablation_parser.add_argument("--report", type=Path, required=True)
         try:
             ablation_args = ablation_parser.parse_args(arguments)
+            context = _validate_formal_controller_context(_controller_context)
             report, _raw = load_strict_json_document(ablation_args.report)
-            validate_formal_ablation_smoke_report(report)
+            validate_formal_ablation_smoke_report(
+                report, controller_context=context,
+                report_path=ablation_args.report,
+            )
         except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
             print(f"formal provenance ablation smoke blocked: {type(exc).__name__}")
             return 2

@@ -177,7 +177,11 @@ _FORMAL_ABLATION_RECEIPT_FIELDS = frozenset({
     "repetition_count", "operation_sample_count", "namespace_residue_count",
     "timeout_cleanup_failure_count", "environment_attestation_sha256",
     "topology_attestation_sha256", "samples_sha256", "repetitions_sha256",
-    "status",
+    "status", "candidate_id", "authorization_nonce_sha256",
+    "control_plane_attestation_sha256",
+})
+_FORMAL_ABLATION_ATTESTATION_FIELDS = frozenset({
+    "control_plane", "environment", "topology", "cleanup", "candidate_seal",
 })
 
 
@@ -201,8 +205,158 @@ def _formal_ablation_config_sha256() -> str:
     return hashlib.sha256(canonical_json_bytes(config)).hexdigest()
 
 
+def _canonical_path_sha256(path: str | Path) -> str:
+    candidate = Path(path).expanduser().absolute()
+    parent = candidate.parent.resolve(strict=True)
+    return hashlib.sha256(str(parent / candidate.name).encode("utf-8")).hexdigest()
+
+
+def _validate_ablation_document(
+    value: Any, *, schema: str, fields: set[str]
+) -> dict[str, Any]:
+    if (
+        not isinstance(value, Mapping)
+        or set(value) != fields | {"document_sha256"}
+        or value.get("schema") != schema
+        or not isinstance(value.get("document_sha256"), str)
+        or _SHA256.fullmatch(str(value["document_sha256"])) is None
+    ):
+        raise CollectorError("formal ablation attestation schema is invalid")
+    material = {key: item for key, item in value.items() if key != "document_sha256"}
+    if hashlib.sha256(canonical_json_bytes(material)).hexdigest() != value["document_sha256"]:
+        raise CollectorError("formal ablation attestation hash is invalid")
+    return dict(value)
+
+
+def _validate_formal_ablation_attestations(
+    attestations: Mapping[str, Any], *, receipt: Mapping[str, Any],
+    candidate_root: Path, formal_out_dir: Path, samples_sha256: str,
+    repetitions_sha256: str, aggregate_sha256: str,
+    expected_source_commit: str, expected_config_file_sha256: str,
+) -> dict[str, dict[str, Any]]:
+    """Validate structured facts emitted inside the root-owned control plane."""
+    if not isinstance(attestations, Mapping) or set(attestations) != _FORMAL_ABLATION_ATTESTATION_FIELDS:
+        raise CollectorError("formal ablation attestation set is incomplete")
+    raw_candidate_root = candidate_root.expanduser().absolute()
+    if raw_candidate_root.is_symlink() or not raw_candidate_root.is_dir():
+        raise CollectorError("formal ablation candidate root is invalid")
+    root_metadata = raw_candidate_root.resolve(strict=True).stat()
+    if stat.S_IMODE(root_metadata.st_mode) & 0o022:
+        raise CollectorError("formal ablation candidate root is not protected")
+    environment = _validate_ablation_document(
+        attestations["environment"], schema="txnmem-provenance-ablation-environment-v1",
+        fields={"schema", "candidate_id", "authorization_nonce_sha256", "isolation_verified",
+                "co_tenant_load_detected", "source", "cpu_logical_count", "memory_total_bytes",
+                "disk_medium", "toxiproxy_version"},
+    )
+    topology = _validate_ablation_document(
+        attestations["topology"], schema="txnmem-provenance-ablation-topology-v1",
+        fields={"schema", "candidate_id", "authorization_nonce_sha256", "transport",
+                "environment_document_sha256", "services"},
+    )
+    cleanup = _validate_ablation_document(
+        attestations["cleanup"], schema="txnmem-provenance-ablation-cleanup-v1",
+        fields={"schema", "candidate_id", "authorization_nonce_sha256",
+                "namespace_observation_count", "namespace_residue_count",
+                "timeout_cleanup_attempt_count", "timeout_cleanup_failure_count",
+                "all_workers_quiescent"},
+    )
+    seal = _validate_ablation_document(
+        attestations["candidate_seal"], schema="txnmem-provenance-ablation-candidate-seal-v1",
+        fields={"schema", "candidate_id", "authorization_nonce_sha256", "candidate_root_sha256",
+                "formal_output_sha256", "samples_sha256", "repetitions_sha256", "aggregate_sha256",
+                "partial_resume_status", "completed_repetition_count", "completed_operation_sample_count"},
+    )
+    control = _validate_ablation_document(
+        attestations["control_plane"], schema="txnmem-provenance-ablation-control-plane-v1",
+        fields={"schema", "trust_boundary", "candidate_id", "authorization_nonce_sha256",
+                "candidate_root_sha256", "formal_output_sha256", "source_commit", "config_sha256",
+                "config_file_sha256", "environment_document_sha256", "topology_document_sha256",
+                "cleanup_document_sha256", "candidate_seal_sha256"},
+    )
+    candidate_id = receipt.get("candidate_id")
+    nonce_hash = receipt.get("authorization_nonce_sha256")
+    if (
+        not isinstance(candidate_id, str) or _SHA256.fullmatch(candidate_id) is None
+        or not isinstance(nonce_hash, str) or _SHA256.fullmatch(nonce_hash) is None
+        or candidate_id != hashlib.sha256(
+            f"{samples_sha256}\0{repetitions_sha256}\0{nonce_hash}".encode("utf-8")
+        ).hexdigest()
+    ):
+        raise CollectorError("formal ablation protected candidate identity is invalid")
+    candidate_root_hash = _canonical_path_sha256(candidate_root)
+    output_hash = _canonical_path_sha256(formal_out_dir)
+    for document in (environment, topology, cleanup, seal, control):
+        if document.get("candidate_id") != candidate_id or document.get("authorization_nonce_sha256") != nonce_hash:
+            raise CollectorError("formal ablation attestation identity drifted")
+    services = topology.get("services")
+    if not isinstance(services, list) or len(services) != 2:
+        raise CollectorError("formal ablation service attestation is invalid")
+    service_map = {}
+    for row in services:
+        if not isinstance(row, Mapping) or set(row) != {"role", "version", "image_manifest_digest_sha256"}:
+            raise CollectorError("formal ablation service attestation is invalid")
+        role, version, image_hash = row.get("role"), row.get("version"), row.get("image_manifest_digest_sha256")
+        if role in service_map or role not in {"qdrant", "neo4j"} or not is_registered_service_version(str(role), version) or image_hash != FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS.get(str(role)):
+            raise CollectorError("formal ablation service identity is unregistered")
+        service_map[str(role)] = dict(row)
+    if set(service_map) != {"qdrant", "neo4j"}:
+        raise CollectorError("formal ablation service roles are incomplete")
+    if (
+        environment.get("isolation_verified") is not True
+        or environment.get("co_tenant_load_detected") is not False
+        or environment.get("source") != "protected_host_probe"
+        or type(environment.get("cpu_logical_count")) is not int or environment["cpu_logical_count"] <= 0
+        or type(environment.get("memory_total_bytes")) is not int or environment["memory_total_bytes"] <= 0
+        or environment.get("disk_medium") not in {"ssd", "nvme", "hdd"}
+        or not is_registered_service_version("toxiproxy", environment.get("toxiproxy_version"))
+        or topology.get("transport") not in {"local_loopback", "container_bridge"}
+    ):
+        raise CollectorError("formal ablation protected environment is ineligible")
+    if (
+        cleanup.get("namespace_observation_count") != 180
+        or cleanup.get("namespace_residue_count") != 0
+        or type(cleanup.get("timeout_cleanup_attempt_count")) is not int
+        or cleanup["timeout_cleanup_attempt_count"] < 0
+        or cleanup.get("timeout_cleanup_failure_count") != 0
+        or cleanup.get("all_workers_quiescent") is not True
+    ):
+        raise CollectorError("formal ablation cleanup proof is ineligible")
+    if (
+        seal.get("candidate_root_sha256") != candidate_root_hash
+        or seal.get("formal_output_sha256") != output_hash
+        or seal.get("samples_sha256") != samples_sha256
+        or seal.get("repetitions_sha256") != repetitions_sha256
+        or seal.get("aggregate_sha256") != aggregate_sha256
+        or seal.get("partial_resume_status") != "sealed_complete"
+        or seal.get("completed_repetition_count") != 180
+        or seal.get("completed_operation_sample_count") != 6480
+    ):
+        raise CollectorError("formal ablation candidate seal is incomplete")
+    if (
+        control.get("trust_boundary") != "root_owned_local_control_plane"
+        or control.get("candidate_root_sha256") != candidate_root_hash
+        or control.get("formal_output_sha256") != output_hash
+        or control.get("source_commit") != expected_source_commit
+        or control.get("config_sha256") != _formal_ablation_config_sha256()
+        or control.get("config_file_sha256") != expected_config_file_sha256
+        or control.get("environment_document_sha256") != environment["document_sha256"]
+        or control.get("topology_document_sha256") != topology["document_sha256"]
+        or control.get("cleanup_document_sha256") != cleanup["document_sha256"]
+        or control.get("candidate_seal_sha256") != seal["document_sha256"]
+        or topology.get("environment_document_sha256") != environment["document_sha256"]
+        or receipt.get("control_plane_attestation_sha256") != control["document_sha256"]
+        or receipt.get("environment_attestation_sha256") != environment["document_sha256"]
+        or receipt.get("topology_attestation_sha256") != topology["document_sha256"]
+    ):
+        raise CollectorError("formal ablation control-plane binding is invalid")
+    return {key: dict(value) for key, value in attestations.items()}
+
+
 def validate_formal_ablation_candidate(
     receipt: Mapping[str, Any], evidence: Mapping[str, Any], *,
+    attestations: Mapping[str, Any], candidate_root: str | Path,
+    formal_out_dir: str | Path,
     expected_source_commit: str, expected_config_file_sha256: str,
 ) -> dict[str, Any]:
     """Recompute every formal ablation eligibility fact and fail closed."""
@@ -269,7 +423,22 @@ def validate_formal_ablation_candidate(
         raise CollectorError("formal ablation evidence validation failed") from exc
     if aggregate.get("formal_contract_complete") is not True:
         raise CollectorError("formal ablation evidence is incomplete")
-    return {**dict(receipt), "aggregate": aggregate}
+    aggregate_sha256 = hashlib.sha256(canonical_json_bytes(aggregate) + b"\n").hexdigest()
+    validated_attestations = _validate_formal_ablation_attestations(
+        attestations, receipt=receipt, candidate_root=Path(candidate_root),
+        formal_out_dir=Path(formal_out_dir), samples_sha256=receipt["samples_sha256"],
+        repetitions_sha256=receipt["repetitions_sha256"], aggregate_sha256=aggregate_sha256,
+        expected_source_commit=expected_source_commit,
+        expected_config_file_sha256=expected_config_file_sha256,
+    )
+    if (
+        receipt.get("namespace_residue_count") != validated_attestations["cleanup"]["namespace_residue_count"]
+        or receipt.get("timeout_cleanup_failure_count") != validated_attestations["cleanup"]["timeout_cleanup_failure_count"]
+    ):
+        raise CollectorError("formal ablation cleanup receipt drifted")
+    return {**dict(receipt), "aggregate": aggregate,
+            "aggregate_sha256": aggregate_sha256,
+            "attestations": validated_attestations}
 
 
 def preflight_formal_ablation_output(out_dir: str | Path) -> Path:
@@ -286,6 +455,8 @@ def preflight_formal_ablation_output(out_dir: str | Path) -> Path:
 
 def promote_formal_ablation_candidate(
     receipt: Mapping[str, Any], evidence: Mapping[str, Any], *,
+    attestations: Mapping[str, Any], candidate_root: str | Path,
+    promotion_registry: str | Path,
     expected_source_commit: str, expected_config_file_sha256: str,
     out_dir: str | Path,
 ) -> Path:
@@ -293,10 +464,41 @@ def promote_formal_ablation_candidate(
     validated = validate_formal_ablation_candidate(
         receipt,
         evidence,
+        attestations=attestations,
+        candidate_root=candidate_root,
+        formal_out_dir=out_dir,
         expected_source_commit=expected_source_commit,
         expected_config_file_sha256=expected_config_file_sha256,
     )
     target = preflight_formal_ablation_output(out_dir)
+    registry = Path(promotion_registry).expanduser().absolute().resolve(strict=True)
+    metadata = registry.stat()
+    if (
+        registry.is_symlink() or not registry.is_dir()
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) & 0o022
+    ):
+        raise CollectorError("formal ablation promotion registry is not protected")
+    candidate_id = str(validated["candidate_id"])
+    marker_payload = canonical_json_bytes({
+        "schema": "txnmem-provenance-ablation-promotion-consumption-v1",
+        "candidate_id": candidate_id,
+        "authorization_nonce_sha256": validated["authorization_nonce_sha256"],
+        "formal_output_sha256": _canonical_path_sha256(target),
+        "candidate_seal_sha256": validated["attestations"]["candidate_seal"]["document_sha256"],
+    }) + b"\n"
+    try:
+        marker_fd = os.open(
+            registry / f"{candidate_id}.json",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o400,
+        )
+        with os.fdopen(marker_fd, "wb", closefd=True) as marker:
+            marker.write(marker_payload)
+            marker.flush()
+            os.fsync(marker.fileno())
+    except FileExistsError as exc:
+        raise CollectorError("formal ablation candidate was already consumed") from exc
     try:
         target.mkdir(mode=0o700)
     except FileExistsError as exc:
@@ -304,14 +506,26 @@ def promote_formal_ablation_candidate(
     try:
         samples = evidence["samples"]
         repetitions = evidence["repetitions"]
+        attestation_bytes = canonical_json_bytes(validated["attestations"]) + b"\n"
+        aggregate_bytes = canonical_json_bytes(validated["aggregate"]) + b"\n"
+        sample_bytes = b"".join(canonical_json_bytes(dict(row)) + b"\n" for row in samples)
+        repetition_bytes = b"".join(canonical_json_bytes(dict(row)) + b"\n" for row in repetitions)
         manifest = {
-            key: value for key, value in validated.items() if key != "aggregate"
+            key: value for key, value in validated.items()
+            if key not in {"aggregate", "attestations"}
+        }
+        manifest["files"] = {
+            "samples.jsonl": hashlib.sha256(sample_bytes).hexdigest(),
+            "repetitions.jsonl": hashlib.sha256(repetition_bytes).hexdigest(),
+            "aggregate.json": hashlib.sha256(aggregate_bytes).hexdigest(),
+            "attestations.json": hashlib.sha256(attestation_bytes).hexdigest(),
         }
         files = {
-            "manifest.json": canonical_json_bytes(manifest) + b"\n",
             "samples.jsonl": b"".join(canonical_json_bytes(dict(row)) + b"\n" for row in samples),
             "repetitions.jsonl": b"".join(canonical_json_bytes(dict(row)) + b"\n" for row in repetitions),
-            "aggregate.json": canonical_json_bytes(validated["aggregate"]) + b"\n",
+            "aggregate.json": aggregate_bytes,
+            "attestations.json": attestation_bytes,
+            "manifest.json": canonical_json_bytes(manifest) + b"\n",
         }
         for name, payload in files.items():
             descriptor = os.open(
@@ -329,6 +543,38 @@ def promote_formal_ablation_candidate(
     return target
 
 
+def verify_promoted_formal_ablation(out_dir: str | Path) -> dict[str, Any]:
+    """Recompute the complete raw → aggregate → manifest hash closure."""
+    root = Path(out_dir).expanduser().absolute().resolve(strict=True)
+    if root.is_symlink() or not root.is_dir():
+        raise CollectorError("formal ablation output is invalid")
+    manifest = _load_ablation_json(root / "manifest.json")
+    if not isinstance(manifest, Mapping) or not isinstance(manifest.get("files"), Mapping):
+        raise CollectorError("formal ablation manifest is invalid")
+    expected_files = {"samples.jsonl", "repetitions.jsonl", "aggregate.json", "attestations.json"}
+    if set(manifest["files"]) != expected_files:
+        raise CollectorError("formal ablation manifest file closure is invalid")
+    for name in expected_files:
+        raw = (root / name).read_bytes()
+        if manifest["files"].get(name) != hashlib.sha256(raw).hexdigest():
+            raise CollectorError("formal ablation promoted file hash mismatch")
+    samples = _load_ablation_jsonl(root / "samples.jsonl")
+    repetitions = _load_ablation_jsonl(root / "repetitions.jsonl")
+    recomputed = aggregate_ablation(
+        {"samples": samples, "repetitions": repetitions},
+        bootstrap_repetitions=int(FORMAL_ABLATION_CONFIG["bootstrap_repetitions"]),
+        seed=int(FORMAL_ABLATION_CONFIG["bootstrap_seed"]),
+        require_formal_contract=True,
+    )
+    aggregate = _load_ablation_json(root / "aggregate.json")
+    if canonical_json_bytes(recomputed) != canonical_json_bytes(aggregate):
+        raise CollectorError("formal ablation aggregate recomputation mismatch")
+    aggregate_hash = hashlib.sha256((root / "aggregate.json").read_bytes()).hexdigest()
+    if manifest.get("aggregate_sha256") != aggregate_hash:
+        raise CollectorError("formal ablation aggregate manifest binding is invalid")
+    return dict(manifest)
+
+
 def _load_ablation_json(path: Path) -> Any:
     try:
         raw = path.read_bytes()
@@ -338,6 +584,41 @@ def _load_ablation_json(path: Path) -> Any:
     if canonical_json_bytes(value) + b"\n" != raw:
         raise CollectorError("formal ablation JSON input is not canonical")
     return value
+
+
+def _require_control_plane_file(path: Path) -> Path:
+    """Require a local controller-owned immutable input (not a signature)."""
+    raw = path.expanduser().absolute()
+    if raw.is_symlink() or not raw.is_file():
+        raise CollectorError("formal ablation control-plane file is unavailable")
+    resolved = raw.resolve(strict=True)
+    metadata = resolved.stat()
+    parent_metadata = resolved.parent.stat()
+    if (
+        metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o400
+        or parent_metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(parent_metadata.st_mode) & 0o022
+    ):
+        raise CollectorError("formal ablation control-plane file is not protected")
+    return resolved
+
+
+def _require_sealed_candidate_file(path: Path, candidate_root: Path) -> Path:
+    raw_root = candidate_root.expanduser().absolute()
+    raw = path.expanduser().absolute()
+    if raw_root.is_symlink() or raw.is_symlink() or not raw.is_file():
+        raise CollectorError("formal ablation candidate file is unavailable")
+    root = raw_root.resolve(strict=True)
+    resolved = raw.resolve(strict=True)
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise CollectorError("formal ablation candidate file escaped sealed root") from exc
+    metadata = resolved.stat()
+    if metadata.st_uid not in {os.geteuid(), FORMAL_RUNNER_UID} or stat.S_IMODE(metadata.st_mode) != 0o400:
+        raise CollectorError("formal ablation candidate file is not sealed")
+    return resolved
 
 
 def _reject_duplicate_mapping(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -374,8 +655,12 @@ def _formal_ablation_cli(
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument("action", choices=("ablation-validate", "ablation-promote"))
     parser.add_argument("--receipt", type=Path, required=True)
+    parser.add_argument("--attestations", type=Path, required=True)
     parser.add_argument("--samples", type=Path, required=True)
     parser.add_argument("--repetitions", type=Path, required=True)
+    parser.add_argument("--candidate-root", type=Path, required=True)
+    parser.add_argument("--formal-out-dir", type=Path, required=True)
+    parser.add_argument("--promotion-registry", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--out-dir", type=Path)
     args = parser.parse_args(list(argv))
@@ -383,16 +668,24 @@ def _formal_ablation_cli(
     source_commit = str(context["source_commit"])
     config_path = Path(__file__).resolve().parents[1] / "configs" / "provenance_ablation_v10.json"
     config_file_sha256 = hashlib.sha256(config_path.read_bytes()).hexdigest()
-    receipt = _load_ablation_json(args.receipt)
+    receipt_path = _require_control_plane_file(args.receipt)
+    attestation_path = _require_control_plane_file(args.attestations)
+    sample_path = _require_sealed_candidate_file(args.samples, args.candidate_root)
+    repetition_path = _require_sealed_candidate_file(args.repetitions, args.candidate_root)
+    receipt = _load_ablation_json(receipt_path)
+    attestations = _load_ablation_json(attestation_path)
     evidence = {
-        "samples": _load_ablation_jsonl(args.samples),
-        "repetitions": _load_ablation_jsonl(args.repetitions),
+        "samples": _load_ablation_jsonl(sample_path),
+        "repetitions": _load_ablation_jsonl(repetition_path),
     }
     if args.action == "ablation-validate":
         if args.out is None or args.out_dir is not None:
             raise CollectorError("formal ablation validation output is invalid")
         validated = validate_formal_ablation_candidate(
             receipt, evidence,
+            attestations=attestations,
+            candidate_root=args.candidate_root,
+            formal_out_dir=args.formal_out_dir,
             expected_source_commit=source_commit,
             expected_config_file_sha256=config_file_sha256,
         )
@@ -400,10 +693,16 @@ def _formal_ablation_cli(
         with os.fdopen(descriptor, "wb", closefd=True) as stream:
             stream.write(canonical_json_bytes(validated) + b"\n")
         return 0
-    if args.out_dir is None or args.out is not None:
+    if (
+        args.out_dir is None or args.out is not None or args.promotion_registry is None
+        or _canonical_path_sha256(args.out_dir) != _canonical_path_sha256(args.formal_out_dir)
+    ):
         raise CollectorError("formal ablation promotion output is invalid")
     promote_formal_ablation_candidate(
         receipt, evidence,
+        attestations=attestations,
+        candidate_root=args.candidate_root,
+        promotion_registry=args.promotion_registry,
         expected_source_commit=source_commit,
         expected_config_file_sha256=config_file_sha256,
         out_dir=args.out_dir,
