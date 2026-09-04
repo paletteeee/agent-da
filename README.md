@@ -1,5 +1,34 @@
 # TxnMem Pilot Experiment
 
+This repository now contains two research prototypes:
+
+- **TxnMem** explores transactional shared memory for multi-agent systems.
+- **InferTxn** applies MVCC and two-phase commit to atomic metadata migration
+  in prefill-decode disaggregated LLM inference.
+
+## InferTxn: transactional inference metadata
+
+InferTxn models route metadata, KV-cache metadata, and request ownership as
+three independent database shards. A migration uses snapshot-isolated reads,
+first-committer-wins conflict detection, and 2PC so the three records either
+move to the target decode node together or remain at the source.
+
+Run all InferTxn tests:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_infertxn*.py' -v
+```
+
+Run the three-process HTTP demonstration:
+
+```bash
+python3 -m src.infertxn.demo
+```
+
+The JSON result should report `"state": "committed"` and
+`"consistent": true`. See [docs/infertxn.md](docs/infertxn.md) for the
+protocol, failure model, limitations, and code map.
+
 This is a dependency-free pilot for the first three controlled workloads:
 
 - `atomic_multi_write` (W1): a crash after the first write;
