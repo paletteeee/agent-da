@@ -93,6 +93,30 @@ class FormalAblationSmokeReceiptTests(unittest.TestCase):
             with patch.object(smoke, "_validate_formal_controller_context", return_value=context):
                 self.assertEqual(smoke.main(["ablation-smoke", "--report", str(path)], _controller_context=context), 2)
 
+    def test_protected_smoke_producer_writes_receipt_from_observations(self):
+        context = {"source_commit": "a" * 40, "approval_manifest_sha256": "c" * 64, "config_file_sha256": "b" * 64}
+        observations = {
+            "service_identities": self._receipt()["service_identities"],
+            "variant_executions": self._receipt()["variant_executions"],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp).resolve()
+            parent.chmod(0o700)
+            report = parent / "smoke.json"
+            produced = smoke.produce_formal_ablation_smoke_report(
+                report, controller_context=context,
+                _execute_observations=lambda: observations,
+            )
+            self.assertTrue(produced["actual_execution"])
+            self.assertEqual(report.stat().st_mode & 0o777, 0o400)
+            self.assertEqual(
+                smoke.validate_formal_ablation_smoke_report(
+                    json.loads(report.read_text()), controller_context=context,
+                    report_path=report,
+                )["document_sha256"],
+                produced["document_sha256"],
+            )
+
 
 ROUTES = [
     {

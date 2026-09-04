@@ -43,6 +43,7 @@ runtime_root=/opt/txnmem-formal-runtime
 wheel_dir="$runtime_root/wheels"
 runs_root=/var/lib/txnmem-formal/runs
 bootstrap_root=/var/lib/txnmem-formal/bootstrap
+ablation_root=/var/lib/txnmem-formal/provenance-ablation
 runner_name=txnmem-formal
 runner_uid=65532
 runner_gid=65532
@@ -379,6 +380,9 @@ fi
 /usr/bin/install -d -o root -g root -m 0755 "$wheel_dir"
 /usr/bin/install -d -o root -g root -m 0700 "$bootstrap_root"
 /usr/bin/install -d -o root -g "$runner_gid" -m 0750 "$runs_root"
+/usr/bin/install -d -o root -g root -m 0700 "$ablation_root"
+/usr/bin/install -d -o root -g root -m 0700 "$ablation_root/candidates"
+/usr/bin/install -d -o root -g root -m 0700 "$ablation_root/promotion-registry"
 
 generation=${staging##*/}
 controller_new="$controller_dir/.txnmem_formal_controller.$approved_commit.$generation.new"

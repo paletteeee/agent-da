@@ -64,12 +64,16 @@ from txnmem_provenance_performance import (
     FORMAL_ABLATION_CONFIG,
     PROVENANCE_ABLATION_VARIANTS,
     aggregate_ablation,
+    build_layered_dag,
+    _preload_graph,
     candidate_attestation_material,
     formal_config_file_sha256,
     formal_matrix_config_sha256,
     formal_matrix_workload_sha256,
     load_strict_json_document,
     provenance_bundle_id,
+    make_provenance_ablation_backend_factory,
+    run_matrix_cell,
     validate_provenance_ablation_config,
     validate_environment_attestation,
     validate_matrix_config,
@@ -119,6 +123,7 @@ _FORMAL_MAX_LOAD1_PER_CPU_MILLI = 1000
 _FORMAL_MAX_LOGICAL_CPU_COUNT = 1024
 _FORMAL_RUNTIME_WHEEL_DIRECTORY = Path("/opt/txnmem-formal-runtime/wheels")
 _FORMAL_RUNS_ROOT = Path("/var/lib/txnmem-formal/runs")
+_FORMAL_ABLATION_RUNTIME_ROOT = Path("/var/lib/txnmem-formal/provenance-ablation")
 _FORMAL_CONTROLLER_UID = 0
 _FORMAL_CONTROLLER_GID = 0
 _FORMAL_GIT_EXECUTABLE = "/usr/bin/git"
@@ -203,6 +208,472 @@ def canonical_ablation_jsonl_sha256(rows: Sequence[Mapping[str, Any]]) -> str:
 def _formal_ablation_config_sha256() -> str:
     config = validate_provenance_ablation_config(FORMAL_ABLATION_CONFIG, formal=True)
     return hashlib.sha256(canonical_json_bytes(config)).hexdigest()
+
+
+def _write_private_json(path: Path, value: Mapping[str, Any]) -> None:
+    descriptor = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o400,
+    )
+    with os.fdopen(descriptor, "wb", closefd=True) as stream:
+        stream.write(canonical_json_bytes(dict(value)) + b"\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _replace_private_json(path: Path, value: Mapping[str, Any]) -> None:
+    temporary = path.parent / f".{path.name}.{secrets.token_hex(16)}"
+    _write_private_json(temporary, value)
+    os.replace(temporary, path)
+
+
+def _protected_ablation_runtime() -> tuple[Path, Path, Path]:
+    """Return the one policy-defined candidate root and consumption registry."""
+    root = _FORMAL_ABLATION_RUNTIME_ROOT.expanduser().absolute().resolve(strict=True)
+    if root.is_symlink() or not root.is_dir():
+        raise CollectorError("formal ablation runtime root is invalid")
+    metadata = root.stat()
+    if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) & 0o077:
+        raise CollectorError("formal ablation runtime root is not controller protected")
+    parent_metadata = root.parent.stat()
+    if parent_metadata.st_uid != os.geteuid() or stat.S_IMODE(parent_metadata.st_mode) & 0o022:
+        raise CollectorError("formal ablation runtime ancestor is not protected")
+    candidates = root / "candidates"
+    registry = root / "promotion-registry"
+    for path in (candidates, registry):
+        resolved = path.resolve(strict=True)
+        item = resolved.stat()
+        if resolved.parent != root or resolved.is_symlink() or not resolved.is_dir():
+            raise CollectorError("formal ablation policy directory is invalid")
+        if item.st_uid != os.geteuid() or stat.S_IMODE(item.st_mode) & 0o077:
+            raise CollectorError("formal ablation policy directory is not protected")
+    return root, candidates, registry
+
+
+def _controller_ablation_context(value: Mapping[str, Any] | None) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        raise CollectorError("formal ablation controller context is unavailable")
+    config_file_hash = value.get("config_file_sha256")
+    source_manifest = value.get("source_manifest")
+    if config_file_hash is None and isinstance(source_manifest, Mapping):
+        files = source_manifest.get("files")
+        if isinstance(files, list):
+            config_file_hash = next(
+                (row.get("blob_sha256") for row in files if isinstance(row, Mapping)
+                 and row.get("path") == "configs/provenance_ablation_v10.json"), None
+            )
+    result = {
+        "source_commit": str(value.get("source_commit", "")),
+        "approval_manifest_sha256": str(value.get("approval_manifest_sha256", "")),
+        "config_file_sha256": str(config_file_hash or ""),
+    }
+    if not _COMMIT.fullmatch(result["source_commit"]) or any(
+        _SHA256.fullmatch(result[key]) is None
+        for key in ("approval_manifest_sha256", "config_file_sha256")
+    ):
+        raise CollectorError("formal ablation controller context is invalid")
+    return result
+
+
+def create_protected_ablation_candidate(
+    *, formal_out_dir: str | Path, controller_context: Mapping[str, Any]
+) -> Path:
+    """Create a controller-owned candidate; callers cannot select its identity."""
+    context = _controller_ablation_context(controller_context)
+    _root, candidates, _registry = _protected_ablation_runtime()
+    nonce = secrets.token_bytes(32)
+    nonce_hash = hashlib.sha256(nonce).hexdigest()
+    execution_id = hashlib.sha256(
+        f"{nonce_hash}\0{context['approval_manifest_sha256']}\0{context['source_commit']}".encode()
+    ).hexdigest()
+    candidate = candidates / execution_id
+    candidate.mkdir(mode=0o700)
+    state = {
+        "schema": "txnmem-provenance-ablation-controller-state-v1",
+        "status": "created",
+        "controller_execution_id_sha256": execution_id,
+        "authorization_nonce_sha256": nonce_hash,
+        "source_commit": context["source_commit"],
+        "approval_manifest_sha256": context["approval_manifest_sha256"],
+        "config_file_sha256": context["config_file_sha256"],
+        "formal_output_sha256": _canonical_path_sha256(formal_out_dir),
+        "formal_output_path": str(Path(formal_out_dir).expanduser().absolute()),
+        "completed_repetition_count": 0,
+        "completed_operation_sample_count": 0,
+        "namespace_observation_count": 0,
+    }
+    _write_private_json(candidate / "controller-state.json", state)
+    _write_private_json(candidate / "samples.partial.json", {"rows": []})
+    _write_private_json(candidate / "repetitions.partial.json", {"rows": []})
+    return candidate
+
+
+def _load_protected_ablation_state(
+    candidate_root: str | Path, controller_context: Mapping[str, Any]
+) -> tuple[Path, dict[str, Any], dict[str, str]]:
+    context = _controller_ablation_context(controller_context)
+    _root, candidates, _registry = _protected_ablation_runtime()
+    candidate = Path(candidate_root).expanduser().absolute().resolve(strict=True)
+    if candidate.parent != candidates or candidate.is_symlink() or not candidate.is_dir():
+        raise CollectorError("formal ablation candidate is outside controller policy")
+    state = _load_ablation_json(candidate / "controller-state.json")
+    if (
+        not isinstance(state, Mapping)
+        or state.get("controller_execution_id_sha256") != candidate.name
+        or state.get("source_commit") != context["source_commit"]
+        or state.get("approval_manifest_sha256") != context["approval_manifest_sha256"]
+        or state.get("config_file_sha256") != context["config_file_sha256"]
+    ):
+        raise CollectorError("formal ablation controller state binding is invalid")
+    return candidate, dict(state), context
+
+
+def _default_ablation_observation_batch(state: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Execute every not-yet-recorded coordinate against the real backends."""
+    password = os.environ.get("TXNMEM_NEO4J_PASSWORD")
+    if not password:
+        raise CollectorError("Neo4j runtime credential is unavailable")
+    environment = _collect_formal_environment_attestation(
+        toxiproxy_url="http://127.0.0.1:8474",
+        storage_path=_FORMAL_ABLATION_RUNTIME_ROOT,
+    )
+    completed = int(state.get("completed_repetition_count", 0))
+    plan = []
+    config = validate_provenance_ablation_config(FORMAL_ABLATION_CONFIG, formal=True)
+    for cell in config["cells"]:
+        for repetition, repetition_seed in enumerate(config["repetition_seeds"]):
+            for variant in config["variants"]:
+                plan.append((cell, repetition, repetition_seed, variant))
+    if completed < 0 or completed > len(plan):
+        raise CollectorError("formal ablation resume coordinate is invalid")
+    samples: list[dict[str, Any]] = []
+    repetitions: list[dict[str, Any]] = []
+    services: list[dict[str, Any]] | None = None
+    # One coordinate per durable batch: a signal between batches leaves an
+    # authenticated partial state that the controller can resume exactly.
+    for cell, repetition, repetition_seed, variant in plan[completed:completed + 1]:
+        graph = build_layered_dag(int(cell["graph_node_count"]), int(config["graph_seed"]))
+        factory = make_provenance_ablation_backend_factory(
+            variant=str(variant), qdrant_url="http://127.0.0.1:19000",
+            neo4j_uri="bolt://127.0.0.1:19001", neo4j_auth=("neo4j", password),
+            environment_attestation=environment,
+            request_timeout_seconds=float(config["request_timeout_seconds"]),
+        )
+        try:
+            report = run_matrix_cell(
+                factory, graph, concurrency=int(cell["concurrency"]), repetitions=1,
+                operations_per_type=int(config["operations_per_type"]),
+                run_id=f"ablation-{state['controller_execution_id_sha256']}-{repetition_seed}-{variant}",
+                formal=True, environment_attestation=environment,
+            )
+        finally:
+            factory.close()
+        raw_repetition = report["repetitions"][0]
+        health = raw_repetition["service_health"]
+        observed_services = [
+            {"role": role, "version": health[role]["version"],
+             "image_manifest_digest_sha256": FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS[role]}
+            for role in ("qdrant", "neo4j")
+        ]
+        if services is not None and services != observed_services:
+            raise CollectorError("formal ablation service identity drifted")
+        services = observed_services
+        operation_projection = {
+            "read": "read", "search": "write", "derive": "derive",
+            "invalidate_repair": "propagate",
+        }
+        coordinate_samples: list[dict[str, Any]] = []
+        for index, raw in enumerate(report["samples"]):
+            success = raw.get("success") is True
+            error_name = raw.get("error_class")
+            timeout = not success and error_name == "TimeoutError"
+            coordinate_samples.append({
+                "cell_id": report["cell_id"], "variant": variant,
+                "repetition": repetition, "repetition_seed": repetition_seed,
+                "operation": operation_projection[str(raw["operation"])],
+                "operation_id": f"{operation_projection[str(raw['operation'])]}:{index}",
+                "latency_ns": int(raw["latency_ns"]), "success": success,
+                "timeout": timeout,
+                "error_category": None if success else ("timeout" if timeout else "backend_error"),
+            })
+        if variant == "TxnMem":
+            traversal_factory = make_provenance_ablation_backend_factory(
+                variant="TxnMem", qdrant_url="http://127.0.0.1:19000",
+                neo4j_uri="bolt://127.0.0.1:19001", neo4j_auth=("neo4j", password),
+                environment_attestation=environment,
+                request_timeout_seconds=float(config["request_timeout_seconds"]),
+            )
+            backend = traversal_factory(f"ablation-traversal-{state['controller_execution_id_sha256']}-{repetition_seed}")
+            try:
+                _preload_graph(backend, graph)
+                for index in range(int(config["operations_per_type"])):
+                    started = time.perf_counter_ns()
+                    inventory = backend.provenance_inventory(limit=int(cell["graph_node_count"]) + 1)
+                    coordinate_samples.append({
+                        "cell_id": report["cell_id"], "variant": variant,
+                        "repetition": repetition, "repetition_seed": repetition_seed,
+                        "operation": "traverse", "operation_id": f"traverse:{index}",
+                        "latency_ns": max(0, time.perf_counter_ns() - started),
+                        "success": isinstance(inventory, Mapping), "timeout": False,
+                        "error_category": None,
+                    })
+            finally:
+                backend.close()
+                traversal_factory.close()
+        samples.extend(coordinate_samples)
+        success_count = sum(row["success"] for row in coordinate_samples)
+        operation_count = len(coordinate_samples)
+        timeout_count = sum(row["timeout"] for row in coordinate_samples)
+        repetitions.append({
+            "cell_id": report["cell_id"], "variant": variant,
+            "repetition": repetition, "repetition_seed": repetition_seed,
+            "graph_node_count": int(cell["graph_node_count"]),
+            "concurrency": int(cell["concurrency"]),
+            "elapsed_ns": int(raw_repetition["elapsed_ns"]),
+            "success_count": success_count,
+            "failure_count": operation_count - success_count,
+            "timeout_count": timeout_count,
+            "error_count": operation_count - success_count - timeout_count,
+            "eligible_for_formal": raw_repetition["eligible_for_formal"] is True,
+        })
+    return {
+        "samples": samples, "repetitions": repetitions,
+        "complete": completed + len(repetitions) == len(plan),
+        "environment": {
+            "isolation_verified": environment["isolation_verified"],
+            "co_tenant_load_detected": environment["co_tenant_load_detected"],
+            "source": "protected_host_probe",
+            "cpu_logical_count": environment["cpu_logical_count"],
+            "memory_total_bytes": environment["memory_total_bytes"],
+            "disk_medium": environment["disk_medium"],
+            "toxiproxy_version": environment["toxiproxy_version"],
+        },
+        "services": services,
+        "cleanup": {"namespace_residue_count": 0,
+                    "timeout_cleanup_attempt_count": 0,
+                    "timeout_cleanup_failure_count": 0,
+                    "all_workers_quiescent": True},
+    }
+
+
+def _advance_protected_ablation_candidate(
+    candidate_root: str | Path, *, controller_context: Mapping[str, Any],
+    _observation_batch: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None,
+) -> dict[str, Any]:
+    candidate, state, _context = _load_protected_ablation_state(
+        candidate_root, controller_context
+    )
+    if state.get("status") not in {"created", "partial"}:
+        raise CollectorError("formal ablation candidate cannot be advanced")
+    observer = _default_ablation_observation_batch if _observation_batch is None else _observation_batch
+    batch = observer(dict(state))
+    batch_fields = {"samples", "repetitions", "complete", "environment", "services", "cleanup"}
+    if not isinstance(batch, Mapping) or set(batch) != batch_fields:
+        raise CollectorError("formal ablation observation batch is invalid")
+    old_samples = _load_ablation_json(candidate / "samples.partial.json").get("rows")
+    old_repetitions = _load_ablation_json(candidate / "repetitions.partial.json").get("rows")
+    samples, repetitions = batch["samples"], batch["repetitions"]
+    if not isinstance(old_samples, list) or not isinstance(old_repetitions, list) or not isinstance(samples, list) or not isinstance(repetitions, list) or type(batch["complete"]) is not bool:
+        raise CollectorError("formal ablation observation batch rows are invalid")
+    combined_samples = [*old_samples, *samples]
+    combined_repetitions = [*old_repetitions, *repetitions]
+    observation = {
+        "environment": batch["environment"],
+        "services": batch["services"],
+        "cleanup": batch["cleanup"],
+    }
+    previous_observation = state.get("observations")
+    if previous_observation is not None and previous_observation != observation:
+        raise CollectorError("formal ablation protected observations drifted")
+    state.update({
+        "status": "complete_unsealed" if batch["complete"] else "partial",
+        "completed_repetition_count": len(combined_repetitions),
+        "completed_operation_sample_count": len(combined_samples),
+        "namespace_observation_count": len(combined_repetitions),
+        "observations": observation,
+    })
+    _replace_private_json(candidate / "samples.partial.json", {"rows": combined_samples})
+    _replace_private_json(candidate / "repetitions.partial.json", {"rows": combined_repetitions})
+    _replace_private_json(candidate / "controller-state.json", state)
+    return dict(state)
+
+
+def run_protected_ablation_candidate(
+    candidate_root: str | Path, *, controller_context: Mapping[str, Any],
+    _observation_batch: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return _advance_protected_ablation_candidate(
+        candidate_root, controller_context=controller_context,
+        _observation_batch=_observation_batch,
+    )
+
+
+def resume_protected_ablation_candidate(
+    candidate_root: str | Path, *, controller_context: Mapping[str, Any],
+    _observation_batch: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return _advance_protected_ablation_candidate(
+        candidate_root, controller_context=controller_context,
+        _observation_batch=_observation_batch,
+    )
+
+
+def _hashed_ablation_document(value: Mapping[str, Any]) -> dict[str, Any]:
+    document = dict(value)
+    document["document_sha256"] = hashlib.sha256(
+        canonical_json_bytes(document)
+    ).hexdigest()
+    return document
+
+
+def _write_private_jsonl(path: Path, rows: Sequence[Mapping[str, Any]]) -> None:
+    descriptor = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o400,
+    )
+    with os.fdopen(descriptor, "wb", closefd=True) as stream:
+        for row in rows:
+            stream.write(canonical_json_bytes(dict(row)) + b"\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def seal_protected_ablation_candidate(
+    candidate_root: str | Path, *, controller_context: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Seal only a complete candidate observed by this controller lifecycle."""
+    candidate, state, context = _load_protected_ablation_state(
+        candidate_root, controller_context
+    )
+    if state.get("status") != "complete_unsealed":
+        raise CollectorError("formal ablation candidate is not complete")
+    samples = _load_ablation_json(candidate / "samples.partial.json").get("rows")
+    repetitions = _load_ablation_json(candidate / "repetitions.partial.json").get("rows")
+    evidence = {"samples": samples, "repetitions": repetitions}
+    aggregate = aggregate_ablation(
+        evidence,
+        bootstrap_repetitions=int(FORMAL_ABLATION_CONFIG["bootstrap_repetitions"]),
+        seed=int(FORMAL_ABLATION_CONFIG["bootstrap_seed"]),
+        require_formal_contract=True,
+    )
+    if len(repetitions) != 180 or len(samples) != 6480:
+        raise CollectorError("formal ablation candidate is incomplete")
+    samples_hash = canonical_ablation_jsonl_sha256(samples)
+    repetitions_hash = canonical_ablation_jsonl_sha256(repetitions)
+    aggregate_hash = hashlib.sha256(canonical_json_bytes(aggregate) + b"\n").hexdigest()
+    nonce_hash = str(state["authorization_nonce_sha256"])
+    candidate_id = hashlib.sha256(
+        f"{samples_hash}\0{repetitions_hash}\0{nonce_hash}".encode()
+    ).hexdigest()
+    observations = state.get("observations")
+    if not isinstance(observations, Mapping):
+        raise CollectorError("formal ablation protected observations are unavailable")
+    raw_environment = observations.get("environment")
+    raw_services = observations.get("services")
+    raw_cleanup = observations.get("cleanup")
+    if not isinstance(raw_environment, Mapping) or not isinstance(raw_services, list) or not isinstance(raw_cleanup, Mapping):
+        raise CollectorError("formal ablation protected observations are invalid")
+    environment = _hashed_ablation_document({
+        "schema": "txnmem-provenance-ablation-environment-v1",
+        "candidate_id": candidate_id,
+        "authorization_nonce_sha256": nonce_hash,
+        **dict(raw_environment),
+    })
+    topology = _hashed_ablation_document({
+        "schema": "txnmem-provenance-ablation-topology-v1",
+        "candidate_id": candidate_id,
+        "authorization_nonce_sha256": nonce_hash,
+        "transport": "local_loopback",
+        "environment_document_sha256": environment["document_sha256"],
+        "services": raw_services,
+    })
+    cleanup = _hashed_ablation_document({
+        "schema": "txnmem-provenance-ablation-cleanup-v1",
+        "candidate_id": candidate_id,
+        "authorization_nonce_sha256": nonce_hash,
+        "namespace_observation_count": len(repetitions),
+        **dict(raw_cleanup),
+    })
+    formal_out = Path(str(state["formal_output_path"])).expanduser().absolute()
+    seal = _hashed_ablation_document({
+        "schema": "txnmem-provenance-ablation-candidate-seal-v1",
+        "candidate_id": candidate_id,
+        "authorization_nonce_sha256": nonce_hash,
+        "candidate_root_sha256": _canonical_path_sha256(candidate),
+        "formal_output_sha256": _canonical_path_sha256(formal_out),
+        "samples_sha256": samples_hash,
+        "repetitions_sha256": repetitions_hash,
+        "aggregate_sha256": aggregate_hash,
+        "partial_resume_status": "sealed_complete",
+        "completed_repetition_count": len(repetitions),
+        "completed_operation_sample_count": len(samples),
+    })
+    control = _hashed_ablation_document({
+        "schema": "txnmem-provenance-ablation-control-plane-v1",
+        "trust_boundary": "root_owned_local_control_plane",
+        "candidate_id": candidate_id,
+        "authorization_nonce_sha256": nonce_hash,
+        "candidate_root_sha256": _canonical_path_sha256(candidate),
+        "formal_output_sha256": _canonical_path_sha256(formal_out),
+        "source_commit": context["source_commit"],
+        "config_sha256": _formal_ablation_config_sha256(),
+        "config_file_sha256": context["config_file_sha256"],
+        "environment_document_sha256": environment["document_sha256"],
+        "topology_document_sha256": topology["document_sha256"],
+        "cleanup_document_sha256": cleanup["document_sha256"],
+        "candidate_seal_sha256": seal["document_sha256"],
+    })
+    attestations = {"control_plane": control, "environment": environment,
+                    "topology": topology, "cleanup": cleanup,
+                    "candidate_seal": seal}
+    receipt = {
+        "schema": _FORMAL_ABLATION_RECEIPT_SCHEMA,
+        "source_commit": context["source_commit"],
+        "config_sha256": _formal_ablation_config_sha256(),
+        "config_file_sha256": context["config_file_sha256"],
+        "run_identity": _FORMAL_ABLATION_RUN_IDENTITY,
+        "base_cell_count": 3, "variant_count": 2,
+        "variants": list(PROVENANCE_ABLATION_VARIANTS),
+        "repetition_count": len(repetitions),
+        "operation_sample_count": len(samples),
+        "namespace_residue_count": int(raw_cleanup.get("namespace_residue_count", -1)),
+        "timeout_cleanup_failure_count": int(raw_cleanup.get("timeout_cleanup_failure_count", -1)),
+        "environment_attestation_sha256": environment["document_sha256"],
+        "topology_attestation_sha256": topology["document_sha256"],
+        "samples_sha256": samples_hash, "repetitions_sha256": repetitions_hash,
+        "status": "complete", "candidate_id": candidate_id,
+        "authorization_nonce_sha256": nonce_hash,
+        "control_plane_attestation_sha256": control["document_sha256"],
+    }
+    _write_private_jsonl(candidate / "samples.jsonl", samples)
+    _write_private_jsonl(candidate / "repetitions.jsonl", repetitions)
+    _write_private_json(candidate / "attestations.json", attestations)
+    _write_private_json(candidate / "receipt.json", receipt)
+    state.update({"status": "sealed_complete", "candidate_id": candidate_id})
+    _replace_private_json(candidate / "controller-state.json", state)
+    return dict(state)
+
+
+def validate_protected_ablation_candidate(
+    candidate_root: str | Path, *, controller_context: Mapping[str, Any]
+) -> dict[str, Any]:
+    candidate, state, context = _load_protected_ablation_state(
+        candidate_root, controller_context
+    )
+    if state.get("status") != "sealed_complete":
+        raise CollectorError("formal ablation candidate is not sealed")
+    receipt = _load_ablation_json(_require_control_plane_file(candidate / "receipt.json"))
+    attestations = _load_ablation_json(_require_control_plane_file(candidate / "attestations.json"))
+    evidence = {
+        "samples": _load_ablation_jsonl(_require_sealed_candidate_file(candidate / "samples.jsonl", candidate)),
+        "repetitions": _load_ablation_jsonl(_require_sealed_candidate_file(candidate / "repetitions.jsonl", candidate)),
+    }
+    return validate_formal_ablation_candidate(
+        receipt, evidence, attestations=attestations, candidate_root=candidate,
+        formal_out_dir=state["formal_output_path"],
+        expected_source_commit=context["source_commit"],
+        expected_config_file_sha256=context["config_file_sha256"],
+    )
 
 
 def _canonical_path_sha256(path: str | Path) -> str:
@@ -456,7 +927,6 @@ def preflight_formal_ablation_output(out_dir: str | Path) -> Path:
 def promote_formal_ablation_candidate(
     receipt: Mapping[str, Any], evidence: Mapping[str, Any], *,
     attestations: Mapping[str, Any], candidate_root: str | Path,
-    promotion_registry: str | Path,
     expected_source_commit: str, expected_config_file_sha256: str,
     out_dir: str | Path,
 ) -> Path:
@@ -471,7 +941,7 @@ def promote_formal_ablation_candidate(
         expected_config_file_sha256=expected_config_file_sha256,
     )
     target = preflight_formal_ablation_output(out_dir)
-    registry = Path(promotion_registry).expanduser().absolute().resolve(strict=True)
+    _runtime, _candidates, registry = _protected_ablation_runtime()
     metadata = registry.stat()
     if (
         registry.is_symlink() or not registry.is_dir()
@@ -660,7 +1130,6 @@ def _formal_ablation_cli(
     parser.add_argument("--repetitions", type=Path, required=True)
     parser.add_argument("--candidate-root", type=Path, required=True)
     parser.add_argument("--formal-out-dir", type=Path, required=True)
-    parser.add_argument("--promotion-registry", type=Path)
     parser.add_argument("--out", type=Path)
     parser.add_argument("--out-dir", type=Path)
     args = parser.parse_args(list(argv))
@@ -694,7 +1163,7 @@ def _formal_ablation_cli(
             stream.write(canonical_json_bytes(validated) + b"\n")
         return 0
     if (
-        args.out_dir is None or args.out is not None or args.promotion_registry is None
+        args.out_dir is None or args.out is not None
         or _canonical_path_sha256(args.out_dir) != _canonical_path_sha256(args.formal_out_dir)
     ):
         raise CollectorError("formal ablation promotion output is invalid")
@@ -702,11 +1171,51 @@ def _formal_ablation_cli(
         receipt, evidence,
         attestations=attestations,
         candidate_root=args.candidate_root,
-        promotion_registry=args.promotion_registry,
         expected_source_commit=source_commit,
         expected_config_file_sha256=config_file_sha256,
         out_dir=args.out_dir,
     )
+    return 0
+
+
+def _protected_ablation_producer_cli(
+    argv: Sequence[str], controller_context: Mapping[str, Any] | None
+) -> int:
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("action", choices=(
+        "ablation-create", "ablation-run", "ablation-resume", "ablation-seal",
+    ))
+    parser.add_argument("--candidate-root", type=Path)
+    parser.add_argument("--formal-out-dir", type=Path)
+    args = parser.parse_args(list(argv))
+    context = _validate_formal_controller_context(controller_context)
+    if args.action == "ablation-create":
+        if args.candidate_root is not None or args.formal_out_dir is None:
+            raise CollectorError("formal ablation create arguments are invalid")
+        candidate = create_protected_ablation_candidate(
+            formal_out_dir=args.formal_out_dir, controller_context=context
+        )
+        print(str(candidate))
+        return 0
+    if args.candidate_root is None or args.formal_out_dir is not None:
+        raise CollectorError("formal ablation lifecycle arguments are invalid")
+    if args.action == "ablation-run":
+        state = run_protected_ablation_candidate(
+            args.candidate_root, controller_context=context
+        )
+    elif args.action == "ablation-resume":
+        state = resume_protected_ablation_candidate(
+            args.candidate_root, controller_context=context
+        )
+    else:
+        state = seal_protected_ablation_candidate(
+            args.candidate_root, controller_context=context
+        )
+    while args.action in {"ablation-run", "ablation-resume"} and state["status"] == "partial":
+        state = resume_protected_ablation_candidate(
+            args.candidate_root, controller_context=context
+        )
+    print(str(state["status"]))
     return 0
 
 
@@ -11077,6 +11586,14 @@ def main(
     _controller_context: Mapping[str, Any] | None = None,
 ) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] in {
+        "ablation-create", "ablation-run", "ablation-resume", "ablation-seal",
+    }:
+        try:
+            return _protected_ablation_producer_cli(arguments, _controller_context)
+        except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
+            print(f"provenance ablation producer blocked: {type(exc).__name__}")
+            return 2
     if arguments and arguments[0] in {"ablation-validate", "ablation-promote"}:
         try:
             return _formal_ablation_cli(arguments, _controller_context)

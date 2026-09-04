@@ -815,6 +815,11 @@ def _dispatch(
         "attest": "txnmem_topology_attestation",
         "promote": "txnmem_experiment",
         "ablation-smoke": "txnmem_formal_smoke",
+        "ablation-smoke-run": "txnmem_formal_smoke",
+        "ablation-create": "txnmem_provenance_execution_collector",
+        "ablation-run": "txnmem_provenance_execution_collector",
+        "ablation-resume": "txnmem_provenance_execution_collector",
+        "ablation-seal": "txnmem_provenance_execution_collector",
         "ablation-validate": "txnmem_provenance_execution_collector",
         "ablation-promote": "txnmem_provenance_execution_collector",
     }.get(action)
@@ -839,7 +844,8 @@ def _dispatch(
         if not callable(entry):
             raise FormalControllerError("formal controller target has no entry point")
         if action in {
-            "measure", "smoke", "progress", "ablation-smoke",
+            "measure", "smoke", "progress", "ablation-smoke", "ablation-smoke-run",
+            "ablation-create", "ablation-run", "ablation-resume", "ablation-seal",
             "ablation-validate", "ablation-promote",
         }:
             controller_context = {

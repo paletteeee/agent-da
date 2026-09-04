@@ -260,18 +260,23 @@ class FormalAblationLifecycleTests(unittest.TestCase):
         evidence = self._evidence()
         with TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
-            candidate_root, registry, output = root / "candidate", root / "registry", root / "formal"
+            candidate_root, output = root / "candidate", root / "formal"
             candidate_root.mkdir(mode=0o700)
-            registry.mkdir(mode=0o700)
+            runtime = root / "runtime"
+            registry = runtime / "promotion-registry"
+            registry.mkdir(parents=True, mode=0o700)
+            (runtime / "candidates").mkdir(mode=0o700)
+            runtime.chmod(0o700)
             attestations = self._attestations(evidence, candidate_root=candidate_root, out_dir=output)
             receipt = self._receipt(evidence, attestations)
-            promoted = collector_module.promote_formal_ablation_candidate(
-                receipt, evidence, attestations=attestations,
-                candidate_root=candidate_root, promotion_registry=registry,
-                expected_source_commit="a" * 40,
-                expected_config_file_sha256="b" * 64,
-                out_dir=output,
-            )
+            with patch.object(collector_module, "_FORMAL_ABLATION_RUNTIME_ROOT", runtime):
+                promoted = collector_module.promote_formal_ablation_candidate(
+                    receipt, evidence, attestations=attestations,
+                    candidate_root=candidate_root,
+                    expected_source_commit="a" * 40,
+                    expected_config_file_sha256="b" * 64,
+                    out_dir=output,
+                )
             self.assertEqual(promoted, output.resolve())
             self.assertTrue((promoted / "manifest.json").is_file())
             self.assertTrue((promoted / "samples.jsonl").is_file())
@@ -286,10 +291,10 @@ class FormalAblationLifecycleTests(unittest.TestCase):
             aggregate_path.write_bytes(aggregate_path.read_bytes() + b" ")
             with self.assertRaises(collector_module.CollectorError):
                 collector_module.verify_promoted_formal_ablation(promoted)
-            with self.assertRaises(collector_module.CollectorError):
+            with patch.object(collector_module, "_FORMAL_ABLATION_RUNTIME_ROOT", runtime), self.assertRaises(collector_module.CollectorError):
                 collector_module.promote_formal_ablation_candidate(
                     receipt, evidence, attestations=attestations,
-                    candidate_root=candidate_root, promotion_registry=registry,
+                    candidate_root=candidate_root,
                     expected_source_commit="a" * 40,
                     expected_config_file_sha256="b" * 64,
                     out_dir=output,
@@ -300,10 +305,10 @@ class FormalAblationLifecycleTests(unittest.TestCase):
                 evidence, candidate_root=candidate_root, out_dir=second
             )
             reissued_receipt = self._receipt(evidence, reissued)
-            with self.assertRaises(collector_module.CollectorError):
+            with patch.object(collector_module, "_FORMAL_ABLATION_RUNTIME_ROOT", runtime), self.assertRaises(collector_module.CollectorError):
                 collector_module.promote_formal_ablation_candidate(
                     reissued_receipt, evidence, attestations=reissued,
-                    candidate_root=candidate_root, promotion_registry=registry,
+                    candidate_root=candidate_root,
                     expected_source_commit="a" * 40,
                     expected_config_file_sha256="b" * 64, out_dir=second,
                 )
@@ -329,6 +334,109 @@ class FormalAblationLifecycleTests(unittest.TestCase):
                         expected_source_commit="a" * 40,
                         expected_config_file_sha256="b" * 64,
                     )
+
+    def test_protected_producer_persists_partial_then_resumes_and_seals(self):
+        evidence = self._evidence()
+        midpoint = len(evidence["repetitions"]) // 2
+        sample_midpoint = sum(
+            40 if row["variant"] == "TxnMem" else 32
+            for row in evidence["repetitions"][:midpoint]
+        )
+        batches = iter((
+            {
+                "samples": evidence["samples"][:sample_midpoint],
+                "repetitions": evidence["repetitions"][:midpoint],
+                "complete": False,
+                "environment": {"isolation_verified": True, "co_tenant_load_detected": False, "source": "protected_host_probe", "cpu_logical_count": 8, "memory_total_bytes": 16_000_000_000, "disk_medium": "ssd", "toxiproxy_version": "2.5.0"},
+                "services": [{"role": "qdrant", "version": "1.15.4", "image_manifest_digest_sha256": collector_module.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["qdrant"]}, {"role": "neo4j", "version": "5.26.0", "image_manifest_digest_sha256": collector_module.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["neo4j"]}],
+                "cleanup": {"namespace_residue_count": 0, "timeout_cleanup_attempt_count": 0, "timeout_cleanup_failure_count": 0, "all_workers_quiescent": True},
+            },
+            {
+                "samples": evidence["samples"][sample_midpoint:],
+                "repetitions": evidence["repetitions"][midpoint:],
+                "complete": True,
+                "environment": {"isolation_verified": True, "co_tenant_load_detected": False, "source": "protected_host_probe", "cpu_logical_count": 8, "memory_total_bytes": 16_000_000_000, "disk_medium": "ssd", "toxiproxy_version": "2.5.0"},
+                "services": [{"role": "qdrant", "version": "1.15.4", "image_manifest_digest_sha256": collector_module.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["qdrant"]}, {"role": "neo4j", "version": "5.26.0", "image_manifest_digest_sha256": collector_module.FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS["neo4j"]}],
+                "cleanup": {"namespace_residue_count": 0, "timeout_cleanup_attempt_count": 0, "timeout_cleanup_failure_count": 0, "all_workers_quiescent": True},
+            },
+        ))
+        context = {
+            "source_commit": "a" * 40,
+            "approval_manifest_sha256": "c" * 64,
+            "config_file_sha256": "b" * 64,
+        }
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module, "_FORMAL_ABLATION_RUNTIME_ROOT", Path(tmp) / "runtime"
+        ):
+            runtime = collector_module._FORMAL_ABLATION_RUNTIME_ROOT
+            (runtime / "candidates").mkdir(parents=True, mode=0o700)
+            (runtime / "promotion-registry").mkdir(mode=0o700)
+            runtime.chmod(0o700)
+            output = Path(tmp) / "formal"
+            candidate = collector_module.create_protected_ablation_candidate(
+                formal_out_dir=output, controller_context=context
+            )
+            first = collector_module.run_protected_ablation_candidate(
+                candidate, controller_context=context,
+                _observation_batch=lambda _state: next(batches),
+            )
+            self.assertEqual(first["status"], "partial")
+            with self.assertRaises(collector_module.CollectorError):
+                collector_module.seal_protected_ablation_candidate(
+                    candidate, controller_context=context
+                )
+            second = collector_module.resume_protected_ablation_candidate(
+                candidate, controller_context=context,
+                _observation_batch=lambda _state: next(batches),
+            )
+            self.assertEqual(second["status"], "complete_unsealed")
+            sealed = collector_module.seal_protected_ablation_candidate(
+                candidate, controller_context=context
+            )
+            self.assertEqual(sealed["status"], "sealed_complete")
+            self.assertEqual((candidate / "receipt.json").stat().st_mode & 0o777, 0o400)
+            self.assertEqual((candidate / "attestations.json").stat().st_mode & 0o777, 0o400)
+            validated = collector_module.validate_protected_ablation_candidate(
+                candidate, controller_context=context
+            )
+            self.assertEqual(validated["operation_sample_count"], 6480)
+
+    def test_registry_is_fixed_policy_and_two_registry_bypass_is_impossible(self):
+        evidence = self._evidence()
+        with TemporaryDirectory() as tmp, patch.object(
+            collector_module, "_FORMAL_ABLATION_RUNTIME_ROOT", Path(tmp) / "runtime"
+        ):
+            runtime = collector_module._FORMAL_ABLATION_RUNTIME_ROOT
+            registry = runtime / "promotion-registry"
+            registry.mkdir(parents=True, mode=0o700)
+            runtime.chmod(0o700)
+            candidate = runtime / "candidates" / ("d" * 64)
+            candidate.mkdir(parents=True, mode=0o700)
+            candidate.parent.chmod(0o700)
+            first, second = Path(tmp) / "formal-a", Path(tmp) / "formal-b"
+            attestations = self._attestations(evidence, candidate_root=candidate, out_dir=first)
+            receipt = self._receipt(evidence, attestations)
+            collector_module.promote_formal_ablation_candidate(
+                receipt, evidence, attestations=attestations,
+                candidate_root=candidate,
+                expected_source_commit="a" * 40,
+                expected_config_file_sha256="b" * 64, out_dir=first,
+            )
+            reissued = self._attestations(evidence, candidate_root=candidate, out_dir=second)
+            with self.assertRaises(collector_module.CollectorError):
+                collector_module.promote_formal_ablation_candidate(
+                    self._receipt(evidence, reissued), evidence,
+                    attestations=reissued, candidate_root=candidate,
+                    expected_source_commit="a" * 40,
+                    expected_config_file_sha256="b" * 64, out_dir=second,
+                )
+            with self.assertRaises(TypeError):
+                collector_module.promote_formal_ablation_candidate(
+                    receipt, evidence, attestations=attestations,
+                    candidate_root=candidate, promotion_registry=Path(tmp) / "registry-b",
+                    expected_source_commit="a" * 40,
+                    expected_config_file_sha256="b" * 64, out_dir=second,
+                )
 
 
 

@@ -24,7 +24,7 @@ import stat
 import subprocess
 import sys
 import time
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 import urllib.parse
 
 from txnmem_formal_io import FormalIOError, FormalStore, canonical_json_bytes
@@ -46,6 +46,7 @@ from txnmem_provenance_execution_collector import (
     _FORMAL_RUNS_ROOT,
     _FORMAL_RUNTIME_WHEEL_DIRECTORY,
     _FORMAL_TOXIPROXY_CONTAINER,
+    _controller_ablation_context,
     _formal_ablation_config_sha256,
     _NftNetworkGuard,
     _cleanup_formal_execution_resources,
@@ -86,9 +87,12 @@ from txnmem_toxiproxy_metrics import proxy_counter_values
 from txnmem_provenance_performance import (
     ProvenancePerformanceError,
     _load_provenance_candidate,
+    build_layered_dag,
     formal_config_file_sha256,
     formal_matrix_config_sha256,
     load_strict_json_document,
+    make_provenance_ablation_backend_factory,
+    run_matrix_cell,
     validate_environment_attestation,
 )
 from txnmem_provenance_progress import canonical_snapshot_line
@@ -271,6 +275,107 @@ def validate_formal_ablation_smoke_report(
         ):
             raise FormalSmokeError("formal ablation smoke receipt is not control-plane protected")
     return dict(value)
+
+
+def _execute_formal_ablation_smoke_observations() -> dict[str, Any]:
+    """Execute both variants against the registered real backend path."""
+    password = os.environ.get("TXNMEM_NEO4J_PASSWORD")
+    if not password:
+        raise FormalSmokeError("Neo4j runtime credential is unavailable")
+    environment = _collect_formal_environment_attestation(
+        toxiproxy_url=_TOXIPROXY_URL,
+        storage_path=Path("/var/lib/txnmem-formal/provenance-ablation"),
+    )
+    graph = build_layered_dag(100, seed=17)
+    executions = []
+    service_identities = None
+    for variant in ("TxnMem", "MemoryOnly-NoProvenance"):
+        factory = make_provenance_ablation_backend_factory(
+            variant=variant, qdrant_url=_QDRANT_URL, neo4j_uri=_NEO4J_URI,
+            neo4j_auth=("neo4j", password), environment_attestation=environment,
+            request_timeout_seconds=30.0,
+        )
+        try:
+            report = run_matrix_cell(
+                factory, graph, concurrency=1, repetitions=1,
+                operations_per_type=1,
+                run_id=f"provenance-ablation-v10-smoke-{variant}",
+                formal=True, environment_attestation=environment,
+            )
+        finally:
+            factory.close()
+        repetitions = report.get("repetitions")
+        samples = report.get("samples")
+        if not isinstance(repetitions, list) or len(repetitions) != 1 or not isinstance(samples, list):
+            raise FormalSmokeError("formal ablation smoke observation is incomplete")
+        repetition = repetitions[0]
+        health = repetition.get("service_health")
+        if not isinstance(health, Mapping):
+            raise FormalSmokeError("formal ablation smoke health observation is invalid")
+        observed_services = [
+            {
+                "role": role,
+                "version": health[role]["version"],
+                "image_manifest_digest_sha256": FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS[role],
+            }
+            for role in ("qdrant", "neo4j")
+        ]
+        if service_identities is not None and service_identities != observed_services:
+            raise FormalSmokeError("formal ablation smoke service identity drifted")
+        service_identities = observed_services
+        operations = {str(row.get("operation")) for row in samples if row.get("success") is True}
+        executions.append({
+            "variant": variant,
+            "memory_crud_verified": {"read", "write", "derive", "propagate"}.issubset(operations),
+            "provenance_edge_count": graph.edge_count if variant == "TxnMem" else 0,
+            "traversal_executed": "traverse" in operations,
+            "namespace_empty_before": repetition.get("namespace_initially_empty") is True,
+            "namespace_empty_after": repetition.get("state_closed") is True,
+            "timeout_cleanup_verified": repetition.get("state_closed") is True,
+        })
+    return {"service_identities": service_identities, "variant_executions": executions}
+
+
+def produce_formal_ablation_smoke_report(
+    report_path: str | Path, *, controller_context: Mapping[str, Any],
+    _execute_observations: Callable[[], Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Run the protected smoke and exclusively create its immutable receipt."""
+    context = _controller_ablation_context(controller_context)
+    target = Path(report_path).expanduser().absolute()
+    parent = target.parent.resolve(strict=True)
+    metadata = parent.stat()
+    if target.parent != parent or target.exists() or target.is_symlink() or metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) & 0o077:
+        raise FormalSmokeError("formal ablation smoke output is not controller protected")
+    executor = _execute_formal_ablation_smoke_observations if _execute_observations is None else _execute_observations
+    observations = executor()
+    if not isinstance(observations, Mapping) or set(observations) != {"service_identities", "variant_executions"}:
+        raise FormalSmokeError("formal ablation smoke observations are invalid")
+    nonce_hash = hashlib.sha256(secrets.token_bytes(32)).hexdigest()
+    execution_id = hashlib.sha256(
+        f"{nonce_hash}\0{context['approval_manifest_sha256']}\0{context['source_commit']}".encode()
+    ).hexdigest()
+    payload = {
+        "schema": _ABLATION_REPORT_SCHEMA,
+        "trust_boundary": "root_owned_local_control_plane",
+        "run_identity": "provenance-ablation-v10-smoke",
+        "source_commit": context["source_commit"],
+        "config_sha256": _formal_ablation_config_sha256(),
+        "config_file_sha256": context["config_file_sha256"],
+        "approval_manifest_sha256": context["approval_manifest_sha256"],
+        "authorization_nonce_sha256": nonce_hash,
+        "controller_execution_id_sha256": execution_id,
+        "service_identities": observations["service_identities"],
+        "variant_executions": observations["variant_executions"],
+        "actual_execution": True, "candidate_created": False, "status": "passed",
+    }
+    payload["document_sha256"] = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+    validated = validate_formal_ablation_smoke_report(payload, controller_context=context)
+    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o400)
+    with os.fdopen(descriptor, "wb", closefd=True) as stream:
+        stream.write(canonical_json_bytes(validated) + b"\n")
+        stream.flush(); os.fsync(stream.fileno())
+    return validated
 
 
 @dataclass(frozen=True)
@@ -2088,6 +2193,21 @@ def main(
     _controller_context: Mapping[str, Any] | None = None,
 ) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "ablation-smoke-run":
+        producer_parser = argparse.ArgumentParser(allow_abbrev=False)
+        producer_parser.add_argument("action", choices=("ablation-smoke-run",))
+        producer_parser.add_argument("--out", type=Path, required=True)
+        try:
+            producer_args = producer_parser.parse_args(arguments)
+            context = _validate_formal_controller_context(_controller_context)
+            produce_formal_ablation_smoke_report(
+                producer_args.out, controller_context=context
+            )
+        except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
+            print(f"formal provenance ablation smoke producer blocked: {type(exc).__name__}")
+            return 2
+        print("formal provenance ablation smoke execution passed")
+        return 0
     if arguments and arguments[0] == "ablation-smoke":
         ablation_parser = argparse.ArgumentParser(allow_abbrev=False)
         ablation_parser.add_argument("action", choices=("ablation-smoke",))

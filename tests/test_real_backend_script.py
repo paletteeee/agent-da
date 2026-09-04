@@ -15,6 +15,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RealBackendScriptTests(unittest.TestCase):
+    def test_formal_runtime_installs_unique_ablation_policy_directories(self):
+        script = (ROOT / "scripts" / "install_formal_provenance_runtime.sh").read_text()
+        self.assertIn("/var/lib/txnmem-formal/provenance-ablation", script)
+        self.assertIn('"$ablation_root/candidates"', script)
+        self.assertIn('"$ablation_root/promotion-registry"', script)
+
     def _run_e2e_cli(self, *arguments):
         environment = os.environ.copy()
         environment["PYTHONPATH"] = os.pathsep.join(
