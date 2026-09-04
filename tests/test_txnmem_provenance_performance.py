@@ -5195,11 +5195,13 @@ class ProvenanceAblationAggregationTests(unittest.TestCase):
                         "repetition": repetition,
                         "repetition_seed": seed,
                         "operation": operation,
+                        "operation_id": f"{operation}:0",
                         "latency_ns": (
                             50 + repetition if operation == "traverse" else common_latency
                         ),
                         "success": True,
                         "timeout": False,
+                        "error_category": None,
                     }
                     for operation in operations
                 ]
@@ -5217,6 +5219,7 @@ class ProvenanceAblationAggregationTests(unittest.TestCase):
                         "success_count": len(variant_samples),
                         "failure_count": 0,
                         "timeout_count": 0,
+                        "error_count": 0,
                     }
                 )
         return {"samples": samples, "repetitions": rows}
@@ -5354,6 +5357,214 @@ class ProvenanceAblationAggregationTests(unittest.TestCase):
         self.assertEqual(paired["eligible_pair_count"], 0)
         self.assertEqual(paired["missing_pair_count"], 2)
         self.assertIsNone(paired["common_latency_overhead_pct"])
+
+    def test_estimate_is_mean_of_pair_percentages_not_ratio_of_means(self):
+        evidence = self._evidence(repetitions=2)
+        for sample in evidence["samples"]:
+            if sample["operation"] == "traverse":
+                continue
+            if sample["repetition"] == 0:
+                sample["latency_ns"] = 2 if sample["variant"] == "TxnMem" else 1
+            else:
+                sample["latency_ns"] = 101 if sample["variant"] == "TxnMem" else 100
+        for row in evidence["repetitions"]:
+            if row["repetition"] == 0:
+                row["elapsed_ns"] = (
+                    2_500_000_000 if row["variant"] == "TxnMem" else 4_000_000_000
+                )
+            else:
+                row["elapsed_ns"] = (
+                    49_504_950 if row["variant"] == "TxnMem" else 40_000_000
+                )
+
+        paired = aggregate_ablation(
+            evidence, bootstrap_repetitions=100, seed=31
+        )["paired_cells"][0]
+        self.assertAlmostEqual(
+            paired["common_latency_overhead_pct"]["estimate"], 50.5
+        )
+        self.assertAlmostEqual(
+            paired["throughput_change_pct"]["estimate"], 50.5, places=5
+        )
+
+    def test_common_operation_identity_or_mix_drift_excludes_pair(self):
+        for mutation in ("identity", "mix"):
+            with self.subTest(mutation=mutation):
+                evidence = self._evidence(repetitions=1)
+                control = [
+                    row
+                    for row in evidence["samples"]
+                    if row["variant"] == "MemoryOnly-NoProvenance"
+                ]
+                if mutation == "identity":
+                    control[0]["operation_id"] = "read:different-input"
+                else:
+                    control[0]["operation"] = "write"
+                paired = aggregate_ablation(
+                    evidence, bootstrap_repetitions=10, seed=37
+                )["paired_cells"][0]
+                self.assertEqual(paired["eligible_pair_count"], 0)
+                self.assertEqual(paired["incomparable_pair_count"], 1)
+
+    def test_pair_requires_all_defined_common_operation_types(self):
+        evidence = self._evidence(repetitions=1)
+        evidence["samples"] = [
+            row for row in evidence["samples"] if row["operation"] != "propagate"
+        ]
+        for repetition in evidence["repetitions"]:
+            repetition["success_count"] -= 1
+        paired = aggregate_ablation(
+            evidence, bootstrap_repetitions=10, seed=39
+        )["paired_cells"][0]
+        self.assertEqual(paired["eligible_pair_count"], 0)
+        self.assertEqual(paired["incomparable_pair_count"], 1)
+
+    def test_cell_metadata_drift_is_rejected(self):
+        evidence = self._evidence(repetitions=1)
+        next(
+            row
+            for row in evidence["repetitions"]
+            if row["variant"] == "MemoryOnly-NoProvenance"
+        )["concurrency"] = 4
+        with self.assertRaisesRegex(ProvenancePerformanceError, "cell metadata"):
+            aggregate_ablation(evidence, bootstrap_repetitions=10, seed=41)
+
+    def test_outcomes_separate_timeouts_errors_and_reject_contradictions(self):
+        evidence = self._evidence(repetitions=1)
+        control_rep = next(
+            row
+            for row in evidence["repetitions"]
+            if row["variant"] == "MemoryOnly-NoProvenance"
+        )
+        control_samples = [
+            row
+            for row in evidence["samples"]
+            if row["variant"] == "MemoryOnly-NoProvenance"
+        ]
+        control_samples[0].update(
+            {"success": False, "timeout": True, "error_category": "timeout"}
+        )
+        control_samples[1].update(
+            {"success": False, "timeout": False, "error_category": "backend_error"}
+        )
+        control_rep.update(
+            {
+                "eligible_for_formal": False,
+                "success_count": 2,
+                "failure_count": 2,
+                "timeout_count": 1,
+                "error_count": 1,
+            }
+        )
+        result = aggregate_ablation(evidence, bootstrap_repetitions=10, seed=43)
+        control = next(
+            row
+            for row in result["variant_cells"]
+            if row["variant"] == "MemoryOnly-NoProvenance"
+        )
+        self.assertEqual(control["timeout_count"], 1)
+        self.assertEqual(control["error_count"], 1)
+        self.assertEqual(control["error_category_counts"], {"backend_error": 1})
+
+        contradictory = self._evidence(repetitions=1)
+        bad = contradictory["samples"][0]
+        bad.update({"success": True, "timeout": True, "error_category": "timeout"})
+        contradictory["repetitions"][0].update(
+            {"timeout_count": 1}
+        )
+        with self.assertRaisesRegex(ProvenancePerformanceError, "outcome"):
+            aggregate_ablation(contradictory, bootstrap_repetitions=10, seed=43)
+
+    def test_eligible_repetition_with_failure_is_rejected(self):
+        evidence = self._evidence(repetitions=1)
+        sample = evidence["samples"][0]
+        sample.update(
+            {"success": False, "timeout": False, "error_category": "backend_error"}
+        )
+        repetition = evidence["repetitions"][0]
+        repetition.update({"success_count": 4, "failure_count": 1, "error_count": 1})
+        with self.assertRaisesRegex(ProvenancePerformanceError, "eligible"):
+            aggregate_ablation(evidence, bootstrap_repetitions=10, seed=47)
+
+    def test_formal_contract_accepts_exact_180_and_rejects_incomplete(self):
+        repetitions = []
+        samples = []
+        for cell in provenance_module.FORMAL_ABLATION_CONFIG["cells"]:
+            cell_id = f"n{cell['graph_node_count']}-c{cell['concurrency']}"
+            for repetition, repetition_seed in enumerate(
+                provenance_module.FORMAL_ABLATION_CONFIG["repetition_seeds"]
+            ):
+                for variant in provenance_module.PROVENANCE_ABLATION_VARIANTS:
+                    operations = ["read", "write", "derive", "propagate"]
+                    if variant == "TxnMem":
+                        operations.append("traverse")
+                    planned_operations = [
+                        (operation, operation_index)
+                        for operation in operations
+                        for operation_index in range(
+                            provenance_module.FORMAL_ABLATION_CONFIG[
+                                "operations_per_type"
+                            ]
+                        )
+                    ]
+                    repetitions.append(
+                        {
+                            "cell_id": cell_id,
+                            "variant": variant,
+                            "repetition": repetition,
+                            "repetition_seed": repetition_seed,
+                            "graph_node_count": cell["graph_node_count"],
+                            "concurrency": cell["concurrency"],
+                            "eligible_for_formal": True,
+                            "elapsed_ns": 100,
+                            "success_count": len(planned_operations),
+                            "failure_count": 0,
+                            "timeout_count": 0,
+                            "error_count": 0,
+                        }
+                    )
+                    samples.extend(
+                        {
+                            "cell_id": cell_id,
+                            "variant": variant,
+                            "repetition": repetition,
+                            "repetition_seed": repetition_seed,
+                            "operation": operation,
+                            "operation_id": f"{operation}:{operation_index}",
+                            "latency_ns": 10,
+                            "success": True,
+                            "timeout": False,
+                            "error_category": None,
+                        }
+                        for operation, operation_index in planned_operations
+                    )
+        evidence = {"samples": samples, "repetitions": repetitions}
+        result = aggregate_ablation(
+            evidence,
+            bootstrap_repetitions=10,
+            seed=53,
+            require_formal_contract=True,
+        )
+        self.assertEqual(result["attempted_repetition_count"], 180)
+        self.assertEqual(result["operation_sample_count"], 6_480)
+        self.assertEqual(result["eligible_pair_count"], 90)
+        self.assertTrue(result["formal_contract_complete"])
+        incomplete = copy.deepcopy(evidence)
+        removed = incomplete["repetitions"].pop()
+        incomplete["samples"] = [
+            row
+            for row in incomplete["samples"]
+            if not all(row[field] == removed[field] for field in (
+                "cell_id", "variant", "repetition", "repetition_seed"
+            ))
+        ]
+        with self.assertRaisesRegex(ProvenancePerformanceError, "formal.*180"):
+            aggregate_ablation(
+                incomplete,
+                bootstrap_repetitions=10,
+                seed=53,
+                require_formal_contract=True,
+            )
 
 
 if __name__ == "__main__":

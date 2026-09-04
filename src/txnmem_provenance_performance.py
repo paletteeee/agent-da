@@ -2085,6 +2085,9 @@ def _bootstrap_throughput(
 
 _ABLATION_COMMON_OPERATIONS = frozenset({"read", "write", "derive", "propagate"})
 _ABLATION_OPERATIONS = _ABLATION_COMMON_OPERATIONS | {"traverse"}
+_ABLATION_ERROR_CATEGORIES = frozenset(
+    {"backend_error", "correctness_error", "isolation_error"}
+)
 
 
 def _bootstrap_ablation_metric(
@@ -2116,6 +2119,7 @@ def aggregate_ablation(
     *,
     bootstrap_repetitions: int = 10_000,
     seed: int = 1701,
+    require_formal_contract: bool = False,
 ) -> dict[str, Any]:
     """Aggregate a two-variant ablation using repetition-level uncertainty."""
 
@@ -2123,6 +2127,8 @@ def aggregate_ablation(
         bootstrap_repetitions, "bootstrap_repetitions"
     )
     seed = _strict_integer(seed, "seed")
+    if type(require_formal_contract) is not bool:
+        raise ProvenancePerformanceError("require_formal_contract must be boolean")
     if not isinstance(evidence, Mapping) or set(evidence) != {
         "samples",
         "repetitions",
@@ -2137,6 +2143,7 @@ def aggregate_ablation(
 
     repetitions: dict[tuple[str, str, int, int], dict[str, Any]] = {}
     coordinates_by_cell: dict[str, set[tuple[int, int]]] = {}
+    cell_metadata: dict[str, tuple[int, int]] = {}
     for raw in raw_repetitions:
         if not isinstance(raw, Mapping):
             raise ProvenancePerformanceError("ablation repetition is malformed")
@@ -2155,10 +2162,28 @@ def aggregate_ablation(
             ("success_count", 0),
             ("failure_count", 0),
             ("timeout_count", 0),
+            ("error_count", 0),
         ):
             _exact_int_field(raw, field, minimum=minimum)
+        metadata = (int(raw["graph_node_count"]), int(raw["concurrency"]))
+        if cell_id != f"n{metadata[0]}-c{metadata[1]}":
+            raise ProvenancePerformanceError("ablation cell metadata is inconsistent")
+        if cell_id in cell_metadata and cell_metadata[cell_id] != metadata:
+            raise ProvenancePerformanceError("ablation cell metadata drifted")
+        cell_metadata[cell_id] = metadata
         if type(raw.get("eligible_for_formal")) is not bool:
             raise ProvenancePerformanceError("ablation eligibility must be boolean")
+        if int(raw["timeout_count"]) + int(raw["error_count"]) != int(
+            raw["failure_count"]
+        ):
+            raise ProvenancePerformanceError("ablation repetition outcome is inconsistent")
+        if raw["eligible_for_formal"] is True and any(
+            int(raw[field]) != 0
+            for field in ("failure_count", "timeout_count", "error_count")
+        ):
+            raise ProvenancePerformanceError(
+                "eligible ablation repetition must contain no failures"
+            )
         key = (cell_id, str(variant), repetition, repetition_seed)
         if key in repetitions:
             raise ProvenancePerformanceError("duplicate ablation repetition identity")
@@ -2197,8 +2222,20 @@ def aggregate_ablation(
                 "memory-only control must not contain traversal samples"
             )
         _exact_int_field(raw, "latency_ns", minimum=0)
+        operation_id = raw.get("operation_id")
+        if not isinstance(operation_id, str) or not operation_id:
+            raise ProvenancePerformanceError("ablation operation identity is invalid")
         if type(raw.get("success")) is not bool or type(raw.get("timeout")) is not bool:
             raise ProvenancePerformanceError("ablation sample outcome is invalid")
+        error_category = raw.get("error_category")
+        if raw["success"] is True:
+            if raw["timeout"] is not False or error_category is not None:
+                raise ProvenancePerformanceError("ablation sample outcome is contradictory")
+        elif raw["timeout"] is True:
+            if error_category != "timeout":
+                raise ProvenancePerformanceError("ablation timeout outcome is invalid")
+        elif error_category not in _ABLATION_ERROR_CATEGORIES:
+            raise ProvenancePerformanceError("ablation error category is invalid")
         samples_by_repetition[key].append(dict(raw))
 
     for key, repetition_row in repetitions.items():
@@ -2206,14 +2243,61 @@ def aggregate_ablation(
         successes = sum(row["success"] is True for row in rows)
         failures = len(rows) - successes
         timeouts = sum(row["timeout"] is True for row in rows)
+        errors = sum(
+            row["success"] is False and row["timeout"] is False for row in rows
+        )
         if (
             successes != repetition_row["success_count"]
             or failures != repetition_row["failure_count"]
             or timeouts != repetition_row["timeout_count"]
+            or errors != repetition_row["error_count"]
         ):
             raise ProvenancePerformanceError(
                 "ablation sample and repetition accounting disagree"
             )
+
+    expected_formal_keys = {
+        (
+            f"n{cell['graph_node_count']}-c{cell['concurrency']}",
+            variant,
+            repetition,
+            repetition_seed,
+        )
+        for cell in FORMAL_ABLATION_CONFIG["cells"]
+        for variant in PROVENANCE_ABLATION_VARIANTS
+        for repetition, repetition_seed in enumerate(
+            FORMAL_ABLATION_CONFIG["repetition_seeds"]
+        )
+    }
+    operations_per_type = int(FORMAL_ABLATION_CONFIG["operations_per_type"])
+    formal_operation_contract_complete = True
+    for key in expected_formal_keys.intersection(repetitions):
+        variant = key[1]
+        expected_operations = set(_ABLATION_COMMON_OPERATIONS)
+        if variant == "TxnMem":
+            expected_operations = expected_operations | {"traverse"}
+        expected_identity = Counter(
+            (operation, f"{operation}:{operation_index}")
+            for operation in expected_operations
+            for operation_index in range(operations_per_type)
+        )
+        observed_identity = Counter(
+            (str(row["operation"]), str(row["operation_id"]))
+            for row in samples_by_repetition[key]
+        )
+        if observed_identity != expected_identity:
+            formal_operation_contract_complete = False
+            break
+    formal_contract_complete = (
+        set(repetitions) == expected_formal_keys
+        and len(repetitions) == 180
+        and all(row["eligible_for_formal"] is True for row in repetitions.values())
+        and formal_operation_contract_complete
+    )
+    if require_formal_contract and not formal_contract_complete:
+        raise ProvenancePerformanceError(
+            "formal ablation requires exactly 180 eligible repetitions"
+        )
 
     variant_cells: list[dict[str, Any]] = []
     for cell_id in sorted(coordinates_by_cell):
@@ -2230,6 +2314,12 @@ def aggregate_ablation(
                 if key[0] == cell_id
                 and key[1] == variant
                 and repetitions[key]["eligible_for_formal"] is True
+                for sample in rows
+            ]
+            attempted_samples = [
+                sample
+                for key, rows in samples_by_repetition.items()
+                if key[0] == cell_id and key[1] == variant
                 for sample in rows
             ]
             successful = [row for row in eligible_samples if row["success"] is True]
@@ -2299,8 +2389,22 @@ def aggregate_ablation(
                     "eligible_repetition_count": len(eligible),
                     "excluded_repetition_count": len(cell_rows) - len(eligible),
                     "successful_operation_count": len(successful),
-                    "failed_operation_count": len(eligible_samples) - len(successful),
+                    "attempted_operation_count": len(attempted_samples),
+                    "failed_operation_count": sum(
+                        row["success"] is False for row in attempted_samples
+                    ),
                     "timeout_count": sum(int(row["timeout_count"]) for row in cell_rows),
+                    "error_count": sum(int(row["error_count"]) for row in cell_rows),
+                    "error_category_counts": dict(
+                        sorted(
+                            Counter(
+                                str(row["error_category"])
+                                for row in attempted_samples
+                                if row["success"] is False
+                                and row["timeout"] is False
+                            ).items()
+                        )
+                    ),
                     "common_operation_sample_count": len(common),
                     "common_latency_ns": {
                         "p50": _percentile([int(row["latency_ns"]) for row in common], 0.50),
@@ -2333,8 +2437,8 @@ def aggregate_ablation(
 
     paired_cells: list[dict[str, Any]] = []
     for cell_id in sorted(coordinates_by_cell):
-        pairs: list[tuple[dict[str, Any], dict[str, Any], float, float]] = []
-        missing = ineligible = zero_denominator = 0
+        pairs: list[tuple[float, float]] = []
+        missing = ineligible = incomparable = zero_denominator = 0
         for repetition, repetition_seed in sorted(coordinates_by_cell[cell_id]):
             pair_rows = {
                 variant: repetitions.get((cell_id, variant, repetition, repetition_seed))
@@ -2348,6 +2452,28 @@ def aggregate_ablation(
             assert full is not None and control is not None
             if not full["eligible_for_formal"] or not control["eligible_for_formal"]:
                 ineligible += 1
+                continue
+            full_common_identity = Counter(
+                (str(row["operation"]), str(row["operation_id"]))
+                for row in samples_by_repetition[
+                    (cell_id, "TxnMem", repetition, repetition_seed)
+                ]
+                if row["operation"] in _ABLATION_COMMON_OPERATIONS
+            )
+            control_common_identity = Counter(
+                (str(row["operation"]), str(row["operation_id"]))
+                for row in samples_by_repetition[
+                    (cell_id, "MemoryOnly-NoProvenance", repetition, repetition_seed)
+                ]
+                if row["operation"] in _ABLATION_COMMON_OPERATIONS
+            )
+            if (
+                not full_common_identity
+                or full_common_identity != control_common_identity
+                or {operation for operation, _operation_id in full_common_identity}
+                != _ABLATION_COMMON_OPERATIONS
+            ):
+                incomparable += 1
                 continue
             common_means: dict[str, float] = {}
             for variant in PROVENANCE_ABLATION_VARIANTS:
@@ -2371,7 +2497,17 @@ def aggregate_ablation(
                 zero_denominator += 1
                 continue
             pairs.append(
-                (full, control, common_means["TxnMem"], common_means["MemoryOnly-NoProvenance"])
+                (
+                    (
+                        common_means["TxnMem"]
+                        - common_means["MemoryOnly-NoProvenance"]
+                    )
+                    / common_means["MemoryOnly-NoProvenance"]
+                    * 100.0,
+                    (full_throughput - control_throughput)
+                    / control_throughput
+                    * 100.0,
+                )
             )
 
         latency_interval = throughput_interval = None
@@ -2381,41 +2517,16 @@ def aggregate_ablation(
                 count=bootstrap_repetitions,
                 seed=seed,
                 identity=f"pair-latency\0{cell_id}",
-                statistic=lambda selected: (
-                    sum(row[2] for row in selected) / len(selected)
-                    - sum(row[3] for row in selected) / len(selected)
-                )
-                / (sum(row[3] for row in selected) / len(selected))
-                * 100.0,
+                statistic=lambda selected: sum(row[0] for row in selected)
+                / len(selected),
             )
             throughput_interval = _bootstrap_ablation_metric(
                 pairs,
                 count=bootstrap_repetitions,
                 seed=seed,
                 identity=f"pair-throughput\0{cell_id}",
-                statistic=lambda selected: (
-                    sum(
-                        int(row[0]["success_count"]) * 1_000_000_000.0
-                        / int(row[0]["elapsed_ns"])
-                        for row in selected
-                    )
-                    / len(selected)
-                    - sum(
-                        int(row[1]["success_count"]) * 1_000_000_000.0
-                        / int(row[1]["elapsed_ns"])
-                        for row in selected
-                    )
-                    / len(selected)
-                )
-                / (
-                    sum(
-                        int(row[1]["success_count"]) * 1_000_000_000.0
-                        / int(row[1]["elapsed_ns"])
-                        for row in selected
-                    )
-                    / len(selected)
-                )
-                * 100.0,
+                statistic=lambda selected: sum(row[1] for row in selected)
+                / len(selected),
             )
         paired_cells.append(
             {
@@ -2423,6 +2534,7 @@ def aggregate_ablation(
                 "eligible_pair_count": len(pairs),
                 "missing_pair_count": missing,
                 "ineligible_pair_count": ineligible,
+                "incomparable_pair_count": incomparable,
                 "zero_denominator_pair_count": zero_denominator,
                 "common_latency_overhead_pct": latency_interval,
                 "throughput_change_pct": throughput_interval,
@@ -2436,6 +2548,24 @@ def aggregate_ablation(
         "bootstrap_seed": seed,
         "common_operations": sorted(_ABLATION_COMMON_OPERATIONS),
         "traversal_reporting": "txnmem_absolute_only",
+        "attempted_repetition_count": len(repetitions),
+        "operation_sample_count": len(raw_samples),
+        "timeout_count": sum(
+            int(row["timeout_count"]) for row in repetitions.values()
+        ),
+        "error_count": sum(
+            int(row["error_count"]) for row in repetitions.values()
+        ),
+        "eligible_repetition_count": sum(
+            row["eligible_for_formal"] is True for row in repetitions.values()
+        ),
+        "excluded_repetition_count": sum(
+            row["eligible_for_formal"] is not True for row in repetitions.values()
+        ),
+        "eligible_pair_count": sum(
+            row["eligible_pair_count"] for row in paired_cells
+        ),
+        "formal_contract_complete": formal_contract_complete,
         "variant_cells": variant_cells,
         "paired_cells": paired_cells,
     }

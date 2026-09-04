@@ -65,6 +65,7 @@ class TxnMemCliOutputTests(unittest.TestCase):
                     "success_count": len(operations),
                     "failure_count": 0,
                     "timeout_count": 0,
+                    "error_count": 0,
                 }
             )
             samples.extend(
@@ -74,9 +75,11 @@ class TxnMemCliOutputTests(unittest.TestCase):
                     "repetition": 0,
                     "repetition_seed": 17,
                     "operation": operation,
+                    "operation_id": f"{operation}:0",
                     "latency_ns": elapsed_ns,
                     "success": True,
                     "timeout": False,
+                    "error_category": None,
                 }
                 for operation in operations
             )
