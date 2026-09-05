@@ -36,6 +36,11 @@ from txnmem_topology_attestation import (
 
 
 class FormalAblationLifecycleTests(unittest.TestCase):
+    def test_timeout_toxic_configuration_is_explicitly_100_milliseconds(self):
+        self.assertEqual(
+            collector_module._FORMAL_ABLATION_TIMEOUT_TOXIC_MILLISECONDS, 100
+        )
+
     @staticmethod
     def _document(payload):
         result = dict(payload)
@@ -535,7 +540,7 @@ class FormalAblationLifecycleTests(unittest.TestCase):
             self.assertNotIn(("write", "write:8"), identities)
 
     def test_timeout_observer_rejects_connection_refused(self):
-        toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 1}}
+        toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 100}}
         class Recovery:
             status = 200
             def __enter__(self): return self
@@ -552,7 +557,7 @@ class FormalAblationLifecycleTests(unittest.TestCase):
                 collector_module._observe_ablation_timeout_cleanup()
 
     def test_timeout_observer_rejects_named_toxic_residue(self):
-        toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 1}}
+        toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 100}}
         with patch.object(
             collector_module, "_toxiproxy_json_request",
             side_effect=[{}, toxic, None, toxic],
@@ -563,7 +568,7 @@ class FormalAblationLifecycleTests(unittest.TestCase):
                 collector_module._observe_ablation_timeout_cleanup()
 
     def test_timeout_observer_accepts_bounded_remote_disconnect_from_exact_toxic(self):
-        toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 1}}
+        toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 100}}
         class Recovery:
             status = 200
             def __enter__(self): return self
@@ -581,7 +586,7 @@ class FormalAblationLifecycleTests(unittest.TestCase):
             )
 
     def test_timeout_observer_rejects_remote_disconnect_without_exact_toxic(self):
-        wrong = {"name": "wrong", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 1}}
+        wrong = {"name": "wrong", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 100}}
         with patch.object(
             collector_module, "_toxiproxy_json_request", side_effect=[{}, wrong, None, None]
         ), patch.object(collector_module.urllib.request, "urlopen", side_effect=http.client.RemoteDisconnected()):
@@ -589,7 +594,7 @@ class FormalAblationLifecycleTests(unittest.TestCase):
                 collector_module._observe_ablation_timeout_cleanup()
 
     def test_timeout_observer_rejects_too_fast_remote_disconnect(self):
-        toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 1}}
+        toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 100}}
         class Recovery:
             status = 200
             def __enter__(self): return self

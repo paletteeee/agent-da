@@ -122,6 +122,7 @@ _FORMAL_TOXIPROXY_CONTAINER = "txnmem-toxiproxy"
 _FORMAL_BACKGROUND_CPU_BUSY_LIMIT_PERMILLE = 200
 _FORMAL_MAX_LOAD1_PER_CPU_MILLI = 1000
 _FORMAL_MAX_LOGICAL_CPU_COUNT = 1024
+_FORMAL_ABLATION_TIMEOUT_TOXIC_MILLISECONDS = 100
 _FORMAL_RUNTIME_WHEEL_DIRECTORY = Path("/opt/txnmem-formal-runtime/wheels")
 _FORMAL_RUNS_ROOT = Path("/var/lib/txnmem-formal/runs")
 _FORMAL_ABLATION_RUNTIME_ROOT = Path("/var/lib/txnmem-formal/provenance-ablation")
@@ -607,7 +608,9 @@ def _observe_ablation_timeout_cleanup() -> dict[str, int]:
         _toxiproxy_json_request(
             base, "/proxies/txnmem-qdrant/toxics", method="POST",
             payload={"name": name, "type": "timeout", "stream": "downstream",
-                     "toxicity": 1.0, "attributes": {"timeout": 1}},
+                     "toxicity": 1.0, "attributes": {
+                         "timeout": _FORMAL_ABLATION_TIMEOUT_TOXIC_MILLISECONDS
+                     }},
         )
         installed = True
         toxic = _toxiproxy_json_request(base, toxic_path, method="GET")
@@ -615,7 +618,9 @@ def _observe_ablation_timeout_cleanup() -> dict[str, int]:
             isinstance(toxic, Mapping) and toxic.get("name") == name
             and toxic.get("type") == "timeout"
             and toxic.get("stream") == "downstream"
-            and toxic.get("attributes") == {"timeout": 1}
+            and toxic.get("attributes") == {
+                "timeout": _FORMAL_ABLATION_TIMEOUT_TOXIC_MILLISECONDS
+            }
         ):
             raise CollectorError("formal ablation timeout toxic identity is invalid")
         request = urllib.request.Request("http://127.0.0.1:19000/collections", method="GET")
