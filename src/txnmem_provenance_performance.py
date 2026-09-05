@@ -143,6 +143,7 @@ class FormalEligibilityReason(enum.Enum):
         "preload_recovery_accounting_invalid"
     )
     PRELOAD_STATE_MISMATCH = "preload_state_mismatch"
+    PERFORMANCE_VARIANT_UNREGISTERED = "performance_variant_unregistered"
     RETRY_POLICY_INELIGIBLE = "retry_policy_ineligible"
     RETRY_METRIC_UNAVAILABLE = "retry_metric_unavailable"
     REPETITION_STATE_INELIGIBLE = "repetition_state_ineligible"
@@ -993,6 +994,41 @@ def _inventory_matches(
     )
 
 
+def _formal_performance_variant(backend_factory: Any, backend: Any) -> str:
+    variants = [
+        value
+        for value in (
+            getattr(backend_factory, "performance_variant", None),
+            getattr(backend, "performance_variant", None),
+        )
+        if value is not None
+    ]
+    if (
+        not variants
+        or any(type(value) is not str or value not in PROVENANCE_ABLATION_VARIANTS for value in variants)
+        or len(set(variants)) != 1
+    ):
+        raise FormalEligibilityError(
+            FormalEligibilityReason.PERFORMANCE_VARIANT_UNREGISTERED,
+            "formal performance variant is absent, inconsistent, or unregistered",
+        )
+    return str(variants[0])
+
+
+def _variant_inventory_edges(
+    performance_variant: str,
+    edges: Sequence[Sequence[str]],
+) -> Sequence[Sequence[str]]:
+    if performance_variant == "TxnMem":
+        return edges
+    if performance_variant == "MemoryOnly-NoProvenance":
+        return ()
+    raise FormalEligibilityError(
+        FormalEligibilityReason.PERFORMANCE_VARIANT_UNREGISTERED,
+        "formal performance variant is unregistered",
+    )
+
+
 def _namespace(run_id: str, graph: GraphSpec, concurrency: int, repetition: int) -> str:
     digest = hashlib.sha256(
         f"{run_id}\0{graph.graph_sha256}\0{concurrency}\0{repetition}".encode("utf-8")
@@ -1231,6 +1267,11 @@ def run_matrix_cell(
         backend = backend_factory(namespace)
         primary_failure: BaseException | None = None
         try:
+            performance_variant = (
+                _formal_performance_variant(backend_factory, backend)
+                if enforce_formal_eligibility
+                else "TxnMem"
+            )
             health_provider = getattr(backend, "healthcheck", None)
             health = _safe_health(health_provider() if callable(health_provider) else None)
             services_available = all(
@@ -1288,7 +1329,7 @@ def run_matrix_cell(
             preload_closed = _inventory_matches(
                 preload_inventory,
                 graph.nodes,
-                graph.edges,
+                _variant_inventory_edges(performance_variant, graph.edges),
                 {"active": graph.node_count},
             )
             if enforce_formal_eligibility and not preload_closed:
@@ -1438,7 +1479,7 @@ def run_matrix_cell(
             state_closed = _inventory_matches(
                 final_inventory,
                 expected_nodes,
-                expected_edges,
+                _variant_inventory_edges(performance_variant, expected_edges),
                 expected_statuses,
             )
             success_count = sum(1 for row in measured_rows if row["success"])
@@ -3224,6 +3265,8 @@ class _MemoryOnlyNoProvenanceBackend(InstrumentedMemoryBackend):
 
 
 class _ReusableVectorGraphBackendFactory:
+    performance_variant = "TxnMem"
+
     def __init__(
         self,
         *,
@@ -3279,6 +3322,7 @@ class _ReusableVectorGraphBackendFactory:
             backend.performance_environment = lambda: copy.deepcopy(
                 self.attestation
             )
+            backend.performance_variant = self.performance_variant
             return backend
 
     def close(self) -> None:
@@ -3292,6 +3336,8 @@ class _ReusableVectorGraphBackendFactory:
 
 
 class _ReusableMemoryOnlyBackendFactory:
+    performance_variant = "MemoryOnly-NoProvenance"
+
     def __init__(
         self,
         *,

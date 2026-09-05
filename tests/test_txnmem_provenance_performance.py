@@ -128,6 +128,7 @@ def _proxy_snapshot(phase, *, qdrant, neo4j):
 
 class _FixtureBackend(InstrumentedMemoryBackend):
     supports_parallel_provenance_preload = True
+    performance_variant = "TxnMem"
 
     def __init__(
         self,
@@ -1431,6 +1432,82 @@ class ProvenanceMatrixTests(unittest.TestCase):
         neo4j_constructor.assert_not_called()
         neo4j_health_constructor.assert_not_called()
 
+    def test_both_real_ablation_factories_satisfy_variant_specific_formal_state(self):
+        from tests.test_txnmem_vector_graph_backend import (
+            _FakeNeo4j,
+            _FakeQdrant,
+        )
+
+        environment = _FixtureBackend("formal-ablation").performance_environment()
+        graph = build_layered_dag(10, seed=17)
+        reports = {}
+        for variant in provenance_module.PROVENANCE_ABLATION_VARIANTS:
+            with self.subTest(variant=variant):
+                qdrant = _FakeQdrant()
+                neo4j = _FakeNeo4j()
+                with patch(
+                    "txnmem_vector_graph_backend._QdrantHTTPClient",
+                    return_value=qdrant,
+                ), patch(
+                    "txnmem_vector_graph_backend._Neo4jBoltClient",
+                    return_value=neo4j,
+                ), patch.object(
+                    provenance_module, "_Neo4jHealthClient", return_value=neo4j,
+                ):
+                    factory = provenance_module.make_provenance_ablation_backend_factory(
+                        variant=variant,
+                        qdrant_url="http://qdrant",
+                        neo4j_uri="bolt://neo4j",
+                        neo4j_auth=("neo4j", "password"),
+                        environment_attestation=environment,
+                    )
+                    try:
+                        reports[variant] = run_matrix_cell(
+                            factory,
+                            graph,
+                            concurrency=1,
+                            repetitions=1,
+                            operations_per_type=1,
+                            run_id=f"formal-ablation-{variant}",
+                            formal=True,
+                            environment_attestation=environment,
+                        )
+                    finally:
+                        factory.close()
+
+        full = reports["TxnMem"]["repetitions"][0]
+        control = reports["MemoryOnly-NoProvenance"]["repetitions"][0]
+        self.assertEqual(full["preload_inventory"]["edge_count"], graph.edge_count)
+        self.assertGreater(full["final_inventory"]["edge_count"], graph.edge_count)
+        self.assertEqual(control["preload_inventory"]["edge_count"], 0)
+        self.assertEqual(control["final_inventory"]["edge_count"], 0)
+        self.assertEqual(
+            [sample["operation"] for sample in reports["TxnMem"]["samples"]],
+            [
+                sample["operation"]
+                for sample in reports["MemoryOnly-NoProvenance"]["samples"]
+            ],
+        )
+
+    def test_formal_run_rejects_unknown_backend_performance_variant(self):
+        graph = build_layered_dag(10, seed=17)
+        backend = _FixtureBackend("unknown-variant")
+        backend.performance_variant = "Unknown"
+        with self.assertRaises(FormalEligibilityError) as raised:
+            run_matrix_cell(
+                lambda _namespace: backend,
+                graph,
+                concurrency=1,
+                repetitions=1,
+                operations_per_type=1,
+                run_id="unknown-variant",
+                formal=True,
+            )
+        self.assertEqual(
+            raised.exception.reason_code,
+            "performance_variant_unregistered",
+        )
+
     def test_formal_run_fails_closed_on_health_isolation_or_inventory(self):
         graph = build_layered_dag(10, seed=17)
         cases = {
@@ -1484,6 +1561,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
                 "parallel_preload_loader_missing",
                 "preload_recovery_accounting_invalid",
                 "preload_state_mismatch",
+                "performance_variant_unregistered",
                 "retry_policy_ineligible",
                 "retry_metric_unavailable",
                 "repetition_state_ineligible",

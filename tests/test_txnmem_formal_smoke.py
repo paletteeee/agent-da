@@ -163,6 +163,65 @@ class FormalAblationSmokeReceiptTests(unittest.TestCase):
         self.assertTrue(by_variant["MemoryOnly-NoProvenance"]["memory_crud_verified"])
         self.assertFalse(by_variant["MemoryOnly-NoProvenance"]["traversal_executed"])
 
+    def test_real_smoke_runs_complete_variant_specific_formal_cells(self):
+        from tests.test_txnmem_vector_graph_backend import (
+            _FakeNeo4j,
+            _FakeQdrant,
+        )
+
+        environment = {
+            "schema": "txnmem-provenance-environment-v1",
+            "isolation_verified": True,
+            "co_tenant_load_detected": False,
+            "source": "collector-observation-v2",
+            "cpu_logical_count": 8,
+            "memory_total_bytes": 16 * 1024**3,
+            "disk_medium": "ssd",
+            "toxiproxy_version": "2.9.0",
+        }
+        qdrant = _FakeQdrant()
+        neo4j = _FakeNeo4j()
+        graph = performance.build_layered_dag(10, seed=17)
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient",
+            return_value=qdrant,
+        ), patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient",
+            return_value=neo4j,
+        ), patch.object(
+            performance, "_Neo4jHealthClient", return_value=neo4j,
+        ), patch.object(
+            smoke, "_collect_formal_environment_attestation", return_value=environment,
+        ), patch.object(
+            smoke, "build_layered_dag", return_value=graph,
+        ), patch.object(
+            smoke, "_cleanup_and_observe_ablation_namespaces",
+            side_effect=lambda backends, **_kwargs: {
+                "observation_count": len(backends), "residue_count": 0,
+            },
+        ), patch.object(
+            smoke, "_observe_ablation_timeout_cleanup",
+            return_value={"attempt_count": 1, "failure_count": 0},
+        ), patch.dict(os.environ, {"TXNMEM_NEO4J_PASSWORD": "password"}):
+            observed = smoke._execute_formal_ablation_smoke_observations()
+
+        by_variant = {
+            row["variant"]: row for row in observed["variant_executions"]
+        }
+        self.assertEqual(set(by_variant), {"TxnMem", "MemoryOnly-NoProvenance"})
+        self.assertTrue(by_variant["TxnMem"]["memory_crud_verified"])
+        self.assertTrue(by_variant["TxnMem"]["traversal_executed"])
+        self.assertGreater(by_variant["TxnMem"]["provenance_edge_count"], 0)
+        self.assertTrue(
+            by_variant["MemoryOnly-NoProvenance"]["memory_crud_verified"]
+        )
+        self.assertFalse(
+            by_variant["MemoryOnly-NoProvenance"]["traversal_executed"]
+        )
+        self.assertEqual(
+            by_variant["MemoryOnly-NoProvenance"]["provenance_edge_count"], 0
+        )
+
 
 ROUTES = [
     {
