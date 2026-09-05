@@ -225,6 +225,52 @@ def _locked_runtime_wheels(export: Path) -> tuple[Path, ...]:
     return tuple(wheels)
 
 
+def _module_uses_import_roots(module: Any, roots: tuple[Path, ...]) -> bool:
+    locations: list[str] = []
+    module_file = getattr(module, "__file__", None)
+    if isinstance(module_file, str):
+        locations.append(module_file)
+    spec = getattr(module, "__spec__", None)
+    origin = getattr(spec, "origin", None)
+    if isinstance(origin, str) and origin not in {"built-in", "frozen"}:
+        locations.append(origin)
+    search_locations = getattr(spec, "submodule_search_locations", None)
+    if search_locations is not None:
+        try:
+            locations.extend(
+                location
+                for location in search_locations
+                if isinstance(location, str)
+            )
+        except TypeError:
+            return False
+    root_strings = tuple(str(path.resolve()) for path in roots)
+    for location in locations:
+        try:
+            resolved = str(Path(location).resolve())
+        except (OSError, ValueError):
+            continue
+        if any(
+            resolved == root or resolved.startswith(root + os.sep)
+            for root in root_strings
+        ):
+            return True
+    return False
+
+
+def _restore_import_state(
+    original_path_object: list[str],
+    original_path: tuple[str, ...],
+    original_modules: set[str],
+    roots: tuple[Path, ...],
+) -> None:
+    for name, module in list(sys.modules.items()):
+        if name not in original_modules and _module_uses_import_roots(module, roots):
+            sys.modules.pop(name, None)
+    original_path_object[:] = original_path
+    sys.path = original_path_object
+
+
 def _validate_progress_output(value: Any, *, allow_blocked: bool = True) -> bytes:
     if (
         type(value) is not bytes
@@ -895,6 +941,8 @@ def _dispatch(
     if module_name in sys.modules:
         raise FormalControllerError("formal controller target was pre-imported")
     original_modules = set(sys.modules)
+    original_path_object = sys.path
+    original_path = tuple(sys.path)
     dispatch_paths = (str(source_directory), *(str(path) for path in runtime_wheels))
     sys.path[:0] = dispatch_paths
     try:
@@ -939,26 +987,12 @@ def _dispatch(
         else:
             result = entry(forwarded)
     finally:
-        for name, module in list(sys.modules.items()):
-            if name in original_modules:
-                continue
-            module_file = getattr(module, "__file__", None)
-            if module_file is not None:
-                resolved_module = ""
-                try:
-                    resolved_module = str(Path(str(module_file)).resolve())
-                    in_export = Path(resolved_module).is_relative_to(export)
-                except (OSError, ValueError):
-                    in_export = False
-                in_wheel = any(
-                    resolved_module == str(path)
-                    or resolved_module.startswith(str(path) + os.sep)
-                    for path in runtime_wheels
-                ) if module_file is not None else False
-                if in_export or in_wheel:
-                    sys.modules.pop(name, None)
-        if tuple(sys.path[:len(dispatch_paths)]) == dispatch_paths:
-            del sys.path[:len(dispatch_paths)]
+        _restore_import_state(
+            original_path_object,
+            original_path,
+            original_modules,
+            (export, *runtime_wheels),
+        )
     if action == "progress":
         return _validate_progress_output(result, allow_blocked=False)
     if type(result) is not int:
@@ -988,6 +1022,9 @@ def _run_protected_linux_integrated_lifecycle(
     export = _create_committed_export(root, approved)
     source_directory = export.path / "src"
     original_modules = set(sys.modules)
+    original_path_object = sys.path
+    original_path = tuple(sys.path)
+    runtime_wheels: tuple[Path, ...] = ()
     primary: BaseException | None = None
     result: dict[str, Any] | None = None
     try:
@@ -995,7 +1032,11 @@ def _run_protected_linux_integrated_lifecycle(
             raise FormalControllerError(
                 "integrated lifecycle collector was pre-imported"
             )
-        sys.path.insert(0, str(source_directory))
+        runtime_wheels = _locked_runtime_wheels(export.path)
+        sys.path[:0] = (
+            str(source_directory),
+            *(str(path) for path in runtime_wheels),
+        )
         collector = importlib.import_module(
             "txnmem_provenance_execution_collector"
         )
@@ -1043,27 +1084,12 @@ def _run_protected_linux_integrated_lifecycle(
     except BaseException as exc:
         primary = exc
     finally:
-        for name, module in list(sys.modules.items()):
-            if name in original_modules:
-                continue
-            module_file = getattr(module, "__file__", None)
-            if module_file is None:
-                continue
-            try:
-                Path(str(module_file)).resolve().relative_to(export.path)
-            except (OSError, ValueError):
-                continue
-            sys.modules.pop(name, None)
-        if sys.path and sys.path[0] == str(source_directory):
-            sys.path.pop(0)
-        else:
-            try:
-                sys.path.remove(str(source_directory))
-            except ValueError:
-                if primary is None:
-                    primary = FormalControllerError(
-                        "integrated lifecycle import path changed"
-                    )
+        _restore_import_state(
+            original_path_object,
+            original_path,
+            original_modules,
+            (export.path, *runtime_wheels),
+        )
         try:
             _remove_export(export)
         except BaseException as cleanup:

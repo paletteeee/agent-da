@@ -16,6 +16,164 @@ import txnmem_provenance_progress as progress_protocol
 
 
 class FormalAblationDispatchTests(unittest.TestCase):
+    def test_integrated_lifecycle_imports_the_same_hash_locked_runtime_wheels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            project = root / "project"
+            export = root / "export"
+            wheel_root = root / "wheels"
+            bootstrap = root / "bootstrap"
+            project.mkdir()
+            (export / "src").mkdir(parents=True)
+            (export / "configs").mkdir()
+            wheel_root.mkdir()
+            bootstrap.mkdir()
+            wheel = wheel_root / "locked_fixture-1.0-py3-none-any.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr("locked_fixture.py", "VALUE = 79\n")
+            (export / "configs" / "provenance_runtime_lock.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "txnmem-provenance-runtime-lock-v1",
+                        "distributions": [
+                            {
+                                "filename": wheel.name,
+                                "sha256": hashlib.sha256(
+                                    wheel.read_bytes()
+                                ).hexdigest(),
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (export / "src" / "txnmem_provenance_execution_collector.py").write_text(
+                "import locked_fixture\n"
+                "class _IntegratedLifecycleFault:\n"
+                "    POINTER_WITHOUT_RECEIPT = 'fault'\n"
+                "def _run_protected_linux_integrated_lifecycle(**kwargs):\n"
+                "    return {'value': locked_fixture.VALUE}\n",
+                encoding="utf-8",
+            )
+            export_stat = export.stat()
+            parent_stat = export.parent.stat()
+            identity = controller._BootstrapExport(
+                path=export,
+                device=export_stat.st_dev,
+                inode=export_stat.st_ino,
+                parent_device=parent_stat.st_dev,
+                parent_inode=parent_stat.st_ino,
+            )
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=(),
+                manifest={},
+                manifest_sha256="b" * 64,
+            )
+            previous_collector = sys.modules.pop(
+                "txnmem_provenance_execution_collector", None
+            )
+            previous_fixture = sys.modules.pop("locked_fixture", None)
+            fixture_uid = os.geteuid()
+            try:
+                with patch.object(controller.sys, "platform", "linux"), patch.object(
+                    controller.os,
+                    "geteuid",
+                    side_effect=(0, fixture_uid, fixture_uid),
+                ), patch.object(
+                    controller, "FORMAL_WHEEL_ROOT", wheel_root
+                ), patch.object(
+                    controller, "BOOTSTRAP_ROOT", bootstrap
+                ), patch.object(
+                    controller, "_verify_installed_controller", return_value=approved
+                ), patch.object(
+                    controller, "_create_committed_export", return_value=identity
+                ), patch.object(controller, "_remove_export"):
+                    observed = controller._run_protected_linux_integrated_lifecycle(
+                        project
+                    )
+                self.assertEqual(observed["value"], 79)
+                self.assertNotIn(str(wheel), sys.path)
+                self.assertNotIn("locked_fixture", sys.modules)
+            finally:
+                sys.modules.pop("txnmem_provenance_execution_collector", None)
+                sys.modules.pop("locked_fixture", None)
+                if previous_collector is not None:
+                    sys.modules[
+                        "txnmem_provenance_execution_collector"
+                    ] = previous_collector
+                if previous_fixture is not None:
+                    sys.modules["locked_fixture"] = previous_fixture
+
+    def test_dispatch_restores_sys_path_and_removes_wheel_namespace_after_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            export = root / "export"
+            wheel_root = root / "wheels"
+            (export / "src").mkdir(parents=True)
+            (export / "configs").mkdir()
+            wheel_root.mkdir()
+            wheel = wheel_root / "locked_fixture-1.0-py3-none-any.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr("locked_namespace/__init__.py", "__file__ = None\n")
+                archive.writestr("locked_namespace/child.py", "VALUE = 83\n")
+            (export / "configs" / "provenance_runtime_lock.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "txnmem-provenance-runtime-lock-v1",
+                        "distributions": [
+                            {
+                                "filename": wheel.name,
+                                "sha256": hashlib.sha256(
+                                    wheel.read_bytes()
+                                ).hexdigest(),
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (export / "src" / "txnmem_formal_smoke.py").write_text(
+                "import sys\n"
+                "import locked_namespace.child\n"
+                "def main(argv, *, _controller_context=None):\n"
+                "    sys.path.insert(0, '/seeded/reordered-path')\n"
+                "    raise RuntimeError('seeded failure')\n",
+                encoding="utf-8",
+            )
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=(),
+                manifest={},
+                manifest_sha256="b" * 64,
+            )
+            original_path = list(sys.path)
+            previous_target = sys.modules.pop("txnmem_formal_smoke", None)
+            previous_namespace = sys.modules.pop("locked_namespace", None)
+            previous_child = sys.modules.pop("locked_namespace.child", None)
+            try:
+                with patch.object(controller, "FORMAL_WHEEL_ROOT", wheel_root):
+                    with self.assertRaisesRegex(RuntimeError, "seeded failure"):
+                        controller._dispatch("smoke", [], export, approved)
+                self.assertEqual(sys.path, original_path)
+                self.assertNotIn("locked_namespace", sys.modules)
+                self.assertNotIn("locked_namespace.child", sys.modules)
+            finally:
+                sys.path[:] = original_path
+                for name in (
+                    "txnmem_formal_smoke",
+                    "locked_namespace",
+                    "locked_namespace.child",
+                ):
+                    sys.modules.pop(name, None)
+                for name, module in (
+                    ("txnmem_formal_smoke", previous_target),
+                    ("locked_namespace", previous_namespace),
+                    ("locked_namespace.child", previous_child),
+                ):
+                    if module is not None:
+                        sys.modules[name] = module
+
     def test_dispatch_imports_only_the_hash_locked_runtime_wheels(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
