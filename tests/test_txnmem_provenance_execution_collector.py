@@ -2,6 +2,7 @@ import copy
 import enum
 import errno
 import hashlib
+import http.client
 import inspect
 import json
 import os
@@ -558,6 +559,48 @@ class FormalAblationLifecycleTests(unittest.TestCase):
         ), patch.object(collector_module.urllib.request, "urlopen", side_effect=socket.timeout()), patch.object(
             collector_module.time, "monotonic", side_effect=[0.0, 0.1]
         ):
+            with self.assertRaises(collector_module.CollectorError):
+                collector_module._observe_ablation_timeout_cleanup()
+
+    def test_timeout_observer_accepts_bounded_remote_disconnect_from_exact_toxic(self):
+        toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 1}}
+        class Recovery:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self, _size): return b"{}"
+        with patch.object(
+            collector_module, "_toxiproxy_json_request", side_effect=[{}, toxic, None, None]
+        ), patch.object(collector_module, "observe_formal_toxiproxy_routes", return_value=[]), patch.object(
+            collector_module.urllib.request, "urlopen",
+            side_effect=[http.client.RemoteDisconnected(), Recovery()],
+        ), patch.object(collector_module.time, "monotonic", side_effect=[0.0, 0.1]):
+            self.assertEqual(
+                collector_module._observe_ablation_timeout_cleanup(),
+                {"attempt_count": 1, "failure_count": 0},
+            )
+
+    def test_timeout_observer_rejects_remote_disconnect_without_exact_toxic(self):
+        wrong = {"name": "wrong", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 1}}
+        with patch.object(
+            collector_module, "_toxiproxy_json_request", side_effect=[{}, wrong, None, None]
+        ), patch.object(collector_module.urllib.request, "urlopen", side_effect=http.client.RemoteDisconnected()):
+            with self.assertRaises(collector_module.CollectorError):
+                collector_module._observe_ablation_timeout_cleanup()
+
+    def test_timeout_observer_rejects_too_fast_remote_disconnect(self):
+        toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 1}}
+        class Recovery:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self, _size): return b"{}"
+        with patch.object(
+            collector_module, "_toxiproxy_json_request", side_effect=[{}, toxic, None, None]
+        ), patch.object(collector_module, "observe_formal_toxiproxy_routes", return_value=[]), patch.object(
+            collector_module.urllib.request, "urlopen",
+            side_effect=[http.client.RemoteDisconnected(), Recovery()],
+        ), patch.object(collector_module.time, "monotonic", side_effect=[0.0, 0.001]):
             with self.assertRaises(collector_module.CollectorError):
                 collector_module._observe_ablation_timeout_cleanup()
 

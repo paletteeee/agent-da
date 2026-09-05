@@ -18,6 +18,7 @@ from email import policy as email_policy
 from email.parser import BytesParser
 import functools
 import hashlib
+import http.client
 import ipaddress
 import importlib
 import io
@@ -622,7 +623,7 @@ def _observe_ablation_timeout_cleanup() -> dict[str, int]:
         try:
             with urllib.request.urlopen(request, timeout=0.25) as response:
                 response.read(1)
-        except (TimeoutError, socket.timeout):
+        except (TimeoutError, socket.timeout, http.client.RemoteDisconnected):
             elapsed = time.monotonic() - started
             if elapsed < 0.05 or elapsed > 1.0:
                 raise CollectorError("formal ablation injected timeout duration is invalid")
