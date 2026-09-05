@@ -529,6 +529,7 @@ def _default_ablation_observation_batch(state: Mapping[str, Any]) -> Mapping[str
 class _NamespaceRecordingFactory:
     def __init__(self, delegate: Callable[[str], Any]) -> None:
         self.delegate = delegate
+        self.performance_variant = getattr(delegate, "performance_variant", None)
         self.backends: list[Any] = []
 
     def __call__(self, namespace: str) -> Any:

@@ -995,24 +995,20 @@ def _inventory_matches(
 
 
 def _formal_performance_variant(backend_factory: Any, backend: Any) -> str:
-    variants = [
-        value
-        for value in (
-            getattr(backend_factory, "performance_variant", None),
-            getattr(backend, "performance_variant", None),
-        )
-        if value is not None
-    ]
+    factory_variant = getattr(backend_factory, "performance_variant", None)
+    backend_variant = getattr(backend, "performance_variant", None)
     if (
-        not variants
-        or any(type(value) is not str or value not in PROVENANCE_ABLATION_VARIANTS for value in variants)
-        or len(set(variants)) != 1
+        type(factory_variant) is not str
+        or type(backend_variant) is not str
+        or factory_variant not in PROVENANCE_ABLATION_VARIANTS
+        or backend_variant not in PROVENANCE_ABLATION_VARIANTS
+        or factory_variant != backend_variant
     ):
         raise FormalEligibilityError(
             FormalEligibilityReason.PERFORMANCE_VARIANT_UNREGISTERED,
             "formal performance variant is absent, inconsistent, or unregistered",
         )
-    return str(variants[0])
+    return factory_variant
 
 
 def _variant_inventory_edges(

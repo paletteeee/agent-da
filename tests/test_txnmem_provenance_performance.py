@@ -166,7 +166,6 @@ class _FixtureBackend(InstrumentedMemoryBackend):
             "qdrant": {"available": self.available, "version": self.qdrant_version},
             "neo4j": {"available": self.available, "version": self.neo4j_version},
         }
-
     def performance_environment(self):
         return {
             "schema": "txnmem-provenance-environment-v1",
@@ -205,6 +204,11 @@ class _FixtureBackend(InstrumentedMemoryBackend):
                 )
             },
         }
+
+
+def _txnmem_factory(factory):
+    factory.performance_variant = "TxnMem"
+    return factory
 
 
 class ProvenanceGraphTests(unittest.TestCase):
@@ -454,6 +458,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
         def factory(namespace):
             seen_namespaces.append(namespace)
             return _FixtureBackend(namespace)
+        factory.performance_variant = "TxnMem"
 
         reports = []
         for cell in cells:
@@ -490,7 +495,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
         snapshots = []
 
         report = run_matrix_cell(
-            lambda namespace: _FixtureBackend(namespace),
+            _txnmem_factory(lambda namespace: _FixtureBackend(namespace)),
             build_layered_dag(2, seed=17),
             concurrency=1,
             repetitions=2,
@@ -525,6 +530,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
         def factory(namespace):
             created.append(namespace)
             return _FixtureBackend(namespace, isolated=False)
+        factory.performance_variant = "TxnMem"
 
         with self.assertRaisesRegex(
             ProvenancePerformanceError,
@@ -554,6 +560,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
         def factory(namespace):
             created.append(namespace)
             return _FixtureBackend(namespace)
+        factory.performance_variant = "TxnMem"
 
         with self.assertRaisesRegex(
             ProvenancePerformanceError,
@@ -584,6 +591,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
         def factory(namespace):
             created.append(namespace)
             return _FixtureBackend(namespace, isolated=len(created) != 3)
+        factory.performance_variant = "TxnMem"
 
         with self.assertRaisesRegex(
             ProvenancePerformanceError,
@@ -1508,19 +1516,68 @@ class ProvenanceMatrixTests(unittest.TestCase):
             "performance_variant_unregistered",
         )
 
+    def test_formal_variant_contract_requires_matching_closed_factory_and_backend_selectors(self):
+        missing = object()
+        graph = build_layered_dag(10, seed=17)
+        cases = (
+            ("factory_missing", missing, "TxnMem"),
+            ("backend_missing", "TxnMem", missing),
+            ("both_missing", missing, missing),
+            ("non_string", True, True),
+            ("unknown", "Unknown", "Unknown"),
+            ("conflict", "TxnMem", "MemoryOnly-NoProvenance"),
+        )
+        for name, factory_variant, backend_variant in cases:
+            with self.subTest(name=name):
+                writes = []
+                backend = SimpleNamespace(write=lambda *_args, **_kwargs: writes.append(1))
+                if backend_variant is not missing:
+                    backend.performance_variant = backend_variant
+                class Factory:
+                    def __call__(self, _namespace):
+                        return backend
+                factory = Factory()
+                if factory_variant is not missing:
+                    factory.performance_variant = factory_variant
+                with self.assertRaises(FormalEligibilityError) as raised:
+                    run_matrix_cell(
+                        factory,
+                        graph,
+                        concurrency=1,
+                        repetitions=1,
+                        operations_per_type=1,
+                        run_id=f"closed-variant-{name}",
+                        formal=True,
+                    )
+                self.assertEqual(
+                    raised.exception.reason_code,
+                    "performance_variant_unregistered",
+                )
+                self.assertEqual(writes, [])
+
+        for variant in provenance_module.PROVENANCE_ABLATION_VARIANTS:
+            with self.subTest(valid=variant):
+                self.assertEqual(
+                    provenance_module._formal_performance_variant(
+                        SimpleNamespace(performance_variant=variant),
+                        SimpleNamespace(performance_variant=variant),
+                    ),
+                    variant,
+                )
+
     def test_formal_run_fails_closed_on_health_isolation_or_inventory(self):
         graph = build_layered_dag(10, seed=17)
         cases = {
             "health": (
-                lambda namespace: _FixtureBackend(namespace, available=False),
+                _txnmem_factory(lambda namespace: _FixtureBackend(namespace, available=False)),
                 "service_health_unavailable",
             ),
             "co_tenant": (
-                lambda namespace: _FixtureBackend(namespace, isolated=False),
+                _txnmem_factory(lambda namespace: _FixtureBackend(namespace, isolated=False)),
                 "environment_ineligible",
             ),
             "partial": (
-                lambda namespace: _FixtureBackend(
+                _txnmem_factory(lambda namespace: _FixtureBackend(
                     namespace,
                     inventory_override={
                         "classification": "partial",
@@ -1529,7 +1586,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
                         "graph_sha256": "0" * 64,
                         "status_counts": {},
                     },
-                ),
+                )),
                 "namespace_not_empty",
             ),
         }
@@ -1613,9 +1670,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
             with self.subTest(name=name):
                 with self.assertRaises(ProvenancePerformanceError) as raised:
                     run_matrix_cell(
-                        lambda namespace, backend_type=backend_type: backend_type(
-                            namespace
-                        ),
+                        backend_type,
                         graph,
                         concurrency=1,
                         repetitions=1,
@@ -1635,7 +1690,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
             return_value="txnmem-prov-collision-fixture",
         ), self.assertRaises(ProvenancePerformanceError) as raised:
             run_matrix_cell(
-                lambda namespace: _FixtureBackend(namespace),
+                _txnmem_factory(lambda namespace: _FixtureBackend(namespace)),
                 build_layered_dag(2, seed=17),
                 concurrency=1,
                 repetitions=2,
@@ -1654,7 +1709,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
 
         with self.assertRaises(ProvenancePerformanceError):
             run_matrix_cell(
-                lambda namespace: _FixtureBackend(namespace),
+                _txnmem_factory(lambda namespace: _FixtureBackend(namespace)),
                 graph,
                 concurrency=1,
                 repetitions=1,
@@ -1708,7 +1763,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
             with self.subTest(name=name):
                 with self.assertRaises(ProvenancePerformanceError):
                     run_matrix_cell(
-                        lambda namespace: _FixtureBackend(namespace, **backend_kwargs),
+                        _txnmem_factory(lambda namespace: _FixtureBackend(namespace, **backend_kwargs)),
                         graph,
                         concurrency=1,
                         repetitions=1,
@@ -1729,9 +1784,9 @@ class ProvenanceMatrixTests(unittest.TestCase):
         }
         with self.assertRaises(ProvenancePerformanceError):
             run_matrix_cell(
-                lambda namespace: _FixtureBackend(
+                _txnmem_factory(lambda namespace: _FixtureBackend(
                     namespace, inventory_override=inventory
-                ),
+                )),
                 graph,
                 concurrency=1,
                 repetitions=1,
@@ -1750,7 +1805,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
 
         with self.assertRaises(ProvenancePerformanceError) as raised:
             run_matrix_cell(
-                lambda namespace: RetryingBackend(namespace),
+                _txnmem_factory(lambda namespace: RetryingBackend(namespace)),
                 graph,
                 concurrency=2,
                 repetitions=1,
@@ -1764,7 +1819,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
         )
 
         report = run_matrix_cell(
-            lambda namespace: _FixtureBackend(namespace),
+            _txnmem_factory(lambda namespace: _FixtureBackend(namespace)),
             graph,
             concurrency=2,
             repetitions=1,
@@ -1794,7 +1849,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
 
         with self.assertRaises(FormalEligibilityError) as raised:
             run_matrix_cell(
-                lambda namespace: FailingInvalidateBackend(namespace),
+                _txnmem_factory(lambda namespace: FailingInvalidateBackend(namespace)),
                 graph,
                 concurrency=1,
                 repetitions=1,
@@ -1852,9 +1907,9 @@ class ProvenanceMatrixTests(unittest.TestCase):
             with self.subTest(name=name):
                 with self.assertRaises(FormalEligibilityError) as raised:
                     run_matrix_cell(
-                        lambda namespace, backend_type=backend_type: backend_type(
+                        _txnmem_factory(lambda namespace, backend_type=backend_type: backend_type(
                             namespace
-                        ),
+                        )),
                         graph,
                         concurrency=1,
                         repetitions=1,
@@ -1897,6 +1952,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
             backend = FailingBackend(namespace)
             created.append(backend)
             return backend
+        factory.performance_variant = "TxnMem"
 
         with self.assertRaises(FormalEligibilityError) as raised:
             run_matrix_cell(
@@ -1929,7 +1985,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
 
         with self.assertRaises(CleanupFailure):
             run_matrix_cell(
-                lambda namespace: FailingCloseBackend(namespace),
+                _txnmem_factory(lambda namespace: FailingCloseBackend(namespace)),
                 graph,
                 concurrency=1,
                 repetitions=1,
@@ -1953,7 +2009,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
         except RuntimeError:
             with self.assertRaises(CleanupFailure):
                 run_matrix_cell(
-                    lambda namespace: FailingCloseBackend(namespace),
+                    _txnmem_factory(lambda namespace: FailingCloseBackend(namespace)),
                     graph,
                     concurrency=1,
                     repetitions=1,
@@ -1989,7 +2045,7 @@ class ProvenanceMatrixTests(unittest.TestCase):
             with self.subTest(attempt=attempt):
                 with self.assertRaises(FormalEligibilityError) as raised:
                     run_matrix_cell(
-                        lambda namespace: FailingBackend(namespace),
+                        _txnmem_factory(lambda namespace: FailingBackend(namespace)),
                         graph,
                         concurrency=2,
                         repetitions=1,
@@ -2566,7 +2622,7 @@ class ProvenanceAggregationTests(unittest.TestCase):
     def _valid_formal_report(self):
         graph = build_layered_dag(10, seed=17)
         return run_matrix_cell(
-            lambda namespace: _FixtureBackend(namespace),
+            _txnmem_factory(lambda namespace: _FixtureBackend(namespace)),
             graph,
             concurrency=1,
             repetitions=2,
@@ -2949,7 +3005,7 @@ class ProvenanceAggregationTests(unittest.TestCase):
         graph = build_layered_dag(10, seed=17)
         reports = [
             run_matrix_cell(
-                lambda namespace: _FixtureBackend(namespace),
+                _txnmem_factory(lambda namespace: _FixtureBackend(namespace)),
                 graph,
                 concurrency=concurrency,
                 repetitions=2,
@@ -3026,7 +3082,7 @@ class ProvenanceAggregationTests(unittest.TestCase):
     def test_formal_aggregate_rejects_peak_below_requested_concurrency(self):
         graph = build_layered_dag(10, seed=17)
         report = run_matrix_cell(
-            lambda namespace: _FixtureBackend(namespace),
+            _txnmem_factory(lambda namespace: _FixtureBackend(namespace)),
             graph,
             concurrency=2,
             repetitions=2,
