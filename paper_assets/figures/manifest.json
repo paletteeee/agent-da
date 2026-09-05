@@ -121,14 +121,14 @@
       ]
     },
     "provenance_performance_scaling": {
-      "alt_text": "v10 测量矩阵包含 100、1,000 和 10,000 nodes 三条吞吐曲线；100 nodes 在并发 2 达到被测峰值 21.899 ops/s；1,000 nodes 在并发 2 达到被测峰值 2.844 ops/s；10,000 nodes 在并发 1 达到被测峰值 0.123 ops/s；所有点均带 95% 置信区间。",
-      "caption": "v10 测量矩阵的吞吐—并发曲线；纵轴为对数刻度，误差线为 whole-repetition bootstrap 95% CI。",
+      "alt_text": "v10 测量矩阵按 100、1,000 和 10,000 nodes 以及并发 1、2、4、8、16 组成 15 个 cell；上半图包含 15 个吞吐点及 95% 置信区间，下半图包含 15 个 p99 尾延迟点；100 nodes 在并发 2 达到被测峰值 21.899 ops/s；1,000 nodes 在并发 2 达到被测峰值 2.844 ops/s；10,000 nodes 在并发 1 达到被测峰值 0.123 ops/s。",
+      "caption": "v10 节点规模—并发扩展性：（a）成功操作吞吐及 whole-repetition bootstrap 95% CI；（b）成功操作 p99 尾延迟；两面板纵轴均为对数刻度。",
       "dimensions": {
-        "height": 650,
+        "height": 880,
         "width": 1160
       },
       "file": "provenance_performance_scaling.svg",
-      "output_sha256": "79dd5a91e1160ffa499a95e0870bf8aa4e06e9c019baa1668b807927268cdf6d",
+      "output_sha256": "bdfc382c478ffb6753bde95cbdf08b6fd59cf8527e44114d5ced855106e7fbee",
       "sources": [
         {
           "path": "results/provenance_performance_v10_measurements/aggregate.json",

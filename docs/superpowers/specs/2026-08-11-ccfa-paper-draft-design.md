@@ -79,7 +79,7 @@
 
 ## 5. 图表计划
 
-正文至少包含以下六幅图，优先使用矢量图或高分辨率生成图：
+正文包含以下七幅图，优先使用矢量图或高分辨率生成图：
 
 1. 动机时间线：read/derive/write 期间发生 crash、revoke 和 source invalidation 时的三类错误。
 2. TxnMem 架构：Agent API、Transaction Manager、Policy Engine、Memory Store、Provenance Repair Engine 及其数据流。
@@ -87,8 +87,9 @@
 4. provenance repair 示例：chain、branch、supersession 与 descendant closure。
 5. controlled suite 主结果：五个 variant 的 violation count/oracle match 对比。
 6. 分层证据图：controlled、native model、public runtime、real services 与 cross-host 的能力和 claim boundary。
+7. provenance scalability：以相同颜色表示 100、1,000 和 10,000 节点规模，在五档并发下并列展示成功操作吞吐（含 whole-repetition bootstrap 95% CI）与 p99 尾延迟；两面板均使用对数纵轴。
 
-正文表格控制在六张以内：需求差距、系统不变量、workload family、实验设置、主结果、真实/公开 runtime 结果。长命令、hash、逐任务状态和完整统计移入附录或仓库报告。
+正文表格共七张：需求差距、系统不变量、workload family、实验设置、主结果、真实/公开 runtime 结果和 provenance-performance v10；附录另含 claim ledger 与 workload schema 两张表。长命令、hash、逐任务状态和更细粒度统计移入附录或仓库报告。
 
 ## 6. 数字与证据规则
 

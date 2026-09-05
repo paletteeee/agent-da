@@ -1,6 +1,20 @@
 # TxnMem CCF-A 中文初稿：state-verified DOCX QA
 
-## 最终交付物与可复现性
+## 2026-09-05 provenance scalability 图表更新
+
+- 当前外部交付物：`<external-output-dir>/TxnMem_论文初稿.docx`。
+- SHA-256：`b01f89e68e4b07f5b71e4a96bfe8adf6a4627fe10b76922b01e7fc4b47ebe1aa`。
+- 最终页数：29（`page-1.png` 至 `page-29.png`）。
+- 当前内容计数：图 7；表 9；参考文献 32（连续 `[R01]`—`[R32]`）；Heading 1/2/3 为 12/19/6。
+- 图表清单：正文图 7 幅（动机时间线、总体架构、提交协议、来源驱动修复、受控结果、分层证据、provenance scalability）；正文表 7 张，附录表 2 张。
+- 图 7 为上下双面板：上图给出 100、1,000、10,000 节点在并发 1/2/4/8/16 下的吞吐与 95% CI；下图给出同一 15-cell 矩阵的 p99 尾延迟。两个纵轴均使用对数刻度，颜色在两个面板间保持一致。
+- 两次独立构建逐字节一致；`cmp -s` 返回 0。图 manifest SHA-256 为 `f9f8e8a5de315f8375eb24f945e575768f9825d3571b74fae6cde86598290e87`。
+
+本轮对精确交付字节执行 `unzip -t`、`images_audit.py`、`heading_audit.py`、`section_audit.py`、`table_geometry.py`、`style_lint.py` 与 `a11y_audit.py`：压缩包完整，7 个 inline 图、9/9 表格几何一致，单一 Letter 纵向 section 的四边页距均为 1.00 in，可访问性 high/medium/low 均为 0。PDF 与 29 个页面 PNG 已逐页原始分辨率检查；图 7 位于第 22 页，图例、两组坐标轴、15 个吞吐点、15 组 95% CI 和 15 个 p99 点均清晰，无裁切、重叠、空白页或跨页回归。
+
+验证结果：图表/Word/投影/稿件专项 69 项测试通过；精确 Python 3.11.9 环境下全量 1,380 项测试通过，23 项 optional-runtime skip；artifact、claim（17 条 claim、176/176 个断言）和 manuscript audit 均为 0 findings。
+
+## 历史 state-verified 基线交付物与可复现性
 
 - 最终外部交付物：`<external-output-dir>/TxnMem_CCF-A中文论文初稿_state_verified.docx`
 - SHA-256：`d5fa35b3f1312fff5c7e3e64c8ff26999d15818b3a62162d0be2ae82d9a5152f`

@@ -230,19 +230,23 @@ class PaperFigureBuilderTests(unittest.TestCase):
         )
         self.assertEqual(svg.count('class="throughput-point"'), 15)
         self.assertEqual(svg.count('class="ci-whisker"'), 15)
+        self.assertEqual(svg.count('class="p99-point"'), 15)
         for label in (
             "100 nodes",
             "1,000 nodes",
             "10,000 nodes",
             "并发数",
             "吞吐（ops/s，对数刻度）",
+            "p99 尾延迟（ms，对数刻度）",
             "峰值 21.899",
             "峰值 2.844",
             "峰值 0.123",
         ):
             self.assertIn(label, svg)
         self.assertIn("whole-repetition bootstrap 95% CI", item["caption"])
+        self.assertIn("p99 尾延迟", item["caption"])
         self.assertIn("v10 测量矩阵", item["alt_text"])
+        self.assertIn("15 个 p99 尾延迟点", item["alt_text"])
         for overclaim in ("终验通过", "正式成功", "promotion", "生产级"):
             self.assertNotIn(overclaim, svg + item["caption"] + item["alt_text"])
 

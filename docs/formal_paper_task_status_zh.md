@@ -1,6 +1,6 @@
 # TxnMem 正式论文任务状态
 
-更新时间：2026-08-16。以下状态区分“代码/实验接口已完成”“已完成正式 batch”“仍不足以支撑更宽结论”，避免把五场景状态回读误写成一般分布式事务保证。
+更新时间：2026-09-05。以下状态区分“代码/实验接口已完成”“已完成正式 batch”“仍不足以支撑更宽结论”，避免把五场景状态回读误写成一般分布式事务保证。
 
 | 序号 | 正式任务 | 状态 | 已完成证据 | 仍需补强 |
 |---:|---|---|---|---|
@@ -14,8 +14,8 @@
 | 8 | τ-bench native runtime | 已完成（50-task batch + retry 合并） | official runtime；50 个唯一 task ID；最终合并 497 events、50/50 evaluator available、reward sum 15、mean 0.3000；manifest/hash、模型/runtime identity、retry 归并、source artifact hash 与运行命令均已固化 | 官方 reward 非 accuracy，需避免将失败 episode 写成任务成功或 memory 结论 |
 | 9 | AppWorld native runtime | 已完成（20-task baseline/tuned 配对） | 同 manifest/condition/tool attestation；baseline 0/20 success、17/112 assertions、517,564 exact tokens；tuned 1/20、53/112，13 task 改善、7 不变；20/20 evaluator available | tuned 有 4 个 unauthorized-tool 和 2 个 model-HTTP execution failure；2,171,632 observed tokens 为下界；n=20 不支持总体显著性声称 |
 | 10 | LoCoMo executable Agent | 已完成（10-conversation native + paired official QA + 3 repetitions） | Qwen2.5-7B native contextual batch；paired QA baseline/tuned 各 3 次、每次 1,986 问题、相同 seeds/condition；baseline mean F1=0.13836，tuned=0.13998，平均差值 +0.00162；token 精确增加 40,539 | 仅 3 次描述性 paired repetition，增益很小且一次回退，不能声称总体显著提升 |
-| 11 | 论文初稿与结果同步 | 已同步 state-verified 结果 | 正文、6 图、8 表、32 条参考文献和确定性 DOCX 构建链均保留窄 claim boundary，并消费新的 Toxiproxy aggregate | 选定 venue 后模板适配和正常作者修订 |
-| 12 | Claim ledger 与历史结果作废 | 已完成 | 15 条 active claim、163 个字段断言；Toxiproxy active claim 绑定 proxy/response/state readback 与严格 limitation；claim/artifact/manuscript audit 均要求 current bytes | 新增论文数字时必须同步更新 ledger 并重跑 fail-closed audit |
+| 11 | 论文初稿与结果同步 | 已同步 state-verified 与 provenance performance 结果 | 正文、7 图、9 表、32 条参考文献和确定性 DOCX 构建链均保留窄 claim boundary；图 7 同时呈现节点规模 × 并发的吞吐、95% CI 与 p99 尾延迟 | 选定 venue 后模板适配和正常作者修订 |
+| 12 | Claim ledger 与历史结果作废 | 已完成 | 17 条 active claim、176 个字段断言；Toxiproxy 与 provenance performance 均绑定严格 limitation；claim/artifact/manuscript audit 均要求 current bytes | 新增论文数字时必须同步更新 ledger 并重跑 fail-closed audit |
 
 ## State-verified backend 证据摘要
 
@@ -43,7 +43,7 @@
 - AppWorld tuned 将官方 success 从 0/20 提至 1/20、断言从 17/112 提至 53/112，但有 6 个 execution failure，token usage 也有 2 次响应缺失；必须按全 20 task 分母报告，并将 tuned token 总量标为观测下界。
 - joint realism 已完成，但 τ/LoCoMo/AppWorld 的结果显示分布差异；LoCoMo/AppWorld holdout 均为 2，不支持分布等价性或强推断。
 - v8 的跨主机范围为 1 Agent-worker host + 1 model-server host、3 条独立 tunnel；生产级多主机 Agent workers、单一连续 30 分钟 tunnel、跨主机 Qdrant/Neo4j 和有明确定价率的成本核算均为 future work/claim boundary，不能伪装成已完成。
-- Claim audit 当前口径为 15 条正式主张和 163 个字段断言；`results/remaining_tasks/final_status.json`、`results/remaining_tasks/production_evidence_status.json` 和旧 backend fault artifact 仅保留作历史审计，不得再被正文引用为当前状态。
+- Claim audit 当前口径为 17 条正式主张和 176 个字段断言；`results/remaining_tasks/final_status.json`、`results/remaining_tasks/production_evidence_status.json` 和旧 backend fault artifact 仅保留作历史审计，不得再被正文引用为当前状态。
 - 本分支已闭环 state-verified backend 实验；venue 模板适配与正常作者修订仍待完成。
 
 ## Manuscript readiness blockers

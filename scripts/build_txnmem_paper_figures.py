@@ -390,44 +390,72 @@ def _provenance_performance_scaling(
 ) -> tuple[str, str, str, list[str], tuple[int, int]]:
     artifact = "results/provenance_performance_v10_measurements/aggregate.json"
     projection = provenance_performance_v10_projection(root)
-    width, height = 1160, 650
-    left, right, top, bottom = 145.0, 1080.0, 140.0, 535.0
-    y_min, y_max = 0.05, 30.0
-    y_log_min, y_log_max = math.log10(y_min), math.log10(y_max)
+    width, height = 1160, 880
+    left, right = 145.0, 1080.0
+    throughput_top, throughput_bottom = 170.0, 390.0
+    latency_top, latency_bottom = 510.0, 730.0
 
     def x_position(index: int) -> float:
         return left + index * (right - left) / 4
 
-    def y_position(value: float) -> float:
-        normalized = (math.log10(value) - y_log_min) / (y_log_max - y_log_min)
+    def log_y_position(
+        value: float,
+        minimum: float,
+        maximum: float,
+        top: float,
+        bottom: float,
+    ) -> float:
+        normalized = (math.log10(value) - math.log10(minimum)) / (
+            math.log10(maximum) - math.log10(minimum)
+        )
         return bottom - normalized * (bottom - top)
 
+    def draw_log_y_axis(
+        *,
+        top: float,
+        bottom: float,
+        minimum: float,
+        maximum: float,
+        ticks: tuple[tuple[float, str], ...],
+        title: str,
+    ) -> None:
+        for tick, label in ticks:
+            y = log_y_position(tick, minimum, maximum, top, bottom)
+            parts.append(
+                f'<line x1="{left:.1f}" y1="{y:.1f}" x2="{right:.1f}" y2="{y:.1f}" '
+                f'stroke="{LIGHT_GRAY}" stroke-width="1"/>'
+            )
+            _lines(parts, left - 14, y + 5, [label], size=15, fill=GRAY, anchor="end")
+        parts.extend(
+            [
+                f'<line x1="{left:.1f}" y1="{top:.1f}" x2="{left:.1f}" y2="{bottom:.1f}" stroke="{DARK}" stroke-width="1.5"/>',
+                f'<line x1="{left:.1f}" y1="{bottom:.1f}" x2="{right:.1f}" y2="{bottom:.1f}" stroke="{DARK}" stroke-width="1.5"/>',
+                f'<text x="38" y="{(top + bottom) / 2:.1f}" transform="rotate(-90 38 {(top + bottom) / 2:.1f})" text-anchor="middle" font-size="16" font-weight="600" fill="{DARK}">{_escape(title)}</text>',
+            ]
+        )
+
+    def draw_x_axis(bottom: float, label_y: float, title_y: float) -> None:
+        for index, concurrency in enumerate((1, 2, 4, 8, 16)):
+            x = x_position(index)
+            parts.append(
+                f'<line x1="{x:.1f}" y1="{bottom:.1f}" x2="{x:.1f}" y2="{bottom + 7:.1f}" stroke="{DARK}" stroke-width="1.2"/>'
+            )
+            _lines(parts, x, label_y, [str(concurrency)], size=15, fill=DARK, anchor="middle")
+        _lines(
+            parts,
+            (left + right) / 2,
+            title_y,
+            ["并发数"],
+            size=16,
+            fill=DARK,
+            anchor="middle",
+            weight="600",
+        )
+
     parts: list[str] = [
-        f'<text x="50" y="46" font-size="25" font-weight="700" fill="{BLUE}">v10 provenance-performance：吞吐随并发与图规模变化</text>',
-        f'<text x="50" y="75" font-size="15" fill="{GRAY}">15 cells × 30 repetitions；误差线为 whole-repetition bootstrap 95% CI</text>',
+        f'<text x="50" y="42" font-size="25" font-weight="700" fill="{BLUE}">v10 provenance-performance：节点规模 × 并发的吞吐与尾延迟</text>',
+        f'<text x="50" y="70" font-size="15" fill="{GRAY}">15 cells × 30 repetitions × 960 successful operation samples</text>',
     ]
-    for tick in (0.05, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0):
-        y = y_position(tick)
-        parts.append(
-            f'<line x1="{left:.1f}" y1="{y:.1f}" x2="{right:.1f}" y2="{y:.1f}" '
-            f'stroke="{LIGHT_GRAY}" stroke-width="1"/>'
-        )
-        label = f"{tick:g}"
-        _lines(parts, left - 14, y + 5, [label], size=15, fill=GRAY, anchor="end")
-    parts.extend(
-        [
-            f'<line x1="{left:.1f}" y1="{top:.1f}" x2="{left:.1f}" y2="{bottom:.1f}" stroke="{DARK}" stroke-width="1.5"/>',
-            f'<line x1="{left:.1f}" y1="{bottom:.1f}" x2="{right:.1f}" y2="{bottom:.1f}" stroke="{DARK}" stroke-width="1.5"/>',
-            f'<text x="38" y="{(top + bottom) / 2:.1f}" transform="rotate(-90 38 {(top + bottom) / 2:.1f})" text-anchor="middle" font-size="17" font-weight="600" fill="{DARK}">吞吐（ops/s，对数刻度）</text>',
-        ]
-    )
-    for index, concurrency in enumerate((1, 2, 4, 8, 16)):
-        x = x_position(index)
-        parts.append(
-            f'<line x1="{x:.1f}" y1="{bottom:.1f}" x2="{x:.1f}" y2="{bottom + 7:.1f}" stroke="{DARK}" stroke-width="1.2"/>'
-        )
-        _lines(parts, x, bottom + 27, [str(concurrency)], size=15, fill=DARK, anchor="middle")
-    _lines(parts, (left + right) / 2, 598, ["并发数"], size=17, fill=DARK, anchor="middle", weight="600")
 
     cells_by_graph = {
         graph_node_count: [
@@ -448,12 +476,33 @@ def _provenance_performance_scaling(
     }
     if set(peaks_by_graph) != set(PROVENANCE_GRAPH_NODE_COUNTS):
         raise ValueError("v10 provenance-performance peak projection is incomplete")
+
+    _lines(parts, left, 154, ["（a）成功操作吞吐"], size=17, fill=DARK, weight="700")
+    draw_log_y_axis(
+        top=throughput_top,
+        bottom=throughput_bottom,
+        minimum=0.05,
+        maximum=30.0,
+        ticks=tuple((tick, f"{tick:g}") for tick in (0.05, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0)),
+        title="吞吐（ops/s，对数刻度）",
+    )
+    draw_x_axis(throughput_bottom, 417.0, 444.0)
+
     for graph_node_count, color, label in series:
         peak = peaks_by_graph[graph_node_count]
         peak_display = f'{peak["throughput_ops_per_second"]:.3f}'
         cells = cells_by_graph[graph_node_count]
         points = [
-            (x_position(index), y_position(cell["throughput_ops_per_second"]))
+            (
+                x_position(index),
+                log_y_position(
+                    cell["throughput_ops_per_second"],
+                    0.05,
+                    30.0,
+                    throughput_top,
+                    throughput_bottom,
+                ),
+            )
             for index, cell in enumerate(cells)
         ]
         point_string = " ".join(f"{x:.1f},{y:.1f}" for x, y in points)
@@ -463,8 +512,20 @@ def _provenance_performance_scaling(
         )
         for index, cell in enumerate(cells):
             x, y = points[index]
-            lower_y = y_position(cell["ci95_lower_ops_per_second"])
-            upper_y = y_position(cell["ci95_upper_ops_per_second"])
+            lower_y = log_y_position(
+                cell["ci95_lower_ops_per_second"],
+                0.05,
+                30.0,
+                throughput_top,
+                throughput_bottom,
+            )
+            upper_y = log_y_position(
+                cell["ci95_upper_ops_per_second"],
+                0.05,
+                30.0,
+                throughput_top,
+                throughput_bottom,
+            )
             parts.extend(
                 [
                     '<g class="ci-whisker">',
@@ -477,20 +538,20 @@ def _provenance_performance_scaling(
             )
         parts.append("</g>")
         legend_index = (100, 1000, 10000).index(graph_node_count)
-        legend_x = 540 + legend_index * 200
+        legend_x = 300 + legend_index * 250
         parts.append(
             f'<g class="series-legend" data-series="{graph_node_count}">'
         )
         parts.append(
-            f'<line x1="{legend_x:.1f}" y1="96" x2="{legend_x + 30:.1f}" y2="96" stroke="{color}" stroke-width="2.8"/>'
+            f'<line x1="{legend_x:.1f}" y1="101" x2="{legend_x + 30:.1f}" y2="101" stroke="{color}" stroke-width="2.8"/>'
         )
         parts.append(
-            f'<circle cx="{legend_x + 15:.1f}" cy="96" r="4.5" fill="white" stroke="{color}" stroke-width="2"/>'
+            f'<circle cx="{legend_x + 15:.1f}" cy="101" r="4.5" fill="white" stroke="{color}" stroke-width="2"/>'
         )
         _lines(
             parts,
             legend_x + 38,
-            101,
+            106,
             [label],
             size=15,
             fill=DARK,
@@ -498,24 +559,61 @@ def _provenance_performance_scaling(
         _lines(
             parts,
             legend_x + 38,
-            122,
+            127,
             [f"峰值 {peak_display}"],
             size=15,
             fill=GRAY,
         )
         parts.append("</g>")
 
+    _lines(parts, left, 494, ["（b）成功操作 p99 尾延迟"], size=17, fill=DARK, weight="700")
+    draw_log_y_axis(
+        top=latency_top,
+        bottom=latency_bottom,
+        minimum=100.0,
+        maximum=1_000_000.0,
+        ticks=((100.0, "100"), (1_000.0, "1k"), (10_000.0, "10k"), (100_000.0, "100k"), (1_000_000.0, "1M")),
+        title="p99 尾延迟（ms，对数刻度）",
+    )
+    draw_x_axis(latency_bottom, 757.0, 784.0)
+    for graph_node_count, color, _ in series:
+        cells = cells_by_graph[graph_node_count]
+        points = [
+            (
+                x_position(index),
+                log_y_position(
+                    cell["p99_ms"],
+                    100.0,
+                    1_000_000.0,
+                    latency_top,
+                    latency_bottom,
+                ),
+            )
+            for index, cell in enumerate(cells)
+        ]
+        point_string = " ".join(f"{x:.1f},{y:.1f}" for x, y in points)
+        parts.append(f'<g class="p99-series" data-series="{graph_node_count}">')
+        parts.append(
+            f'<polyline points="{point_string}" fill="none" stroke="{color}" stroke-width="2.8"/>'
+        )
+        for x, y in points:
+            parts.append(
+                f'<circle class="p99-point" cx="{x:.1f}" cy="{y:.1f}" r="5.5" fill="{color}" stroke="white" stroke-width="1.5"/>'
+            )
+        parts.append("</g>")
+
     _lines(
         parts,
         50,
-        632,
-        ["读法：同色折线只比较同一图规模；纵轴为对数刻度，不能按视觉距离作线性差值。"],
+        828,
+        ["（a）误差线为 whole-repetition bootstrap 95% CI；（b）p99 由每个 cell 的成功操作样本计算。"],
         size=15,
         fill=GRAY,
     )
+    _lines(parts, 50, 852, ["同色折线表示同一节点规模；两面板纵轴均为对数刻度。"], size=15, fill=GRAY)
     caption = (
-        "v10 测量矩阵的吞吐—并发曲线；纵轴为对数刻度，误差线为 "
-        "whole-repetition bootstrap 95% CI。"
+        "v10 节点规模—并发扩展性：（a）成功操作吞吐及 whole-repetition "
+        "bootstrap 95% CI；（b）成功操作 p99 尾延迟；两面板纵轴均为对数刻度。"
     )
     peak_descriptions = "；".join(
         f'{label} 在并发 {peaks_by_graph[graph_node_count]["concurrency"]} 达到被测峰值 '
@@ -523,8 +621,9 @@ def _provenance_performance_scaling(
         for graph_node_count, _, label in series
     )
     alt = (
-        "v10 测量矩阵包含 100、1,000 和 10,000 nodes 三条吞吐曲线；"
-        f"{peak_descriptions}；所有点均带 95% 置信区间。"
+        "v10 测量矩阵按 100、1,000 和 10,000 nodes 以及并发 1、2、4、8、16 "
+        "组成 15 个 cell；上半图包含 15 个吞吐点及 95% 置信区间，下半图包含 "
+        f"15 个 p99 尾延迟点；{peak_descriptions}。"
     )
     return (
         _svg(width, height, "v10 provenance-performance 扩展性", alt, parts),
