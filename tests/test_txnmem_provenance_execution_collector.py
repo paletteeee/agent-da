@@ -11,6 +11,7 @@ import socket
 import stat
 import subprocess
 import sys
+import threading
 import time
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -36,31 +37,101 @@ from txnmem_topology_attestation import (
 
 
 class FormalAblationLifecycleTests(unittest.TestCase):
+    @staticmethod
+    def _fault_http_connection(error):
+        class FaultConnection:
+            def request(self, _method, _path, *, headers):
+                pass
+            def getresponse(self):
+                raise error
+            def close(self):
+                pass
+        return FaultConnection()
+
     def test_timeout_toxic_configuration_is_explicitly_100_milliseconds(self):
         self.assertEqual(
             collector_module._FORMAL_ABLATION_TIMEOUT_TOXIC_MILLISECONDS, 100
         )
 
-    def test_timeout_probe_uses_keep_alive_but_recovery_request_does_not(self):
+    def test_timeout_probe_uses_direct_http_connection_and_closes_it(self):
         toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 100}}
-        headers = []
+        calls = []
+        class FaultResponse:
+            def read(self, size):
+                calls.append(("read", size))
+                raise http.client.RemoteDisconnected()
+        class FaultConnection:
+            def __init__(self, host, port, timeout):
+                calls.append(("init", host, port, timeout))
+            def request(self, method, path, *, headers):
+                calls.append(("request", method, path, headers))
+            def getresponse(self):
+                calls.append(("getresponse",))
+                return FaultResponse()
+            def close(self):
+                calls.append(("close",))
         class Recovery:
             status = 200
             def __enter__(self): return self
             def __exit__(self, *_args): return False
             def read(self, _size): return b"{}"
-        def urlopen(request, **_kwargs):
-            headers.append(request.get_header("Connection"))
-            if len(headers) == 1:
-                raise http.client.RemoteDisconnected()
-            return Recovery()
         with patch.object(
             collector_module, "_toxiproxy_json_request", side_effect=[{}, toxic, None, None]
         ), patch.object(collector_module, "observe_formal_toxiproxy_routes", return_value=[]), patch.object(
-            collector_module.urllib.request, "urlopen", side_effect=urlopen
+            collector_module.http.client, "HTTPConnection", FaultConnection
+        ), patch.object(
+            collector_module.urllib.request, "urlopen", return_value=Recovery()
         ), patch.object(collector_module.time, "monotonic", side_effect=[0.0, 0.1]):
             self.assertEqual(collector_module._observe_ablation_timeout_cleanup(), {"attempt_count": 1, "failure_count": 0})
-        self.assertEqual(headers, ["keep-alive", None])
+        self.assertEqual(calls, [
+            ("init", "127.0.0.1", 19000, 0.25),
+            ("request", "GET", "/collections", {"Connection": "keep-alive"}),
+            ("getresponse",),
+            ("read", 1),
+            ("close",),
+        ])
+
+    def test_timeout_probe_sends_keep_alive_on_the_wire(self):
+        toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 100}}
+        real_connection = http.client.HTTPConnection
+        captured = []
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(0.5)
+        port = listener.getsockname()[1]
+        def serve_once():
+            try:
+                connection, _address = listener.accept()
+                with connection:
+                    captured.append(connection.recv(4096))
+            except TimeoutError:
+                pass
+        worker = threading.Thread(target=serve_once, daemon=True)
+        worker.start()
+        class Recovery:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self, _size): return b"{}"
+        def connect_to_listener(host, requested_port, timeout):
+            self.assertEqual((host, requested_port, timeout), ("127.0.0.1", 19000, 0.25))
+            return real_connection("127.0.0.1", port, timeout=timeout)
+        try:
+            with patch.object(
+                collector_module, "_toxiproxy_json_request", side_effect=[{}, toxic, None, None]
+            ), patch.object(collector_module, "observe_formal_toxiproxy_routes", return_value=[]), patch.object(
+                collector_module.http.client, "HTTPConnection", side_effect=connect_to_listener
+            ), patch.object(
+                collector_module.urllib.request, "urlopen", return_value=Recovery()
+            ), patch.object(collector_module.time, "monotonic", side_effect=[0.0, 0.1]):
+                self.assertEqual(collector_module._observe_ablation_timeout_cleanup(), {"attempt_count": 1, "failure_count": 0})
+        finally:
+            listener.close()
+            worker.join(timeout=1.0)
+        request_bytes = b"".join(captured)
+        self.assertIn(b"Connection: keep-alive\r\n", request_bytes)
+        self.assertNotIn(b"Connection: close\r\n", request_bytes)
 
     @staticmethod
     def _document(payload):
@@ -571,8 +642,10 @@ class FormalAblationLifecycleTests(unittest.TestCase):
             collector_module, "_toxiproxy_json_request",
             side_effect=[{}, toxic, None, None],
         ), patch.object(collector_module, "observe_formal_toxiproxy_routes", return_value=[]), patch.object(
-            collector_module.urllib.request, "urlopen",
-            side_effect=[collector_module.urllib.error.URLError(ConnectionRefusedError()), Recovery()],
+            collector_module.http.client, "HTTPConnection",
+            return_value=self._fault_http_connection(ConnectionRefusedError()),
+        ), patch.object(
+            collector_module.urllib.request, "urlopen", return_value=Recovery(),
         ):
             with self.assertRaises(collector_module.CollectorError):
                 collector_module._observe_ablation_timeout_cleanup()
@@ -582,8 +655,10 @@ class FormalAblationLifecycleTests(unittest.TestCase):
         with patch.object(
             collector_module, "_toxiproxy_json_request",
             side_effect=[{}, toxic, None, toxic],
-        ), patch.object(collector_module.urllib.request, "urlopen", side_effect=socket.timeout()), patch.object(
-            collector_module.time, "monotonic", side_effect=[0.0, 0.1]
+        ), patch.object(
+            collector_module.http.client, "HTTPConnection",
+            return_value=self._fault_http_connection(socket.timeout()),
+        ), patch.object(collector_module.time, "monotonic", side_effect=[0.0, 0.1]
         ):
             with self.assertRaises(collector_module.CollectorError):
                 collector_module._observe_ablation_timeout_cleanup()
@@ -598,8 +673,10 @@ class FormalAblationLifecycleTests(unittest.TestCase):
         with patch.object(
             collector_module, "_toxiproxy_json_request", side_effect=[{}, toxic, None, None]
         ), patch.object(collector_module, "observe_formal_toxiproxy_routes", return_value=[]), patch.object(
-            collector_module.urllib.request, "urlopen",
-            side_effect=[http.client.RemoteDisconnected(), Recovery()],
+            collector_module.http.client, "HTTPConnection",
+            return_value=self._fault_http_connection(http.client.RemoteDisconnected()),
+        ), patch.object(
+            collector_module.urllib.request, "urlopen", return_value=Recovery(),
         ), patch.object(collector_module.time, "monotonic", side_effect=[0.0, 0.1]):
             self.assertEqual(
                 collector_module._observe_ablation_timeout_cleanup(),
@@ -608,9 +685,14 @@ class FormalAblationLifecycleTests(unittest.TestCase):
 
     def test_timeout_observer_rejects_remote_disconnect_without_exact_toxic(self):
         wrong = {"name": "wrong", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 100}}
+        class Recovery:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self, _size): return b"{}"
         with patch.object(
             collector_module, "_toxiproxy_json_request", side_effect=[{}, wrong, None, None]
-        ), patch.object(collector_module.urllib.request, "urlopen", side_effect=http.client.RemoteDisconnected()):
+        ), patch.object(collector_module.urllib.request, "urlopen", return_value=Recovery()):
             with self.assertRaises(collector_module.CollectorError):
                 collector_module._observe_ablation_timeout_cleanup()
 
@@ -624,8 +706,10 @@ class FormalAblationLifecycleTests(unittest.TestCase):
         with patch.object(
             collector_module, "_toxiproxy_json_request", side_effect=[{}, toxic, None, None]
         ), patch.object(collector_module, "observe_formal_toxiproxy_routes", return_value=[]), patch.object(
-            collector_module.urllib.request, "urlopen",
-            side_effect=[http.client.RemoteDisconnected(), Recovery()],
+            collector_module.http.client, "HTTPConnection",
+            return_value=self._fault_http_connection(http.client.RemoteDisconnected()),
+        ), patch.object(
+            collector_module.urllib.request, "urlopen", return_value=Recovery(),
         ), patch.object(collector_module.time, "monotonic", side_effect=[0.0, 0.001]):
             with self.assertRaises(collector_module.CollectorError):
                 collector_module._observe_ablation_timeout_cleanup()

@@ -624,24 +624,25 @@ def _observe_ablation_timeout_cleanup() -> dict[str, int]:
             }
         ):
             raise CollectorError("formal ablation timeout toxic identity is invalid")
-        request = urllib.request.Request(
-            "http://127.0.0.1:19000/collections", method="GET",
-            headers={"Connection": _FORMAL_ABLATION_TIMEOUT_CONNECTION_HEADER},
-        )
+        connection = http.client.HTTPConnection("127.0.0.1", 19000, timeout=0.25)
         started = time.monotonic()
         try:
-            with urllib.request.urlopen(request, timeout=0.25) as response:
-                response.read(1)
+            connection.request(
+                "GET", "/collections",
+                headers={"Connection": _FORMAL_ABLATION_TIMEOUT_CONNECTION_HEADER},
+            )
+            response = connection.getresponse()
+            response.read(1)
         except (TimeoutError, socket.timeout, http.client.RemoteDisconnected):
             elapsed = time.monotonic() - started
             if elapsed < 0.05 or elapsed > 1.0:
                 raise CollectorError("formal ablation injected timeout duration is invalid")
-        except urllib.error.URLError as exc:
-            elapsed = time.monotonic() - started
-            if not isinstance(exc.reason, (TimeoutError, socket.timeout)) or elapsed < 0.05 or elapsed > 1.0:
-                raise CollectorError("formal ablation probe failed without injected timeout") from exc
+        except OSError as exc:
+            raise CollectorError("formal ablation probe failed without injected timeout") from exc
         else:
             raise CollectorError("formal ablation timeout toxic did not isolate the request")
+        finally:
+            connection.close()
     finally:
         try:
             _toxiproxy_json_request(
