@@ -34,7 +34,7 @@ W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 DOC_PR_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 NS = {"w": W_NS, "wp": WP_NS}
-FIG_MARKER = re.compile(r"\[\[FIG:([a-z_]+)\]\]")
+FIG_MARKER = re.compile(r"\[\[FIG:([a-z0-9_]+)\]\]")
 MARKERS = (
     "[[FIG:",
     "[[TABLE:",
@@ -63,11 +63,20 @@ def _test_rasterizer(svg: Path, cache: Path) -> tuple[Path, float]:
     for y in range(image.height):
         image.putpixel((0, y), (0, 0, 0))
         image.putpixel((image.width - 1, y), (0, 0, 0))
+    # Keep same-sized but semantically distinct SVG fixtures distinct inside
+    # the DOCX package; python-docx legitimately deduplicates identical images.
+    image.putpixel((1, 1), tuple(hashlib.sha256(svg.read_bytes()).digest()[:3]))
     image.save(target)
     return target, height / width
 
 
 class TxnMemCcfaDocxTests(unittest.TestCase):
+    def test_figure_marker_grammar_accepts_numeric_ids(self):
+        self.assertEqual(
+            FIG_MARKER.findall("[[FIG:provenance_performance_scaling_v10]]"),
+            ["provenance_performance_scaling_v10"],
+        )
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.config = json.loads((ROOT / "configs/txnmem_ccfa_paper.json").read_text(encoding="utf-8"))
@@ -121,11 +130,11 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
         self.assertTrue(zipfile.is_zipfile(self.path))
         self.assertEqual(
             len([name for name in self.parts if name.startswith("word/media/")]),
-            6,
+            7,
         )
-        self.assertEqual(len(self.figure_ids), 6)
+        self.assertEqual(len(self.figure_ids), 7)
         self.assertEqual(set(self.figure_ids), set(self.manifest))
-        self.assertEqual(len(self.table_ids), 8)
+        self.assertEqual(len(self.table_ids), 9)
         self.assertEqual(set(self.table_ids), set(TABLE_TITLES))
         self.assertEqual([item["id"] for item in self.catalog], [f"R{number:02d}" for number in range(1, 33)])
         headings = [p.text for p in self.document.paragraphs if p.style.name.startswith("Heading")]
@@ -267,7 +276,7 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
 
     def test_appendix_schema_table_uses_compact_readable_type(self) -> None:
         """Keep the final appendix table and its explanatory paragraph on one page flow."""
-        for number, appendix_table in ((7, self.document.tables[-2]), (8, self.document.tables[-1])):
+        for number, appendix_table in ((8, self.document.tables[-2]), (9, self.document.tables[-1])):
             caption = next(
                 paragraph for paragraph in self.document.paragraphs
                 if paragraph.style.name == "Caption" and paragraph.text.startswith(f"表 {number}")
@@ -322,20 +331,21 @@ class TxnMemCcfaDocxTests(unittest.TestCase):
     def test_targeted_table_layouts_use_readable_widths_and_breaks(self) -> None:
         grids = {
             number: [int(column.get(qn("w:w"))) for column in self.document.tables[number - 1]._tbl.tblGrid.gridCol_lst]
-            for number in (4, 6, 7)
+            for number in (4, 6, 7, 8)
         }
         self.assertEqual(grids[4], [1600, 2700, 3150, 1910])
         self.assertEqual(grids[6], [1800, 2800, 3000, 1760])
-        self.assertEqual(grids[7], [2300, 2300, 4760])
+        self.assertEqual(grids[7], [980, 780, 1250, 1250, 1250, 1550, 2300])
+        self.assertEqual(grids[8], [2300, 2300, 4760])
         table_text = "\n".join(
-            cell.text for number in (4, 6, 7)
+            cell.text for number in (4, 6, 7, 8)
             for row in self.document.tables[number - 1].rows
             for cell in row.cells
         )
         for fragmented in ("simulato\nr", "AppWorl\nd", "Q\ndrant+Ne\no4j"):
             self.assertNotIn(fragmented, table_text)
         self.assertIn("Qwen +\nQdrant +\nNeo4j", table_text)
-        claim_cells = [row.cells[0].text for row in self.document.tables[6].rows[1:]]
+        claim_cells = [row.cells[0].text for row in self.document.tables[7].rows[1:]]
         expected_claim_ids = [
             claim["claim_id"]
             for claim in json.loads((ROOT / "configs/paper_claims.json").read_text(encoding="utf-8"))["claims"]

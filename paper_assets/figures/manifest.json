@@ -8,15 +8,15 @@
         "width": 1160
       },
       "file": "architecture.svg",
-      "output_sha256": "9a132f6bc2240bdde399af8ab2735f805f33544697346ea1af1cfcb28518bb92",
+      "output_sha256": "c0b7130f22de106deb6d3f7e371509d54d4aff7826f0f02c50ff023e8c2cd1a5",
       "sources": [
         {
           "path": "docs/paper/txnmem_ccfa_draft_zh.md",
-          "sha256": "b645c7d84b7cb854d3f728ffb32806c3f9a37ef7e83e14b7a8f613bcca40592a"
+          "sha256": "bc010808896f172db0c81d4e1ada702f990170e76bcc9538c462a644721466b4"
         },
         {
           "path": "configs/txnmem_ccfa_paper.json",
-          "sha256": "917867f49158784a0176cd11e21aa019be0ae509836537a7587b5b90f1d447f0"
+          "sha256": "a98f850eb9f3d9eb0eaeac436d5c54eed310533dd6a39dc514c4f63b4fd03018"
         }
       ]
     },
@@ -32,7 +32,7 @@
       "sources": [
         {
           "path": "docs/paper/txnmem_ccfa_draft_zh.md",
-          "sha256": "b645c7d84b7cb854d3f728ffb32806c3f9a37ef7e83e14b7a8f613bcca40592a"
+          "sha256": "bc010808896f172db0c81d4e1ada702f990170e76bcc9538c462a644721466b4"
         },
         {
           "path": "results/final_controlled/results/schedule_baseline.json",
@@ -64,15 +64,15 @@
         "width": 1160
       },
       "file": "evidence_layers.svg",
-      "output_sha256": "57ae976d0b3d12b2c88a2710a3b2d8f6a3824ea58fda8def89e1e68e4a5c3342",
+      "output_sha256": "cd4e67f19b0c31d771ce1c1ddb195b2d5c299332187b2e01ccc1ecada96ca81d",
       "sources": [
         {
           "path": "configs/txnmem_ccfa_paper.json",
-          "sha256": "917867f49158784a0176cd11e21aa019be0ae509836537a7587b5b90f1d447f0"
+          "sha256": "a98f850eb9f3d9eb0eaeac436d5c54eed310533dd6a39dc514c4f63b4fd03018"
         },
         {
           "path": "configs/paper_claims.json",
-          "sha256": "c45def3dae8308d2f49a32490c354bcb77bd9d0ee4b7f1c53e1a0a565d6cb9b5"
+          "sha256": "5e755e377f4b65478428f4a9cbe553c8ae0dbafad50a0386f8a85f187f2529ce"
         },
         {
           "path": "results/final_controlled/results/schedule_baseline.json",
@@ -108,7 +108,7 @@
       "sources": [
         {
           "path": "docs/paper/txnmem_ccfa_draft_zh.md",
-          "sha256": "b645c7d84b7cb854d3f728ffb32806c3f9a37ef7e83e14b7a8f613bcca40592a"
+          "sha256": "bc010808896f172db0c81d4e1ada702f990170e76bcc9538c462a644721466b4"
         },
         {
           "path": "results/final_controlled/results/schedule_baseline.json",
@@ -117,6 +117,22 @@
         {
           "path": "results/final_controlled/results/minimal_mutant_witnesses.json",
           "sha256": "8a8c19faf8c906652596c6da351fa410444f78472f02e807b8b625c4a31b539d"
+        }
+      ]
+    },
+    "provenance_performance_scaling": {
+      "alt_text": "v10 测量矩阵包含 100、1,000 和 10,000 nodes 三条吞吐曲线；100 nodes 在并发 2 达到被测峰值 21.899 ops/s；1,000 nodes 在并发 2 达到被测峰值 2.844 ops/s；10,000 nodes 在并发 1 达到被测峰值 0.123 ops/s；所有点均带 95% 置信区间。",
+      "caption": "v10 测量矩阵的吞吐—并发曲线；纵轴为对数刻度，误差线为 whole-repetition bootstrap 95% CI。",
+      "dimensions": {
+        "height": 650,
+        "width": 1160
+      },
+      "file": "provenance_performance_scaling.svg",
+      "output_sha256": "79dd5a91e1160ffa499a95e0870bf8aa4e06e9c019baa1668b807927268cdf6d",
+      "sources": [
+        {
+          "path": "results/provenance_performance_v10_measurements/aggregate.json",
+          "sha256": "9045c59ad476dc0870fb51fc4b68469935bd79f83cf82b85bcc9845b7230f378"
         }
       ]
     },
@@ -132,7 +148,7 @@
       "sources": [
         {
           "path": "docs/paper/txnmem_ccfa_draft_zh.md",
-          "sha256": "b645c7d84b7cb854d3f728ffb32806c3f9a37ef7e83e14b7a8f613bcca40592a"
+          "sha256": "bc010808896f172db0c81d4e1ada702f990170e76bcc9538c462a644721466b4"
         },
         {
           "path": "results/final_controlled/results/minimal_mutant_witnesses.json",

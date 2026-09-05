@@ -7,12 +7,14 @@
 | 可使用 claim | 正文可使用数字 | artifact | 统计单位 | claim boundary | 预定章节 |
 | --- | --- | --- | --- | --- | --- |
 | `controlled_correctness_400x5` | 8 workload family、50 seed、400 instance、5 variant、2000 variant row；TxnMem 0 violation、400 oracle match；Naive 350、NoTxn 200、NoPolicyCommit 50、NoRepair 100 violation | `results/paper_evidence/controlled_suite.json` | instance、variant row | deterministic controlled simulator evidence against an independent reference semantics; not a public-task accuracy claim | 6 评估 / RQ1 |
+| `external_baselines_scale_400` | 同一 400-instance suite 上 5 个 adapter 共 2000 次 attempted；1850 次纳入正确性分母、150 次 unsupported mapping 排除、0 次 runtime error；100 次 capability-absence observation；纳入统计的执行中 1550 次 correctness violation | `results/paper_evidence/external_baselines_scale_400.json` | adapter-instance attempt、successful correctness-included attempt | observable correctness comparison on the same 400-instance TxnMemBench suite; capability absence is an interface observation, unsupported/runtime attempts are excluded from correctness denominators, and results do not establish third-party security defects or general production behavior | 6 评估 / RQ1 外部系统对照 |
 
 ## RQ2：测试方法是否揭示目标缺陷？
 
 | 可使用 claim | 正文可使用数字 | artifact | 统计单位 | claim boundary | 预定章节 |
 | --- | --- | --- | --- | --- | --- |
 | `causal_schedule_vs_random` | causal 400 case、0.875 detection rate；random 4000 case、0.75 detection rate | `results/final_controlled/results/schedule_baseline.json` | schedule case | schedule detection in the controlled simulator; random baseline consists of ten seeded schedules per instance | 6 评估 / RQ2 |
+| `controlled_mutation_matrix_350` | 350 variant-instance case、300 killed、50 survived、mutation kill rate 0.8571428571428571 | `results/final_controlled/reproducibility_report.json` | variant-instance case | controlled mutation-matrix sensitivity over 350 variant-instance cases; not a production defect rate or universal mutant-coverage claim | 6 评估 / RQ2 |
 | `minimal_mutant_witnesses_4` | 400 source instance、4 mutant、4 prefix-minimal witness | `results/final_controlled/results/minimal_mutant_witnesses.json` | mutant、witness | one deterministic operation-prefix-minimal witness per major mutant; minimality is with respect to suffix removal | 6 评估 / RQ2 |
 
 ## RQ3：真实模型和公开 runtime 能否接入？
@@ -44,3 +46,9 @@
 | `joint_realism_locomo` | 400 synthetic、2 trace、MMD statistic 1.9418861405587229、p=0.0005、1999 permutation | `results/joint_realism/locomo/results/trace_realism.json` | synthetic instance、held-out conversation、permutation | joint-distribution diagnostic with only two held-out conversations; low-power and not evidence of equivalence | 6 评估 / RQ5 |
 | `appworld_projection_regeneration` | 5 task、380 event | `results/appworld_projection_regenerated/projection_inventory.json` | projected task、projection event | method/URL-only trace-grounded projection from official API calls; not native Agent memory ground truth | 6 评估 / RQ5 |
 | `joint_realism_appworld` | 400 synthetic、2 trace、MMD statistic 1.2209670111356792、p=0.0005、1999 permutation | `results/appworld_projection_regenerated/results/trace_realism.json` | synthetic instance、held-out projected task、permutation | joint-distribution diagnostic over a redacted projection with two held-out tasks; not native memory ground truth or distributional equivalence | 6 评估 / RQ5 |
+
+## RQ6：图规模与并发增长时，性能如何变化？
+
+| 可使用 claim | 正文可使用数字 | artifact | 统计单位 | claim boundary | 预定章节 |
+| --- | --- | --- | --- | --- | --- |
+| `provenance_performance_v10_measurements` | 3 种图规模 × 5 档并发 = 15 cell；每 cell 30 repetition、960 operation sample；合计 450 repetition、14,400 successful sample、0 failed sample；whole-repetition bootstrap 95% CI（10,000 次重采样）；100-node 与 1,000-node 图均在并发 2 达到被测峰值 21.899464 与 2.843982 ops/s，10,000-node 图在并发 1 达到被测峰值 0.122943 ops/s | `results/paper_evidence/provenance_performance_v10.json` | graph-size/concurrency cell、repetition、successful operation sample | tested provenance-performance graph-size/concurrency matrix; aggregate measurement results only, not terminal validation, promotion, or production performance | 6 评估 / RQ6 |

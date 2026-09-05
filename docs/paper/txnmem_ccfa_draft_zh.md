@@ -28,7 +28,7 @@ TxnMem 因而不试图宣称一种更好的文本记忆或更高的公开任务�
 
 - 在受控 workload、真实 Qwen tool loop、三个公开 Agent runtime、真实 Qdrant/Neo4j/Toxiproxy 服务和跨主机模型负载上建立分层证据链。
 
-本文不将上述接线或外部 workflow 指标改写成 end-user 成功率、memory accuracy 或 production quality。后文首先定位问题与设计需求，继而给出形式模型、三个机制及其原型边界，再以已审计的受控、模型、公开 runtime、服务路径与跨主机证据回答五个研究问题，并总结局限与相关工作。
+本文不将上述接线或外部 workflow 指标改写成 end-user 成功率、memory accuracy 或 production quality。后文首先定位问题与设计需求，继而给出形式模型、三个机制及其原型边界，再以已审计的受控、模型、公开 runtime、服务路径、跨主机与 provenance-performance 证据回答六个研究问题，并总结局限与相关工作。
 
 # 2 背景与动机
 
@@ -205,7 +205,7 @@ Qwen 工具循环通过结构化工具调用产生逐个 memory event；模型�
 
 # 6 评估
 
-我们围绕五个问题组织评估。RQ1 检查三个机制是否阻止目标违规；RQ2 检查因果调度和 mutation witness 是否揭示这些违规；RQ3 检查真实模型及公开 runtime 是否能接入事件接口；RQ4 检查真实服务故障、响应与操作后状态回读；RQ5 检查 synthetic workload 与 trace-grounded holdout 的失配程度。各问题只使用独立记录的分母：workload family 是生成规则类别，seed 是该规则下的随机化输入，instance 是一个受控 history，variant row 是 instance 与实现变体的一次组合；task episode、conversation、native event、服务重复和跨主机 repetition 则分别属于不同实验层，绝不合并为同一成功率。
+我们围绕六个问题组织评估。RQ1 检查三个机制是否阻止目标违规；RQ2 检查因果调度和 mutation witness 是否揭示这些违规；RQ3 检查真实模型及公开 runtime 是否能接入事件接口；RQ4 检查真实服务故障、响应与操作后状态回读；RQ5 检查 synthetic workload 与 trace-grounded holdout 的失配程度；RQ6 检查 provenance 图规模与并发增长时的时延和吞吐变化。各问题只使用独立记录的分母：workload family 是生成规则类别，seed 是该规则下的随机化输入，instance 是一个受控 history，variant row 是 instance 与实现变体的一次组合；task episode、conversation、native event、服务重复和跨主机 repetition 则分别属于不同实验层，绝不合并为同一成功率。
 
 判定也分为四层：官方 evaluator 判定公开任务工作流；TxnMem oracle 将候选可观察 history 与独立 serial reference semantics 比较；event contract 只验证逐个 memory event 的格式和路由；真实服务观察记录代理路由、故障触发、客户端响应与操作后 Qdrant/Neo4j 回读。下层可为上层提供接线证据，却不替代上层的语义判定；该服务观察只回答被测 workload 和五个单机场景的 complete-or-absent 结果。因此，workflow reward、QA 分数和端到端耗时均不被解释为 memory accuracy。
 
@@ -254,6 +254,10 @@ Qwen 工具循环通过结构化工具调用产生逐个 memory event；模型�
 <!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:controlled_correctness_400x5]] deterministic controlled simulator evidence against an independent reference semantics; not a public-task accuracy claim<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
 
 这些差异对应的是删去机制后的因果路径，而非把对照当作可互换的产品版本：Agent Memory Transaction 隔离未决写集并把故障路径收束为 abort；Policy-Consistent Commit 在提交点使用最新策略，因而阻断开始后撤权；Provenance-Driven Repair 从被撤销、取代或更正的源沿依赖闭包标记对象失效。完整实现的结果仅说明确定性 core/reference simulator 下的目标不变量与参考语义一致，不是公开任务准确率结论。
+
+### 外部系统的可观察正确性对照
+
+在同一 400-instance TxnMemBench suite 上，五个适配器共尝试 2,000 次执行。其中 1,850 次进入正确性分母，150 次因 unsupported mapping 排除；unsupported mapping 与 runtime attempt 均不进入正确性分母，本次 runtime error 为 0。另记录 100 次 capability-absence observation，该项与互斥的运行状态正交。在纳入正确性统计的执行中，oracle outcome 记录 1,550 次 violation。该结果只比较统一接口下的可观察正确性，不能据此声称第三方系统存在安全缺陷，也不能外推至一般生产行为。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:external_baselines_scale_400]] observable correctness comparison on the same 400-instance TxnMemBench suite; capability absence is an interface observation, unsupported/runtime attempts are excluded from correctness denominators, and results do not establish third-party security defects or general production behavior<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
 
 ## 6.2 RQ2：因果调度和 mutation witness 是否揭示目标缺陷？
 
@@ -311,9 +315,40 @@ AppWorld 先由官方 API call 重新生成 method/URL-only、脱敏的 projecti
 
 RQ5 因而提供的是负结果：三个 holdout 上的统计量均要求我们校准 workload generator、扩大 trace 覆盖并明确适配假设；它们绝不构成 synthetic workload 与真实使用分布相同的证明。
 
+## 6.6 RQ6：图规模与并发增长时，性能如何变化？
+
+v10 provenance-performance 采用三种图规模和五档并发，形成 15 个 cell；每个 cell 重复 30 次、包含 960 个操作样本，合计 450 次 repetition 与 14,400 个成功样本，失败样本为 0。时延统计只覆盖成功操作，吞吐分子也只计成功操作；吞吐区间采用 whole-repetition bootstrap 95% CI（10,000 次重采样）。以下结果的范围是 `measurement_results`。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:provenance_performance_v10_measurements]] tested provenance-performance graph-size/concurrency matrix; aggregate measurement results only, not terminal validation, promotion, or production performance<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
+
+`[[FIG:provenance_performance_scaling]]`
+
+`[[TABLE:provenance_performance_v10]]`
+
+| 图节点数 | 并发 | p50（ms） | p95（ms） | p99（ms） | 吞吐（ops/s） | 95% CI（ops/s） |
+| --- | --- | --- | --- | --- | --- | --- |
+| 100 | 1 | 59.474 | 144.263 | 172.244 | 16.825475 | [16.125670, 17.477550] |
+| 100 | 2 | 68.064 | 330.635 | 353.102 | 21.899464 | [20.632092, 23.307180] |
+| 100 | 4 | 89.755 | 655.549 | 725.238 | 21.151550 | [20.058562, 22.487822] |
+| 100 | 8 | 229.866 | 1,233.670 | 1,428.238 | 20.461595 | [19.651022, 21.294217] |
+| 100 | 16 | 442.466 | 1,702.442 | 1,895.605 | 19.758651 | [19.051363, 20.521189] |
+| 1,000 | 1 | 62.501 | 1,533.362 | 1,617.790 | 2.534724 | [2.506544, 2.563749] |
+| 1,000 | 2 | 71.585 | 3,216.801 | 3,987.923 | 2.843982 | [2.668030, 3.029075] |
+| 1,000 | 4 | 90.397 | 6,835.186 | 7,986.409 | 2.520705 | [2.412020, 2.630662] |
+| 1,000 | 8 | 174.203 | 14,894.333 | 15,938.193 | 2.239141 | [2.165761, 2.323211] |
+| 1,000 | 16 | 563.288 | 15,221.788 | 16,448.678 | 2.216911 | [2.154179, 2.283054] |
+| 10,000 | 1 | 63.877 | 33,867.706 | 35,404.604 | 0.122943 | [0.122035, 0.123856] |
+| 10,000 | 2 | 72.419 | 90,076.885 | 96,829.864 | 0.099012 | [0.095984, 0.102353] |
+| 10,000 | 4 | 322.637 | 248,251.087 | 263,715.226 | 0.067595 | [0.066848, 0.068441] |
+| 10,000 | 8 | 664.050 | 531,690.806 | 545,494.199 | 0.063665 | [0.061806, 0.065988] |
+| 10,000 | 16 | 2,037.842 | 530,274.466 | 545,677.946 | 0.063491 | [0.061534, 0.066058] |
+<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:provenance_performance_v10_measurements]] tested provenance-performance graph-size/concurrency matrix; aggregate measurement results only, not terminal validation, promotion, or production performance<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
+
+吞吐曲线表现出清晰的规模分层。100-node 图在并发 2 达到被测峰值 21.899464 ops/s，较并发 1 增加 30.16%；1,000-node 图同样在并发 2 达到峰值 2.843982 ops/s，增幅为 12.20%。10,000-node 图则在并发 1 时达到被测峰值 0.122943 ops/s；增加到并发 2 后吞吐下降 19.46%，到并发 16 时为 0.063491 ops/s，较并发 1 下降 48.36%。固定并发 1 时，图规模从 100 增至 10,000，吞吐由 16.825475 降至 0.122943 ops/s，降幅为 99.27%。这说明在被测矩阵中，提高并发只能给小图和中图带来有限收益，不能抵消大图带来的工作量增长。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:provenance_performance_v10_measurements]] tested provenance-performance graph-size/concurrency matrix; aggregate measurement results only, not terminal validation, promotion, or production performance<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
+
+操作分解进一步定位了尾延迟增长的主要伴随项：在 10,000-node、并发 1 的 cell 中，search 的 p50 为 32,342.042 ms，而 read、derive 和 invalidate/repair 的 p50 分别为 4.596 ms、21.312 ms 和 73.928 ms；并发 1 下 search p50 又随图规模从 130.019 ms 增至 1,470.183 ms，再增至 32,342.042 ms。该模式与总吞吐按图规模急剧下降相一致，提示后续优化应优先针对大图 search 路径、索引与查询计划，并在提高并发前加入背压或批处理；它不把单次矩阵中的相关变化解释为一般化的因果证明。<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->[[CLAIM:provenance_performance_v10_measurements]] tested provenance-performance graph-size/concurrency matrix; aggregate measurement results only, not terminal validation, promotion, or production performance<!-- TXNMEM-AUTHOR-ANNOTATIONS:END -->
+
 # 7 讨论与局限性
 
-TxnMemBench 的说服力来自机制可控、oracle 独立、可缩减 witness 和可检查不变量，而不是把合成 history 当作真实用户行为的统计替身。受控 generator 允许我们把崩溃、撤权和来源失效放在明确的状态转换边界，并把输出缩减为可复放的 history；RQ5 的失配正说明这种说服力不依赖、也不能替代外部行为分布的拟合。
+TxnMemBench 的说服力来自机制可控、oracle 独立、可缩减 witness 和可检查不变量，而不是把合成 history 当作真实用户行为的统计替身。受控 generator 允许我们把崩溃、撤权和来源失效放在明确的状态转换边界，并把输出缩减为可复放的 history；RQ5 的失配正说明这种说服力不依赖、也不能替代外部行为分布的拟合。RQ6 的测量矩阵则揭示大图 search 路径的扩展性压力，但不把固定 workload 的聚合测量外推为生产性能。
 
 确定性 policy 的语义范围同样需要谨慎解释。系统接受一个已由外部治理层给出的允许/拒绝决议及其版本，并在提交点重新检查它；它并不解决自然语言政策解释、主体身份归因、冲突政策合并或政策本身的正确性。原生 Qwen/public-runtime/backend 路径仅逐个事件接入，不能被误读为 Transaction Manager 已跨工具调用缓冲或提交。
 

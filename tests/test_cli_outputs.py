@@ -176,6 +176,8 @@ class TxnMemCliOutputTests(unittest.TestCase):
         from txnmem_experiment import main
 
         class UnavailableBackend:
+            performance_variant = "TxnMem"
+
             def healthcheck(self):
                 return {
                     "qdrant": {"available": False, "version": "fixture"},
@@ -185,11 +187,16 @@ class TxnMemCliOutputTests(unittest.TestCase):
             def close(self):
                 return None
 
+        def factory(_namespace):
+            return UnavailableBackend()
+
+        factory.performance_variant = "TxnMem"
+
         with TemporaryDirectory() as tmp, patch.dict(
             "os.environ", {"TXNMEM_NEO4J_PASSWORD": "runtime-only"}, clear=False
         ), patch(
             "txnmem_provenance_performance.make_vector_graph_backend_factory",
-            return_value=lambda _namespace: UnavailableBackend(),
+            return_value=factory,
         ):
             root = Path(tmp).resolve()
             config = root / "config.json"
@@ -402,6 +409,7 @@ class TxnMemCliOutputTests(unittest.TestCase):
             pass
 
         class FailingInvalidateBackend(InstrumentedMemoryBackend):
+            performance_variant = "TxnMem"
             max_retries = 0
             neo4j_max_transaction_retry_time_seconds = 0.0
 
@@ -422,11 +430,16 @@ class TxnMemCliOutputTests(unittest.TestCase):
                 failure._txnmem_operation = "canonical-invalidate"
                 raise failure
 
+        def factory(_namespace):
+            return FailingInvalidateBackend()
+
+        factory.performance_variant = "TxnMem"
+
         with TemporaryDirectory() as tmp, patch.dict(
             "os.environ", {"TXNMEM_NEO4J_PASSWORD": "runtime-only"}, clear=False
         ), patch(
             "txnmem_provenance_performance.make_vector_graph_backend_factory",
-            return_value=lambda _namespace: FailingInvalidateBackend(),
+            return_value=factory,
         ):
             root = Path(tmp).resolve()
             config = root / "config.json"

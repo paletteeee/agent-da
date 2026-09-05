@@ -64,7 +64,7 @@ ENGLISH_TITLE = "TxnMem: A Policy-Aware Transactional Runtime for Shared Memory 
 SHORT_TITLE = "TxnMem"
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS = {"w": W_NS}
-MARKER = re.compile(r"^`?\[\[(FIG|TABLE):([a-z_]+)\]\]`?$")
+MARKER = re.compile(r"^`?\[\[(FIG|TABLE):([a-z0-9_]+)\]\]`?$")
 HEADING = re.compile(r"^(#{1,3})\s+(.+?)\s*$")
 SVG_RASTER_SCALE = 2
 
@@ -585,6 +585,7 @@ TABLE_TITLES = {
     "experimental_setup": "评估层次、对象和判定器",
     "controlled_results": "受控套件中各实现变体的结果",
     "runtime_results": "模型、公开 runtime 与服务路径证据",
+    "provenance_performance_v10": "v10 provenance-performance 测量矩阵",
     "claim_ledger": "活跃 claim 与审计边界",
     "workload_schema": "评估记录的 schema 字段",
 }
@@ -603,12 +604,25 @@ def _add_configured_table(doc: Document, table_id: str, markdown: dict[str, tupl
         TABLE_TITLES[table_id],
         headers,
         rows,
-        compact=table_id in {"claim_ledger", "workload_schema"},
-        # These only correct reader-facing wrapping faults in Tables 4, 6, and 7.
+        compact=table_id in {
+            "provenance_performance_v10",
+            "claim_ledger",
+            "workload_schema",
+        },
+        # These only correct reader-facing wrapping faults in the narrow tables.
         # Each retains the required fixed 9360-DXA table geometry.
         widths={
             "experimental_setup": [1600, 2700, 3150, 1910],
             "runtime_results": [1800, 2800, 3000, 1760],
+            "provenance_performance_v10": [
+                980,
+                780,
+                1250,
+                1250,
+                1250,
+                1550,
+                2300,
+            ],
             "claim_ledger": [2300, 2300, 4760],
         }.get(table_id),
     )

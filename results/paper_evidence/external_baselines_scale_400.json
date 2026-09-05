@@ -1,0 +1,275 @@
+{
+  "adapters": [
+    {
+      "adapter": "AppendOnly",
+      "adapter_version": "controlled-v1",
+      "backend_mode": "controlled",
+      "counts": {
+        "attempted": 400,
+        "capability_absent_observed": 50,
+        "correctness_included": 400,
+        "excluded": 0,
+        "runtime_error": 0,
+        "successful": 400,
+        "unsupported_mapping": 0
+      },
+      "oracle_match_count": 0,
+      "oracle_match_interval": {
+        "available": true,
+        "confidence": 0.95,
+        "denominator": 400,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "numerator": 0,
+        "upper": 0.009512294334296508
+      },
+      "oracle_match_rate": 0.0,
+      "target_adapter_version": "controlled-v1",
+      "violation_count": 400,
+      "violation_interval": {
+        "available": true,
+        "confidence": 0.95,
+        "denominator": 400,
+        "estimate": 1.0,
+        "lower": 0.9904877056657034,
+        "numerator": 400,
+        "upper": 1.0
+      },
+      "violation_rate": 1.0
+    },
+    {
+      "adapter": "LastWriteWins",
+      "adapter_version": "controlled-v1",
+      "backend_mode": "controlled",
+      "counts": {
+        "attempted": 400,
+        "capability_absent_observed": 0,
+        "correctness_included": 400,
+        "excluded": 0,
+        "runtime_error": 0,
+        "successful": 400,
+        "unsupported_mapping": 0
+      },
+      "oracle_match_count": 50,
+      "oracle_match_interval": {
+        "available": true,
+        "confidence": 0.95,
+        "denominator": 400,
+        "estimate": 0.125,
+        "lower": 0.09611512323676381,
+        "numerator": 50,
+        "upper": 0.1610190975139586
+      },
+      "oracle_match_rate": 0.125,
+      "target_adapter_version": "controlled-v1",
+      "violation_count": 350,
+      "violation_interval": {
+        "available": true,
+        "confidence": 0.95,
+        "denominator": 400,
+        "estimate": 0.875,
+        "lower": 0.8389809024860414,
+        "numerator": 350,
+        "upper": 0.9038848767632363
+      },
+      "violation_rate": 0.875
+    },
+    {
+      "adapter": "MetadataFiltered",
+      "adapter_version": "controlled-v1",
+      "backend_mode": "controlled",
+      "counts": {
+        "attempted": 400,
+        "capability_absent_observed": 50,
+        "correctness_included": 400,
+        "excluded": 0,
+        "runtime_error": 0,
+        "successful": 400,
+        "unsupported_mapping": 0
+      },
+      "oracle_match_count": 50,
+      "oracle_match_interval": {
+        "available": true,
+        "confidence": 0.95,
+        "denominator": 400,
+        "estimate": 0.125,
+        "lower": 0.09611512323676381,
+        "numerator": 50,
+        "upper": 0.1610190975139586
+      },
+      "oracle_match_rate": 0.125,
+      "target_adapter_version": "controlled-v1",
+      "violation_count": 350,
+      "violation_interval": {
+        "available": true,
+        "confidence": 0.95,
+        "denominator": 400,
+        "estimate": 0.875,
+        "lower": 0.8389809024860414,
+        "numerator": 350,
+        "upper": 0.9038848767632363
+      },
+      "violation_rate": 0.875
+    },
+    {
+      "adapter": "Mem0",
+      "adapter_version": "2.0.0",
+      "backend_mode": "embedded_qdrant",
+      "counts": {
+        "attempted": 400,
+        "capability_absent_observed": 0,
+        "correctness_included": 400,
+        "excluded": 0,
+        "runtime_error": 0,
+        "successful": 400,
+        "unsupported_mapping": 0
+      },
+      "oracle_match_count": 100,
+      "oracle_match_interval": {
+        "available": true,
+        "confidence": 0.95,
+        "denominator": 400,
+        "estimate": 0.25,
+        "lower": 0.2100790142364741,
+        "numerator": 100,
+        "upper": 0.2946771329306741
+      },
+      "oracle_match_rate": 0.25,
+      "target_adapter_version": "mem0ai==2.0.0",
+      "violation_count": 300,
+      "violation_interval": {
+        "available": true,
+        "confidence": 0.95,
+        "denominator": 400,
+        "estimate": 0.75,
+        "lower": 0.7053228670693259,
+        "numerator": 300,
+        "upper": 0.7899209857635259
+      },
+      "violation_rate": 0.75
+    },
+    {
+      "adapter": "LangGraphStore",
+      "adapter_version": "1.2.11",
+      "backend_mode": "in_memory_fallback",
+      "counts": {
+        "attempted": 400,
+        "capability_absent_observed": 0,
+        "correctness_included": 250,
+        "excluded": 150,
+        "runtime_error": 0,
+        "successful": 250,
+        "unsupported_mapping": 150
+      },
+      "oracle_match_count": 100,
+      "oracle_match_interval": {
+        "available": true,
+        "confidence": 0.95,
+        "denominator": 250,
+        "estimate": 0.4,
+        "lower": 0.34122832313654916,
+        "numerator": 100,
+        "upper": 0.4617983367625397
+      },
+      "oracle_match_rate": 0.4,
+      "target_adapter_version": "langgraph==1.2.11",
+      "violation_count": 150,
+      "violation_interval": {
+        "available": true,
+        "confidence": 0.95,
+        "denominator": 250,
+        "estimate": 0.6,
+        "lower": 0.5382016632374602,
+        "numerator": 150,
+        "upper": 0.6587716768634508
+      },
+      "violation_rate": 0.6
+    }
+  ],
+  "claim_boundary": "observable correctness comparison on the same 400-instance TxnMemBench suite; capability absence is an interface observation, unsupported/runtime attempts are excluded from correctness denominators, and results do not establish third-party security defects or general production behavior",
+  "counts": {
+    "attempted": 2000,
+    "capability_absent_observed": 100,
+    "correctness_included": 1850,
+    "excluded": 150,
+    "runtime_error": 0,
+    "successful": 1850,
+    "unsupported_mapping": 150
+  },
+  "overall_correctness": {
+    "oracle_match_count": 300,
+    "oracle_match_interval": {
+      "available": true,
+      "confidence": 0.95,
+      "denominator": 1850,
+      "estimate": 0.16216216216216217,
+      "lower": 0.14606860106171,
+      "numerator": 300,
+      "upper": 0.17965583235603372
+    },
+    "oracle_match_rate": 0.16216216216216217,
+    "violation_count": 1550,
+    "violation_interval": {
+      "available": true,
+      "confidence": 0.95,
+      "denominator": 1850,
+      "estimate": 0.8378378378378378,
+      "lower": 0.8203441676439662,
+      "numerator": 1550,
+      "upper": 0.85393139893829
+    },
+    "violation_rate": 0.8378378378378378
+  },
+  "package_versions": {
+    "langgraph": "1.2.11",
+    "langgraph-checkpoint-postgres": "3.1.2",
+    "mem0ai": "2.0.0",
+    "psycopg-binary": "3.3.4"
+  },
+  "reporting_concepts": {
+    "capability_absence": {
+      "count": 100,
+      "relationship": "orthogonal observation on successful attempts"
+    },
+    "correctness_violation": {
+      "count": 1550,
+      "denominator": 1850,
+      "relationship": "oracle outcome on successful attempts only"
+    },
+    "runtime_error": {
+      "count": 0,
+      "relationship": "mutually exclusive run status; excluded from correctness"
+    },
+    "unsupported_mapping": {
+      "count": 150,
+      "relationship": "mutually exclusive run status; excluded from correctness"
+    }
+  },
+  "result_scope": "observable_correctness_comparison",
+  "schema": "txnmem.paper_projection.external_baselines_scale_400.v1",
+  "sources": {
+    "bundle_commit": "79ab85e48196b7d2f4504ee34f3f4d1025e122e4",
+    "input": {
+      "record_count": 400,
+      "sha256": "d2fb1041989f4d42de6527c67c49e38c23af965bf21dc0a3d3064514f73a12ee"
+    },
+    "raw_results": {
+      "path": "results/external_baselines_scale_400/formal_native_v3/results.csv",
+      "sha256": "744ad7c77c539d8e424a9032b8036692a60534cbff7c13d00d59f631153d2888"
+    },
+    "run_manifest": {
+      "path": "results/external_baselines_scale_400/formal_native_v3/run_manifest.json",
+      "sha256": "cff0f64aeafab8cc62c95cd5acb54574f26396bca0e439291502cf557749043b"
+    },
+    "runner_commit": "540b980c4248830462ceeb2401e818e03b6284f2",
+    "summary": {
+      "path": "results/external_baselines_scale_400/formal_native_v3/summary.json",
+      "sha256": "c8a2bf895cfd50440a2d91ef89328196b037f73a374b9b2bcbbabfbe9f727370"
+    }
+  },
+  "wilson_interval": {
+    "confidence": 0.95,
+    "denominator": "successful attempts (correctness_included)",
+    "method": "Wilson score interval"
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "active_claim_count": 15,
+  "active_claim_count": 17,
   "checked_artifacts": [
     {
       "path": "results/appworld_projection_regenerated/projection_inventory.json",
@@ -38,6 +38,14 @@
       "sha256": "4337cd70033244177dccbd2e24e3596945b94d9b9cc34797363069988cf17db0"
     },
     {
+      "path": "results/paper_evidence/external_baselines_scale_400.json",
+      "sha256": "4b43eecef14f46bd9a6cb0a9f614b7a18926057ffe37c4faa34b8962f80bbc61"
+    },
+    {
+      "path": "results/paper_evidence/provenance_performance_v10.json",
+      "sha256": "1448cd3a11aed2caa715a6d82c2be5f99a674f465b5ae50290b725ef6d4d3389"
+    },
+    {
       "path": "results/prompt_profile_formal_v4/appworld_prompt_comparison.json",
       "sha256": "ce9ec092782a75d6b5c7adc519407b9ec8bfc8384c84549edf8b536242de88d0"
     },
@@ -62,16 +70,16 @@
       "sha256": "04de2a3c7da3b8c2dcda06d88afdb18e6f224d8f0e1fcaae4847f1277b3bbcad"
     }
   ],
-  "checked_assertion_count": 163,
-  "claim_count": 15,
-  "declared_assertion_count": 163,
+  "checked_assertion_count": 176,
+  "claim_count": 17,
+  "declared_assertion_count": 176,
   "evidence_id": "paper_claim_audit",
-  "expected_active_claim_count": 15,
-  "expected_assertion_count": 163,
+  "expected_active_claim_count": 17,
+  "expected_assertion_count": 176,
   "finding_count": 0,
   "findings": [],
   "ledger_path": "configs/paper_claims.json",
-  "ledger_sha256": "c45def3dae8308d2f49a32490c354bcb77bd9d0ee4b7f1c53e1a0a565d6cb9b5",
+  "ledger_sha256": "5e755e377f4b65478428f4a9cbe553c8ae0dbafad50a0386f8a85f187f2529ce",
   "schema_version": 1,
   "status": "passed",
   "superseded_artifact_count": 4

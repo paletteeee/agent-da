@@ -30,6 +30,6 @@
 <text x="163.0" y="530.0" text-anchor="middle" font-size="18" font-weight="700" fill="#263238">跨主机</text>
 <text x="265.0" y="520.0" text-anchor="start" font-size="16" font-weight="600" fill="#263238">3 次 client→model-server attested repetitions</text>
 <text x="265.0" y="543.0" text-anchor="start" font-size="15" font-weight="400" fill="#A63D40">边界：不是多 host Agent workers、连续 tunnel 或 production latency</text>
-<text x="70.0" y="599.0" text-anchor="start" font-size="15" font-weight="400" fill="#68737D">设计配置声明的正文图：motivation_timeline、architecture、commit_protocol、provenance_repair、controlled_results、evidence_layers</text>
+<text x="70.0" y="599.0" text-anchor="start" font-size="15" font-weight="400" fill="#68737D">正文图均由确定性构建器生成，并由 manifest 绑定输入与输出哈希。</text>
 <text x="70.0" y="623.0" text-anchor="start" font-size="15" font-weight="400" fill="#263238">证据链强调：controlled correctness → 接线/服务/拓扑的外部相关性；后者不改写前者的语义结论。</text>
 </svg>

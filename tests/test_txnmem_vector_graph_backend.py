@@ -2964,7 +2964,7 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
 
         def factory(namespace):
             namespaces.append(namespace)
-            return VectorGraphMemoryBackend(
+            backend = VectorGraphMemoryBackend(
                 namespace,
                 "http://qdrant",
                 "bolt://neo4j",
@@ -2973,6 +2973,10 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
                 neo4j_client=_FakeNeo4j(),
                 max_retries=0,
             )
+            backend.performance_variant = "TxnMem"
+            return backend
+
+        factory.performance_variant = "TxnMem"
 
         report = run_matrix_cell(
             factory,
@@ -3015,7 +3019,7 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
                 )
 
         def factory(namespace):
-            return VectorGraphMemoryBackend(
+            backend = VectorGraphMemoryBackend(
                 namespace,
                 "http://qdrant",
                 "bolt://neo4j",
@@ -3024,6 +3028,10 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
                 neo4j_client=_FakeNeo4j(),
                 max_retries=0,
             )
+            backend.performance_variant = "TxnMem"
+            return backend
+
+        factory.performance_variant = "TxnMem"
 
         report = run_matrix_cell(
             factory,

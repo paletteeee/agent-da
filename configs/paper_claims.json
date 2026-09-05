@@ -2,8 +2,8 @@
   "schema_version": 1,
   "ledger_scope": "formal experimental claims in the TxnMem draft and current experiment report",
   "supersession_index": "results/paper_evidence/supersession_index.json",
-  "expected_active_claim_count": 15,
-  "expected_assertion_count": 163,
+  "expected_active_claim_count": 17,
+  "expected_assertion_count": 176,
   "claims": [
     {
       "claim_id": "controlled_correctness_400x5",
@@ -381,6 +381,76 @@
       "manifest": {"path": "configs/workload_families.yaml", "sha256": "b1a4d206a55565fb64eafe47f88e5df905823a3909cc8b0dd575de696376ed50"},
       "source_commit": "a77e1cce6ee07166c38a06d8991ff93f1424764a",
       "claim_boundary": "one deterministic operation-prefix-minimal witness per major mutant; minimality is with respect to suffix removal"
+    },
+    {
+      "claim_id": "provenance_performance_v10_measurements",
+      "status": "active",
+      "paper_location": ["Experiments/Provenance performance scaling", "docs/paper/txnmem_ccfa_draft_zh.md#6.6"],
+      "artifact_path": "results/paper_evidence/provenance_performance_v10.json",
+      "artifact_format": "json",
+      "artifact_sha256": "1448cd3a11aed2caa715a6d82c2be5f99a674f465b5ae50290b725ef6d4d3389",
+      "assertions": [
+        {"pointer": "/result_scope", "operator": "equals", "expected": "measurement_results"},
+        {"pointer": "/counts", "operator": "equals", "expected": {"cells": 15, "failed_samples": 0, "repetitions": 450, "samples": 14400, "successful_samples": 14400}},
+        {"pointer": "/methodology", "operator": "equals", "expected": {"bootstrap_repetitions": 10000, "bootstrap_unit": "whole_repetition", "confidence_level_percent": 95, "latency_unit": "ms", "percentiles": [50, 95, 99], "repetitions_per_cell": 30, "samples_per_cell": 960, "source_latency_unit": "ns"}},
+        {"pointer": "/cells", "operator": "equals", "expected": [
+          {"ci95_lower_ops_per_second": 16.12567, "ci95_upper_ops_per_second": 17.47755, "concurrency": 1, "graph_node_count": 100, "p50_ms": 59.474, "p95_ms": 144.263, "p99_ms": 172.244, "throughput_ops_per_second": 16.825475},
+          {"ci95_lower_ops_per_second": 20.632092, "ci95_upper_ops_per_second": 23.30718, "concurrency": 2, "graph_node_count": 100, "p50_ms": 68.064, "p95_ms": 330.635, "p99_ms": 353.102, "throughput_ops_per_second": 21.899464},
+          {"ci95_lower_ops_per_second": 20.058562, "ci95_upper_ops_per_second": 22.487822, "concurrency": 4, "graph_node_count": 100, "p50_ms": 89.755, "p95_ms": 655.549, "p99_ms": 725.238, "throughput_ops_per_second": 21.15155},
+          {"ci95_lower_ops_per_second": 19.651022, "ci95_upper_ops_per_second": 21.294217, "concurrency": 8, "graph_node_count": 100, "p50_ms": 229.866, "p95_ms": 1233.67, "p99_ms": 1428.238, "throughput_ops_per_second": 20.461595},
+          {"ci95_lower_ops_per_second": 19.051363, "ci95_upper_ops_per_second": 20.521189, "concurrency": 16, "graph_node_count": 100, "p50_ms": 442.466, "p95_ms": 1702.442, "p99_ms": 1895.605, "throughput_ops_per_second": 19.758651},
+          {"ci95_lower_ops_per_second": 2.506544, "ci95_upper_ops_per_second": 2.563749, "concurrency": 1, "graph_node_count": 1000, "p50_ms": 62.501, "p95_ms": 1533.362, "p99_ms": 1617.79, "throughput_ops_per_second": 2.534724},
+          {"ci95_lower_ops_per_second": 2.66803, "ci95_upper_ops_per_second": 3.029075, "concurrency": 2, "graph_node_count": 1000, "p50_ms": 71.585, "p95_ms": 3216.801, "p99_ms": 3987.923, "throughput_ops_per_second": 2.843982},
+          {"ci95_lower_ops_per_second": 2.41202, "ci95_upper_ops_per_second": 2.630662, "concurrency": 4, "graph_node_count": 1000, "p50_ms": 90.397, "p95_ms": 6835.186, "p99_ms": 7986.409, "throughput_ops_per_second": 2.520705},
+          {"ci95_lower_ops_per_second": 2.165761, "ci95_upper_ops_per_second": 2.323211, "concurrency": 8, "graph_node_count": 1000, "p50_ms": 174.203, "p95_ms": 14894.333, "p99_ms": 15938.193, "throughput_ops_per_second": 2.239141},
+          {"ci95_lower_ops_per_second": 2.154179, "ci95_upper_ops_per_second": 2.283054, "concurrency": 16, "graph_node_count": 1000, "p50_ms": 563.288, "p95_ms": 15221.788, "p99_ms": 16448.678, "throughput_ops_per_second": 2.216911},
+          {"ci95_lower_ops_per_second": 0.122035, "ci95_upper_ops_per_second": 0.123856, "concurrency": 1, "graph_node_count": 10000, "p50_ms": 63.877, "p95_ms": 33867.706, "p99_ms": 35404.604, "throughput_ops_per_second": 0.122943},
+          {"ci95_lower_ops_per_second": 0.095984, "ci95_upper_ops_per_second": 0.102353, "concurrency": 2, "graph_node_count": 10000, "p50_ms": 72.419, "p95_ms": 90076.885, "p99_ms": 96829.864, "throughput_ops_per_second": 0.099012},
+          {"ci95_lower_ops_per_second": 0.066848, "ci95_upper_ops_per_second": 0.068441, "concurrency": 4, "graph_node_count": 10000, "p50_ms": 322.637, "p95_ms": 248251.087, "p99_ms": 263715.226, "throughput_ops_per_second": 0.067595},
+          {"ci95_lower_ops_per_second": 0.061806, "ci95_upper_ops_per_second": 0.065988, "concurrency": 8, "graph_node_count": 10000, "p50_ms": 664.05, "p95_ms": 531690.806, "p99_ms": 545494.199, "throughput_ops_per_second": 0.063665},
+          {"ci95_lower_ops_per_second": 0.061534, "ci95_upper_ops_per_second": 0.066058, "concurrency": 16, "graph_node_count": 10000, "p50_ms": 2037.842, "p95_ms": 530274.466, "p99_ms": 545677.946, "throughput_ops_per_second": 0.063491}
+        ]},
+        {"pointer": "/analysis", "operator": "equals", "expected": {
+          "graph_10000_c1_operation_p50_ms": {"derive": 21.312, "invalidate_repair": 73.928, "read": 4.596, "search": 32342.042},
+          "peak_throughput_by_graph": [
+            {"concurrency": 2, "graph_node_count": 100, "throughput_ops_per_second": 21.899464},
+            {"concurrency": 2, "graph_node_count": 1000, "throughput_ops_per_second": 2.843982},
+            {"concurrency": 1, "graph_node_count": 10000, "throughput_ops_per_second": 0.122943}
+          ],
+          "search_p50_ms_at_concurrency_1": [
+            {"graph_node_count": 100, "p50_ms": 130.019},
+            {"graph_node_count": 1000, "p50_ms": 1470.183},
+            {"graph_node_count": 10000, "p50_ms": 32342.042}
+          ],
+          "throughput_change_percent": {"c1_graph_100_to_10000_drop": 99.27, "graph_10000_c1_to_c16": -48.36, "graph_10000_c1_to_c2": -19.46, "graph_1000_c1_to_c2": 12.2, "graph_100_c1_to_c2": 30.16}
+        }},
+        {"pointer": "/manuscript_numeric_values", "operator": "equals", "expected": [-48.36, -19.46, 0, 0.061534, 0.061806, 0.063491, 0.063665, 0.065988, 0.066058, 0.066848, 0.067595, 0.068441, 0.095984, 0.099012, 0.102353, 0.122035, 0.122943, 0.123856, 1, 2, 2.154179, 2.165761, 2.216911, 2.239141, 2.283054, 2.323211, 2.41202, 2.506544, 2.520705, 2.534724, 2.563749, 2.630662, 2.66803, 2.843982, 3.029075, 4, 4.596, 8, 12.2, 15, 16, 16.12567, 16.825475, 17.47755, 19.051363, 19.46, 19.651022, 19.758651, 20.058562, 20.461595, 20.521189, 20.632092, 21.15155, 21.294217, 21.312, 21.899464, 22.487822, 23.30718, 30, 30.16, 48.36, 50, 59.474, 62.501, 63.877, 68.064, 71.585, 72.419, 73.928, 89.755, 90.397, 95, 99, 99.27, 100, 130.019, 144.263, 172.244, 174.203, 229.866, 322.637, 330.635, 353.102, 442.466, 450, 563.288, 655.549, 664.05, 725.238, 960, 1000, 1233.67, 1428.238, 1470.183, 1533.362, 1617.79, 1702.442, 1895.605, 2037.842, 3216.801, 3987.923, 6835.186, 7986.409, 10000, 14400, 14894.333, 15221.788, 15938.193, 16448.678, 32342.042, 33867.706, 35404.604, 90076.885, 96829.864, 248251.087, 263715.226, 530274.466, 531690.806, 545494.199, 545677.946]}
+      ],
+      "run_command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -B src/txnmem_paper_projection.py --root . --provenance-v10-out results/paper_evidence/provenance_performance_v10.json",
+      "manifest": {"path": "results/provenance_performance_v10_measurements/manifest.json", "sha256": "f008348307ed5db76bba6aa675f49f193e8d61ed057997632e88cb89a213cf71"},
+      "source_commit": "fb6528014b6708e27d02fc9426c1cdf0e3069d06",
+      "claim_boundary": "tested provenance-performance graph-size/concurrency matrix; aggregate measurement results only, not terminal validation, promotion, or production performance"
+    },
+    {
+      "claim_id": "external_baselines_scale_400",
+      "status": "active",
+      "paper_location": ["Experiments/External baseline comparison"],
+      "artifact_path": "results/paper_evidence/external_baselines_scale_400.json",
+      "artifact_format": "json",
+      "artifact_sha256": "4b43eecef14f46bd9a6cb0a9f614b7a18926057ffe37c4faa34b8962f80bbc61",
+      "assertions": [
+        {"pointer": "/result_scope", "operator": "equals", "expected": "observable_correctness_comparison"},
+        {"pointer": "/sources", "operator": "equals", "expected": {"bundle_commit": "79ab85e48196b7d2f4504ee34f3f4d1025e122e4", "input": {"record_count": 400, "sha256": "d2fb1041989f4d42de6527c67c49e38c23af965bf21dc0a3d3064514f73a12ee"}, "raw_results": {"path": "results/external_baselines_scale_400/formal_native_v3/results.csv", "sha256": "744ad7c77c539d8e424a9032b8036692a60534cbff7c13d00d59f631153d2888"}, "run_manifest": {"path": "results/external_baselines_scale_400/formal_native_v3/run_manifest.json", "sha256": "cff0f64aeafab8cc62c95cd5acb54574f26396bca0e439291502cf557749043b"}, "runner_commit": "540b980c4248830462ceeb2401e818e03b6284f2", "summary": {"path": "results/external_baselines_scale_400/formal_native_v3/summary.json", "sha256": "c8a2bf895cfd50440a2d91ef89328196b037f73a374b9b2bcbbabfbe9f727370"}}},
+        {"pointer": "/counts", "operator": "equals", "expected": {"attempted": 2000, "capability_absent_observed": 100, "correctness_included": 1850, "excluded": 150, "runtime_error": 0, "successful": 1850, "unsupported_mapping": 150}},
+        {"pointer": "/wilson_interval", "operator": "equals", "expected": {"confidence": 0.95, "denominator": "successful attempts (correctness_included)", "method": "Wilson score interval"}},
+        {"pointer": "/reporting_concepts", "operator": "equals", "expected": {"capability_absence": {"count": 100, "relationship": "orthogonal observation on successful attempts"}, "correctness_violation": {"count": 1550, "denominator": 1850, "relationship": "oracle outcome on successful attempts only"}, "runtime_error": {"count": 0, "relationship": "mutually exclusive run status; excluded from correctness"}, "unsupported_mapping": {"count": 150, "relationship": "mutually exclusive run status; excluded from correctness"}}},
+        {"pointer": "/adapters", "operator": "length_equals", "expected": 5},
+        {"pointer": "/claim_boundary", "operator": "equals", "expected": "observable correctness comparison on the same 400-instance TxnMemBench suite; capability absence is an interface observation, unsupported/runtime attempts are excluded from correctness denominators, and results do not establish third-party security defects or general production behavior"}
+      ],
+      "run_command": "PYTHONDONTWRITEBYTECODE=1 python3 -B src/txnmem_paper_projection.py --external-baselines-source-dir <validated-formal-native-v3-dir> --external-baselines-out results/paper_evidence/external_baselines_scale_400.json",
+      "manifest": {"path": "results/paper_evidence/external_baselines_scale_400.json", "sha256": "4b43eecef14f46bd9a6cb0a9f614b7a18926057ffe37c4faa34b8962f80bbc61"},
+      "source_commit": "79ab85e48196b7d2f4504ee34f3f4d1025e122e4",
+      "claim_boundary": "observable correctness comparison on the same 400-instance TxnMemBench suite; capability absence is an interface observation, unsupported/runtime attempts are excluded from correctness denominators, and results do not establish third-party security defects or general production behavior"
     }
   ]
 }

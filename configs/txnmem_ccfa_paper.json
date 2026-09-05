@@ -46,7 +46,9 @@
     "joint_realism_locomo",
     "appworld_projection_regeneration",
     "joint_realism_appworld",
-    "minimal_mutant_witnesses_4"
+    "minimal_mutant_witnesses_4",
+    "provenance_performance_v10_measurements",
+    "external_baselines_scale_400"
   ],
   "forbidden_artifacts": [
     "results/remaining_tasks/final_status.json",
@@ -76,7 +78,9 @@
     "joint-distribution diagnostic with only two held-out conversations; low-power and not evidence of equivalence",
     "method/URL-only trace-grounded projection from official API calls; not native Agent memory ground truth",
     "joint-distribution diagnostic over a redacted projection with two held-out tasks; not native memory ground truth or distributional equivalence",
-    "one deterministic operation-prefix-minimal witness per major mutant; minimality is with respect to suffix removal"
+    "one deterministic operation-prefix-minimal witness per major mutant; minimality is with respect to suffix removal",
+    "tested provenance-performance graph-size/concurrency matrix; aggregate measurement results only, not terminal validation, promotion, or production performance",
+    "observable correctness comparison on the same 400-instance TxnMemBench suite; capability absence is an interface observation, unsupported/runtime attempts are excluded from correctness denominators, and results do not establish third-party security defects or general production behavior"
   ],
   "body_figure_ids": [
     "motivation_timeline",
@@ -84,7 +88,8 @@
     "commit_protocol",
     "provenance_repair",
     "controlled_results",
-    "evidence_layers"
+    "evidence_layers",
+    "provenance_performance_scaling"
   ],
   "body_table_ids": [
     "requirements_gap",
@@ -92,7 +97,8 @@
     "workload_family",
     "experimental_setup",
     "controlled_results",
-    "runtime_results"
+    "runtime_results",
+    "provenance_performance_v10"
   ],
   "appendix_figure_ids": [],
   "appendix_table_ids": [

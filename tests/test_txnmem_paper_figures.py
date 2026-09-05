@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import copy
 import sys
 import unittest
+import unicodedata
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -12,7 +14,11 @@ from tempfile import TemporaryDirectory
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from build_txnmem_paper_figures import REQUIRED_FIGURE_IDS, build_all  # noqa: E402
+from build_txnmem_paper_figures import (  # noqa: E402
+    REQUIRED_FIGURE_IDS,
+    _provenance_performance_scaling,
+    build_all,
+)
 
 
 class PaperFigureBuilderTests(unittest.TestCase):
@@ -31,6 +37,7 @@ class PaperFigureBuilderTests(unittest.TestCase):
                     "provenance_repair",
                     "controlled_results",
                     "evidence_layers",
+                    "provenance_performance_scaling",
                 },
             )
             for figure_id, item in manifest["figures"].items():
@@ -156,6 +163,42 @@ class PaperFigureBuilderTests(unittest.TestCase):
                     ]
                     self.assertGreaterEqual(min(sizes), 15.0)
 
+    def test_unrotated_svg_text_stays_inside_each_viewbox(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "figures"
+            manifest = build_all(ROOT, out_dir)
+
+            for figure_id, item in manifest["figures"].items():
+                with self.subTest(figure_id=figure_id):
+                    root = self._svg_root(out_dir / item["file"])
+                    canvas_width = float(root.attrib["width"])
+                    for label in root.findall(
+                        "{http://www.w3.org/2000/svg}text"
+                    ):
+                        if "transform" in label.attrib:
+                            continue
+                        content = "".join(label.itertext())
+                        font_size = float(label.attrib["font-size"])
+                        estimated_width = sum(
+                            font_size
+                            * (
+                                1.0
+                                if unicodedata.east_asian_width(character) in {"W", "F"}
+                                else 0.62
+                            )
+                            for character in content
+                        )
+                        x = float(label.attrib["x"])
+                        anchor = label.attrib.get("text-anchor", "start")
+                        if anchor == "middle":
+                            left, right = x - estimated_width / 2, x + estimated_width / 2
+                        elif anchor == "end":
+                            left, right = x - estimated_width, x
+                        else:
+                            left, right = x, x + estimated_width
+                        self.assertGreaterEqual(left, -1.0, content)
+                        self.assertLessEqual(right, canvas_width + 1.0, content)
+
     def test_manifest_declares_required_source_dependencies(self):
         with TemporaryDirectory() as tmp:
             manifest = build_all(ROOT, Path(tmp) / "figures")
@@ -173,6 +216,89 @@ class PaperFigureBuilderTests(unittest.TestCase):
                 "results/cross_host_model_load_formal_v8_aggregate/results/model_load_repetition_summary.json",
             }.issubset(evidence_sources)
         )
+
+    def test_v10_scaling_figure_is_a_complete_measurement_results_projection(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "figures"
+            manifest = build_all(ROOT, out_dir)
+            item = manifest["figures"]["provenance_performance_scaling"]
+            svg = (out_dir / item["file"]).read_text(encoding="utf-8")
+
+        self.assertEqual(
+            {source["path"] for source in item["sources"]},
+            {"results/provenance_performance_v10_measurements/aggregate.json"},
+        )
+        self.assertEqual(svg.count('class="throughput-point"'), 15)
+        self.assertEqual(svg.count('class="ci-whisker"'), 15)
+        for label in (
+            "100 nodes",
+            "1,000 nodes",
+            "10,000 nodes",
+            "并发数",
+            "吞吐（ops/s，对数刻度）",
+            "峰值 21.899",
+            "峰值 2.844",
+            "峰值 0.123",
+        ):
+            self.assertIn(label, svg)
+        self.assertIn("whole-repetition bootstrap 95% CI", item["caption"])
+        self.assertIn("v10 测量矩阵", item["alt_text"])
+        for overclaim in ("终验通过", "正式成功", "promotion", "生产级"):
+            self.assertNotIn(overclaim, svg + item["caption"] + item["alt_text"])
+
+    def test_v10_scaling_legend_stays_inside_the_svg_canvas(self):
+        with TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "figures"
+            manifest = build_all(ROOT, out_dir)
+            root = self._svg_root(
+                out_dir
+                / manifest["figures"]["provenance_performance_scaling"]["file"]
+            )
+
+        namespace = {"svg": "http://www.w3.org/2000/svg"}
+        legend_groups = root.findall(".//svg:g[@class='series-legend']", namespace)
+        self.assertEqual(len(legend_groups), 3)
+        canvas_width = float(root.attrib["width"])
+        for legend in legend_groups:
+            labels = legend.findall("svg:text", namespace)
+            self.assertEqual(len(labels), 2)
+            self.assertEqual(len({float(label.attrib["y"]) for label in labels}), 2)
+            for label in labels:
+                # A conservative full-em estimate catches labels whose declared
+                # anchor leaves them outside the SVG viewBox.
+                estimated_right = float(label.attrib["x"]) + len(label.text or "") * float(
+                    label.attrib["font-size"]
+                )
+                self.assertLessEqual(estimated_right, canvas_width)
+
+    def test_v10_scaling_peak_annotations_follow_a_valid_source_revision(self):
+        source = json.loads(
+            (
+                ROOT
+                / "results/provenance_performance_v10_measurements/aggregate.json"
+            ).read_text(encoding="utf-8")
+        )
+        revised = copy.deepcopy(source)
+        revised_cell = next(
+            cell
+            for cell in revised["cells"]
+            if cell["graph_node_count"] == 100 and cell["concurrency"] == 4
+        )
+        revised_cell["successful_throughput_ops_per_second"] = 30.0
+        revised_cell["throughput_95ci"] = {"lower": 29.0, "upper": 31.0}
+
+        with TemporaryDirectory() as tmp:
+            source_path = (
+                Path(tmp)
+                / "results/provenance_performance_v10_measurements/aggregate.json"
+            )
+            source_path.parent.mkdir(parents=True)
+            source_path.write_text(json.dumps(revised), encoding="utf-8")
+            svg, _, alt_text, _, _ = _provenance_performance_scaling(Path(tmp))
+
+        self.assertIn("峰值 30.000", svg)
+        self.assertNotIn("峰值 21.899", svg)
+        self.assertIn("100 nodes 在并发 4 达到被测峰值 30.000 ops/s", alt_text)
 
     @staticmethod
     def _sha256(path: Path) -> str:

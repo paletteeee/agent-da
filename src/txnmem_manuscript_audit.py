@@ -421,6 +421,12 @@ def _collect_numbers(value: Any) -> set[Decimal]:
         return set()
     if isinstance(value, (int, float)):
         return {Decimal(str(value))}
+    if isinstance(value, dict):
+        return (
+            set().union(*(_collect_numbers(item) for item in value.values()))
+            if value
+            else set()
+        )
     if isinstance(value, list):
         return set().union(*(_collect_numbers(item) for item in value)) if value else set()
     return set()

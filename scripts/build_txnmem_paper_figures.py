@@ -7,13 +7,18 @@ import argparse
 import hashlib
 import html
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from txnmem_paper_projection import controlled_result_rows
+from txnmem_paper_projection import (
+    PROVENANCE_GRAPH_NODE_COUNTS,
+    controlled_result_rows,
+    provenance_performance_v10_projection,
+)
 
 
 REQUIRED_FIGURE_IDS = (
@@ -23,6 +28,7 @@ REQUIRED_FIGURE_IDS = (
     "provenance_repair",
     "controlled_results",
     "evidence_layers",
+    "provenance_performance_scaling",
 )
 
 BLUE = "#1F4E79"
@@ -182,7 +188,17 @@ def _architecture(_: Path) -> tuple[str, str, str, list[str], tuple[int, int]]:
     _note(parts, 322, 207, "event contract", anchor="middle")
 
     _box(parts, 904, 76, 210, 480, stroke=GRAY, fill="none", radius=10)
-    _lines(parts, 925, 108, ["独立 reference simulator"], size=18, fill=DARK, weight="700")
+    _lines(
+        parts,
+        1009,
+        104,
+        ["独立 reference", "simulator"],
+        size=18,
+        fill=DARK,
+        anchor="middle",
+        weight="700",
+        leading=22,
+    )
     _box(parts, 928, 150, 162, 86, stroke=GRAY, fill=LIGHT_GRAY, radius=6)
     _lines(parts, 1009, 184, ["serial semantics"], size=16, fill=DARK, anchor="middle", weight="600")
     _lines(parts, 1009, 207, ["合法线性化集合"], size=15, fill=GRAY, anchor="middle")
@@ -322,6 +338,8 @@ def _evidence_layers(root: Path) -> tuple[str, str, str, list[str], tuple[int, i
     toxiproxy = _load_json(root, toxiproxy_path)
     cross_host = _load_json(root, cross_host_path)
     native = _load_json(root, native_path)
+    if config.get("body_figure_ids") != list(REQUIRED_FIGURE_IDS):
+        raise ValueError("paper body figure configuration is out of sync")
     active_claims = {claim["claim_id"]: claim["claim_boundary"] for claim in claims["claims"] if claim["status"] == "active"}
     width, height = 1160, 650
     parts: list[str] = [
@@ -349,7 +367,14 @@ def _evidence_layers(root: Path) -> tuple[str, str, str, list[str], tuple[int, i
         _lines(parts, 163, y + 42, [label], size=18, fill=DARK, anchor="middle", weight="700")
         _lines(parts, 265, y + 32, [evidence], size=16, fill=DARK, weight="600")
         _lines(parts, 265, y + 55, ["边界：" + boundary], size=15, fill=RED if color == RED else GRAY)
-    _lines(parts, 70, 599, ["设计配置声明的正文图：" + "、".join(config["body_figure_ids"])], size=15, fill=GRAY)
+    _lines(
+        parts,
+        70,
+        599,
+        ["正文图均由确定性构建器生成，并由 manifest 绑定输入与输出哈希。"],
+        size=15,
+        fill=GRAY,
+    )
     _lines(parts, 70, 623, ["证据链强调：controlled correctness → 接线/服务/拓扑的外部相关性；后者不改写前者的语义结论。"], size=15, fill=DARK)
     caption = "TxnMem 的分层证据链：从受控正确性到模型、公共 runtime、真实服务和跨主机证据；Toxiproxy 层给出五个单机场景的操作后双存储回读。"
     alt = "五层证据图依次为受控正确性、原生模型、公共 runtime、真实服务和跨主机；Toxiproxy 层为 90 complete、60 absent、0 partial、0 unknown，不代表一般分布式事务。"
@@ -360,6 +385,156 @@ def _evidence_layers(root: Path) -> tuple[str, str, str, list[str], tuple[int, i
     return _svg(width, height, "TxnMem 分层证据", alt, parts), caption, alt, sources, (width, height)
 
 
+def _provenance_performance_scaling(
+    root: Path,
+) -> tuple[str, str, str, list[str], tuple[int, int]]:
+    artifact = "results/provenance_performance_v10_measurements/aggregate.json"
+    projection = provenance_performance_v10_projection(root)
+    width, height = 1160, 650
+    left, right, top, bottom = 145.0, 1080.0, 140.0, 535.0
+    y_min, y_max = 0.05, 30.0
+    y_log_min, y_log_max = math.log10(y_min), math.log10(y_max)
+
+    def x_position(index: int) -> float:
+        return left + index * (right - left) / 4
+
+    def y_position(value: float) -> float:
+        normalized = (math.log10(value) - y_log_min) / (y_log_max - y_log_min)
+        return bottom - normalized * (bottom - top)
+
+    parts: list[str] = [
+        f'<text x="50" y="46" font-size="25" font-weight="700" fill="{BLUE}">v10 provenance-performance：吞吐随并发与图规模变化</text>',
+        f'<text x="50" y="75" font-size="15" fill="{GRAY}">15 cells × 30 repetitions；误差线为 whole-repetition bootstrap 95% CI</text>',
+    ]
+    for tick in (0.05, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0):
+        y = y_position(tick)
+        parts.append(
+            f'<line x1="{left:.1f}" y1="{y:.1f}" x2="{right:.1f}" y2="{y:.1f}" '
+            f'stroke="{LIGHT_GRAY}" stroke-width="1"/>'
+        )
+        label = f"{tick:g}"
+        _lines(parts, left - 14, y + 5, [label], size=15, fill=GRAY, anchor="end")
+    parts.extend(
+        [
+            f'<line x1="{left:.1f}" y1="{top:.1f}" x2="{left:.1f}" y2="{bottom:.1f}" stroke="{DARK}" stroke-width="1.5"/>',
+            f'<line x1="{left:.1f}" y1="{bottom:.1f}" x2="{right:.1f}" y2="{bottom:.1f}" stroke="{DARK}" stroke-width="1.5"/>',
+            f'<text x="38" y="{(top + bottom) / 2:.1f}" transform="rotate(-90 38 {(top + bottom) / 2:.1f})" text-anchor="middle" font-size="17" font-weight="600" fill="{DARK}">吞吐（ops/s，对数刻度）</text>',
+        ]
+    )
+    for index, concurrency in enumerate((1, 2, 4, 8, 16)):
+        x = x_position(index)
+        parts.append(
+            f'<line x1="{x:.1f}" y1="{bottom:.1f}" x2="{x:.1f}" y2="{bottom + 7:.1f}" stroke="{DARK}" stroke-width="1.2"/>'
+        )
+        _lines(parts, x, bottom + 27, [str(concurrency)], size=15, fill=DARK, anchor="middle")
+    _lines(parts, (left + right) / 2, 598, ["并发数"], size=17, fill=DARK, anchor="middle", weight="600")
+
+    cells_by_graph = {
+        graph_node_count: [
+            cell
+            for cell in projection["cells"]
+            if cell["graph_node_count"] == graph_node_count
+        ]
+        for graph_node_count in (100, 1000, 10000)
+    }
+    series = (
+        (100, BLUE, "100 nodes"),
+        (1000, GRAY, "1,000 nodes"),
+        (10000, RED, "10,000 nodes"),
+    )
+    peaks_by_graph = {
+        item["graph_node_count"]: item
+        for item in projection["analysis"]["peak_throughput_by_graph"]
+    }
+    if set(peaks_by_graph) != set(PROVENANCE_GRAPH_NODE_COUNTS):
+        raise ValueError("v10 provenance-performance peak projection is incomplete")
+    for graph_node_count, color, label in series:
+        peak = peaks_by_graph[graph_node_count]
+        peak_display = f'{peak["throughput_ops_per_second"]:.3f}'
+        cells = cells_by_graph[graph_node_count]
+        points = [
+            (x_position(index), y_position(cell["throughput_ops_per_second"]))
+            for index, cell in enumerate(cells)
+        ]
+        point_string = " ".join(f"{x:.1f},{y:.1f}" for x, y in points)
+        parts.append(f'<g data-series="{graph_node_count}">')
+        parts.append(
+            f'<polyline points="{point_string}" fill="none" stroke="{color}" stroke-width="2.8"/>'
+        )
+        for index, cell in enumerate(cells):
+            x, y = points[index]
+            lower_y = y_position(cell["ci95_lower_ops_per_second"])
+            upper_y = y_position(cell["ci95_upper_ops_per_second"])
+            parts.extend(
+                [
+                    '<g class="ci-whisker">',
+                    f'<line x1="{x:.1f}" y1="{upper_y:.1f}" x2="{x:.1f}" y2="{lower_y:.1f}" stroke="{color}" stroke-width="1.4"/>',
+                    f'<line x1="{x - 6:.1f}" y1="{upper_y:.1f}" x2="{x + 6:.1f}" y2="{upper_y:.1f}" stroke="{color}" stroke-width="1.4"/>',
+                    f'<line x1="{x - 6:.1f}" y1="{lower_y:.1f}" x2="{x + 6:.1f}" y2="{lower_y:.1f}" stroke="{color}" stroke-width="1.4"/>',
+                    "</g>",
+                    f'<circle class="throughput-point" cx="{x:.1f}" cy="{y:.1f}" r="5.5" fill="white" stroke="{color}" stroke-width="2.5"/>',
+                ]
+            )
+        parts.append("</g>")
+        legend_index = (100, 1000, 10000).index(graph_node_count)
+        legend_x = 540 + legend_index * 200
+        parts.append(
+            f'<g class="series-legend" data-series="{graph_node_count}">'
+        )
+        parts.append(
+            f'<line x1="{legend_x:.1f}" y1="96" x2="{legend_x + 30:.1f}" y2="96" stroke="{color}" stroke-width="2.8"/>'
+        )
+        parts.append(
+            f'<circle cx="{legend_x + 15:.1f}" cy="96" r="4.5" fill="white" stroke="{color}" stroke-width="2"/>'
+        )
+        _lines(
+            parts,
+            legend_x + 38,
+            101,
+            [label],
+            size=15,
+            fill=DARK,
+        )
+        _lines(
+            parts,
+            legend_x + 38,
+            122,
+            [f"峰值 {peak_display}"],
+            size=15,
+            fill=GRAY,
+        )
+        parts.append("</g>")
+
+    _lines(
+        parts,
+        50,
+        632,
+        ["读法：同色折线只比较同一图规模；纵轴为对数刻度，不能按视觉距离作线性差值。"],
+        size=15,
+        fill=GRAY,
+    )
+    caption = (
+        "v10 测量矩阵的吞吐—并发曲线；纵轴为对数刻度，误差线为 "
+        "whole-repetition bootstrap 95% CI。"
+    )
+    peak_descriptions = "；".join(
+        f'{label} 在并发 {peaks_by_graph[graph_node_count]["concurrency"]} 达到被测峰值 '
+        f'{peaks_by_graph[graph_node_count]["throughput_ops_per_second"]:.3f} ops/s'
+        for graph_node_count, _, label in series
+    )
+    alt = (
+        "v10 测量矩阵包含 100、1,000 和 10,000 nodes 三条吞吐曲线；"
+        f"{peak_descriptions}；所有点均带 95% 置信区间。"
+    )
+    return (
+        _svg(width, height, "v10 provenance-performance 扩展性", alt, parts),
+        caption,
+        alt,
+        [artifact],
+        (width, height),
+    )
+
+
 BUILDERS: dict[str, Callable[[Path], tuple[str, str, str, list[str], tuple[int, int]]]] = {
     "motivation_timeline": _motivation_timeline,
     "architecture": _architecture,
@@ -367,6 +542,7 @@ BUILDERS: dict[str, Callable[[Path], tuple[str, str, str, list[str], tuple[int, 
     "provenance_repair": _provenance_repair,
     "controlled_results": _controlled_results,
     "evidence_layers": _evidence_layers,
+    "provenance_performance_scaling": _provenance_performance_scaling,
 }
 
 

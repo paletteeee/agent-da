@@ -25,9 +25,9 @@
 ### Task 1: Harden the 400-instance external manifest contract
 
 **Files:**
-- Modify: `/Users/xiaoyan_zhu/Desktop/agent-db/.worktrees/agent-da-external-baselines/src/txnmem_external_experiment.py`
-- Modify: `/Users/xiaoyan_zhu/Desktop/agent-db/.worktrees/agent-da-external-baselines/tests/test_txnmem_external_experiment.py`
-- Create: `/Users/xiaoyan_zhu/Desktop/agent-db/.worktrees/agent-da-external-baselines/configs/external_baselines_scale_400.json`
+- Modify: `<workspace>/src/txnmem_external_experiment.py`
+- Modify: `<workspace>/tests/test_txnmem_external_experiment.py`
+- Create: `<workspace>/configs/external_baselines_scale_400.json`
 
 **Interfaces:**
 - Consumes: validated TxnMemBench JSONL instances.
@@ -63,9 +63,9 @@ git commit -m "feat: bind external baselines to formal 400 instances"
 ### Task 2: Add status accounting and Wilson intervals
 
 **Files:**
-- Modify: `/Users/xiaoyan_zhu/Desktop/agent-db/.worktrees/agent-da-external-baselines/src/txnmem_external_experiment.py`
-- Modify: `/Users/xiaoyan_zhu/Desktop/agent-db/.worktrees/agent-da-external-baselines/tests/test_txnmem_external_experiment.py`
-- Modify: `/Users/xiaoyan_zhu/Desktop/agent-db/.worktrees/agent-da-external-baselines/tests/test_external_baseline_protocol.py`
+- Modify: `<workspace>/src/txnmem_external_experiment.py`
+- Modify: `<workspace>/tests/test_txnmem_external_experiment.py`
+- Modify: `<workspace>/tests/test_external_baseline_protocol.py`
 
 **Interfaces:**
 - Produces: `wilson_interval(successes: int, total: int, confidence: float = 0.95) -> dict[str, Any]`.
@@ -101,7 +101,7 @@ git commit -m "feat: report external baseline uncertainty and exclusions"
 ### Task 3: Run external adapter smoke and formal 400-instance batch
 
 **Files:**
-- Create: `/Users/xiaoyan_zhu/Desktop/agent-db/.worktrees/agent-da-external-baselines/results/external_baselines_scale_400/*`
+- Create: `<workspace>/results/external_baselines_scale_400/*`
 - Modify only if required by a test-first defect fix: adapter source/tests in the external-baselines worktree.
 
 **Interfaces:**

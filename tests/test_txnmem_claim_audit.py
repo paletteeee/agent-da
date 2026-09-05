@@ -1501,6 +1501,107 @@ class PaperClaimLedgerTests(unittest.TestCase):
             {item["code"] for item in report["findings"]},
         )
 
+    def test_v10_measurement_results_claim_is_narrow_and_source_bound(self):
+        ledger = json.loads((ROOT / "configs/paper_claims.json").read_text())
+        claims = {claim["claim_id"]: claim for claim in ledger["claims"]}
+        claim = claims["provenance_performance_v10_measurements"]
+        projection = json.loads(
+            (
+                ROOT
+                / "results/paper_evidence/provenance_performance_v10.json"
+            ).read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(ledger["expected_active_claim_count"], 17)
+        self.assertEqual(ledger["expected_assertion_count"], 176)
+        self.assertEqual(
+            claim["artifact_path"],
+            "results/paper_evidence/provenance_performance_v10.json",
+        )
+        self.assertEqual(
+            claim["artifact_sha256"],
+            "1448cd3a11aed2caa715a6d82c2be5f99a674f465b5ae50290b725ef6d4d3389",
+        )
+        self.assertEqual(
+            claim["manifest"],
+            {
+                "path": "results/provenance_performance_v10_measurements/manifest.json",
+                "sha256": "f008348307ed5db76bba6aa675f49f193e8d61ed057997632e88cb89a213cf71",
+            },
+        )
+        self.assertEqual(
+            claim["source_commit"],
+            "fb6528014b6708e27d02fc9426c1cdf0e3069d06",
+        )
+        self.assertEqual(
+            claim["claim_boundary"],
+            "tested provenance-performance graph-size/concurrency matrix; aggregate "
+            "measurement results only, not terminal validation, promotion, or "
+            "production performance",
+        )
+        assertions = {
+            row["pointer"]: row["expected"] for row in claim["assertions"]
+        }
+        self.assertEqual(
+            assertions,
+            {
+                "/result_scope": "measurement_results",
+                "/counts": projection["counts"],
+                "/methodology": projection["methodology"],
+                "/cells": projection["cells"],
+                "/analysis": projection["analysis"],
+                "/manuscript_numeric_values": projection[
+                    "manuscript_numeric_values"
+                ],
+            },
+        )
+
+    def test_external_scale_400_claim_is_narrow_and_source_bound(self):
+        ledger = json.loads((ROOT / "configs/paper_claims.json").read_text())
+        claims = {claim["claim_id"]: claim for claim in ledger["claims"]}
+        claim = claims["external_baselines_scale_400"]
+        artifact = ROOT / "results/paper_evidence/external_baselines_scale_400.json"
+        projection = json.loads(artifact.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            claim["artifact_path"],
+            "results/paper_evidence/external_baselines_scale_400.json",
+        )
+        self.assertEqual(claim["artifact_sha256"], self._sha256(artifact))
+        self.assertEqual(
+            claim["manifest"],
+            {
+                "path": "results/paper_evidence/external_baselines_scale_400.json",
+                "sha256": self._sha256(artifact),
+            },
+        )
+        self.assertEqual(
+            claim["source_commit"],
+            "79ab85e48196b7d2f4504ee34f3f4d1025e122e4",
+        )
+        self.assertEqual(
+            claim["claim_boundary"],
+            "observable correctness comparison on the same 400-instance TxnMemBench "
+            "suite; capability absence is an interface observation, unsupported/runtime "
+            "attempts are excluded from correctness denominators, and results do not "
+            "establish third-party security defects or general production behavior",
+        )
+        assertions = {
+            row["pointer"]: row["expected"] for row in claim["assertions"]
+        }
+        self.assertEqual(
+            assertions,
+            {
+                "/result_scope": projection["result_scope"],
+                "/sources": projection["sources"],
+                "/counts": projection["counts"],
+                "/wilson_interval": projection["wilson_interval"],
+                "/reporting_concepts": projection["reporting_concepts"],
+                "/adapters": 5,
+                "/claim_boundary": projection["claim_boundary"],
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

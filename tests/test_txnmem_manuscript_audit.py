@@ -202,6 +202,53 @@ class ManuscriptAuditTests(unittest.TestCase):
             "unmarked_claim_value", {item["code"] for item in report["findings"]}
         )
 
+    def test_accepts_number_from_nested_active_claim_assertion(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger = root / "configs/paper_claims.json"
+            ledger.parent.mkdir(parents=True)
+            ledger.write_text(
+                json.dumps(
+                    {
+                        "claims": [
+                            {
+                                "claim_id": "nested_count",
+                                "status": "active",
+                                "claim_boundary": "nested count evidence only",
+                                "assertions": [
+                                    {
+                                        "pointer": "/counts",
+                                        "operator": "equals",
+                                        "expected": {
+                                            "attempted": 42,
+                                            "feature_enabled": True,
+                                            "numeric_label": "77",
+                                        },
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "claim_ledger_path": "configs/paper_claims.json",
+                "active_claim_ids": ["nested_count"],
+                "required_claim_boundaries": ["nested count evidence only"],
+            }
+
+            report = audit_text(
+                "实验结果为 42。[[CLAIM:nested_count]] nested count evidence only",
+                root=root,
+                config=config,
+            )
+
+        self.assertNotIn(
+            "uncovered_claim_value", {item["code"] for item in report["findings"]}
+        )
+        self.assertEqual(report["allowed_numeric_values"], ["42"])
+
     def test_rejects_missing_claim_audit_report(self):
         config = dict(CONFIG)
         config["claim_audit_path"] = "results/paper_evidence/missing_claim_audit.json"
@@ -328,6 +375,33 @@ class ManuscriptAuditTests(unittest.TestCase):
         report = audit_manuscript(ROOT / CONFIG["paper_source_path"], ROOT, CONFIG)
 
         self.assertEqual(report["finding_count"], 0)
+
+    def test_evidence_map_covers_every_configured_manuscript_claim(self):
+        evidence_map = (ROOT / "docs/paper/evidence_map_zh.md").read_text(
+            encoding="utf-8"
+        )
+
+        missing_claim_ids = [
+            claim_id
+            for claim_id in CONFIG["active_claim_ids"]
+            if f"`{claim_id}`" not in evidence_map
+        ]
+
+        self.assertEqual(missing_claim_ids, [])
+
+    def test_external_baseline_reader_text_preserves_denominator_boundary(self):
+        source = (ROOT / CONFIG["paper_source_path"]).read_text(encoding="utf-8")
+        reader_text = strip_author_annotations(source)
+        external_baseline = reader_text.split(
+            "### 外部系统的可观察正确性对照", 1
+        )[1].split("## 6.2 RQ2", 1)[0]
+
+        for phrase in (
+            "unsupported mapping 与 runtime attempt 均不进入正确性分母",
+            "不能据此声称第三方系统存在安全缺陷",
+            "不能外推至一般生产行为",
+        ):
+            self.assertIn(phrase, external_baseline)
 
     def test_state_verified_toxiproxy_surfaces_report_narrow_readback_claim(self):
         paths = (
@@ -485,7 +559,10 @@ class ManuscriptAuditTests(unittest.TestCase):
         )
         self._assert_all_configured_markers(reader_text)
         self.assertTrue(
-            all(rq in evaluation for rq in ("RQ1", "RQ2", "RQ3", "RQ4", "RQ5"))
+            all(
+                rq in evaluation
+                for rq in ("RQ1", "RQ2", "RQ3", "RQ4", "RQ5", "RQ6")
+            )
         )
         self.assertTrue(
             all(
@@ -541,6 +618,74 @@ class ManuscriptAuditTests(unittest.TestCase):
                 for phrase in ("接近真实分布", "证明等价", "分布等价证明", "生产级性能")
             )
         )
+        self.assertIn("回答六个研究问题", reader_text)
+        self.assertNotIn("回答五个研究问题", reader_text)
+
+    def test_v10_measurement_results_table_and_scaling_analysis_are_source_bound(self):
+        source = (ROOT / CONFIG["paper_source_path"]).read_text(encoding="utf-8")
+        reader_text = strip_author_annotations(source)
+        rq6 = reader_text.split("## 6.6 RQ6", 1)[1].split(
+            "# 7 讨论与局限性", 1
+        )[0]
+        projection = json.loads(
+            (
+                ROOT
+                / "results/paper_evidence/provenance_performance_v10.json"
+            ).read_text(encoding="utf-8")
+        )
+
+        self.assertIn("我们围绕六个问题组织评估", reader_text)
+        self.assertIn("`[[FIG:provenance_performance_scaling]]`", rq6)
+        self.assertIn("`[[TABLE:provenance_performance_v10]]`", rq6)
+        self.assertIn("measurement_results", rq6)
+        self.assertIn("whole-repetition bootstrap 95% CI", rq6)
+
+        table = rq6.split("`[[TABLE:provenance_performance_v10]]`", 1)[1].split(
+            "<!-- TXNMEM-AUTHOR-ANNOTATIONS:BEGIN -->", 1
+        )[0]
+        observed_rows = []
+        for line in table.splitlines():
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            if len(cells) == 7 and cells[0].replace(",", "").isdigit():
+                observed_rows.append(cells)
+        expected_rows = [
+            [
+                f"{row['graph_node_count']:,}",
+                str(row["concurrency"]),
+                f"{row['p50_ms']:,.3f}",
+                f"{row['p95_ms']:,.3f}",
+                f"{row['p99_ms']:,.3f}",
+                f"{row['throughput_ops_per_second']:.6f}",
+                "["
+                f"{row['ci95_lower_ops_per_second']:.6f}, "
+                f"{row['ci95_upper_ops_per_second']:.6f}"
+                "]",
+            ]
+            for row in projection["cells"]
+        ]
+        self.assertEqual(observed_rows, expected_rows)
+        for phrase in (
+            "30.16%",
+            "12.20%",
+            "19.46%",
+            "48.36%",
+            "99.27%",
+            "32,342.042 ms",
+            "4.596 ms",
+            "21.312 ms",
+            "73.928 ms",
+        ):
+            self.assertIn(phrase, rq6)
+        for directional_statement in (
+            "较并发 1 增加 30.16%",
+            "增幅为 12.20%",
+            "增加到并发 2 后吞吐下降 19.46%",
+            "较并发 1 下降 48.36%",
+            "降幅为 99.27%",
+        ):
+            self.assertIn(directional_statement, rq6)
+        for overclaim in ("终验通过", "正式成功", "promotion", "生产级性能"):
+            self.assertNotIn(overclaim, rq6)
 
 
 if __name__ == "__main__":
