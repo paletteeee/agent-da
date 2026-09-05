@@ -31,6 +31,7 @@ PROGRESS_READER_INSTALL_PATH = Path(
 APPROVAL_MANIFEST_PATH = Path(
     "/opt/txnmem-formal-controller/approved_source_manifest.json"
 )
+FORMAL_WHEEL_ROOT = Path("/opt/txnmem-formal-runtime/wheels")
 BOOTSTRAP_ROOT = Path("/var/lib/txnmem-formal/bootstrap")
 GIT_EXECUTABLE = Path("/usr/bin/git")
 _COMMIT = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
@@ -165,6 +166,63 @@ def _canonical_json_bytes(value: Any) -> bytes:
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise FormalControllerError("formal approval manifest is not canonical") from exc
+
+
+def _locked_runtime_wheels(export: Path) -> tuple[Path, ...]:
+    lock_path = export / "configs" / "provenance_runtime_lock.json"
+    try:
+        lock = json.loads(lock_path.read_bytes())
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise FormalControllerError("formal runtime lock is unavailable") from exc
+    rows = lock.get("distributions") if isinstance(lock, dict) else None
+    if not isinstance(lock, dict) or lock.get(
+        "schema"
+    ) != "txnmem-provenance-runtime-lock-v1" or not isinstance(rows, list):
+        raise FormalControllerError("formal runtime lock is invalid")
+    expected: dict[str, str] = {}
+    for row in rows:
+        filename = row.get("filename") if isinstance(row, dict) else None
+        digest = row.get("sha256") if isinstance(row, dict) else None
+        if (
+            not isinstance(filename, str)
+            or not re.fullmatch(r"[A-Za-z0-9_.+-]+\.whl", filename)
+            or filename in expected
+            or not isinstance(digest, str)
+            or _SHA256.fullmatch(digest) is None
+        ):
+            raise FormalControllerError("formal runtime lock is invalid")
+        expected[filename] = digest
+    try:
+        root_metadata = FORMAL_WHEEL_ROOT.lstat()
+        entries = tuple(FORMAL_WHEEL_ROOT.iterdir())
+    except OSError as exc:
+        raise FormalControllerError("formal runtime wheel directory is unavailable") from exc
+    if (
+        not stat.S_ISDIR(root_metadata.st_mode)
+        or root_metadata.st_uid != os.geteuid()
+        or root_metadata.st_mode & 0o022
+    ):
+        raise FormalControllerError("formal runtime wheel directory is not protected")
+    if {entry.name for entry in entries} != set(expected):
+        raise FormalControllerError("formal runtime wheel closure does not match lock")
+    wheels: list[Path] = []
+    for filename, digest in expected.items():
+        wheel = FORMAL_WHEEL_ROOT / filename
+        try:
+            metadata = wheel.lstat()
+            payload = wheel.read_bytes()
+        except OSError as exc:
+            raise FormalControllerError("formal runtime wheel is unavailable") from exc
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_mode & 0o022
+        ):
+            raise FormalControllerError("formal runtime wheel is not protected")
+        if _sha256(payload) != digest:
+            raise FormalControllerError("runtime wheel digest does not match lock")
+        wheels.append(wheel)
+    return tuple(wheels)
 
 
 def _validate_progress_output(value: Any, *, allow_blocked: bool = True) -> bytes:
@@ -833,10 +891,12 @@ def _dispatch(
     elif action.startswith("ablation-"):
         forwarded.insert(0, action)
     source_directory = export / "src"
+    runtime_wheels = _locked_runtime_wheels(export)
     if module_name in sys.modules:
         raise FormalControllerError("formal controller target was pre-imported")
     original_modules = set(sys.modules)
-    sys.path.insert(0, str(source_directory))
+    dispatch_paths = (str(source_directory), *(str(path) for path in runtime_wheels))
+    sys.path[:0] = dispatch_paths
     try:
         module = importlib.import_module(module_name)
         entry_name = "read_formal_progress_line" if action == "progress" else "main"
@@ -884,13 +944,21 @@ def _dispatch(
                 continue
             module_file = getattr(module, "__file__", None)
             if module_file is not None:
+                resolved_module = ""
                 try:
-                    Path(str(module_file)).resolve().relative_to(export)
+                    resolved_module = str(Path(str(module_file)).resolve())
+                    in_export = Path(resolved_module).is_relative_to(export)
                 except (OSError, ValueError):
-                    continue
-                sys.modules.pop(name, None)
-        if sys.path and sys.path[0] == str(source_directory):
-            sys.path.pop(0)
+                    in_export = False
+                in_wheel = any(
+                    resolved_module == str(path)
+                    or resolved_module.startswith(str(path) + os.sep)
+                    for path in runtime_wheels
+                ) if module_file is not None else False
+                if in_export or in_wheel:
+                    sys.modules.pop(name, None)
+        if tuple(sys.path[:len(dispatch_paths)]) == dispatch_paths:
+            del sys.path[:len(dispatch_paths)]
     if action == "progress":
         return _validate_progress_output(result, allow_blocked=False)
     if type(result) is not int:

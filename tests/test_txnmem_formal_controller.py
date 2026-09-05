@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +16,105 @@ import txnmem_provenance_progress as progress_protocol
 
 
 class FormalAblationDispatchTests(unittest.TestCase):
+    def test_dispatch_imports_only_the_hash_locked_runtime_wheels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            export = root / "export"
+            wheel_root = root / "wheels"
+            (export / "src").mkdir(parents=True)
+            (export / "configs").mkdir()
+            wheel_root.mkdir()
+            wheel = wheel_root / "locked_fixture-1.0-py3-none-any.whl"
+            with zipfile.ZipFile(wheel, "w") as archive:
+                archive.writestr("locked_fixture.py", "VALUE = 73\n")
+            digest = hashlib.sha256(wheel.read_bytes()).hexdigest()
+            (export / "configs" / "provenance_runtime_lock.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "txnmem-provenance-runtime-lock-v1",
+                        "python_versions": [],
+                        "distributions": [
+                            {
+                                "name": "locked-fixture",
+                                "version": "1.0",
+                                "filename": wheel.name,
+                                "sha256": digest,
+                                "dependency_names": [],
+                                "requires_dist": [],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (export / "src" / "txnmem_formal_smoke.py").write_text(
+                "import locked_fixture\n"
+                "def main(argv, *, _controller_context=None):\n"
+                "    return 0 if locked_fixture.VALUE == 73 else 91\n",
+                encoding="utf-8",
+            )
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=(),
+                manifest={},
+                manifest_sha256="b" * 64,
+            )
+            module_name = "txnmem_formal_smoke"
+            previous_target = sys.modules.pop(module_name, None)
+            previous_fixture = sys.modules.pop("locked_fixture", None)
+            try:
+                with patch.object(controller, "FORMAL_WHEEL_ROOT", wheel_root):
+                    self.assertEqual(
+                        controller._dispatch("smoke", [], export, approved), 0
+                    )
+                self.assertNotIn(str(wheel), sys.path)
+                self.assertNotIn("locked_fixture", sys.modules)
+            finally:
+                sys.modules.pop(module_name, None)
+                sys.modules.pop("locked_fixture", None)
+                if previous_target is not None:
+                    sys.modules[module_name] = previous_target
+                if previous_fixture is not None:
+                    sys.modules["locked_fixture"] = previous_fixture
+
+    def test_dispatch_rejects_a_runtime_wheel_that_differs_from_the_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            export = root / "export"
+            wheel_root = root / "wheels"
+            (export / "src").mkdir(parents=True)
+            (export / "configs").mkdir()
+            wheel_root.mkdir()
+            wheel = wheel_root / "locked_fixture-1.0-py3-none-any.whl"
+            wheel.write_bytes(b"tampered")
+            (export / "configs" / "provenance_runtime_lock.json").write_text(
+                json.dumps(
+                    {
+                        "schema": "txnmem-provenance-runtime-lock-v1",
+                        "distributions": [
+                            {"filename": wheel.name, "sha256": "0" * 64}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (export / "src" / "txnmem_formal_smoke.py").write_text(
+                "def main(argv, *, _controller_context=None): return 0\n",
+                encoding="utf-8",
+            )
+            approved = controller._ApprovedSource(
+                commit="a" * 40,
+                files=(),
+                manifest={},
+                manifest_sha256="b" * 64,
+            )
+            with patch.object(controller, "FORMAL_WHEEL_ROOT", wheel_root):
+                with self.assertRaisesRegex(
+                    controller.FormalControllerError,
+                    "runtime wheel digest does not match lock",
+                ):
+                    controller._dispatch("smoke", [], export, approved)
+
     def test_ablation_actions_are_distinct_and_forwarded_without_v10_aliases(self):
         class Target:
             calls = []
@@ -29,6 +129,8 @@ class FormalAblationDispatchTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp, patch.object(
             controller.importlib, "import_module", return_value=Target
+        ), patch.object(
+            controller, "_locked_runtime_wheels", return_value=()
         ), patch.dict(controller.sys.modules, {
             "txnmem_provenance_execution_collector": None,
             "txnmem_formal_smoke": None,
@@ -581,9 +683,12 @@ class FormalControllerCleanupTests(unittest.TestCase):
             module_name = "txnmem_provenance_execution_collector"
             previous = sys.modules.pop(module_name, None)
             try:
-                self.assertEqual(
-                    controller._dispatch("measure", [], export, approved), 0
-                )
+                with patch.object(
+                    controller, "_locked_runtime_wheels", return_value=()
+                ):
+                    self.assertEqual(
+                        controller._dispatch("measure", [], export, approved), 0
+                    )
             finally:
                 sys.modules.pop(module_name, None)
                 if previous is not None:
@@ -626,15 +731,18 @@ class FormalControllerCleanupTests(unittest.TestCase):
             module_name = "txnmem_formal_smoke"
             previous = sys.modules.pop(module_name, None)
             try:
-                self.assertEqual(
-                    controller._dispatch(
-                        "smoke",
-                        ["--out", "/external/smoke.json"],
-                        export,
-                        approved,
-                    ),
-                    0,
-                )
+                with patch.object(
+                    controller, "_locked_runtime_wheels", return_value=()
+                ):
+                    self.assertEqual(
+                        controller._dispatch(
+                            "smoke",
+                            ["--out", "/external/smoke.json"],
+                            export,
+                            approved,
+                        ),
+                        0,
+                    )
             finally:
                 sys.modules.pop(module_name, None)
                 if previous is not None:
@@ -681,18 +789,21 @@ class FormalControllerCleanupTests(unittest.TestCase):
             previous = sys.modules.pop(module_name, None)
             try:
                 try:
-                    observed = controller._dispatch(
-                        "progress",
-                        [
-                            "--run-id",
-                            "run",
-                            "--authorization-nonce",
-                            "/private/nonce",
-                        ],
-                        export,
-                        approved,
-                        project_root=Path("/approved/project"),
-                    )
+                    with patch.object(
+                        controller, "_locked_runtime_wheels", return_value=()
+                    ):
+                        observed = controller._dispatch(
+                            "progress",
+                            [
+                                "--run-id",
+                                "run",
+                                "--authorization-nonce",
+                                "/private/nonce",
+                            ],
+                            export,
+                            approved,
+                            project_root=Path("/approved/project"),
+                        )
                 except controller.FormalControllerError as exc:
                     self.fail(
                         "dedicated progress dispatch is missing: "
@@ -734,7 +845,9 @@ class FormalControllerCleanupTests(unittest.TestCase):
             module_name = "txnmem_provenance_execution_collector"
             previous = sys.modules.pop(module_name, None)
             try:
-                with self.assertRaises(controller.FormalControllerError):
+                with patch.object(
+                    controller, "_locked_runtime_wheels", return_value=()
+                ), self.assertRaises(controller.FormalControllerError):
                     controller._dispatch(
                         "progress",
                         [
