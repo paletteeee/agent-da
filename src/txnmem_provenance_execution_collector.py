@@ -123,6 +123,7 @@ _FORMAL_BACKGROUND_CPU_BUSY_LIMIT_PERMILLE = 200
 _FORMAL_MAX_LOAD1_PER_CPU_MILLI = 1000
 _FORMAL_MAX_LOGICAL_CPU_COUNT = 1024
 _FORMAL_ABLATION_TIMEOUT_TOXIC_MILLISECONDS = 100
+_FORMAL_ABLATION_TIMEOUT_CONNECTION_HEADER = "keep-alive"
 _FORMAL_RUNTIME_WHEEL_DIRECTORY = Path("/opt/txnmem-formal-runtime/wheels")
 _FORMAL_RUNS_ROOT = Path("/var/lib/txnmem-formal/runs")
 _FORMAL_ABLATION_RUNTIME_ROOT = Path("/var/lib/txnmem-formal/provenance-ablation")
@@ -623,7 +624,10 @@ def _observe_ablation_timeout_cleanup() -> dict[str, int]:
             }
         ):
             raise CollectorError("formal ablation timeout toxic identity is invalid")
-        request = urllib.request.Request("http://127.0.0.1:19000/collections", method="GET")
+        request = urllib.request.Request(
+            "http://127.0.0.1:19000/collections", method="GET",
+            headers={"Connection": _FORMAL_ABLATION_TIMEOUT_CONNECTION_HEADER},
+        )
         started = time.monotonic()
         try:
             with urllib.request.urlopen(request, timeout=0.25) as response:

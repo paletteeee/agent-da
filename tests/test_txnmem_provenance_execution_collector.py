@@ -41,6 +41,27 @@ class FormalAblationLifecycleTests(unittest.TestCase):
             collector_module._FORMAL_ABLATION_TIMEOUT_TOXIC_MILLISECONDS, 100
         )
 
+    def test_timeout_probe_uses_keep_alive_but_recovery_request_does_not(self):
+        toxic = {"name": "txnmem-formal-ablation-timeout", "type": "timeout", "stream": "downstream", "attributes": {"timeout": 100}}
+        headers = []
+        class Recovery:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self, _size): return b"{}"
+        def urlopen(request, **_kwargs):
+            headers.append(request.get_header("Connection"))
+            if len(headers) == 1:
+                raise http.client.RemoteDisconnected()
+            return Recovery()
+        with patch.object(
+            collector_module, "_toxiproxy_json_request", side_effect=[{}, toxic, None, None]
+        ), patch.object(collector_module, "observe_formal_toxiproxy_routes", return_value=[]), patch.object(
+            collector_module.urllib.request, "urlopen", side_effect=urlopen
+        ), patch.object(collector_module.time, "monotonic", side_effect=[0.0, 0.1]):
+            self.assertEqual(collector_module._observe_ablation_timeout_cleanup(), {"attempt_count": 1, "failure_count": 0})
+        self.assertEqual(headers, ["keep-alive", None])
+
     @staticmethod
     def _document(payload):
         result = dict(payload)
