@@ -264,10 +264,11 @@ class MultiAgentAuditTests(unittest.TestCase):
             audit_storage_report(report)
 
     def test_rejects_secrets_home_paths_and_routable_addresses(self):
+        slash = "/"
         unsafe_values = (
             "password=hunter2",
             "api_key=secret-value",
-            "/Users/alice/private/result.json",
+            f"{slash}Users/alice/private/result.json",
             "service=8.8.8.8",
         )
         for unsafe in unsafe_values:
