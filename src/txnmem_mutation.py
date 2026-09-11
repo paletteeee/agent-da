@@ -41,6 +41,62 @@ MUTANTS: dict[str, dict[str, Any]] = {
     },
 }
 
+MULTI_AGENT_MUTANTS = {
+    "expose_other_txn_pending": "dirty_read_violation",
+    "flush_all_txn_buffers": "cross_txn_flush_violation",
+    "disable_actor_commit_revalidation": "actor_authorization_violation",
+    "disable_read_version_check": "conflict_consistency_violation",
+    "disable_cross_agent_repair": "cross_agent_provenance_violation",
+}
+
+_MULTI_AGENT_MUTANT_SPECS: dict[str, dict[str, Any]] = {
+    "expose_other_txn_pending": {
+        "variant": "TxnMem-NoTxn",
+        "target_workloads": {"multi_agent_visibility"},
+        "target_violation": "dirty_read_violation",
+        "witness_predicate": "target_violation",
+    },
+    "flush_all_txn_buffers": {
+        "variant": "TxnMem-NoTxn",
+        "target_workloads": {"interleaved_atomicity"},
+        "target_violation": "cross_txn_flush_violation",
+        "witness_predicate": "target_violation",
+    },
+    "disable_actor_commit_revalidation": {
+        "variant": "TxnMem-NoPolicyCommit",
+        "target_workloads": {"actor_policy_scope"},
+        "target_violation": "actor_authorization_violation",
+        "witness_predicate": "target_violation",
+    },
+    "disable_read_version_check": {
+        "variant": "TxnMem-NoTxn",
+        "target_workloads": {"concurrent_supersession"},
+        "target_violation": "conflict_consistency_violation",
+        "witness_predicate": "target_violation",
+    },
+    "disable_cross_agent_repair": {
+        "variant": "TxnMem-NoRepair",
+        "target_workloads": {"cross_agent_provenance"},
+        "target_violation": "cross_agent_provenance_violation",
+        "witness_predicate": "target_violation",
+    },
+}
+
+
+def _selected_mutants(
+    instances: Iterable[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    materialized = list(instances)
+    available_workloads = {
+        str(instance.get("workload")) for instance in materialized
+    }
+    all_specs = {**MUTANTS, **_MULTI_AGENT_MUTANT_SPECS}
+    return {
+        name: spec
+        for name, spec in all_specs.items()
+        if available_workloads & set(spec["target_workloads"])
+    }
+
 
 def _canonical_sha256(value: Any) -> str:
     encoded = json.dumps(
@@ -143,8 +199,9 @@ def build_minimal_mutant_witnesses(
     """Build one deterministic prefix-minimal witness per major mutant."""
 
     materialized = list(instances)
+    selected_mutants = _selected_mutants(materialized)
     witnesses: dict[str, dict[str, Any]] = {}
-    for mutant_name, spec in MUTANTS.items():
+    for mutant_name, spec in selected_mutants.items():
         candidates = []
         for instance in sorted(materialized, key=lambda item: str(item.get("instance_id"))):
             if instance.get("workload") not in spec["target_workloads"]:
@@ -165,7 +222,7 @@ def build_minimal_mutant_witnesses(
     report = {
         "schema_version": 1,
         "source_instance_count": len(materialized),
-        "mutant_count": len(MUTANTS),
+        "mutant_count": len(selected_mutants),
         "witness_count": len(witnesses),
         "witnesses": witnesses,
     }
@@ -180,10 +237,13 @@ def validate_minimal_mutant_witnesses(report: dict[str, Any]) -> bool:
     """Replay all published witnesses and fail closed on a stale witness."""
 
     witnesses = report.get("witnesses")
-    if not isinstance(witnesses, dict) or set(witnesses) != set(MUTANTS):
+    if not isinstance(witnesses, dict) or not witnesses:
+        raise ValueError("minimal witness report does not cover any mutants")
+    all_specs = {**MUTANTS, **_MULTI_AGENT_MUTANT_SPECS}
+    if set(witnesses) - set(all_specs):
         raise ValueError("minimal witness report does not cover all mutants")
     for mutant_name, witness in witnesses.items():
-        spec = MUTANTS[mutant_name]
+        spec = all_specs[mutant_name]
         instance = witness.get("minimal_instance")
         if not isinstance(instance, dict):
             raise ValueError(f"minimal instance missing for {mutant_name}")
@@ -203,10 +263,11 @@ def run_mutation_campaign(instances: Iterable[dict[str, Any]]) -> dict[str, Any]
     """Run named mutants and report how often the oracle detects them."""
 
     materialized = list(instances)
+    selected_mutants = _selected_mutants(materialized)
     report: dict[str, Any] = {"mutants": {}, "cases": []}
     total_cases = 0
     total_killed = 0
-    for mutant_name, spec in MUTANTS.items():
+    for mutant_name, spec in selected_mutants.items():
         targeted = [
             instance
             for instance in materialized

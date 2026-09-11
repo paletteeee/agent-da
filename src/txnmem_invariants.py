@@ -6,6 +6,8 @@ from collections import defaultdict, deque
 from typing import Any
 
 from txnmem_differential import compare_result_to_oracle
+from txnmem_multiagent_invariants import check_multi_agent_invariants
+from txnmem_schema import MULTI_AGENT_WORKLOADS
 
 
 VIOLATION_ORDER = (
@@ -40,6 +42,9 @@ def _descendants(
 
 def check_invariants(instance: dict[str, Any], result: dict[str, Any]) -> list[str]:
     """Return stable, deduplicated violation names for one replay result."""
+
+    if instance.get("workload") in MULTI_AGENT_WORKLOADS:
+        return check_multi_agent_invariants(instance, result)
 
     violations: list[str] = []
     workload = instance["workload"]

@@ -28,6 +28,14 @@ NUMERIC_FIELDS = (
     "repair_count",
     "oracle_match",
     "allowed_outcome_count",
+    "agent_count",
+    "transaction_count",
+    "dirty_read_rate",
+    "cross_txn_flush_rate",
+    "actor_authorization_rate",
+    "actor_scope_rate",
+    "conflict_violation_rate",
+    "cross_agent_provenance_rate",
 )
 
 
@@ -101,6 +109,21 @@ def result_row(instance: dict[str, Any], result: dict[str, Any]) -> dict[str, An
         "oracle_match": int(oracle_comparison["matches"]),
         "allowed_outcome_count": oracle_comparison["allowed_outcome_count"],
         "oracle_mismatches": ";".join(oracle_comparison["mismatches"]),
+        "agent_count": int(instance.get("config", {}).get("agent_count", 1)),
+        "transaction_count": len(result.get("transaction_states", {})),
+        "structure_signature": instance.get("structure_signature", ""),
+        "dirty_read_rate": float("dirty_read_violation" in violations),
+        "cross_txn_flush_rate": float("cross_txn_flush_violation" in violations),
+        "actor_authorization_rate": float(
+            "actor_authorization_violation" in violations
+        ),
+        "actor_scope_rate": float("actor_scope_violation" in violations),
+        "conflict_violation_rate": float(
+            "conflict_consistency_violation" in violations
+        ),
+        "cross_agent_provenance_rate": float(
+            "cross_agent_provenance_violation" in violations
+        ),
     }
 
 

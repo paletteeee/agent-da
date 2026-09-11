@@ -8,15 +8,47 @@ sys.path.insert(0, str(ROOT / "src"))
 from txnmem_invariants import check_invariants  # noqa: E402
 from txnmem_mutation import (  # noqa: E402
     MUTANTS,
+    MULTI_AGENT_MUTANTS,
     build_minimal_mutant_witnesses,
     run_mutation_campaign,
     validate_minimal_mutant_witnesses,
 )
+from txnmem_multiagent_workloads import generate_multi_agent_suite  # noqa: E402
 from txnmem_simulator import run_instance  # noqa: E402
 from txnmem_workloads import generate_suite  # noqa: E402
 
 
 class TxnMemMutationTests(unittest.TestCase):
+    def test_multi_agent_mutants_have_expected_ablation_mapping(self):
+        self.assertEqual(
+            MULTI_AGENT_MUTANTS,
+            {
+                "expose_other_txn_pending": "dirty_read_violation",
+                "flush_all_txn_buffers": "cross_txn_flush_violation",
+                "disable_actor_commit_revalidation": "actor_authorization_violation",
+                "disable_read_version_check": "conflict_consistency_violation",
+                "disable_cross_agent_repair": "cross_agent_provenance_violation",
+            },
+        )
+
+    def test_multi_agent_campaign_kills_every_targeted_mutant(self):
+        report = run_mutation_campaign(generate_multi_agent_suite(range(50)))
+
+        self.assertEqual(set(report["mutants"]), set(MULTI_AGENT_MUTANTS))
+        self.assertTrue(
+            all(item["killed"] > 0 for item in report["mutants"].values())
+        )
+
+    def test_multi_agent_mutants_have_prefix_minimal_witnesses(self):
+        report = build_minimal_mutant_witnesses(
+            generate_multi_agent_suite(range(50))
+        )
+
+        self.assertEqual(set(report["witnesses"]), set(MULTI_AGENT_MUTANTS))
+        self.assertEqual(report["witness_count"], 5)
+        self.assertTrue(report["all_prefix_minimal"])
+        self.assertTrue(validate_minimal_mutant_witnesses(report))
+
     def test_campaign_kills_targeted_mutants(self):
         instances = generate_suite(
             [
