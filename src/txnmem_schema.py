@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-KNOWN_WORKLOADS = (
+LEGACY_WORKLOADS = (
     "atomic_multi_write",
     "crash_during_commit",
     "revoke_before_commit",
@@ -16,9 +16,19 @@ KNOWN_WORKLOADS = (
     "provenance_chain_repair",
     "provenance_branch_repair",
     "mixed_stress",
+)
+MULTI_AGENT_WORKLOADS = (
+    "multi_agent_visibility",
+    "interleaved_atomicity",
+    "concurrent_supersession",
+    "actor_policy_scope",
+    "cross_agent_provenance",
+    "multi_agent_mixed",
+)
+KNOWN_WORKLOADS = LEGACY_WORKLOADS + MULTI_AGENT_WORKLOADS + (
     "trace_grounded_replay",
 )
-CONFIG_WORKLOADS = KNOWN_WORKLOADS[:-1]
+CONFIG_WORKLOADS = LEGACY_WORKLOADS
 
 REQUIRED_INSTANCE_KEYS = (
     "instance_id",
@@ -89,6 +99,16 @@ def validate_instance(instance: dict[str, Any]) -> None:
         raise ValueError(f"unsupported workload: {workload}")
     if not isinstance(instance["seed"], int):
         raise ValueError("seed must be an integer")
+    if "structure_signature" in instance:
+        signature = instance["structure_signature"]
+        if (
+            not isinstance(signature, str)
+            or len(signature) != 64
+            or any(character not in "0123456789abcdef" for character in signature)
+        ):
+            raise ValueError("structure_signature must be a lowercase SHA-256 hex digest")
+    if instance.get("evidence_tier") not in {None, "seeded", "exhaustive"}:
+        raise ValueError("evidence_tier must be seeded or exhaustive")
     config = instance["config"]
     if not isinstance(config, dict):
         raise ValueError("config must be a mapping")

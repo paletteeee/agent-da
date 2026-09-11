@@ -52,6 +52,23 @@ class TxnMemSchemaTests(unittest.TestCase):
             },
         )
 
+    def test_validate_instance_accepts_multi_agent_metadata(self):
+        instance = minimal_instance()
+        instance["workload"] = "multi_agent_visibility"
+        instance["evidence_tier"] = "seeded"
+        instance["structure_signature"] = "a" * 64
+
+        validate_instance(instance)
+
+    def test_validate_instance_rejects_invalid_multi_agent_signature(self):
+        instance = minimal_instance()
+        instance["workload"] = "multi_agent_visibility"
+        instance["evidence_tier"] = "seeded"
+        instance["structure_signature"] = "not-a-sha256"
+
+        with self.assertRaisesRegex(ValueError, "structure_signature"):
+            validate_instance(instance)
+
 
 if __name__ == "__main__":
     unittest.main()
