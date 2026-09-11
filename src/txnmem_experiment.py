@@ -35,6 +35,7 @@ from txnmem_mutation import (
     validate_minimal_mutant_witnesses,
 )
 from txnmem_model_protocol import ModelResponse, OpenAICompatibleClient, ToolCall
+from txnmem_multiagent_experiment import run_multi_agent_controlled
 from txnmem_performance import benchmark_replay
 from txnmem_realism import (
     calibrate_config,
@@ -252,6 +253,20 @@ def _build_parser() -> argparse.ArgumentParser:
     experiment.add_argument("--out-dir", type=Path, default=Path("."))
     experiment.add_argument("--seeds", type=int, default=10)
     experiment.add_argument("--variants", nargs="+", choices=VARIANTS, default=list(VARIANTS))
+
+    multi_agent = subparsers.add_parser(
+        "multi-agent-experiment",
+        help="run exhaustive and structurally unique multi-agent correctness experiments",
+    )
+    multi_agent.add_argument("--out-dir", type=Path, required=True)
+    multi_agent.add_argument("--seeds", type=int, default=50)
+    multi_agent.add_argument("--replications", type=int, default=3)
+    multi_agent.add_argument(
+        "--variants",
+        nargs="+",
+        choices=VARIANTS,
+        default=list(VARIANTS),
+    )
 
     mutation_witnesses = subparsers.add_parser(
         "mutation-witnesses",
@@ -534,6 +549,24 @@ def main(argv: list[str] | None = None) -> int:
         load_workload_config(args.config)
         instances = generate_suite(WORKLOADS, range(args.seeds))
         return _run_core_experiment(instances, args.variants, args.out_dir)
+    if args.command == "multi-agent-experiment":
+        try:
+            report = run_multi_agent_controlled(
+                args.out_dir,
+                seeds=args.seeds,
+                replications=args.replications,
+                variants=args.variants,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"multi-agent experiment error: {exc}")
+            return 2
+        print(
+            "wrote "
+            f"{report['seeded_observation_count']} seeded and "
+            f"{report['exhaustive_observation_count']} exhaustive observations "
+            f"-> {args.out_dir}"
+        )
+        return 0
     if args.command == "mutation-witnesses":
         instances = _read_jsonl(args.instances)
         report = build_minimal_mutant_witnesses(instances)

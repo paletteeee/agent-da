@@ -11,6 +11,54 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TxnMemCliOutputTests(unittest.TestCase):
+    def test_multi_agent_experiment_cli_writes_complete_separated_artifacts(self):
+        with TemporaryDirectory() as tmp:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "src" / "txnmem_experiment.py"),
+                    "multi-agent-experiment",
+                    "--out-dir",
+                    tmp,
+                    "--seeds",
+                    "2",
+                    "--replications",
+                    "2",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            root = Path(tmp)
+            required = (
+                "data/generated_instances.jsonl",
+                "data/reference_oracles.jsonl",
+                "data/exhaustive_interleavings.jsonl",
+                "results/experiment_results.csv",
+                "results/exhaustive_results.csv",
+                "results/summary.json",
+                "results/coverage.json",
+                "results/minimal_witnesses.json",
+                "results/reproducibility.json",
+                "results/claim_status.json",
+            )
+            self.assertTrue(all((root / relative).exists() for relative in required))
+            import csv
+
+            with (root / "results" / "experiment_results.csv").open(
+                encoding="utf-8"
+            ) as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 60)
+            self.assertTrue(all(int(row["agent_count"]) == 2 for row in rows))
+            self.assertTrue(all(int(row["transaction_count"]) >= 2 for row in rows))
+            self.assertTrue(
+                all("_exhaustive_" not in row["instance_id"] for row in rows)
+            )
+
     def test_vector_graph_fault_cli_binds_scenario_to_toxiproxy_requester(self):
         sys.path.insert(0, str(ROOT / "src"))
         from txnmem_experiment import main
