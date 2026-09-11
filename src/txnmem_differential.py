@@ -55,6 +55,18 @@ def _implementation_snapshot(instance: dict[str, Any], result: dict[str, Any]) -
             for memory_id, memory in final_memories.items()
             if memory.get("status") == "superseded"
         ),
+        "read_observations": sorted(
+            result.get("read_observations", []),
+            key=lambda row: (
+                str(row.get("operation_id")),
+                str(row.get("reader_agent_id")),
+            ),
+        ),
+        "active_versions": {
+            memory_id: int(memory.get("version", 1))
+            for memory_id, memory in sorted(final_memories.items())
+            if memory.get("status") == "active"
+        },
     }
 
 
@@ -74,6 +86,9 @@ def _matches_outcome(candidate: dict[str, Any], outcome: dict[str, Any]) -> tupl
         "superseded_memory_ids",
     ):
         if candidate[field] != outcome.get(field, []):
+            mismatches.append(field)
+    for field in ("read_observations", "active_versions"):
+        if field in outcome and candidate[field] != outcome[field]:
             mismatches.append(field)
     return not mismatches, mismatches
 

@@ -17,7 +17,7 @@ class TxnMemDifferentialTests(unittest.TestCase):
         comparison = compare_result_to_oracle(instance, run_instance(instance, "TxnMem"))
 
         self.assertTrue(comparison["matches"])
-        self.assertEqual(comparison["oracle_version"], "0.1")
+        self.assertEqual(comparison["oracle_version"], "0.2")
 
     def test_naive_partial_write_is_rejected_by_w1_oracle(self):
         instance = generate_instance("atomic_multi_write", seed=1, config={"txn_size": 2})
