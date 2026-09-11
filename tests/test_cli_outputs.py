@@ -58,6 +58,28 @@ class TxnMemCliOutputTests(unittest.TestCase):
             self.assertTrue(
                 all("_exhaustive_" not in row["instance_id"] for row in rows)
             )
+            audited = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "src" / "txnmem_experiment.py"),
+                    "multi-agent-audit",
+                    "--controlled-root",
+                    tmp,
+                    "--expected-seeds",
+                    "2",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(audited.returncode, 0, audited.stderr)
+            claim = json.loads(
+                (root / "results" / "claim_status.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(claim["status"], "inactive")
 
     def test_vector_graph_fault_cli_binds_scenario_to_toxiproxy_requester(self):
         sys.path.insert(0, str(ROOT / "src"))

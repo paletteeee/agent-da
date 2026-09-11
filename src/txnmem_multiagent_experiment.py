@@ -324,4 +324,23 @@ def run_multi_agent_controlled(
     write_summary(witnesses, root / "results" / "minimal_witnesses.json")
     write_summary(reproducibility, root / "results" / "reproducibility.json")
     write_summary(claim_status, root / "results" / "claim_status.json")
+    from txnmem_multiagent_audit import (
+        audit_controlled_artifacts,
+        evaluate_claim_status,
+        write_paper_summary,
+    )
+
+    artifact_audit = audit_controlled_artifacts(root, expected_seeds=seeds)
+    write_summary(artifact_audit, root / "results" / "artifact_audit.json")
+    claim_status = evaluate_claim_status(artifact_audit, None)
+    claim_status["artifact_sha256"] = artifact_audit["file_sha256"]
+    write_summary(claim_status, root / "results" / "claim_status.json")
+    write_paper_summary(
+        claim_status,
+        artifact_audit,
+        None,
+        root / "results" / "paper_summary.md",
+    )
+    report["artifact_audit_status"] = artifact_audit["status"]
+    report["claim_status"] = claim_status["status"]
     return report

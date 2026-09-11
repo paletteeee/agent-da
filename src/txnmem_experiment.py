@@ -268,6 +268,16 @@ def _build_parser() -> argparse.ArgumentParser:
         default=list(VARIANTS),
     )
 
+    multi_agent_audit = subparsers.add_parser(
+        "multi-agent-audit",
+        help="audit controlled and optional real-storage multi-agent evidence",
+    )
+    multi_agent_audit.add_argument(
+        "--controlled-root", type=Path, required=True
+    )
+    multi_agent_audit.add_argument("--storage-report", type=Path, default=None)
+    multi_agent_audit.add_argument("--expected-seeds", type=int, default=50)
+
     mutation_witnesses = subparsers.add_parser(
         "mutation-witnesses",
         help="derive and replay one prefix-minimal witness for each major mutant",
@@ -565,6 +575,43 @@ def main(argv: list[str] | None = None) -> int:
             f"{report['seeded_observation_count']} seeded and "
             f"{report['exhaustive_observation_count']} exhaustive observations "
             f"-> {args.out_dir}"
+        )
+        return 0
+    if args.command == "multi-agent-audit":
+        from txnmem_multiagent_audit import (
+            audit_controlled_artifacts,
+            evaluate_claim_status,
+            write_paper_summary,
+        )
+
+        try:
+            controlled = audit_controlled_artifacts(
+                args.controlled_root,
+                expected_seeds=args.expected_seeds,
+            )
+            storage = (
+                json.loads(args.storage_report.read_text(encoding="utf-8"))
+                if args.storage_report is not None
+                else None
+            )
+            claim_status = evaluate_claim_status(controlled, storage)
+            claim_status["artifact_sha256"] = controlled["file_sha256"]
+            write_summary(
+                claim_status,
+                args.controlled_root / "results" / "claim_status.json",
+            )
+            write_paper_summary(
+                claim_status,
+                controlled,
+                storage,
+                args.controlled_root / "results" / "paper_summary.md",
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"multi-agent audit error: {exc}")
+            return 2
+        print(
+            f"multi-agent evidence audit passed; claim is {claim_status['status']} "
+            f"-> {args.controlled_root / 'results' / 'claim_status.json'}"
         )
         return 0
     if args.command == "mutation-witnesses":
