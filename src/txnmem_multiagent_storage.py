@@ -336,14 +336,16 @@ class MultiAgentStorageCoordinator:
                 )
 
             self._capture_prior_states(txn)
+            attempted_actions: list[dict[str, Any]] = []
             try:
                 for action in txn["actions"]:
+                    attempted_actions.append(action)
                     self._apply(action)
                     txn["applied_actions"].append(action)
             except Exception as apply_error:
                 compensation_failed = False
                 restored: set[str] = set()
-                for action in reversed(txn["applied_actions"]):
+                for action in reversed(attempted_actions):
                     memory_id = self._memory_id(action)
                     if memory_id is None or memory_id in restored:
                         continue
@@ -393,7 +395,8 @@ class MultiAgentStorageCoordinator:
                         continue
                     self.backend.invalidate(current, agent_id=agent_id)
                     invalidated.append(current)
-                    queue.extend(children.get(current, []))
+                    if self.variant == "TxnMem":
+                        queue.extend(children.get(current, []))
                 verifier = getattr(self.backend, "verify_persistent_state", None)
                 if callable(verifier):
                     readback = verifier(

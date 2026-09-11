@@ -278,6 +278,32 @@ def _build_parser() -> argparse.ArgumentParser:
     multi_agent_audit.add_argument("--storage-report", type=Path, default=None)
     multi_agent_audit.add_argument("--expected-seeds", type=int, default=50)
 
+    multi_agent_storage = subparsers.add_parser(
+        "multi-agent-storage-experiment",
+        help="run paired two-agent scenarios over Qdrant and Neo4j",
+    )
+    multi_agent_storage.add_argument(
+        "--backend", choices=("vector-graph",), default="vector-graph"
+    )
+    multi_agent_storage.add_argument(
+        "--qdrant-url", default="http://127.0.0.1:19000"
+    )
+    multi_agent_storage.add_argument(
+        "--neo4j-uri", default="bolt://127.0.0.1:19001"
+    )
+    multi_agent_storage.add_argument(
+        "--neo4j-user-env", default="TXNMEM_NEO4J_USER"
+    )
+    multi_agent_storage.add_argument(
+        "--neo4j-password-env", default="TXNMEM_NEO4J_PASSWORD"
+    )
+    multi_agent_storage.add_argument(
+        "--toxiproxy-url", default="http://127.0.0.1:8474"
+    )
+    multi_agent_storage.add_argument("--repetitions", type=int, default=30)
+    multi_agent_storage.add_argument("--out-dir", type=Path, required=True)
+    multi_agent_storage.add_argument("--fixture", action="store_true")
+
     mutation_witnesses = subparsers.add_parser(
         "mutation-witnesses",
         help="derive and replay one prefix-minimal witness for each major mutant",
@@ -612,6 +638,100 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"multi-agent evidence audit passed; claim is {claim_status['status']} "
             f"-> {args.controlled_root / 'results' / 'claim_status.json'}"
+        )
+        return 0
+    if args.command == "multi-agent-storage-experiment":
+        from txnmem_multiagent_audit import audit_storage_report
+        from txnmem_multiagent_storage_experiment import (
+            fixture_backend_factory,
+            run_real_storage_matrix,
+        )
+
+        try:
+            if args.fixture:
+                storage_backend_factory = fixture_backend_factory
+                fault_requester_factory = None
+                real_service_evidence = False
+            else:
+                from txnmem_vector_graph_backend import VectorGraphMemoryBackend
+
+                neo4j_user = os.environ.get(args.neo4j_user_env)
+                neo4j_password = os.environ.get(args.neo4j_password_env)
+                if not neo4j_user or not neo4j_password:
+                    raise ValueError(
+                        "Neo4j credentials must be supplied through the configured environment variables"
+                    )
+                proxy_routes = {
+                    "qdrant": {
+                        "proxy_name": os.environ.get(
+                            "TXNMEM_QDRANT_PROXY_NAME", "txnmem-qdrant"
+                        ),
+                        "client_endpoint": args.qdrant_url,
+                        "listen": os.environ.get(
+                            "TXNMEM_QDRANT_PROXY_LISTEN", "0.0.0.0:19000"
+                        ),
+                        "upstream": os.environ.get(
+                            "TXNMEM_QDRANT_PROXY_UPSTREAM", "qdrant:6333"
+                        ),
+                    },
+                    "neo4j": {
+                        "proxy_name": os.environ.get(
+                            "TXNMEM_NEO4J_PROXY_NAME", "txnmem-neo4j"
+                        ),
+                        "client_endpoint": args.neo4j_uri,
+                        "listen": os.environ.get(
+                            "TXNMEM_NEO4J_PROXY_LISTEN", "0.0.0.0:19001"
+                        ),
+                        "upstream": os.environ.get(
+                            "TXNMEM_NEO4J_PROXY_UPSTREAM", "neo4j:7687"
+                        ),
+                    },
+                }
+
+                def storage_backend_factory(namespace, fault_requester):
+                    return VectorGraphMemoryBackend(
+                        namespace,
+                        args.qdrant_url,
+                        args.neo4j_uri,
+                        (neo4j_user, neo4j_password),
+                        proxy_requester=fault_requester,
+                        max_retries=0,
+                        request_timeout_seconds=2.0,
+                    )
+
+                def fault_requester_factory(scenario):
+                    return ToxiproxyFaultController(
+                        scenario,
+                        management_url=args.toxiproxy_url,
+                        proxy_routes=proxy_routes,
+                    )
+
+                real_service_evidence = True
+
+            storage_report = run_real_storage_matrix(
+                storage_backend_factory,
+                repetitions=args.repetitions,
+                fault_requester_factory=fault_requester_factory,
+                real_service_evidence=real_service_evidence,
+            )
+            audited = audit_storage_report(storage_report)
+            output_path = (
+                args.out_dir / "results" / "multi_agent_storage_results.json"
+            )
+            write_summary(storage_report, output_path)
+            audited["report_sha256"] = hashlib.sha256(
+                output_path.read_bytes()
+            ).hexdigest()
+            write_summary(
+                audited,
+                args.out_dir / "results" / "artifact_audit.json",
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"multi-agent storage experiment error: {exc}")
+            return 2
+        print(
+            f"wrote {storage_report['observation_count']} paired storage observations "
+            f"-> {output_path}"
         )
         return 0
     if args.command == "mutation-witnesses":

@@ -11,6 +11,39 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TxnMemCliOutputTests(unittest.TestCase):
+    def test_multi_agent_storage_fixture_cli_writes_audited_matrix(self):
+        with TemporaryDirectory() as tmp:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "src" / "txnmem_experiment.py"),
+                    "multi-agent-storage-experiment",
+                    "--fixture",
+                    "--repetitions",
+                    "2",
+                    "--out-dir",
+                    tmp,
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            root = Path(tmp) / "results"
+            report = json.loads(
+                (root / "multi_agent_storage_results.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            audit = json.loads(
+                (root / "artifact_audit.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(report["observation_count"], 16)
+            self.assertFalse(report["real_service_evidence"])
+            self.assertEqual(audit["status"], "passed")
+
     def test_multi_agent_experiment_cli_writes_complete_separated_artifacts(self):
         with TemporaryDirectory() as tmp:
             completed = subprocess.run(

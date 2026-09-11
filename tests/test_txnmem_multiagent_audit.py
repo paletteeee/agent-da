@@ -191,6 +191,7 @@ class MultiAgentAuditTests(unittest.TestCase):
         return {
             "schema_version": 1,
             "status": "passed",
+            "real_service_evidence": True,
             "observation_count": 240,
             "unknown_count": 0,
             "partial_visible_count": 0,

@@ -351,6 +351,7 @@ def audit_storage_report(report: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "status": "passed",
+        "real_service_evidence": report.get("real_service_evidence") is True,
         **counts,
     }
 
@@ -393,6 +394,7 @@ def evaluate_claim_status(
         "three_identical_replications": _int(controlled, "replication_count")
         >= 3,
         "real_storage_evidence": audited_storage is not None
+        and audited_storage["real_service_evidence"] is True
         and audited_storage["observation_count"] == 240,
         "real_storage_zero_partial_visibility": audited_storage is not None
         and audited_storage["partial_visible_count"] == 0,
