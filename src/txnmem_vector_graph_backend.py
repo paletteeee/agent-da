@@ -437,12 +437,68 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
         return memory
 
     def invalidate(self, memory_id: str, **fields: Any) -> None:
-        if memory_id in self.memories:
-            self.memories[memory_id]["status"] = "invalid"
+        memory_id = str(memory_id)
+        memory = copy.deepcopy(self.memories.get(memory_id, {}))
+        if memory:
+            memory["status"] = "invalid"
         key = self._key("invalidate", str(memory_id))
+        if memory:
+            self._call(
+                "qdrant",
+                "invalidate",
+                lambda: self.qdrant.upsert(
+                    self.db_namespace,
+                    memory_id,
+                    self.embedder(memory.get("value", memory_id)),
+                    memory,
+                    key,
+                ),
+                key,
+            )
         if hasattr(self.neo4j, "update_status"):
             self._call("neo4j", "update_status", lambda: self.neo4j.update_status(self.db_namespace, memory_id, "invalid", key), key)
+        if memory:
+            self.memories[memory_id] = memory
         self._event("invalidate", memory_id=memory_id, **fields)
+
+    def delete(self, memory_id: str, **fields: Any) -> None:
+        """Delete both persistent representations and require verified absence."""
+
+        memory_id = str(memory_id)
+        key = self._key("delete", memory_id)
+        for service, operation, function in (
+            (
+                "qdrant",
+                "delete",
+                lambda: self.qdrant.delete(self.db_namespace, memory_id, key),
+            ),
+            (
+                "neo4j",
+                "delete",
+                lambda: self.neo4j.delete_memory(
+                    self.db_namespace, memory_id, key
+                ),
+            ),
+        ):
+            try:
+                self._call(service, operation, function, key)
+            except Exception:
+                # Persistent readback below decides whether a lost response was
+                # harmless or left an indeterminate state.
+                continue
+        verification = self.verify_persistent_state(
+            [{"type": "write", "memory_id": memory_id}]
+        )
+        if verification.get("classification") != "absent":
+            raise VectorGraphBackendError(
+                "persistent state is not verified absent after delete"
+            )
+        self.memories.pop(memory_id, None)
+        self._committed_keys = {
+            committed_key: committed_id
+            for committed_key, committed_id in self._committed_keys.items()
+            if committed_id != memory_id
+        }
 
     def snapshot(self) -> dict[str, dict[str, Any]]:
         return copy.deepcopy(self.memories)
@@ -454,23 +510,28 @@ class VectorGraphMemoryBackend(InstrumentedMemoryBackend):
 
         items: list[dict[str, Any]] = []
         for action in actions:
-            if str(action.get("type", action.get("kind", ""))) != "write":
+            action_type = str(action.get("type", action.get("kind", "")))
+            if action_type not in {"write", "derive", "propagate", "invalidate"}:
                 continue
             memory_id = str(action.get("memory_id", ""))
             source_ids = sorted(str(item) for item in action.get("source_ids", []))
-            expected_qdrant = {
-                "memory_id": memory_id,
-                "value": action.get("value", memory_id),
-                "status": "active",
-                "agent_id": action.get("agent_id", "agent_1"),
-                "scope": action.get("scope", "tenant:user_001"),
-                "derived_from": source_ids,
-            }
-            expected_neo4j = {
-                "status": "active",
-                "source_ids": source_ids,
-                "supersedes_id": action.get("supersedes_id"),
-            }
+            if action_type == "invalidate":
+                expected_qdrant = {"status": "invalid"}
+                expected_neo4j = {"status": "invalid"}
+            else:
+                expected_qdrant = {
+                    "memory_id": memory_id,
+                    "value": action.get("value", memory_id),
+                    "status": "active",
+                    "agent_id": action.get("agent_id", "agent_1"),
+                    "scope": action.get("scope", "tenant:user_001"),
+                    "derived_from": source_ids,
+                }
+                expected_neo4j = {
+                    "status": "active",
+                    "source_ids": source_ids,
+                    "supersedes_id": action.get("supersedes_id"),
+                }
             item: dict[str, Any] = {"memory_id": memory_id}
             try:
                 qdrant_state = self.qdrant.retrieve(self.db_namespace, memory_id)

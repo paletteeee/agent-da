@@ -41,13 +41,20 @@ class InstrumentedMemoryBackend:
         return self._event(kind, **fields)
 
     def write(self, memory_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
+        previous = self.memories.get(memory_id, {})
         memory = {
             "memory_id": memory_id,
             "value": value if value is not None else memory_id,
-            "status": "active",
+            "status": fields.get("status", "active"),
             "agent_id": fields.get("agent_id", "agent_1"),
             "scope": fields.get("scope", "tenant:user_001"),
+            "entity_id": fields.get("entity_id", "user_001"),
+            "attribute": fields.get("attribute", "fact"),
+            "version": int(
+                fields.get("version", int(previous.get("version", 0)) + 1)
+            ),
             "derived_from": list(fields.get("source_ids", [])),
+            "supersedes_id": fields.get("supersedes_id"),
         }
         self.memories[memory_id] = memory
         self._event("memory_write", memory_id=memory_id, value=memory["value"], **fields)
@@ -102,6 +109,11 @@ class InstrumentedMemoryBackend:
         if memory_id in self.memories:
             self.memories[memory_id]["status"] = "invalid"
         self._event("invalidate", memory_id=memory_id, **fields)
+
+    def delete(self, memory_id: str, **fields: Any) -> None:
+        """Remove a memory for transaction compensation."""
+
+        self.memories.pop(memory_id, None)
 
     def snapshot(self) -> dict[str, Any]:
         return copy.deepcopy(self.memories)
@@ -192,6 +204,13 @@ class SQLiteInstrumentedMemoryBackend(InstrumentedMemoryBackend):
         if memory_id in self.memories:
             self._persist_memory(self.memories[memory_id])
             self._connection.commit()
+
+    def delete(self, memory_id: str, **fields: Any) -> None:
+        super().delete(memory_id, **fields)
+        self._connection.execute(
+            "DELETE FROM memories WHERE memory_id = ?", (str(memory_id),)
+        )
+        self._connection.commit()
 
     def close(self) -> None:
         self._connection.commit()

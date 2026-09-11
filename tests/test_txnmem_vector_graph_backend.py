@@ -245,6 +245,23 @@ class VectorGraphMemoryBackendTests(unittest.TestCase):
         self.backend.write("m0", value="source")
         self.backend.invalidate("m0")
         self.assertEqual(self.backend.read("m0"), None)
+        self.assertEqual(
+            self.qdrant.retrieve("episode-1", "m0")["status"],
+            "invalid",
+        )
+        verification = self.backend.verify_persistent_state(
+            [{"type": "invalidate", "memory_id": "m0"}]
+        )
+        self.assertEqual(verification["classification"], "complete")
+
+    def test_delete_requires_both_persistent_stores_to_be_absent(self):
+        self.backend.write("m-delete", value="source")
+
+        self.backend.delete("m-delete")
+
+        self.assertIsNone(self.qdrant.retrieve("episode-1", "m-delete"))
+        self.assertIsNone(self.neo4j.retrieve_memory("episode-1", "m-delete"))
+        self.assertNotIn("m-delete", self.backend.snapshot())
 
     def test_proxy_requester_observes_semantic_write_and_commit_boundaries(self):
         observed = []
