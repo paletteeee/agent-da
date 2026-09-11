@@ -1,0 +1,1659 @@
+{
+  "all_prefix_minimal": true,
+  "mutant_count": 5,
+  "schema_version": 1,
+  "source_instance_count": 300,
+  "witness_count": 5,
+  "witnesses": {
+    "disable_actor_commit_revalidation": {
+      "minimal_instance": {
+        "config": {
+          "agent_count": 2,
+          "branch_factor": 1,
+          "concurrency": 2,
+          "policy_churn": 1,
+          "provenance_depth": 1,
+          "sampled_parameters": {
+            "probe_type": "search",
+            "revoked_action": "write",
+            "revoked_agent": "agent_1",
+            "trigger_slot": 1
+          },
+          "txn_size": 1
+        },
+        "evidence_tier": "seeded",
+        "failure_schedule": [
+          {
+            "agent_id": "agent_1",
+            "phase": "before_validate",
+            "scope": "tenant:user_001",
+            "target": "write",
+            "trigger": {
+              "before_operation": "agent_1_op_004"
+            },
+            "trigger_slot": 1,
+            "type": "revoke"
+          }
+        ],
+        "initial_memories": [
+          {
+            "agent_id": "agent_1",
+            "attribute": "fact",
+            "derived_from": [],
+            "entity_id": "shared_entity",
+            "memory_id": "m_private_1",
+            "memory_role": "private_1",
+            "policy_version": 1,
+            "scope": "tenant:user_001",
+            "status": "active",
+            "supersedes_id": null,
+            "value": "private_1",
+            "version": 1
+          },
+          {
+            "agent_id": "agent_2",
+            "attribute": "fact",
+            "derived_from": [],
+            "entity_id": "shared_entity",
+            "memory_id": "m_private_2",
+            "memory_role": "private_2",
+            "policy_version": 1,
+            "scope": "tenant:user_002",
+            "status": "active",
+            "supersedes_id": null,
+            "value": "private_2",
+            "version": 1
+          }
+        ],
+        "instance_id": "actor_policy_scope_seed_0",
+        "operations": [
+          {
+            "agent_id": "agent_1",
+            "op_id": "agent_1_op_001",
+            "program_index": 1,
+            "step": 1,
+            "txn_id": "txn_agent_1",
+            "type": "begin_txn"
+          },
+          {
+            "agent_id": "agent_1",
+            "op_id": "agent_1_op_002",
+            "probe_role": "cross_scope_probe",
+            "program_index": 2,
+            "query": "private_2",
+            "scope": "tenant:user_001",
+            "step": 2,
+            "txn_id": "txn_agent_1",
+            "type": "search"
+          },
+          {
+            "agent_id": "agent_1",
+            "memory_id": "m_agent_1_write",
+            "memory_role": "agent_1_write",
+            "op_id": "agent_1_op_003",
+            "policy_version": 1,
+            "program_index": 3,
+            "scope": "tenant:user_001",
+            "source_ids": [],
+            "step": 3,
+            "txn_id": "txn_agent_1",
+            "type": "write",
+            "value": "written_by_agent_1"
+          },
+          {
+            "agent_id": "agent_1",
+            "op_id": "agent_1_op_004",
+            "program_index": 4,
+            "step": 4,
+            "txn_id": "txn_agent_1",
+            "type": "commit"
+          }
+        ],
+        "policies": [
+          {
+            "action": "write",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_write_tenant_user_001",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "read",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_read_tenant_user_001",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "search",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_search_tenant_user_001",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "derive",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_derive_tenant_user_001",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "propagate",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_propagate_tenant_user_001",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "supersede",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_supersede_tenant_user_001",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "invalidate",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_invalidate_tenant_user_001",
+            "scope": "tenant:user_001",
+            "version": 1
+          },
+          {
+            "action": "write",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_write_tenant_user_002",
+            "scope": "tenant:user_002",
+            "version": 1
+          },
+          {
+            "action": "read",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_read_tenant_user_002",
+            "scope": "tenant:user_002",
+            "version": 1
+          },
+          {
+            "action": "search",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_search_tenant_user_002",
+            "scope": "tenant:user_002",
+            "version": 1
+          },
+          {
+            "action": "derive",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_derive_tenant_user_002",
+            "scope": "tenant:user_002",
+            "version": 1
+          },
+          {
+            "action": "propagate",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_propagate_tenant_user_002",
+            "scope": "tenant:user_002",
+            "version": 1
+          },
+          {
+            "action": "supersede",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_supersede_tenant_user_002",
+            "scope": "tenant:user_002",
+            "version": 1
+          },
+          {
+            "action": "invalidate",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_invalidate_tenant_user_002",
+            "scope": "tenant:user_002",
+            "version": 1
+          }
+        ],
+        "provenance_edges": [],
+        "seed": 0,
+        "structure_signature": "635568b756f9d98bd0c70921df561bbfc333ba9cd6ad7c450cdad0051cfed7b6",
+        "workload": "actor_policy_scope"
+      },
+      "minimal_instance_sha256": "dddc3200879a9a84c4011b0b68cdbe456a55e8dfb13515763fcb615a45d9410a",
+      "minimal_operation_count": 4,
+      "minimality": {
+        "method": "shortest_operation_prefix_reproducing_target_violation",
+        "predecessor_operation_count": 3,
+        "predecessor_reproduces_target_violation": false
+      },
+      "mutant": "disable_actor_commit_revalidation",
+      "observed": {
+        "candidate": {
+          "active_versions": {
+            "m_agent_1_write": 1,
+            "m_private_1": 1,
+            "m_private_2": 1
+          },
+          "committed_memory_ids": [
+            "m_agent_1_write"
+          ],
+          "invalid_memory_ids": [],
+          "read_observations": [
+            {
+              "denied_reason": "scope_mismatch",
+              "operation_id": "agent_1_op_002",
+              "probe_role": "cross_scope_probe",
+              "reader_agent_id": "agent_1",
+              "txn_id": "txn_agent_1",
+              "visible_memory_ids": []
+            }
+          ],
+          "superseded_memory_ids": [],
+          "txn_states": {
+            "txn_agent_1": "committed"
+          },
+          "visible_memory_ids": []
+        },
+        "committed_memory_ids": [
+          "m_agent_1_write"
+        ],
+        "oracle_mismatches": [
+          "transaction_state",
+          "committed_memory_ids",
+          "active_versions"
+        ],
+        "reproduces": true,
+        "transaction_state": "committed",
+        "violations": [
+          "actor_authorization_violation"
+        ]
+      },
+      "reference_expected": {
+        "allowed_outcome_count": 1,
+        "allowed_outcomes": [
+          {
+            "committed_memory_ids": [],
+            "invalid_memory_ids": [],
+            "superseded_memory_ids": [],
+            "txn_states": {
+              "txn_agent_1": "aborted"
+            },
+            "visible_memory_ids": []
+          }
+        ],
+        "oracle_version": "0.2"
+      },
+      "shrink_trace": [
+        {
+          "operation_count": 1,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 2,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 3,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 4,
+          "oracle_mismatches": [
+            "transaction_state",
+            "committed_memory_ids",
+            "active_versions"
+          ],
+          "reproduces_target_violation": true,
+          "violations": [
+            "actor_authorization_violation"
+          ]
+        }
+      ],
+      "source_instance_id": "actor_policy_scope_seed_0",
+      "source_instance_sha256": "647e95df4bf5a0d73c56ff42a28712e58f30ee21dec245a72a3f6fb4da3981c9",
+      "source_operation_count": 8,
+      "target_violation": "actor_authorization_violation",
+      "variant": "TxnMem-NoPolicyCommit"
+    },
+    "disable_cross_agent_repair": {
+      "minimal_instance": {
+        "config": {
+          "agent_count": 2,
+          "branch_factor": 1,
+          "concurrency": 2,
+          "policy_churn": 0,
+          "provenance_depth": 1,
+          "sampled_parameters": {
+            "branch_factor": 1,
+            "depth": 1,
+            "invalidation_phase": "after_derived_commit",
+            "source_agent": "agent_1"
+          },
+          "txn_size": 1
+        },
+        "evidence_tier": "seeded",
+        "failure_schedule": [
+          {
+            "agent_id": "agent_1",
+            "memory_id": "m_cross_root",
+            "memory_role": "cross_root",
+            "phase": "after_derived_commit",
+            "target": "m_cross_root",
+            "trigger": {
+              "after_operation": "agent_2_op_003"
+            },
+            "type": "invalidate"
+          }
+        ],
+        "initial_memories": [],
+        "instance_id": "cross_agent_provenance_seed_24",
+        "operations": [
+          {
+            "agent_id": "agent_1",
+            "op_id": "agent_1_op_001",
+            "program_index": 1,
+            "step": 1,
+            "txn_id": "txn_agent_1",
+            "type": "begin_txn"
+          },
+          {
+            "agent_id": "agent_1",
+            "memory_id": "m_cross_root",
+            "memory_role": "cross_root",
+            "op_id": "agent_1_op_002",
+            "policy_version": 1,
+            "program_index": 2,
+            "scope": "tenant:shared",
+            "source_ids": [],
+            "step": 2,
+            "txn_id": "txn_agent_1",
+            "type": "write",
+            "value": "cross_agent_source"
+          },
+          {
+            "agent_id": "agent_1",
+            "op_id": "agent_1_op_003",
+            "program_index": 3,
+            "step": 3,
+            "txn_id": "txn_agent_1",
+            "type": "commit"
+          },
+          {
+            "agent_id": "agent_2",
+            "op_id": "agent_2_op_001",
+            "program_index": 1,
+            "step": 4,
+            "txn_id": "txn_agent_2",
+            "type": "begin_txn"
+          },
+          {
+            "agent_id": "agent_2",
+            "memory_id": "m_cross_b1_d1",
+            "memory_role": "branch_1_depth_1",
+            "op_id": "agent_2_op_002",
+            "policy_version": 1,
+            "program_index": 2,
+            "scope": "tenant:shared",
+            "source_ids": [
+              "m_cross_root"
+            ],
+            "source_roles": [
+              "cross_root"
+            ],
+            "step": 5,
+            "txn_id": "txn_agent_2",
+            "type": "derive",
+            "value": "branch_1_depth_1"
+          },
+          {
+            "agent_id": "agent_2",
+            "op_id": "agent_2_op_003",
+            "program_index": 3,
+            "step": 6,
+            "txn_id": "txn_agent_2",
+            "type": "commit"
+          }
+        ],
+        "policies": [
+          {
+            "action": "write",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_write_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "read",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_read_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "search",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_search_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "derive",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_derive_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "propagate",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_propagate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "supersede",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_supersede_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "invalidate",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_invalidate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "write",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_write_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "read",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_read_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "search",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_search_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "derive",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_derive_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "propagate",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_propagate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "supersede",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_supersede_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "invalidate",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_invalidate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          }
+        ],
+        "provenance_edges": [],
+        "seed": 24,
+        "structure_signature": "0d9c695704226db8fb36c0361327bfbd41fae6e690dd190dd532d719d559bc33",
+        "workload": "cross_agent_provenance"
+      },
+      "minimal_instance_sha256": "0338b192fe2c73e94a8d1cdf837ec7cfddc77812bb48242f22a777a544e9fc14",
+      "minimal_operation_count": 6,
+      "minimality": {
+        "method": "shortest_operation_prefix_reproducing_target_violation",
+        "predecessor_operation_count": 5,
+        "predecessor_reproduces_target_violation": false
+      },
+      "mutant": "disable_cross_agent_repair",
+      "observed": {
+        "candidate": {
+          "active_versions": {
+            "m_cross_b1_d1": 1
+          },
+          "committed_memory_ids": [
+            "m_cross_root",
+            "m_cross_b1_d1"
+          ],
+          "invalid_memory_ids": [
+            "m_cross_root"
+          ],
+          "read_observations": [],
+          "superseded_memory_ids": [],
+          "txn_states": {
+            "txn_agent_1": "committed",
+            "txn_agent_2": "committed"
+          },
+          "visible_memory_ids": [
+            "m_cross_b1_d1"
+          ]
+        },
+        "committed_memory_ids": [
+          "m_cross_root",
+          "m_cross_b1_d1"
+        ],
+        "oracle_mismatches": [
+          "visible_memory_ids",
+          "invalid_memory_ids",
+          "active_versions"
+        ],
+        "reproduces": true,
+        "transaction_state": "invalidated",
+        "violations": [
+          "cross_agent_provenance_violation"
+        ]
+      },
+      "reference_expected": {
+        "allowed_outcome_count": 1,
+        "allowed_outcomes": [
+          {
+            "committed_memory_ids": [
+              "m_cross_root",
+              "m_cross_b1_d1"
+            ],
+            "invalid_memory_ids": [
+              "m_cross_b1_d1",
+              "m_cross_root"
+            ],
+            "superseded_memory_ids": [],
+            "txn_states": {
+              "txn_agent_1": "committed",
+              "txn_agent_2": "committed"
+            },
+            "visible_memory_ids": []
+          }
+        ],
+        "oracle_version": "0.2"
+      },
+      "shrink_trace": [
+        {
+          "operation_count": 1,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 2,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 3,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 4,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 5,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 6,
+          "oracle_mismatches": [
+            "visible_memory_ids",
+            "invalid_memory_ids",
+            "active_versions"
+          ],
+          "reproduces_target_violation": true,
+          "violations": [
+            "cross_agent_provenance_violation"
+          ]
+        }
+      ],
+      "source_instance_id": "cross_agent_provenance_seed_24",
+      "source_instance_sha256": "0338b192fe2c73e94a8d1cdf837ec7cfddc77812bb48242f22a777a544e9fc14",
+      "source_operation_count": 6,
+      "target_violation": "cross_agent_provenance_violation",
+      "variant": "TxnMem-NoRepair"
+    },
+    "disable_read_version_check": {
+      "minimal_instance": {
+        "config": {
+          "agent_count": 2,
+          "branch_factor": 1,
+          "concurrency": 2,
+          "policy_churn": 0,
+          "provenance_depth": 1,
+          "sampled_parameters": {
+            "first_committer": "agent_2",
+            "new_value_count": 1,
+            "precommit_reads": 1
+          },
+          "txn_size": 1
+        },
+        "evidence_tier": "seeded",
+        "failure_schedule": [],
+        "initial_memories": [
+          {
+            "agent_id": "agent_1",
+            "attribute": "preference",
+            "derived_from": [],
+            "entity_id": "shared_entity",
+            "memory_id": "m_shared_old",
+            "memory_role": "shared_old",
+            "policy_version": 1,
+            "scope": "tenant:shared",
+            "status": "active",
+            "supersedes_id": null,
+            "value": "old_preference",
+            "version": 1
+          }
+        ],
+        "instance_id": "concurrent_supersession_seed_17",
+        "operations": [
+          {
+            "agent_id": "agent_2",
+            "op_id": "agent_2_op_001",
+            "program_index": 1,
+            "step": 1,
+            "txn_id": "txn_agent_2",
+            "type": "begin_txn"
+          },
+          {
+            "agent_id": "agent_1",
+            "op_id": "agent_1_op_001",
+            "program_index": 1,
+            "step": 2,
+            "txn_id": "txn_agent_1",
+            "type": "begin_txn"
+          },
+          {
+            "agent_id": "agent_2",
+            "memory_id": "m_shared_old",
+            "memory_role": "shared_old",
+            "op_id": "agent_2_op_002",
+            "probe_role": "base_version_read_1",
+            "program_index": 2,
+            "scope": "tenant:shared",
+            "step": 3,
+            "txn_id": "txn_agent_2",
+            "type": "read"
+          },
+          {
+            "agent_id": "agent_1",
+            "memory_id": "m_shared_old",
+            "memory_role": "shared_old",
+            "op_id": "agent_1_op_002",
+            "probe_role": "base_version_read_1",
+            "program_index": 2,
+            "scope": "tenant:shared",
+            "step": 4,
+            "txn_id": "txn_agent_1",
+            "type": "read"
+          },
+          {
+            "agent_id": "agent_1",
+            "attribute": "preference",
+            "base_version": 1,
+            "entity_id": "shared_entity",
+            "memory_id": "m_agent_1_new",
+            "memory_role": "agent_1_new",
+            "op_id": "agent_1_op_003",
+            "policy_version": 1,
+            "program_index": 3,
+            "scope": "tenant:shared",
+            "source_ids": [],
+            "step": 5,
+            "supersedes_id": "m_shared_old",
+            "txn_id": "txn_agent_1",
+            "type": "write",
+            "value": "agent_1_candidate_1"
+          },
+          {
+            "agent_id": "agent_2",
+            "attribute": "preference",
+            "base_version": 1,
+            "entity_id": "shared_entity",
+            "memory_id": "m_agent_2_new",
+            "memory_role": "agent_2_new",
+            "op_id": "agent_2_op_003",
+            "policy_version": 1,
+            "program_index": 3,
+            "scope": "tenant:shared",
+            "source_ids": [],
+            "step": 6,
+            "supersedes_id": "m_shared_old",
+            "txn_id": "txn_agent_2",
+            "type": "write",
+            "value": "agent_2_candidate_1"
+          }
+        ],
+        "policies": [
+          {
+            "action": "write",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_write_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "read",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_read_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "search",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_search_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "derive",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_derive_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "propagate",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_propagate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "supersede",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_supersede_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "invalidate",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_invalidate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "write",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_write_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "read",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_read_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "search",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_search_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "derive",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_derive_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "propagate",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_propagate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "supersede",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_supersede_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "invalidate",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_invalidate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          }
+        ],
+        "provenance_edges": [],
+        "seed": 17,
+        "structure_signature": "3d3120d2a90e8c2097e8cc922e55a1fa398549dfbe380caddc6b1d226e72539e",
+        "workload": "concurrent_supersession"
+      },
+      "minimal_instance_sha256": "2dd7f73b177d3e942ebfe49fd371a5aa7ef7b9ac9eeafab8a5522ff91b893e2f",
+      "minimal_operation_count": 6,
+      "minimality": {
+        "method": "shortest_operation_prefix_reproducing_target_violation",
+        "predecessor_operation_count": 5,
+        "predecessor_reproduces_target_violation": false
+      },
+      "mutant": "disable_read_version_check",
+      "observed": {
+        "candidate": {
+          "active_versions": {
+            "m_agent_1_new": 1,
+            "m_agent_2_new": 1,
+            "m_shared_old": 1
+          },
+          "committed_memory_ids": [
+            "m_agent_1_new",
+            "m_agent_2_new"
+          ],
+          "invalid_memory_ids": [],
+          "read_observations": [
+            {
+              "denied_reason": null,
+              "operation_id": "agent_1_op_002",
+              "probe_role": "base_version_read_1",
+              "reader_agent_id": "agent_1",
+              "txn_id": "txn_agent_1",
+              "visible_memory_ids": [
+                "m_shared_old"
+              ]
+            },
+            {
+              "denied_reason": null,
+              "operation_id": "agent_2_op_002",
+              "probe_role": "base_version_read_1",
+              "reader_agent_id": "agent_2",
+              "txn_id": "txn_agent_2",
+              "visible_memory_ids": [
+                "m_shared_old"
+              ]
+            }
+          ],
+          "superseded_memory_ids": [],
+          "txn_states": {
+            "txn_agent_1": "completed",
+            "txn_agent_2": "completed"
+          },
+          "visible_memory_ids": [
+            "m_shared_old"
+          ]
+        },
+        "committed_memory_ids": [
+          "m_agent_1_new",
+          "m_agent_2_new"
+        ],
+        "oracle_mismatches": [
+          "transaction_state",
+          "committed_memory_ids",
+          "active_versions"
+        ],
+        "reproduces": true,
+        "transaction_state": "completed",
+        "violations": [
+          "cross_txn_flush_violation",
+          "conflict_consistency_violation"
+        ]
+      },
+      "reference_expected": {
+        "allowed_outcome_count": 1,
+        "allowed_outcomes": [
+          {
+            "committed_memory_ids": [],
+            "invalid_memory_ids": [],
+            "superseded_memory_ids": [],
+            "txn_states": {
+              "txn_agent_1": "aborted",
+              "txn_agent_2": "aborted"
+            },
+            "visible_memory_ids": [
+              "m_shared_old"
+            ]
+          }
+        ],
+        "oracle_version": "0.2"
+      },
+      "shrink_trace": [
+        {
+          "operation_count": 1,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 2,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 3,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 4,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 5,
+          "oracle_mismatches": [
+            "transaction_state",
+            "committed_memory_ids",
+            "active_versions"
+          ],
+          "reproduces_target_violation": false,
+          "violations": [
+            "cross_txn_flush_violation"
+          ]
+        },
+        {
+          "operation_count": 6,
+          "oracle_mismatches": [
+            "transaction_state",
+            "committed_memory_ids",
+            "active_versions"
+          ],
+          "reproduces_target_violation": true,
+          "violations": [
+            "cross_txn_flush_violation",
+            "conflict_consistency_violation"
+          ]
+        }
+      ],
+      "source_instance_id": "concurrent_supersession_seed_17",
+      "source_instance_sha256": "4ff3541df43506c96ff1248f7c52d653d8500682937f1b9b8ca96fbafbb2c6d1",
+      "source_operation_count": 10,
+      "target_violation": "conflict_consistency_violation",
+      "variant": "TxnMem-NoTxn"
+    },
+    "expose_other_txn_pending": {
+      "minimal_instance": {
+        "config": {
+          "agent_count": 2,
+          "branch_factor": 1,
+          "concurrency": 2,
+          "policy_churn": 0,
+          "provenance_depth": 1,
+          "sampled_parameters": {
+            "reader_probe_count": 1,
+            "txn_size": 1,
+            "writer": "agent_1"
+          },
+          "txn_size": 1
+        },
+        "evidence_tier": "seeded",
+        "failure_schedule": [],
+        "initial_memories": [],
+        "instance_id": "multi_agent_visibility_seed_0",
+        "operations": [
+          {
+            "agent_id": "agent_2",
+            "op_id": "agent_2_op_001",
+            "program_index": 1,
+            "step": 1,
+            "txn_id": "txn_agent_2",
+            "type": "begin_txn"
+          },
+          {
+            "agent_id": "agent_1",
+            "op_id": "agent_1_op_001",
+            "program_index": 1,
+            "step": 2,
+            "txn_id": "txn_agent_1",
+            "type": "begin_txn"
+          },
+          {
+            "agent_id": "agent_1",
+            "memory_id": "m_visibility_1",
+            "memory_role": "writer_item_1",
+            "op_id": "agent_1_op_002",
+            "policy_version": 1,
+            "program_index": 2,
+            "scope": "tenant:shared",
+            "source_ids": [],
+            "step": 3,
+            "txn_id": "txn_agent_1",
+            "type": "write",
+            "value": "visibility_value_1"
+          },
+          {
+            "agent_id": "agent_2",
+            "memory_id": "m_visibility_1",
+            "memory_role": "writer_item_1",
+            "op_id": "agent_2_op_002",
+            "probe_role": "before_writer_commit",
+            "program_index": 2,
+            "scope": "tenant:shared",
+            "step": 4,
+            "txn_id": "txn_agent_2",
+            "type": "get_by_id"
+          }
+        ],
+        "policies": [
+          {
+            "action": "write",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_write_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "read",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_read_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "search",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_search_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "derive",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_derive_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "propagate",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_propagate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "supersede",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_supersede_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "invalidate",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_invalidate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "write",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_write_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "read",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_read_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "search",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_search_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "derive",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_derive_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "propagate",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_propagate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "supersede",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_supersede_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "invalidate",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_invalidate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          }
+        ],
+        "provenance_edges": [],
+        "seed": 0,
+        "structure_signature": "11f4f598d9685eda6f0a6cd635fe1a8e1fd4407169825d04afdd145f5a4c487e",
+        "workload": "multi_agent_visibility"
+      },
+      "minimal_instance_sha256": "c5c0fcc37189fd076fa0982495b6986593be1553f8ae95a9525b5682db096b34",
+      "minimal_operation_count": 4,
+      "minimality": {
+        "method": "shortest_operation_prefix_reproducing_target_violation",
+        "predecessor_operation_count": 3,
+        "predecessor_reproduces_target_violation": false
+      },
+      "mutant": "expose_other_txn_pending",
+      "observed": {
+        "candidate": {
+          "active_versions": {
+            "m_visibility_1": 1
+          },
+          "committed_memory_ids": [
+            "m_visibility_1"
+          ],
+          "invalid_memory_ids": [],
+          "read_observations": [
+            {
+              "denied_reason": null,
+              "operation_id": "agent_2_op_002",
+              "probe_role": "before_writer_commit",
+              "reader_agent_id": "agent_2",
+              "txn_id": "txn_agent_2",
+              "visible_memory_ids": [
+                "m_visibility_1"
+              ]
+            }
+          ],
+          "superseded_memory_ids": [],
+          "txn_states": {
+            "txn_agent_1": "completed",
+            "txn_agent_2": "completed"
+          },
+          "visible_memory_ids": [
+            "m_visibility_1"
+          ]
+        },
+        "committed_memory_ids": [
+          "m_visibility_1"
+        ],
+        "oracle_mismatches": [
+          "transaction_state",
+          "committed_memory_ids",
+          "visible_memory_ids",
+          "read_observations",
+          "active_versions"
+        ],
+        "reproduces": true,
+        "transaction_state": "completed",
+        "violations": [
+          "dirty_read_violation",
+          "cross_txn_flush_violation"
+        ]
+      },
+      "reference_expected": {
+        "allowed_outcome_count": 1,
+        "allowed_outcomes": [
+          {
+            "committed_memory_ids": [],
+            "invalid_memory_ids": [],
+            "superseded_memory_ids": [],
+            "txn_states": {
+              "txn_agent_1": "aborted",
+              "txn_agent_2": "completed"
+            },
+            "visible_memory_ids": []
+          }
+        ],
+        "oracle_version": "0.2"
+      },
+      "shrink_trace": [
+        {
+          "operation_count": 1,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 2,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 3,
+          "oracle_mismatches": [
+            "transaction_state",
+            "committed_memory_ids",
+            "visible_memory_ids",
+            "active_versions"
+          ],
+          "reproduces_target_violation": false,
+          "violations": [
+            "cross_txn_flush_violation"
+          ]
+        },
+        {
+          "operation_count": 4,
+          "oracle_mismatches": [
+            "transaction_state",
+            "committed_memory_ids",
+            "visible_memory_ids",
+            "read_observations",
+            "active_versions"
+          ],
+          "reproduces_target_violation": true,
+          "violations": [
+            "dirty_read_violation",
+            "cross_txn_flush_violation"
+          ]
+        }
+      ],
+      "source_instance_id": "multi_agent_visibility_seed_0",
+      "source_instance_sha256": "c9ab9ff931ae4fc358d599916b84ed9072ed124c86cd738052c218696cd88e27",
+      "source_operation_count": 7,
+      "target_violation": "dirty_read_violation",
+      "variant": "TxnMem-NoTxn"
+    },
+    "flush_all_txn_buffers": {
+      "minimal_instance": {
+        "config": {
+          "agent_count": 2,
+          "branch_factor": 1,
+          "concurrency": 2,
+          "policy_churn": 0,
+          "provenance_depth": 1,
+          "sampled_parameters": {
+            "crash_phase": "before_linearize",
+            "crash_victim": "agent_1",
+            "txn_size_a": 1,
+            "txn_size_b": 1
+          },
+          "txn_size": 1
+        },
+        "evidence_tier": "seeded",
+        "failure_schedule": [],
+        "initial_memories": [],
+        "instance_id": "interleaved_atomicity_seed_0",
+        "operations": [
+          {
+            "agent_id": "agent_2",
+            "op_id": "agent_2_op_001",
+            "program_index": 1,
+            "step": 1,
+            "txn_id": "txn_agent_2",
+            "type": "begin_txn"
+          },
+          {
+            "agent_id": "agent_2",
+            "memory_id": "m_agent_2_1",
+            "memory_role": "agent_2_item_1",
+            "op_id": "agent_2_op_002",
+            "policy_version": 1,
+            "program_index": 2,
+            "scope": "tenant:shared",
+            "source_ids": [],
+            "step": 2,
+            "txn_id": "txn_agent_2",
+            "type": "write",
+            "value": "agent_2_value_1"
+          }
+        ],
+        "policies": [
+          {
+            "action": "write",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_write_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "read",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_read_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "search",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_search_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "derive",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_derive_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "propagate",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_propagate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "supersede",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_supersede_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "invalidate",
+            "agent_id": "agent_1",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_1_invalidate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "write",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_write_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "read",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_read_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "search",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_search_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "derive",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_derive_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "propagate",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_propagate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "supersede",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_supersede_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          },
+          {
+            "action": "invalidate",
+            "agent_id": "agent_2",
+            "effect": "allow",
+            "effective_step": 0,
+            "policy_id": "allow_agent_2_invalidate_tenant_shared",
+            "scope": "tenant:shared",
+            "version": 1
+          }
+        ],
+        "provenance_edges": [],
+        "seed": 0,
+        "structure_signature": "10a686487f4e1c99e1b89d27ce460add2fab04fe58b6e2f925930f1f7412ebe7",
+        "workload": "interleaved_atomicity"
+      },
+      "minimal_instance_sha256": "6c2539105eb6c208d4d369b661f44a3e56b5bbd106dc27b72b9bf28163e2914f",
+      "minimal_operation_count": 2,
+      "minimality": {
+        "method": "shortest_operation_prefix_reproducing_target_violation",
+        "predecessor_operation_count": 1,
+        "predecessor_reproduces_target_violation": false
+      },
+      "mutant": "flush_all_txn_buffers",
+      "observed": {
+        "candidate": {
+          "active_versions": {
+            "m_agent_2_1": 1
+          },
+          "committed_memory_ids": [
+            "m_agent_2_1"
+          ],
+          "invalid_memory_ids": [],
+          "read_observations": [],
+          "superseded_memory_ids": [],
+          "txn_states": {
+            "txn_agent_2": "completed"
+          },
+          "visible_memory_ids": [
+            "m_agent_2_1"
+          ]
+        },
+        "committed_memory_ids": [
+          "m_agent_2_1"
+        ],
+        "oracle_mismatches": [
+          "transaction_state",
+          "committed_memory_ids",
+          "visible_memory_ids",
+          "active_versions"
+        ],
+        "reproduces": true,
+        "transaction_state": "completed",
+        "violations": [
+          "cross_txn_flush_violation"
+        ]
+      },
+      "reference_expected": {
+        "allowed_outcome_count": 1,
+        "allowed_outcomes": [
+          {
+            "committed_memory_ids": [],
+            "invalid_memory_ids": [],
+            "superseded_memory_ids": [],
+            "txn_states": {
+              "txn_agent_2": "aborted"
+            },
+            "visible_memory_ids": []
+          }
+        ],
+        "oracle_version": "0.2"
+      },
+      "shrink_trace": [
+        {
+          "operation_count": 1,
+          "oracle_mismatches": [],
+          "reproduces_target_violation": false,
+          "violations": []
+        },
+        {
+          "operation_count": 2,
+          "oracle_mismatches": [
+            "transaction_state",
+            "committed_memory_ids",
+            "visible_memory_ids",
+            "active_versions"
+          ],
+          "reproduces_target_violation": true,
+          "violations": [
+            "cross_txn_flush_violation"
+          ]
+        }
+      ],
+      "source_instance_id": "interleaved_atomicity_seed_0",
+      "source_instance_sha256": "24b547f5472580cba47fad6055561693822ff8faaf9dd598290e236463cdbb63",
+      "source_operation_count": 6,
+      "target_violation": "cross_txn_flush_violation",
+      "variant": "TxnMem-NoTxn"
+    }
+  }
+}

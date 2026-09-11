@@ -1,0 +1,190 @@
+{
+  "exhaustive_interleaving_count": 207,
+  "exhaustive_interleavings_by_family": {
+    "actor_policy_scope": 70,
+    "concurrent_supersession": 120,
+    "cross_agent_provenance": 4,
+    "interleaved_atomicity": 10,
+    "multi_agent_visibility": 3
+  },
+  "invariants": [
+    "dirty_read_violation",
+    "atomicity_violation",
+    "cross_txn_flush_violation",
+    "actor_authorization_violation",
+    "actor_scope_violation",
+    "conflict_consistency_violation",
+    "cross_agent_provenance_violation",
+    "recovery_consistency_violation"
+  ],
+  "mutants": {
+    "disable_actor_commit_revalidation": {
+      "kill_rate": 1.0,
+      "killed": 50,
+      "target_case_count": 50,
+      "target_violation": "actor_authorization_violation",
+      "variant": "TxnMem-NoPolicyCommit"
+    },
+    "disable_cross_agent_repair": {
+      "kill_rate": 0.48,
+      "killed": 24,
+      "target_case_count": 50,
+      "target_violation": "cross_agent_provenance_violation",
+      "variant": "TxnMem-NoRepair"
+    },
+    "disable_read_version_check": {
+      "kill_rate": 1.0,
+      "killed": 50,
+      "target_case_count": 50,
+      "target_violation": "conflict_consistency_violation",
+      "variant": "TxnMem-NoTxn"
+    },
+    "expose_other_txn_pending": {
+      "kill_rate": 1.0,
+      "killed": 50,
+      "target_case_count": 50,
+      "target_violation": "dirty_read_violation",
+      "variant": "TxnMem-NoTxn"
+    },
+    "flush_all_txn_buffers": {
+      "kill_rate": 0.86,
+      "killed": 43,
+      "target_case_count": 50,
+      "target_violation": "cross_txn_flush_violation",
+      "variant": "TxnMem-NoTxn"
+    }
+  },
+  "parameter_values": {
+    "actor_policy_scope": {
+      "probe_type": [
+        "get_by_id",
+        "search"
+      ],
+      "revoked_action": [
+        "derive",
+        "write"
+      ],
+      "revoked_agent": [
+        "agent_1",
+        "agent_2"
+      ],
+      "trigger_slot": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "concurrent_supersession": {
+      "first_committer": [
+        "agent_1",
+        "agent_2"
+      ],
+      "new_value_count": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "precommit_reads": [
+        1,
+        2
+      ]
+    },
+    "cross_agent_provenance": {
+      "branch_factor": [
+        1,
+        2,
+        3
+      ],
+      "depth": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "invalidation_phase": [
+        "after_derived_commit",
+        "before_derived_commit"
+      ],
+      "source_agent": [
+        "agent_1",
+        "agent_2"
+      ]
+    },
+    "interleaved_atomicity": {
+      "crash_phase": [
+        "after_linearize",
+        "before_linearize"
+      ],
+      "crash_victim": [
+        "agent_1",
+        "agent_2"
+      ],
+      "txn_size_a": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "txn_size_b": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "multi_agent_mixed": {
+      "crash_phase": [
+        "before_linearize"
+      ],
+      "depth": [
+        1,
+        2
+      ],
+      "revoked_agent": [
+        "agent_1",
+        "agent_2"
+      ],
+      "txn_size_a": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "txn_size_b": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "multi_agent_visibility": {
+      "reader_probe_count": [
+        1,
+        2
+      ],
+      "txn_size": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "writer": [
+        "agent_1",
+        "agent_2"
+      ]
+    }
+  },
+  "schema_version": 1,
+  "seeded_instance_count": 300,
+  "unique_signature_count": 300,
+  "workload_families": [
+    "multi_agent_visibility",
+    "interleaved_atomicity",
+    "concurrent_supersession",
+    "actor_policy_scope",
+    "cross_agent_provenance",
+    "multi_agent_mixed"
+  ]
+}

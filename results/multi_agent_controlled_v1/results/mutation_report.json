@@ -1,0 +1,2415 @@
+{
+  "cases": [
+    {
+      "instance_id": "multi_agent_visibility_seed_0",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_1",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_2",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_3",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_4",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_5",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_6",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_7",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_8",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_9",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_10",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_11",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_12",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_13",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_14",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_15",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_16",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_17",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_18",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_19",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_20",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_21",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_22",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_23",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_24",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_25",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_26",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_27",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_28",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_29",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_30",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_31",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_32",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_33",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_34",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_35",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_36",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_37",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_38",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_39",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_40",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_41",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_42",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_43",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_44",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_45",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_46",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_47",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_48",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "multi_agent_visibility_seed_49",
+      "killed": true,
+      "mismatches": [
+        "read_observations"
+      ],
+      "mutant": "expose_other_txn_pending"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_0",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_1",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_2",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_3",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_4",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_5",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_6",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_7",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_8",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_9",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_10",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_11",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_12",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_13",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_14",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_15",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_16",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_17",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_18",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_19",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_20",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_21",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_22",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_23",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_24",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_25",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_26",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_27",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_28",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_29",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_30",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_31",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_32",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_33",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_34",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_35",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_36",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_37",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_38",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_39",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_40",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_41",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_42",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_43",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_44",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_45",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_46",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_47",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_48",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "interleaved_atomicity_seed_49",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids"
+      ],
+      "mutant": "flush_all_txn_buffers"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_0",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_1",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_2",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_3",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_4",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_5",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_6",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_7",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_8",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_9",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_10",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_11",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_12",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_13",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_14",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_15",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_16",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_17",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_18",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_19",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_20",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_21",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_22",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_23",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_24",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_25",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_26",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_27",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_28",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_29",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_30",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_31",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_32",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_33",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_34",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_35",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_36",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_37",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_38",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_39",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_40",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_41",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_42",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_43",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_44",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_45",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_46",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_47",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_48",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "actor_policy_scope_seed_49",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_actor_commit_revalidation"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_0",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_1",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_2",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_3",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_4",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_5",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_6",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_7",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_8",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_9",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_10",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_11",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_12",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_13",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_14",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_15",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_16",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_17",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_18",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_19",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_20",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_21",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_22",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_23",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_24",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_25",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_26",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_27",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_28",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_29",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_30",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_31",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_32",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_33",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_34",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_35",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_36",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_37",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_38",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_39",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_40",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_41",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_42",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_43",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_44",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_45",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_46",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_47",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_48",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "concurrent_supersession_seed_49",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids",
+        "superseded_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_read_version_check"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_0",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_1",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_2",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_3",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_4",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_5",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_6",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_7",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_8",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_9",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_10",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_11",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_12",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_13",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_14",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_15",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_16",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_17",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_18",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_19",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_20",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_21",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_22",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_23",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_24",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_25",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_26",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_27",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_28",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_29",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_30",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_31",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_32",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_33",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_34",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_35",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_36",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_37",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_38",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_39",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_40",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_41",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_42",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_43",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_44",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_45",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_46",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_47",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids",
+        "invalid_memory_ids",
+        "active_versions"
+      ],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_48",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    },
+    {
+      "instance_id": "cross_agent_provenance_seed_49",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "disable_cross_agent_repair"
+    }
+  ],
+  "kill_rate": 0.868,
+  "mutants": {
+    "disable_actor_commit_revalidation": {
+      "kill_rate": 1.0,
+      "killed": 50,
+      "target_case_count": 50,
+      "variant": "TxnMem-NoPolicyCommit"
+    },
+    "disable_cross_agent_repair": {
+      "kill_rate": 0.48,
+      "killed": 24,
+      "target_case_count": 50,
+      "variant": "TxnMem-NoRepair"
+    },
+    "disable_read_version_check": {
+      "kill_rate": 1.0,
+      "killed": 50,
+      "target_case_count": 50,
+      "variant": "TxnMem-NoTxn"
+    },
+    "expose_other_txn_pending": {
+      "kill_rate": 1.0,
+      "killed": 50,
+      "target_case_count": 50,
+      "variant": "TxnMem-NoTxn"
+    },
+    "flush_all_txn_buffers": {
+      "kill_rate": 0.86,
+      "killed": 43,
+      "target_case_count": 50,
+      "variant": "TxnMem-NoTxn"
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "artifact_sha256": {
+    "data/exhaustive_interleavings.jsonl": "e7d5e43051c144c1620adbc47a360843ac6dbed547ef6b6a7f791be375d5b56f",
+    "data/exhaustive_reference_oracles.jsonl": "0e6069388e8451fabb03d172c721718c36fb546f7ada245235da56a0d06af22a",
+    "data/generated_instances.jsonl": "5dd38101029f43f23cef145772a560d8f30af448698a7f5653a4ea6fb2ba0cdc",
+    "data/reference_oracles.jsonl": "71e8a4a47ef6a582f301291afafba0f3f9acc3de17dea8baafaa2647cff27fb9",
+    "results/controlled_report.json": "72d016ca7b2f1ea416e032ba7af5ff3df8661269691da328209496464ce374ae",
+    "results/coverage.json": "9f9a3caa2b8117c3b03defd1753b9d691602a579ad2e6426bbc80dd1ef7cbe84",
+    "results/exhaustive_results.csv": "63ccae4faee9626a5e43ccb8a021e3907d30d3f469a766ec872848d88e400e04",
+    "results/experiment_results.csv": "6b8c7ef3bfd25f61a93176a60b5f1516c1d7d0b5d6d0c605831f1e77d5f5ef94",
+    "results/minimal_witnesses.json": "aaf3a02f7914b27fa6d660451e59ecb74e1836dff6d1ae931b186971cfb73895",
+    "results/mutation_report.json": "be5f4affd8622d6a04bf4ffb5e7b724947ed1d9744e8b953177d1c8112200f3f",
+    "results/reproducibility.json": "93e98b26b710cde8e855a6ca0ce7f914aaa27b9cf705de3913d25ac6931d0deb",
+    "results/summary.json": "63ad514e823fa64e516d9149db092fd53df4823a6a507c4984e1e92d66c8ec6d"
+  },
+  "claim": "In the defined operation model and covered fault schedules, TxnMem preserves transactional, actor-policy, and cross-agent provenance consistency for shared memory.",
+  "failed_gates": [],
+  "gates": {
+    "controlled_artifact_integrity": true,
+    "formal_seed_count": true,
+    "full_txnmem_exhaustive_oracle_match": true,
+    "full_txnmem_exhaustive_zero_violations": true,
+    "full_txnmem_seeded_oracle_match": true,
+    "full_txnmem_seeded_zero_violations": true,
+    "mutation_witnesses": true,
+    "real_storage_evidence": true,
+    "real_storage_zero_partial_visibility": true,
+    "real_storage_zero_policy_violations": true,
+    "real_storage_zero_provenance_violations": true,
+    "real_storage_zero_unknown": true,
+    "seeded_case_count": true,
+    "seeded_observation_count": true,
+    "three_identical_replications": true
+  },
+  "schema_version": 1,
+  "scope_boundary": "finite exhaustive micro-programs, 300 seeded controlled cases, and 240 state-verified real-storage observations",
+  "status": "active"
+}
