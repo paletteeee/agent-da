@@ -1,0 +1,34 @@
+{
+  "manifest_version": 1,
+  "dataset_name": "locomo",
+  "tasks": [
+    {
+      "task_id": "locomo-conv-26",
+      "instruction": "Continue the long-term multi-session conversation of user conv-26. Session history and summaries are available through memory tools. First session started at 8:56 pm on 20 July, 2023.",
+      "prompt": "Continue the long-term multi-session conversation of user conv-26. Session history and summaries are available through memory tools. First session started at 8:56 pm on 20 July, 2023.",
+      "agent_id": "agent_1",
+      "seed": 0,
+      "temperature": 0.0,
+      "max_steps": 30,
+      "failure_schedule": [],
+      "acceptance": {
+        "expected_status": "completed"
+      },
+      "sample_id": "conv-26"
+    },
+    {
+      "task_id": "locomo-conv-30",
+      "instruction": "Continue the long-term multi-session conversation of user conv-30. Session history and summaries are available through memory tools. First session started at 11:24 am on 25 April, 2023.",
+      "prompt": "Continue the long-term multi-session conversation of user conv-30. Session history and summaries are available through memory tools. First session started at 11:24 am on 25 April, 2023.",
+      "agent_id": "agent_1",
+      "seed": 0,
+      "temperature": 0.0,
+      "max_steps": 30,
+      "failure_schedule": [],
+      "acceptance": {
+        "expected_status": "completed"
+      },
+      "sample_id": "conv-30"
+    }
+  ]
+}

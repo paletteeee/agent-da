@@ -1,0 +1,60 @@
+# 八项补强的实现状态
+
+本轮把八项补强拆成了可以在当前仓库内独立验证的代码接口，并将外部数据/运行环境依赖显式保留。
+
+| 项目 | 当前实现 | 证据/边界 |
+|---|---|---|
+| 1. τ-bench/AppWorld/LoCoMo trace-grounded replay | `txnmem_trace_pipeline.py` 保留 projection replay；`txnmem_public_native.py` 与 `benchmark-native-smoke` 明确区分 native workflow runtime 和 projection | 三类 runtime 均已安装/核验并在远程 Qwen2.5-7B 上完成扩样 native smoke；另完成 SQLite-backed memory replay：τ-bench 1 task/4 events、AppWorld Venmo-only 1 task/1 event、LoCoMo ordered 1 conversation/2 events，均 0 replay evaluation error、TxnMem oracle 1/1。它们证明可执行边界打通，不是公开 benchmark accuracy，也不把 QA/API 结果当作 memory ground truth；projection replay 仍为 τ-bench 175/920、LoCoMo 10/272、AppWorld 5/380 |
+| 2. benchmark-specific adapter | `txnmem_bench_adapters.py`：`tau-bench`、`appworld`、`locomo`、`normalized` | 只转换显式 tool/API/memory event；普通对话会被跳过 |
+| 3. 真实 Agent memory trace 采集 | `txnmem_model_protocol.py` 的 OpenAI-compatible client、`txnmem_real_agent.py` 的 structured tool loop、`txnmem_public_native.py` 的 public boundary、`txnmem_event_contract.py` validator、`SQLiteInstrumentedMemoryBackend` | 已在远程 RTX 4090 上运行 Qwen2.5-7B-Instruct；完成通用 native smoke、8 train、2 holdout、5×10 repetition、LoCoMo contextual Agent smoke，以及三类 official runtime 的 SQLite-backed smoke；raw trace 仅保存在远端结果目录，仓库只保留脱敏 aggregate |
+| 4. trace 校准与 holdout | `txnmem_realism.py` 的 `calibrate_config`、`calibrated_suite`、`split_holdout` | 按完整 episode 划分，校准只影响 synthetic config，不改变 oracle |
+| 5. 并发/micro-witness | `txnmem_interleavings.py` 穷举保持各 agent 局部顺序的所有 linearization；`txnmem_concurrency.py` 提供线程锁 harness；`txnmem_distributed.py` 提供跨进程 owner-linearization；新增 `txnmem_distributed_protocol.py` 和 `process-protocol-smoke` | 已完成 4 类确定性 fault schedule、5/5 invariant coverage、无最小反例；仍不等同于生产级跨进程/分布式事务 |
+| 6. incremental repair failure | `txnmem_repair.py` 的 `incremental_repair` 和 `repair_failure_matrix` | 明确定义 crash-after-k repair steps，并报告 unsafe active descendants |
+| 7. backend/Agent workflow | `AgentReplayRunner`、`run_real_agent`、`run_repetitions` 接受可替换 model/backend；固定 task、seed、temperature、failure schedule 和 acceptance contract | Qwen2.5-7B 真实 endpoint 已完成 5×10 repetition：50/50 contract、50/50 TxnMem oracle match，0 evaluation error；仍不是生产 backend 或真实多 Agent 长流程 |
+| 8. 论文同步 | 根目录脚本/初稿同步 controlled suite、三类官方 replay、protocol smoke、native repetition 和边界；`scripts/render_docx_with_bundled_libs.sh` 提供稳定渲染入口 | 初稿已重新生成；结构化/a11y 审计通过；已生成并逐页检查 18 页 PNG/PDF，解决本机 LibreOffice `liblcms2` 动态库路径问题 |
+
+## 当前状态与下一步
+
+### 2026-08-05 production evidence extension
+
+本轮新增了 production evidence 的可审计执行层：
+
+- `build_native_scale_manifest()` 固定 τ-bench 50、AppWorld 20、LoCoMo 10 的推荐 primary limit、seed=17、task-level split、source hash 和 manifest hash。
+- `benchmark-native-batch` 按 task/conversation 统计官方 evaluator，保留 official status、native event contract、TxnMem oracle 和 95% 区间；blocked evaluator 不会被替换成 oracle 成功。
+- `VectorGraphMemoryBackend`、Qdrant/Neo4j/Toxiproxy compose 配置、幂等/补偿回滚和 `backend-performance` fault/timing runner 已加入；本地 fake-client 与 CLI 测试通过。
+- `scripts/run_native_scale.sh`、`scripts/run_real_backend_smoke.sh`、`scripts/run_remote_evidence.sh` 已加入远端 preflight 和脱敏 aggregate 入口。
+
+代码接口已完成，但正式远端执行仍 blocked：本地缺少 Docker、tau-bench/appworld/LoCoMo QA evaluator，远程 GPU 主机本轮 SSH 检查被远端关闭。因此 `results/remaining_tasks/production_evidence_status.json` 明确记录为 `implementation_complete_execution_blocked`，既有 smoke/replay 结果不升级为正式 benchmark accuracy 或生产性能。
+
+1. 已完成三类官方输入的 workflow/API projection replay，并新增 canonical public-native boundary；τ-bench、AppWorld 和 LoCoMo 的 executable/native workflow smoke 已完成，没有静默 fallback；Qwen2.5-7B GPU native trace 采集、train/holdout differential evaluation 已完成，并新增 per-task SQLite memory backend smoke。公开 benchmark 的大规模 native memory 采样仍未完成。
+2. 已保留非敏感的 `trace_replay.csv`、`trace_realism.json` 和 calibration/performance JSON；原始输入及含内容的 instance 文件不提交仓库。
+3. 已按 task/trial/sample episode 做 holdout；native Qwen task 已按 seed=17、holdout=0.2 划分 8/2，并报告 task contract、replay error 和 oracle match。LoCoMo 已接入 contextual Agent runtime；τ-bench/AppWorld 也已接入官方 runtime，并用 SQLite backend 完成小规模 memory instrumentation。下一步若要形成正式公开 benchmark 结果，仍需扩大 task/sample 数、稳定模型服务并接入真实向量/图 memory backend。
+4. 已完成小规模 interleaving、线程锁、跨进程 owner-linearization smoke harness、trigger-based controller 和 4 类 distributed protocol schedule；下一步是从真实多 Agent trace 生成每个 agent 的局部 operation sequence，并运行完整 linearization 检查。
+5. 远程 GPU endpoint、smoke/train/holdout、native event log 与 reference differential comparison 已完成；Qwen2.5-7B 五次重复（50 个 task）保持 50/50 contract 与 50/50 oracle match；三个官方 runtime 的 SQLite-backed smoke 也已完成。仍需大规模公开 workflow 原生 Agent trace、生产级 backend/网络故障和端到端性能。
+
+## 当前真实模型实验入口
+
+本地可先运行无模型依赖的协议 fixture：
+
+```bash
+python3 examples/real_model_smoke.py \
+  --manifest configs/real_model_smoke.json \
+  --offline-fixture \
+  --out-dir results/real_model_fixture
+```
+
+真实 GPU endpoint 使用：
+
+```bash
+python3 examples/real_model_smoke.py \
+  --manifest configs/real_model_tasks.json \
+  --endpoint http://GPU_HOST:8000/v1 \
+  --model MODEL_ID \
+  --out-dir results/real_model_run
+```
+
+当前仓库只提交脱敏 aggregate summary；原始 prompt、tool arguments 和 native
+event trace 保存在远端运行目录，不作为公开数据集提交。Qwen2.5-7B 最终证据路径为：
+`/data/txnmem/results/real_model_qwen2.5_7b_smoke_final/`、
+`/data/txnmem/results/real_model_qwen2.5_7b_splits_rerun/train/` 和
+`/data/txnmem/results/real_model_qwen2.5_7b_splits_rerun/holdout/`。

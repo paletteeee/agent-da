@@ -1,0 +1,3808 @@
+{
+  "dataset": "tau-bench-airline-test",
+  "evaluation_error_count": 0,
+  "memory_backend": "sqlite",
+  "model_execution_mode": "remote_endpoint",
+  "model_id": "qwen2.5-7b-instruct",
+  "native_event_count": 497,
+  "official": {
+    "blocked_task_count": 0,
+    "dataset": "tau-bench-airline-test",
+    "error_task_count": 0,
+    "evaluator_available_task_count": 50,
+    "event_count": 497,
+    "official_evaluator_status": "available",
+    "reward_mean": 0.3,
+    "reward_sum": 15.0,
+    "success_interval": {
+      "confidence": 0.95,
+      "estimate": 0.0,
+      "lower": 0.0,
+      "successes": 0,
+      "trials": 50,
+      "upper": 0.07134759913335872
+    },
+    "successes": 0,
+    "task_count": 50,
+    "trials": 50
+  },
+  "primary_manifest_sha256": "b794d7578aeaacf5efdcd3a9ebe708fcbd52f54d3a5f64a142c13371057e012e",
+  "production_latency_claim": false,
+  "replaced_network_error_tasks": [
+    "tau-airline-test-0008",
+    "tau-airline-test-0023"
+  ],
+  "retry_manifests": [
+    "tau-bench-retry-failed",
+    "tau-bench-retry-0023-timeout600"
+  ],
+  "status": "available",
+  "task_count": 50,
+  "task_summaries": [
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 4,
+        "source_operation_count": 2,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 2,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0000",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 9,
+        "source_operation_count": 7,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 7,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 8,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0001",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 14,
+        "source_operation_count": 12,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 12,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 4,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0002",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 32,
+        "source_operation_count": 30,
+        "trace_ground_truth_native": true
+      },
+      "failure_code": "max_steps_exceeded",
+      "native_event_count": 30,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "failed",
+      "steps": 30,
+      "task_evaluator": {
+        "reasons": [
+          "run_not_completed"
+        ],
+        "success": false
+      },
+      "task_id": "tau-airline-test-0003",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 12,
+        "source_operation_count": 10,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 10,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 4,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0004",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 15,
+        "source_operation_count": 13,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 13,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 9,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0005",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 14,
+        "source_operation_count": 12,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 12,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 13,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0006",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 32,
+        "source_operation_count": 30,
+        "trace_ground_truth_native": true
+      },
+      "failure_code": "max_steps_exceeded",
+      "native_event_count": 30,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "failed",
+      "steps": 30,
+      "task_evaluator": {
+        "reasons": [
+          "run_not_completed"
+        ],
+        "success": false
+      },
+      "task_id": "tau-airline-test-0007",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 8,
+        "source_operation_count": 6,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 6,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 7,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0009",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 16,
+        "source_operation_count": 14,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 14,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 16,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0010",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 3,
+        "source_operation_count": 1,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 1,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0011",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 3,
+        "source_operation_count": 1,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 1,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0012",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 5,
+        "source_operation_count": 3,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 3,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 4,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0013",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 9,
+        "source_operation_count": 7,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 7,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 4,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0014",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 6,
+        "source_operation_count": 4,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 4,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0015",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 6,
+        "source_operation_count": 4,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 4,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0016",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 6,
+        "source_operation_count": 4,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 4,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 5,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0017",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 4,
+        "source_operation_count": 2,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 2,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0018",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 14,
+        "source_operation_count": 12,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 12,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 6,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0019",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 10,
+        "source_operation_count": 8,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 8,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 7,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0020",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 6,
+        "source_operation_count": 4,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 4,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 5,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0021",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 3,
+        "source_operation_count": 1,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 1,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0022",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 9,
+        "source_operation_count": 7,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 7,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 8,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0024",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 9,
+        "source_operation_count": 7,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 7,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 8,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0025",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 9,
+        "source_operation_count": 7,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 7,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 8,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0026",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 8,
+        "source_operation_count": 6,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 6,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 5,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0027",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 187,
+        "source_operation_count": 185,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 185,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0028",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 12,
+        "source_operation_count": 10,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 10,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 11,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0029",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 8,
+        "source_operation_count": 6,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 6,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 7,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0030",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 9,
+        "source_operation_count": 7,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 7,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 8,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0031",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 5,
+        "source_operation_count": 3,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 3,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 4,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0032",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 16,
+        "source_operation_count": 14,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 14,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 15,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0033",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 10,
+        "source_operation_count": 8,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 8,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0034",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 4,
+        "source_operation_count": 2,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 2,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 4,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0035",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 9,
+        "source_operation_count": 7,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 7,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 5,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0036",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "failure_code": "no_events",
+      "native_event_count": 0,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0037"
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 3,
+        "source_operation_count": 1,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 1,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0038",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 3,
+        "source_operation_count": 1,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 1,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0039",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 4,
+        "source_operation_count": 2,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 2,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0040",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 3,
+        "source_operation_count": 1,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 1,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0041",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 5,
+        "source_operation_count": 3,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 3,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0042",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 5,
+        "source_operation_count": 3,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 3,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 4,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0043",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 5,
+        "source_operation_count": 3,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 3,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 5,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0044",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 5,
+        "source_operation_count": 3,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 3,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0045",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 14,
+        "source_operation_count": 12,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 12,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 14,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0046",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 3,
+        "source_operation_count": 1,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 1,
+      "official": {
+        "reward": 1.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0047",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 4,
+        "source_operation_count": 2,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 2,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0048",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 3,
+        "source_operation_count": 1,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 1,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0049",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 10,
+        "source_operation_count": 8,
+        "trace_ground_truth_native": true
+      },
+      "native_event_count": 8,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 10,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0008",
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "failure_code": "no_events",
+      "native_event_count": 0,
+      "official": {
+        "reward": 0.0,
+        "status": "available"
+      },
+      "status": "completed",
+      "steps": 1,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "tau-airline-test-0023"
+    }
+  ],
+  "unique_task_count": 50,
+  "variants": {
+    "Naive": {
+      "count": 48,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 48,
+      "violating": 0
+    },
+    "TxnMem": {
+      "count": 48,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 48,
+      "violating": 0
+    },
+    "TxnMem-NoPolicyCommit": {
+      "count": 48,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 48,
+      "violating": 0
+    },
+    "TxnMem-NoRepair": {
+      "count": 48,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 48,
+      "violating": 0
+    },
+    "TxnMem-NoTxn": {
+      "count": 48,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 48,
+      "violating": 0
+    }
+  }
+}

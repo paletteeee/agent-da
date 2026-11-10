@@ -1,0 +1,173 @@
+Collecting mem0ai==2.0.18
+  Using cached mem0ai-2.0.18-py3-none-any.whl.metadata (15 kB)
+Collecting pytest
+  Using cached pytest-9.1.1-py3-none-any.whl.metadata (7.6 kB)
+Collecting httpx>=0.28.0 (from mem0ai==2.0.18)
+  Using cached httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Collecting openai>=1.90.0 (from mem0ai==2.0.18)
+  Using cached openai-3.19.2-py3-none-any.whl.metadata (44 kB)
+Collecting posthog>=7.14.0 (from mem0ai==2.0.18)
+  Using cached posthog-7.60.1-py3-none-any.whl.metadata (5.6 kB)
+Collecting protobuf<7.0.0,>=5.29.6 (from mem0ai==2.0.18)
+  Using cached protobuf-6.33.6-cp39-abi3-manylinux2014_x86_64.whl.metadata (593 bytes)
+Collecting pydantic>=2.7.3 (from mem0ai==2.0.18)
+  Using cached pydantic-2.13.5-py3-none-any.whl.metadata (110 kB)
+Collecting pytz>=2024.1 (from mem0ai==2.0.18)
+  Using cached pytz-2026.4-py2.py3-none-any.whl.metadata (22 kB)
+Collecting qdrant-client>=1.12.0 (from mem0ai==2.0.18)
+  Using cached qdrant_client-1.19.1-py3-none-any.whl.metadata (11 kB)
+Collecting sqlalchemy>=2.0.31 (from mem0ai==2.0.18)
+  Using cached sqlalchemy-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (9.7 kB)
+Collecting iniconfig>=1.0.1 (from pytest)
+  Using cached iniconfig-2.3.0-py3-none-any.whl.metadata (2.5 kB)
+Collecting packaging>=22 (from pytest)
+  Using cached packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+Collecting pluggy<2,>=1.5 (from pytest)
+  Using cached pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+Collecting pygments>=2.7.2 (from pytest)
+  Using cached pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
+Collecting anyio (from httpx>=0.28.0->mem0ai==2.0.18)
+  Using cached anyio-4.15.1-py3-none-any.whl.metadata (4.7 kB)
+Collecting certifi (from httpx>=0.28.0->mem0ai==2.0.18)
+  Using cached certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+Collecting httpcore==1.* (from httpx>=0.28.0->mem0ai==2.0.18)
+  Using cached httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+Collecting idna (from httpx>=0.28.0->mem0ai==2.0.18)
+  WARNING: Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ProtocolError('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))': /packages/58/a2/bb081bab032533a855d44de1d56f8e8426114ff1ba5d1f07a438a0a654f8/idna-3.20-py3-none-any.whl.metadata
+  Downloading idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+Collecting h11>=0.16 (from httpcore==1.*->httpx>=0.28.0->mem0ai==2.0.18)
+  Using cached h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+Collecting httpx2<3,>=2.12.0 (from openai>=1.90.0->mem0ai==2.0.18)
+  Downloading httpx2-2.13.1-py3-none-any.whl.metadata (9.8 kB)
+Collecting jiter<1,>=0.16.0 (from openai>=1.90.0->mem0ai==2.0.18)
+  Downloading jiter-0.17.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (5.2 kB)
+Collecting sniffio (from openai>=1.90.0->mem0ai==2.0.18)
+  Using cached sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+Collecting typing-extensions<5,>=4.14 (from openai>=1.90.0->mem0ai==2.0.18)
+  Using cached typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting requests<3.0,>=2.7 (from posthog>=7.14.0->mem0ai==2.0.18)
+  Using cached requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+Collecting backoff>=1.10.0 (from posthog>=7.14.0->mem0ai==2.0.18)
+  Downloading backoff-2.2.1-py3-none-any.whl.metadata (14 kB)
+Collecting distro>=1.5.0 (from posthog>=7.14.0->mem0ai==2.0.18)
+  Using cached distro-1.9.0-py3-none-any.whl.metadata (6.8 kB)
+Collecting annotated-types>=0.6.0 (from pydantic>=2.7.3->mem0ai==2.0.18)
+  Using cached annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+Collecting pydantic-core==2.46.5 (from pydantic>=2.7.3->mem0ai==2.0.18)
+  Downloading pydantic_core-2.46.5-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.6 kB)
+Collecting typing-inspection>=0.4.2 (from pydantic>=2.7.3->mem0ai==2.0.18)
+  Using cached typing_inspection-0.4.4-py3-none-any.whl.metadata (2.6 kB)
+Collecting grpcio>=1.41.0 (from qdrant-client>=1.12.0->mem0ai==2.0.18)
+  Downloading grpcio-1.84.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (3.8 kB)
+Collecting numpy>=1.26 (from qdrant-client>=1.12.0->mem0ai==2.0.18)
+  Using cached numpy-2.5.3-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+Collecting portalocker<4.0,>=2.7.0 (from qdrant-client>=1.12.0->mem0ai==2.0.18)
+  Using cached portalocker-3.2.0-py3-none-any.whl.metadata (8.7 kB)
+Collecting urllib3<3,>=1.26.14 (from qdrant-client>=1.12.0->mem0ai==2.0.18)
+  Downloading urllib3-2.8.0-py3-none-any.whl.metadata (7.4 kB)
+Collecting httpcore2==2.13.1 (from httpx2<3,>=2.12.0->openai>=1.90.0->mem0ai==2.0.18)
+  Downloading httpcore2-2.13.1-py3-none-any.whl.metadata (26 kB)
+Collecting truststore>=0.10 (from httpx2<3,>=2.12.0->openai>=1.90.0->mem0ai==2.0.18)
+  Using cached truststore-0.10.4-py3-none-any.whl.metadata (4.4 kB)
+Collecting h2<5,>=3 (from httpx[http2]>=0.20.0->qdrant-client>=1.12.0->mem0ai==2.0.18)
+  Using cached h2-4.4.1-py3-none-any.whl.metadata (3.8 kB)
+Collecting charset_normalizer<4,>=2 (from requests<3.0,>=2.7->posthog>=7.14.0->mem0ai==2.0.18)
+  Downloading charset_normalizer-3.5.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (45 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 45.9/45.9 kB 45.7 kB/s eta 0:00:00
+Collecting hyperframe<7,>=6.1 (from h2<5,>=3->httpx[http2]>=0.20.0->qdrant-client>=1.12.0->mem0ai==2.0.18)
+  Using cached hyperframe-6.1.0-py3-none-any.whl.metadata (4.3 kB)
+Collecting hpack<5,>=4.2 (from h2<5,>=3->httpx[http2]>=0.20.0->qdrant-client>=1.12.0->mem0ai==2.0.18)
+  Using cached hpack-4.2.0-py3-none-any.whl.metadata (3.3 kB)
+Downloading mem0ai-2.0.18-py3-none-any.whl (344 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 344.4/344.4 kB 60.9 kB/s eta 0:00:00
+Using cached pytest-9.1.1-py3-none-any.whl (386 kB)
+Using cached httpx-0.28.1-py3-none-any.whl (73 kB)
+Using cached httpcore-1.0.9-py3-none-any.whl (78 kB)
+Using cached iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+Downloading openai-3.19.2-py3-none-any.whl (2.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 55.2 kB/s eta 0:00:00
+Using cached packaging-26.3-py3-none-any.whl (129 kB)
+Using cached pluggy-1.6.0-py3-none-any.whl (20 kB)
+Downloading posthog-7.60.1-py3-none-any.whl (805 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 806.0/806.0 kB 55.5 kB/s eta 0:00:00
+Using cached protobuf-6.33.6-cp39-abi3-manylinux2014_x86_64.whl (323 kB)
+Using cached pydantic-2.13.5-py3-none-any.whl (472 kB)
+Downloading pydantic_core-2.46.5-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 52.9 kB/s eta 0:00:00
+Using cached pygments-2.21.0-py3-none-any.whl (1.3 MB)
+Downloading pytz-2026.4-py2.py3-none-any.whl (506 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 506.7/506.7 kB 62.6 kB/s eta 0:00:00
+Downloading qdrant_client-1.19.1-py3-none-any.whl (406 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 406.5/406.5 kB 58.3 kB/s eta 0:00:00
+Downloading sqlalchemy-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (4.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.7/4.7 MB 16.8 kB/s eta 0:00:00
+Using cached annotated_types-0.8.0-py3-none-any.whl (13 kB)
+Using cached anyio-4.15.1-py3-none-any.whl (132 kB)
+Downloading backoff-2.2.1-py3-none-any.whl (15 kB)
+Using cached distro-1.9.0-py3-none-any.whl (20 kB)
+Downloading grpcio-1.84.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (7.2 MB)
+   ━━━━━━╸                                  1.2/7.2 MB 20.2 kB/s eta 0:04:57
+ERROR: Exception:
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_vendor/urllib3/response.py", line 438, in _error_catcher
+    yield
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_vendor/urllib3/response.py", line 561, in read
+    data = self._fp_read(amt) if not fp_closed else b""
+           ^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_vendor/urllib3/response.py", line 527, in _fp_read
+    return self._fp.read(amt) if amt is not None else self._fp.read()
+           ^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_vendor/cachecontrol/filewrapper.py", line 98, in read
+    data: bytes = self.__fp.read(amt)
+                  ^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/http/client.py", line 479, in read
+    s = self.fp.read(amt)
+        ^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/socket.py", line 707, in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/ssl.py", line 1252, in recv_into
+    return self.read(nbytes, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/ssl.py", line 1104, in read
+    return self._sslobj.read(len, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ssl.SSLError: [SYS] unknown error (_ssl.c:2559)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_internal/cli/base_command.py", line 180, in exc_logging_wrapper
+    status = run_func(*args)
+             ^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_internal/cli/req_command.py", line 245, in wrapper
+    return func(self, options, args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_internal/commands/install.py", line 377, in run
+    requirement_set = resolver.resolve(
+                      ^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_internal/resolution/resolvelib/resolver.py", line 179, in resolve
+    self.factory.preparer.prepare_linked_requirements_more(reqs)
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_internal/operations/prepare.py", line 552, in prepare_linked_requirements_more
+    self._complete_partial_requirements(
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_internal/operations/prepare.py", line 467, in _complete_partial_requirements
+    for link, (filepath, _) in batch_download:
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_internal/network/download.py", line 183, in __call__
+    for chunk in chunks:
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_internal/cli/progress_bars.py", line 53, in _rich_progress_bar
+    for chunk in iterable:
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_internal/network/utils.py", line 63, in response_chunks
+    for chunk in response.raw.stream(
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_vendor/urllib3/response.py", line 622, in stream
+    data = self.read(amt=amt, decode_content=decode_content)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_vendor/urllib3/response.py", line 560, in read
+    with self._error_catcher():
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "/data/txnmem/external-comparison-20260928/.venv-mem0/lib/python3.12/site-packages/pip/_vendor/urllib3/response.py", line 449, in _error_catcher
+    raise SSLError(e)
+pip._vendor.urllib3.exceptions.SSLError: [SYS] unknown error (_ssl.c:2559)
+
+[notice] A new release of pip is available: 24.0 -> 26.2.1
+[notice] To update, run: /data/txnmem/external-comparison-20260928/.venv-mem0/bin/python -m pip install --upgrade pip

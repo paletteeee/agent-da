@@ -1,0 +1,22 @@
+# api url:  http://127.0.0.1:9
+# api key:  not-a-secret-controlled-provider
+/data/txnmem/external-comparison-20260928/.venv/lib/python3.12/site-packages/finch/finch.py:12: UserWarning: pynndescent is not installed: No module named 'pynndescent'
+  warnings.warn('pynndescent is not installed: {}'.format(e))
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_8815cvsy/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_jhvp49fj/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_kerf3a4t/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_g34mbd5i/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_rjoy3hlt/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_2du63h73/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_xw422g7k/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_4vnbvt_h/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_mc0vsft_/case'}

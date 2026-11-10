@@ -1,0 +1,11 @@
+{
+  "status": "passed",
+  "rows": 66,
+  "replays": 12,
+  "checks": [
+    "all campaign artifact hashes",
+    "all input and observation hashes",
+    "all judgments recomputed from raw evidence",
+    "all replay outcomes recomputed"
+  ]
+}

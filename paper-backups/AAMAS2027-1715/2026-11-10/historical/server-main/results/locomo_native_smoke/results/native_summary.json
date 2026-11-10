@@ -1,0 +1,30 @@
+{
+  "completed_task_count": 0,
+  "dataset": "locomo",
+  "evaluation_error_count": 0,
+  "execution_mode": "native_contextual_agent_run",
+  "native_event_count": 0,
+  "native_ground_truth": true,
+  "production_latency_claim": false,
+  "projection_fallback": false,
+  "raw_trace_path": "/data/txnmem/results/locomo_native_smoke/data/native_model_traces.jsonl",
+  "source_sha256": "79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4",
+  "status": "completed",
+  "task_count": 1,
+  "task_summaries": [
+    {
+      "failure_code": "model_http_error",
+      "status": "failed",
+      "steps": 1,
+      "task_evaluator": {
+        "reasons": [
+          "run_not_completed"
+        ],
+        "success": false
+      },
+      "task_id": "locomo:conv-26"
+    }
+  ],
+  "trace_ground_truth_native": true,
+  "variants": {}
+}

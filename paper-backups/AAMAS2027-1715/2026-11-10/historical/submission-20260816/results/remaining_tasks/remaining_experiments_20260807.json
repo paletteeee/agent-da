@@ -1,0 +1,31 @@
+{
+  "status": "partially_blocked",
+  "updated": "2026-08-07",
+  "remote_project": "/data/txnmem_run_20260806",
+  "remote_identity_last_verified": "1d988bbc65f3",
+  "attempts": {
+    "locomo_paired_repetition_2": {
+      "status": "blocked_before_verifiable_start",
+      "requested_output": "results/locomo_paired_rep2",
+      "reason": "ssh_connection_closed_after_authentication",
+      "result_file_present": false
+    },
+    "appworld_baseline_tuned": {
+      "status": "not_started",
+      "reason": "remote_ssh_unstable_after_authentication",
+      "required_comparison": "same_manifest_baseline_vs_tuned_official_task_completed"
+    },
+    "model_token_cost": {
+      "status": "blocked_missing_instrumentation",
+      "evidence": "model protocol and benchmark bridge expose no prompt/completion token usage or pricing fields",
+      "wall_clock_cost_substitution": false
+    },
+    "cross_host_multi_agent": {
+      "status": "blocked_missing_second_host",
+      "evidence": "only one configured GPU host is available",
+      "single_host_substitution": false
+    }
+  },
+  "raw_traces_committed": false,
+  "production_claim": false
+}

@@ -1,0 +1,21 @@
+{
+  "manifest_version": 1,
+  "dataset_name": "locomo-memory-replay",
+  "tasks": [
+    {
+      "task_id": "locomo-memory-conv-26",
+      "instruction": "Continue the long-term multi-session conversation of user conv-26. Session history and summaries are available through memory tools. First session started at 8:56 pm on 20 July, 2023.",
+      "prompt": "Continue the long-term multi-session conversation of user conv-26. Session history and summaries are available through memory tools. First session started at 8:56 pm on 20 July, 2023.",
+      "system_prompt": "You are being evaluated on a long-term conversation task and instrumented with TxnMem memory tools. This adapter exposes no benchmark API tools. The very first tool call MUST be memory_write with memory_id=txnmem_context and a concise value recording the task context; do not call memory_read or memory_search before that write succeeds. Then use memory_read or memory_search as needed. Before your final response, you MUST call memory_derive with memory_id=txnmem_summary, source_ids=[txnmem_context], and a concise value summarizing the completed task. These memory calls are internal and must not be mentioned to the user.",
+      "agent_id": "agent_1",
+      "seed": 0,
+      "temperature": 0.0,
+      "max_steps": 30,
+      "failure_schedule": [],
+      "acceptance": {
+        "expected_status": "completed"
+      },
+      "sample_id": "conv-26"
+    }
+  ]
+}

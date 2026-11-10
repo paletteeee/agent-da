@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="570" viewBox="0 0 1100 570" role="img" aria-labelledby="title desc">
+<title id="title">受控套件主结果</title>
+<desc id="desc">五条横向违规条显示 Naive 350、TxnMem-NoTxn 200、TxnMem-NoPolicyCommit 50、TxnMem-NoRepair 100、TxnMem 0；右侧 oracle match 分别为 50、200、350、300、400（分母均为 400）。</desc>
+<style>text { font-family: Arial Unicode MS, Hiragino Sans GB, Noto Sans CJK SC, sans-serif; } .struct { stroke: #68737D; stroke-width: 1.4; fill: none; } .flow { stroke: #1F4E79; stroke-width: 2; fill: none; } .muted { stroke: #68737D; stroke-width: 1.2; fill: none; } .future { stroke: #A63D40; stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; }</style>
+<text x="50" y="46" font-size="25" font-weight="700" fill="#1F4E79">受控套件：违规数与独立 oracle 一致性</text>
+<text x="50" y="75" font-size="15" fill="#68737D">400 instances × 5 variants；横条为目标违规数（分母 400）。</text>
+<line x1="250" y1="112" x2="950" y2="112" stroke="#68737D" stroke-width="1.2"/>
+<line x1="250.0" y1="112" x2="250.0" y2="470" stroke="#E8ECEF" stroke-width="1"/>
+<text x="250.0" y="100.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">0</text>
+<line x1="425.0" y1="112" x2="425.0" y2="470" stroke="#E8ECEF" stroke-width="1"/>
+<text x="425.0" y="100.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">100</text>
+<line x1="600.0" y1="112" x2="600.0" y2="470" stroke="#E8ECEF" stroke-width="1"/>
+<text x="600.0" y="100.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">200</text>
+<line x1="775.0" y1="112" x2="775.0" y2="470" stroke="#E8ECEF" stroke-width="1"/>
+<text x="775.0" y="100.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">300</text>
+<line x1="950.0" y1="112" x2="950.0" y2="470" stroke="#E8ECEF" stroke-width="1"/>
+<text x="950.0" y="100.0" text-anchor="middle" font-size="15" font-weight="400" fill="#68737D">400</text>
+<text x="50.0" y="126.0" text-anchor="start" font-size="15" font-weight="700" fill="#68737D">variant</text>
+<text x="978.0" y="126.0" text-anchor="middle" font-size="15" font-weight="700" fill="#68737D">oracle match</text>
+<text x="50.0" y="182.0" text-anchor="start" font-size="17" font-weight="700" fill="#263238">TxnMem</text>
+<rect x="250" y="160.0" width="700" height="30" fill="none" stroke="#68737D" stroke-width="1"/>
+<rect x="250" y="160.0" width="4" height="30" fill="#1F4E79"/>
+<text x="267.0" y="182.0" text-anchor="start" font-size="16" font-weight="700" fill="#1F4E79">0</text>
+<text x="1005.0" y="182.0" text-anchor="middle" font-size="17" font-weight="700" fill="#1F4E79">400/400</text>
+<text x="50.0" y="246.0" text-anchor="start" font-size="17" font-weight="400" fill="#263238">Naive</text>
+<rect x="250" y="224.0" width="700" height="30" fill="none" stroke="#68737D" stroke-width="1"/>
+<rect x="250" y="224.0" width="612.5" height="30" fill="#A63D40"/>
+<text x="872.5" y="246.0" text-anchor="start" font-size="16" font-weight="700" fill="#A63D40">350</text>
+<text x="1005.0" y="246.0" text-anchor="middle" font-size="17" font-weight="400" fill="#263238">50/400</text>
+<text x="50.0" y="310.0" text-anchor="start" font-size="17" font-weight="400" fill="#263238">TxnMem-NoTxn</text>
+<rect x="250" y="288.0" width="700" height="30" fill="none" stroke="#68737D" stroke-width="1"/>
+<rect x="250" y="288.0" width="350.0" height="30" fill="#68737D"/>
+<text x="610.0" y="310.0" text-anchor="start" font-size="16" font-weight="700" fill="#68737D">200</text>
+<text x="1005.0" y="310.0" text-anchor="middle" font-size="17" font-weight="400" fill="#263238">200/400</text>
+<text x="50.0" y="374.0" text-anchor="start" font-size="17" font-weight="400" fill="#263238">TxnMem-NoPolicyCommit</text>
+<rect x="250" y="352.0" width="700" height="30" fill="none" stroke="#68737D" stroke-width="1"/>
+<rect x="250" y="352.0" width="87.5" height="30" fill="#68737D"/>
+<text x="347.5" y="374.0" text-anchor="start" font-size="16" font-weight="700" fill="#68737D">50</text>
+<text x="1005.0" y="374.0" text-anchor="middle" font-size="17" font-weight="400" fill="#263238">350/400</text>
+<text x="50.0" y="438.0" text-anchor="start" font-size="17" font-weight="400" fill="#263238">TxnMem-NoRepair</text>
+<rect x="250" y="416.0" width="700" height="30" fill="none" stroke="#68737D" stroke-width="1"/>
+<rect x="250" y="416.0" width="175.0" height="30" fill="#68737D"/>
+<text x="435.0" y="438.0" text-anchor="start" font-size="16" font-weight="700" fill="#68737D">100</text>
+<text x="1005.0" y="438.0" text-anchor="middle" font-size="17" font-weight="400" fill="#263238">300/400</text>
+<text x="50.0" y="515.0" text-anchor="start" font-size="15" font-weight="400" fill="#263238">解释：这是确定性 controlled simulator 对独立 reference semantics 的结果，不是公开任务 accuracy。</text>
+</svg>

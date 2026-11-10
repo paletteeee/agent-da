@@ -1,0 +1,25 @@
+system,family,attempted,evaluated,violations,normal_completed,normal_cases,false_aborts,normal_tasks,stale,affected,excluded
+TxnMem,multi_agent_visibility,50,50,0,50,50,0,100,0,0,{}
+Mem0,multi_agent_visibility,50,50,50,50,50,0,100,0,0,{}
+G-Memory,multi_agent_visibility,50,50,50,50,50,0,100,0,0,{}
+A-MEM,multi_agent_visibility,50,50,50,50,50,0,100,0,0,{}
+TxnMem,interleaved_atomicity,50,50,0,50,50,0,100,0,0,{}
+Mem0,interleaved_atomicity,50,50,50,50,50,0,100,0,0,{}
+G-Memory,interleaved_atomicity,50,50,50,50,50,0,100,0,0,{}
+A-MEM,interleaved_atomicity,50,50,50,50,50,0,100,0,0,{}
+TxnMem,concurrent_supersession,50,50,0,50,50,0,100,0,0,{}
+Mem0,concurrent_supersession,50,0,0,50,50,0,100,0,0,"{""runtime_error"": 50}"
+G-Memory,concurrent_supersession,50,0,0,0,0,0,0,0,0,"{""unsupported_mapping"": 50}"
+A-MEM,concurrent_supersession,50,50,50,50,50,0,100,0,0,{}
+TxnMem,actor_policy_scope,50,50,0,50,50,0,100,0,0,{}
+Mem0,actor_policy_scope,50,0,0,0,0,0,0,0,0,"{""unsupported_mapping"": 50}"
+G-Memory,actor_policy_scope,50,0,0,0,0,0,0,0,0,"{""unsupported_mapping"": 50}"
+A-MEM,actor_policy_scope,50,0,0,0,0,0,0,0,0,"{""unsupported_mapping"": 50}"
+TxnMem,cross_agent_provenance,50,50,0,50,50,0,100,0,242,{}
+Mem0,cross_agent_provenance,50,50,50,50,50,0,100,242,242,{}
+G-Memory,cross_agent_provenance,50,0,0,0,0,0,0,0,0,"{""unsupported_mapping"": 50}"
+A-MEM,cross_agent_provenance,50,50,50,50,50,0,100,242,242,{}
+TxnMem,multi_agent_mixed,50,50,0,50,50,0,100,0,68,{}
+Mem0,multi_agent_mixed,50,0,0,0,0,0,0,0,0,"{""unsupported_mapping"": 50}"
+G-Memory,multi_agent_mixed,50,0,0,0,0,0,0,0,0,"{""unsupported_mapping"": 50}"
+A-MEM,multi_agent_mixed,50,0,0,0,0,0,0,0,0,"{""unsupported_mapping"": 50}"

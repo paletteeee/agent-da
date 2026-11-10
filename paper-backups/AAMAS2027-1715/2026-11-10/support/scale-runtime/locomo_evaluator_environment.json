@@ -1,0 +1,12 @@
+{
+  "evaluator_sha256": "8e3be5d57ff2ff9ec5cd05939592f468c5f3f1fd95d13e431932bdf6bf0fd6fd",
+  "packages": {
+    "bert-score": "0.3.13",
+    "matplotlib": "3.11.1",
+    "nltk": "3.9.2",
+    "pandas": "3.0.5",
+    "torch": "2.13.0",
+    "transformers": "5.15.0"
+  },
+  "python": "3.14.6"
+}

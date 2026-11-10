@@ -1,0 +1,145 @@
+{
+  "figures": {
+    "architecture": {
+      "alt_text": "左侧是 Qwen、公共 runtime 和后端的非事务逐事件适配；中间是 TxnMem 的事务管理、策略、存储和来源修复 core；右侧是独立 reference simulator。",
+      "caption": "TxnMem 架构：确定性 core/reference simulator 承担事务语义；Qwen、公共 runtime 与后端仅通过逐事件适配接入。",
+      "dimensions": {
+        "height": 620,
+        "width": 1160
+      },
+      "file": "architecture.svg",
+      "output_sha256": "9a132f6bc2240bdde399af8ab2735f805f33544697346ea1af1cfcb28518bb92",
+      "sources": [
+        {
+          "path": "docs/paper/txnmem_ccfa_draft_zh.md",
+          "sha256": "b645c7d84b7cb854d3f728ffb32806c3f9a37ef7e83e14b7a8f613bcca40592a"
+        },
+        {
+          "path": "configs/txnmem_ccfa_paper.json",
+          "sha256": "917867f49158784a0176cd11e21aa019be0ae509836537a7587b5b90f1d447f0"
+        }
+      ]
+    },
+    "commit_protocol": {
+      "alt_text": "从 begin 到 buffer、最新策略重验证和原子持久化的协议图，策略拒绝分支指向 abort，崩溃恢复只有完整提交或未提交两种结果。",
+      "caption": "TxnMem commit 协议：begin 后写入仅缓冲，commit 点以最新策略重验证，并原子持久化或 abort。",
+      "dimensions": {
+        "height": 500,
+        "width": 1120
+      },
+      "file": "commit_protocol.svg",
+      "output_sha256": "dc66463a6dfb8654395ddd21e8a4e10b6ff748f320297354b8bf0460a6d77d1d",
+      "sources": [
+        {
+          "path": "docs/paper/txnmem_ccfa_draft_zh.md",
+          "sha256": "b645c7d84b7cb854d3f728ffb32806c3f9a37ef7e83e14b7a8f613bcca40592a"
+        },
+        {
+          "path": "results/final_controlled/results/schedule_baseline.json",
+          "sha256": "9bbce21983e152cde55b2b0cb27932b79afaf38406e9d41ce80cf64a424a6758"
+        }
+      ]
+    },
+    "controlled_results": {
+      "alt_text": "五条横向违规条显示 Naive 350、TxnMem-NoTxn 200、TxnMem-NoPolicyCommit 50、TxnMem-NoRepair 100、TxnMem 0；右侧 oracle match 分别为 50、200、350、300、400（分母均为 400）。",
+      "caption": "受控套件主结果：五个实现变体的目标违规数和独立 oracle match 数；完整 TxnMem 为 0/400 与 400/400。",
+      "dimensions": {
+        "height": 570,
+        "width": 1100
+      },
+      "file": "controlled_results.svg",
+      "output_sha256": "3b716af178b3247a9ea9f0949465a65baeeb5666779056243007df6eae3065bf",
+      "sources": [
+        {
+          "path": "results/paper_evidence/controlled_suite.json",
+          "sha256": "4337cd70033244177dccbd2e24e3596945b94d9b9cc34797363069988cf17db0"
+        }
+      ]
+    },
+    "evidence_layers": {
+      "alt_text": "五层证据图依次为受控正确性、原生模型、公共 runtime、真实服务和跨主机；Toxiproxy 层为 90 complete、60 absent、0 partial、0 unknown，不代表一般分布式事务。",
+      "caption": "TxnMem 的分层证据链：从受控正确性到模型、公共 runtime、真实服务和跨主机证据；Toxiproxy 层给出五个单机场景的操作后双存储回读。",
+      "dimensions": {
+        "height": 650,
+        "width": 1160
+      },
+      "file": "evidence_layers.svg",
+      "output_sha256": "57ae976d0b3d12b2c88a2710a3b2d8f6a3824ea58fda8def89e1e68e4a5c3342",
+      "sources": [
+        {
+          "path": "configs/txnmem_ccfa_paper.json",
+          "sha256": "917867f49158784a0176cd11e21aa019be0ae509836537a7587b5b90f1d447f0"
+        },
+        {
+          "path": "configs/paper_claims.json",
+          "sha256": "c45def3dae8308d2f49a32490c354bcb77bd9d0ee4b7f1c53e1a0a565d6cb9b5"
+        },
+        {
+          "path": "results/final_controlled/results/schedule_baseline.json",
+          "sha256": "9bbce21983e152cde55b2b0cb27932b79afaf38406e9d41ce80cf64a424a6758"
+        },
+        {
+          "path": "results/final_controlled/results/minimal_mutant_witnesses.json",
+          "sha256": "8a8c19faf8c906652596c6da351fa410444f78472f02e807b8b625c4a31b539d"
+        },
+        {
+          "path": "results/submission_evidence/toxiproxy_state_verified_30/aggregate.json",
+          "sha256": "04de2a3c7da3b8c2dcda06d88afdb18e6f224d8f0e1fcaae4847f1277b3bbcad"
+        },
+        {
+          "path": "results/cross_host_model_load_formal_v8_aggregate/results/model_load_repetition_summary.json",
+          "sha256": "c65dda52edc9c66e8441580a90c39d1aef60c34e8f44feca3415429f8d8622ed"
+        },
+        {
+          "path": "results/remaining_tasks/native_repetitions5/repetition_report.json",
+          "sha256": "bc68cd36f7d22f857aabb7885f47cf66f65597ba4ce084f825a7d56ad8eb0b3e"
+        }
+      ]
+    },
+    "motivation_timeline": {
+      "alt_text": "从读取地址到写订单的时间线，标出三个红色风险点：写入中崩溃、提交时撤权、地址源失效。",
+      "caption": "地址—订单协作时间线：崩溃、提交时撤权和来源失效分别造成半更新、旧授权提交与派生污染。",
+      "dimensions": {
+        "height": 520,
+        "width": 1100
+      },
+      "file": "motivation_timeline.svg",
+      "output_sha256": "50504849cad425ee2a5e1ca17e8217088462eed88e23cbc007de6de1face86db",
+      "sources": [
+        {
+          "path": "docs/paper/txnmem_ccfa_draft_zh.md",
+          "sha256": "b645c7d84b7cb854d3f728ffb32806c3f9a37ef7e83e14b7a8f613bcca40592a"
+        },
+        {
+          "path": "results/final_controlled/results/schedule_baseline.json",
+          "sha256": "9bbce21983e152cde55b2b0cb27932b79afaf38406e9d41ce80cf64a424a6758"
+        },
+        {
+          "path": "results/final_controlled/results/minimal_mutant_witnesses.json",
+          "sha256": "8a8c19faf8c906652596c6da351fa410444f78472f02e807b8b625c4a31b539d"
+        }
+      ]
+    },
+    "provenance_repair": {
+      "alt_text": "地址源失效后，发货建议、订单更新、客服副本和下游计划组成的依赖图被后代失效闭包处理；下方虚线框将 stale、重算和新来源 repair 标为未来扩展。",
+      "caption": "当前 provenance repair 仅沿已记录依赖执行后代失效闭包；stale、重算和新来源修复均为未来扩展。",
+      "dimensions": {
+        "height": 540,
+        "width": 1120
+      },
+      "file": "provenance_repair.svg",
+      "output_sha256": "40efbf5782697e6ab2c9138f8d2512558ff336a1ae2c0adb7b6965f45ff07970",
+      "sources": [
+        {
+          "path": "docs/paper/txnmem_ccfa_draft_zh.md",
+          "sha256": "b645c7d84b7cb854d3f728ffb32806c3f9a37ef7e83e14b7a8f613bcca40592a"
+        },
+        {
+          "path": "results/final_controlled/results/minimal_mutant_witnesses.json",
+          "sha256": "8a8c19faf8c906652596c6da351fa410444f78472f02e807b8b625c4a31b539d"
+        }
+      ]
+    }
+  },
+  "schema_version": 1
+}

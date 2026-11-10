@@ -1,0 +1,61 @@
+{
+  "status": "instrumented_native_replay_smoke",
+  "model_id": "qwen2.5-7b-instruct",
+  "memory_backend": "sqlite",
+  "raw_trace_policy": "raw traces and memory payloads remain on the remote GPU server",
+  "official_accuracy_claim": false,
+  "notes": [
+    "These runs execute the official benchmark runtime boundary while exposing TxnMem memory tools.",
+    "The benchmark manifests add an instrumentation contract for memory events; they are trace-grounded adaptations, not native benchmark memory ground truth.",
+    "Official evaluator outputs are reported independently from the TxnMem differential oracle."
+  ],
+  "runs": [
+    {
+      "benchmark": "tau-bench",
+      "runtime_scope": "airline/test/task_index_0",
+      "task_count": 1,
+      "completed_task_count": 1,
+      "native_event_count": 4,
+      "evaluation_error_count": 0,
+      "official": {
+        "reward": 0.0
+      },
+      "txnmem_oracle": {
+        "matched": 1,
+        "total": 1
+      }
+    },
+    {
+      "benchmark": "appworld",
+      "runtime_scope": "task_024c982_1; app schema limited to venmo",
+      "task_count": 1,
+      "completed_task_count": 1,
+      "native_event_count": 1,
+      "evaluation_error_count": 0,
+      "official": {
+        "success": false,
+        "pass_count": 0,
+        "total_count": 7
+      },
+      "txnmem_oracle": {
+        "matched": 1,
+        "total": 1
+      }
+    },
+    {
+      "benchmark": "locomo",
+      "runtime_scope": "conversation conv-26; memory-only adapter",
+      "task_count": 1,
+      "completed_task_count": 1,
+      "native_event_count": 2,
+      "evaluation_error_count": 0,
+      "official": {
+        "evaluator": "not_available_in_current_runtime_boundary"
+      },
+      "txnmem_oracle": {
+        "matched": 1,
+        "total": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"task_id": "appworld-024c982_1", "run": {"task_id": "appworld-024c982_1", "status": "failed", "failure_code": "model_http_error", "steps": 1, "events": [], "messages": [{"role": "user", "content": "Request $13 publicly on Venmo from my friend, Stacy, with a note, \"For yesterday's meal\"."}]}}

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TXNMEM_CODEX_DEPS="${TXNMEM_CODEX_DEPS:-/Users/xiaoyan_zhu/.cache/codex-runtimes/codex-primary-runtime/dependencies}"
+TXNMEM_LO_BIN="${TXNMEM_CODEX_DEPS}/native/libreoffice-headless/libreoffice/LibreOfficeDev.app/Contents/MacOS/soffice"
+TXNMEM_LCMS_DIR="${TXNMEM_CODEX_DEPS}/native/poppler/poppler/lib"
+
+if [[ ! -x "$TXNMEM_LO_BIN" ]]; then
+    echo "LibreOffice binary not found: $TXNMEM_LO_BIN" >&2
+    exit 1
+fi
+if [[ ! -f "$TXNMEM_LCMS_DIR/liblcms2.2.dylib" ]]; then
+    echo "Bundled liblcms2.2.dylib not found: $TXNMEM_LCMS_DIR" >&2
+    exit 1
+fi
+
+# Set this inside the shell wrapper. macOS may strip DYLD_* variables that
+# were inherited by a Python subprocess, while variables set immediately
+# before exec are honored by the LibreOffice process.
+export DYLD_LIBRARY_PATH="$TXNMEM_LCMS_DIR${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+exec "$TXNMEM_LO_BIN" "$@"

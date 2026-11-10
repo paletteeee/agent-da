@@ -1,0 +1,119 @@
+21:21:08 - LiteLLM:WARNING: get_model_cost_map.py:300 - LiteLLM: model cost map fetch attempt 1/3 failed (ConnectError fetching https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json: [Errno 111] Connection refused); retrying in 2.1s
+21:21:08 - LiteLLM:WARNING: get_model_cost_map.py:655 - LiteLLM: Failed to fetch remote model cost map from https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json: ConnectError fetching https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json: [Errno 111] Connection refused. Falling back to local backup.
+21:21:11 - LiteLLM:WARNING: get_model_cost_map.py:300 - LiteLLM: model cost map fetch attempt 2/3 failed (ConnectError fetching https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json: [Errno 111] Connection refused); retrying in 4.2s
+21:21:15 - LiteLLM:WARNING: get_model_cost_map.py:576 - LiteLLM: Failed to fetch remote model cost map from https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json after 3 attempts; keeping local backup
+{
+  "status": "ok",
+  "implementation": "AgenticMemorySystem; native note/Chroma methods",
+  "provider_profile": {
+    "embedding": "sha256-counter-v1-64d",
+    "generation": "fixed-response-v1",
+    "scope": "controlled operations; no semantic quality or process-crash claim"
+  },
+  "initial_snapshot": {
+    "unrelated": {
+      "value": "Independent fact remains valid"
+    }
+  },
+  "final_snapshot": {
+    "unrelated": {
+      "value": "Independent fact remains valid"
+    },
+    "w0": {
+      "value": "Fact w0 instance 0"
+    },
+    "w1": {
+      "value": "Fact w1 instance 0"
+    }
+  },
+  "final_ids": [
+    "unrelated",
+    "w0",
+    "w1"
+  ],
+  "events": [
+    {
+      "operation": "A1",
+      "kind": "begin",
+      "actor": "A",
+      "response": null,
+      "elapsed_ns": 1500
+    },
+    {
+      "operation": "A2",
+      "kind": "put",
+      "actor": "A",
+      "response": null,
+      "elapsed_ns": 3763619
+    },
+    {
+      "operation": "A3",
+      "kind": "put",
+      "actor": "A",
+      "response": null,
+      "elapsed_ns": 3379646
+    },
+    {
+      "operation": "B1",
+      "kind": "begin",
+      "actor": "B",
+      "response": null,
+      "elapsed_ns": 560
+    },
+    {
+      "operation": "B2",
+      "kind": "read",
+      "actor": "B",
+      "response": [
+        "w0"
+      ],
+      "elapsed_ns": 6930
+    },
+    {
+      "operation": "B3",
+      "kind": "commit",
+      "actor": "B",
+      "response": "completed",
+      "elapsed_ns": 1010
+    },
+    {
+      "operation": "A4",
+      "kind": "commit",
+      "actor": "A",
+      "response": "completed",
+      "elapsed_ns": 580
+    }
+  ],
+  "reads": [
+    {
+      "operation": "B2",
+      "txn": "B",
+      "key": "w0",
+      "visible": [
+        "w0"
+      ],
+      "completed": []
+    }
+  ],
+  "final_native_reads": {
+    "unrelated": [
+      "unrelated"
+    ],
+    "w0": [
+      "w0"
+    ],
+    "w1": [
+      "w1"
+    ]
+  },
+  "transactions": {
+    "A": "completed",
+    "B": "completed"
+  },
+  "invalidated": [],
+  "revoked": [],
+  "fault_triggered": false,
+  "model_provider_calls": 2,
+  "elapsed_ns": 10945211724
+}
+{'case_id': 'multi_agent_visibility-0-directed-perturbed', 'family': 'multi_agent_visibility', 'strategy': 'directed', 'control': False, 'status': 'ok', 'reason': '', 'correctness_included': True, 'any_violation': 1, 'violations': ['dirty_read'], 'normal_completed': None, 'false_abort_count': None, 'normal_task_count': None, 'stale_descendant_count': 0, 'affected_descendant_count': 0}

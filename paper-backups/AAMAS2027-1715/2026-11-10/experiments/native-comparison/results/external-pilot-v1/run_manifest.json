@@ -1,0 +1,61 @@
+{
+  "artifacts": {
+    "amem-observations.jsonl": "6a71482ff3b91c3996cc010567e1e22f77eb116ba8e268c6ffdf6d3205c391bc",
+    "amem-replays.jsonl": "51fab253319b6e6aa997e45b8455e5da99ff73289541342b46b6e7044a560d19",
+    "amem-rows.json": "6d2978362e779bd32ecb117ad67bf1e3c9c66e7a09a3722e441687ae9fa6b523",
+    "amem-witnesses.json": "847b332e217fee534893df5a5e4ad75aca918227885ca01d693f27b419dceff2",
+    "amem-worker.log": "b718958b9c2a7e11e993ab47999388fd096d4a2fc58014182baf774e3cba1b85",
+    "capabilities.json": "7175ca279872370606e164fd008578f7de72d937f95e5e1b700c1f6d9127ddd7",
+    "environment.json": "79be6ef8b71ad73997fd6a5eaa1ecd9e16b177ac36396fc37ddc212dc612bbdb",
+    "gmemory-observations.jsonl": "c659430f3a63142a56d1ccd768ed2a2fd2fbc69d28f0009b1c7b5ff871f15982",
+    "gmemory-replays.jsonl": "8182d58aefd301fab490e15db188f94744e7438608340c0f6b203a0334fdb53a",
+    "gmemory-rows.json": "88dd533ab3a0a28ae086135665473c027bc6c3d707299347eaa139f6f7ddca14",
+    "gmemory-witnesses.json": "7a7e1847843d588a648e3c2c941e2e9bc1a865a971987c0dd8722cc0bb4a0585",
+    "gmemory-worker.log": "2eb543e502b5238b383e326cdf22515e01ad3ed5720cd15e48654b3e58868556",
+    "inputs.jsonl": "ff410b76b65c595e82d0ccc36224258d76355d94439144e6dfa7155805e69add",
+    "jobs.json": "f9909b34385529d8b8ee8af5241431c6d4ace7155adbc637ee67cccdfaf9d938",
+    "mem0-observations.jsonl": "ee33a24fe5fbd5567d442e01c2f23da893e30c4d40c49d30e6c59f2c5c5f213e",
+    "mem0-replays.jsonl": "ea99cad73cf17f2e29f851e89d498498ab5868d86038a904890267b9cd15601c",
+    "mem0-rows.json": "24fc103913a0f35a43eb16bd200c1c52f8ae130587f9b722637dc1e180695c6a",
+    "mem0-witnesses.json": "1d6ec23dd955757d09aa99ff3973de2ae40bc52b29cc28ed8d3201bcf0e7fdbe",
+    "mem0-worker.log": "590b572888be1c65c97553c804e4489a56151018a770489005d476d0c6c04d0e",
+    "replay_summary.json": "c751f65bf0d86c8c3dfb55cfc3211f9761f849b820f372f8b743f5eaee970683",
+    "results.csv": "44d25510e9eb6810be1fb429c84d5105c364ce40018549be7c7aba14fd7e7be5",
+    "summary.json": "1b8f9fa7a3f63600da53835d6e6e11b31adcae434b0d38170d8051ee9392e6ff",
+    "txnmem-observations.jsonl": "9356727d2af57d52bf4e28ce15ed3a595c6cd9fd93724b91f1e6071426982876",
+    "txnmem-replays.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "txnmem-rows.json": "d52b08aeb4bfe228801d5989d0ea46a7a85d00fe958c537aae369d9943f5a98b",
+    "txnmem-witnesses.json": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+    "txnmem-worker.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "distinct_inputs": 36,
+  "ended_utc": "2026-09-28T13:27:03.102122+00:00",
+  "execution_count": 132,
+  "fault_model": "operation-boundary controller interruption; not process kill or storage recovery",
+  "inputs_sha256": "ff410b76b65c595e82d0ccc36224258d76355d94439144e6dfa7155805e69add",
+  "provider_profile": {
+    "embedding": "sha256-counter-v1-64d",
+    "generation": "fixed-response-v1",
+    "scope": "controlled operations; no semantic quality or process-crash claim"
+  },
+  "replay_attempts": 12,
+  "replay_count": 1,
+  "results_count": 132,
+  "runtime_errors": 4,
+  "seeds": 2,
+  "shared_evidence": "E1 directed/ordinary native executions are reused in E2, not independent replications",
+  "source_commit": "bade14dc459038a438f3d6432b2b6172d0004459",
+  "source_files": {
+    "src/txnmem_external_campaign.py": "b4636af84357aeffb0b328bfd7bee18d1692c4adc99eb0e22bb19f76c4bfd2ec",
+    "src/txnmem_external_compare.py": "3fbd15a423b57f2a3fb8fdf2cf7017afe0cb5231e39a3a609f27ca8804c1d103",
+    "src/txnmem_external_native.py": "9342f737912753a53b3a8eebf8e07d0a31acd4c63768d6987f4c41a11886b7aa"
+  },
+  "started_utc": "2026-09-28T13:26:46.936832+00:00",
+  "status": "completed",
+  "systems": [
+    "TxnMem",
+    "Mem0",
+    "G-Memory",
+    "A-MEM"
+  ]
+}

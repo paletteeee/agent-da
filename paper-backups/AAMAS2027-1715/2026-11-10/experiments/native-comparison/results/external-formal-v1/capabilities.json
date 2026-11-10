@@ -1,0 +1,29 @@
+{
+  "A-MEM": {
+    "implementation": "AgenticMemorySystem; native note/Chroma methods",
+    "unsupported": [
+      "actor_policy_scope",
+      "multi_agent_mixed"
+    ]
+  },
+  "G-Memory": {
+    "implementation": "GMemory.add_memory/retrieve_memory; task-record mapping",
+    "unsupported": [
+      "actor_policy_scope",
+      "multi_agent_mixed",
+      "cross_agent_provenance",
+      "concurrent_supersession"
+    ]
+  },
+  "Mem0": {
+    "implementation": "mem0.Memory 2.0.18; infer=False; embedded Qdrant",
+    "unsupported": [
+      "actor_policy_scope",
+      "multi_agent_mixed"
+    ]
+  },
+  "TxnMem": {
+    "implementation": "MultiAgentStorageCoordinator/SQLiteInstrumentedMemoryBackend",
+    "unsupported": []
+  }
+}

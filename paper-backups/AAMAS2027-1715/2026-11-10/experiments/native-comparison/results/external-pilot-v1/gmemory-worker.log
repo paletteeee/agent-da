@@ -1,0 +1,34 @@
+# api url:  http://127.0.0.1:9
+# api key:  not-a-secret-controlled-provider
+/data/txnmem/external-comparison-20260928/.venv/lib/python3.12/site-packages/finch/finch.py:12: UserWarning: pynndescent is not installed: No module named 'pynndescent'
+  warnings.warn('pynndescent is not installed: {}'.format(e))
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_se6abfrf/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_55rrdf9p/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_624sx4m5/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_1yhmisah/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_c00t76vq/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_ysh5amfy/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_78bwy68z/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_hxemg2ig/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_fgddoe19/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_exvr9aff/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_esx5h5h0/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_7l2csi6d/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_goyrzu7v/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_pbn5zxte/case'}
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_yysjn540/case'}

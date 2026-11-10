@@ -1,0 +1,32 @@
+FFF
+======================================================================
+FAIL: test_all_four_systems_use_identical_comparison_inputs (test_txnmem_external_campaign.CampaignTests.test_all_four_systems_use_identical_comparison_inputs)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_external_campaign.py", line 10, in setUp
+    def setUp(self):self.assertIsNotNone(make_jobs,"campaign is not implemented")
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None : campaign is not implemented
+
+======================================================================
+FAIL: test_reuses_identical_observations_between_questions (test_txnmem_external_campaign.CampaignTests.test_reuses_identical_observations_between_questions)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_external_campaign.py", line 10, in setUp
+    def setUp(self):self.assertIsNotNone(make_jobs,"campaign is not implemented")
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None : campaign is not implemented
+
+======================================================================
+FAIL: test_summary_does_not_mix_normal_and_perturbed (test_txnmem_external_campaign.CampaignTests.test_summary_does_not_mix_normal_and_perturbed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_external_campaign.py", line 10, in setUp
+    def setUp(self):self.assertIsNotNone(make_jobs,"campaign is not implemented")
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None : campaign is not implemented
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.001s
+
+FAILED (failures=3)

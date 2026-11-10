@@ -1,0 +1,86 @@
+[
+  {
+    "case_id": "interleaved_atomicity-0-random-perturbed",
+    "repetition": 1,
+    "reproduced": true,
+    "system": "Mem0",
+    "target_violation": "aborted_task_residue"
+  },
+  {
+    "case_id": "multi_agent_visibility-0-directed-perturbed",
+    "repetition": 1,
+    "reproduced": true,
+    "system": "Mem0",
+    "target_violation": "dirty_read"
+  },
+  {
+    "case_id": "interleaved_atomicity-0-random-perturbed",
+    "repetition": 1,
+    "reproduced": true,
+    "system": "Mem0",
+    "target_violation": "partial_update"
+  },
+  {
+    "case_id": "cross_agent_provenance-0-random-perturbed",
+    "repetition": 1,
+    "reproduced": true,
+    "system": "Mem0",
+    "target_violation": "stale_descendant"
+  },
+  {
+    "case_id": "interleaved_atomicity-0-random-perturbed",
+    "repetition": 1,
+    "reproduced": true,
+    "system": "G-Memory",
+    "target_violation": "aborted_task_residue"
+  },
+  {
+    "case_id": "multi_agent_visibility-0-directed-perturbed",
+    "repetition": 1,
+    "reproduced": true,
+    "system": "G-Memory",
+    "target_violation": "dirty_read"
+  },
+  {
+    "case_id": "interleaved_atomicity-0-random-perturbed",
+    "repetition": 1,
+    "reproduced": true,
+    "system": "G-Memory",
+    "target_violation": "partial_update"
+  },
+  {
+    "case_id": "interleaved_atomicity-0-random-perturbed",
+    "repetition": 1,
+    "reproduced": true,
+    "system": "A-MEM",
+    "target_violation": "aborted_task_residue"
+  },
+  {
+    "case_id": "concurrent_supersession-0-random-perturbed",
+    "repetition": 1,
+    "reproduced": true,
+    "system": "A-MEM",
+    "target_violation": "conflicting_versions"
+  },
+  {
+    "case_id": "multi_agent_visibility-0-directed-perturbed",
+    "repetition": 1,
+    "reproduced": true,
+    "system": "A-MEM",
+    "target_violation": "dirty_read"
+  },
+  {
+    "case_id": "interleaved_atomicity-0-random-perturbed",
+    "repetition": 1,
+    "reproduced": true,
+    "system": "A-MEM",
+    "target_violation": "partial_update"
+  },
+  {
+    "case_id": "cross_agent_provenance-0-random-perturbed",
+    "repetition": 1,
+    "reproduced": true,
+    "system": "A-MEM",
+    "target_violation": "stale_descendant"
+  }
+]

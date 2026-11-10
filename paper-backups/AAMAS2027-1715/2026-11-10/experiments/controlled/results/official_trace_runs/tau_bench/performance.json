@@ -1,0 +1,29 @@
+{
+  "benchmark": "deterministic_serial_replay",
+  "production_latency_claim": false,
+  "rows": [
+    {
+      "instance_count": 175,
+      "mean_ms": 6.4512085,
+      "operation_count": 1270,
+      "operations_per_second": 196862.339823616,
+      "p50_ms": 5.177500000000002,
+      "p95_ms": 7.724916999999998,
+      "repetitions": 2,
+      "total_seconds": 0.012902417,
+      "variant": "TxnMem"
+    },
+    {
+      "instance_count": 175,
+      "mean_ms": 5.6240415,
+      "operation_count": 1270,
+      "operations_per_second": 225816.2568679481,
+      "p50_ms": 4.959790999999998,
+      "p95_ms": 6.288292000000001,
+      "repetitions": 2,
+      "total_seconds": 0.011248082999999999,
+      "variant": "Naive"
+    }
+  ],
+  "timing_source": "time.perf_counter"
+}

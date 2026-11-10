@@ -1,0 +1,140 @@
+{
+  "hostname": "1d988bbc65f3",
+  "python": "3.12.3",
+  "gpu": "NVIDIA GeForce RTX 4090, 24564 MiB, 570.124.06",
+  "cuda_available": true,
+  "cuda_version": "12.4",
+  "packages": {
+    "vllm": "0.8.5.post1",
+    "torch": "2.6.0",
+    "transformers": "4.51.3",
+    "tokenizers": "0.21.4",
+    "modelscope": "1.32.0",
+    "safetensors": "0.8.0"
+  },
+  "model_id": "Qwen/Qwen2.5-7B-Instruct",
+  "served_model_id": "qwen2.5-7b-instruct",
+  "model_path": "/data/models/Qwen/Qwen2___5-7B-Instruct",
+  "model_files_bytes": 15242806902,
+  "model_config_sha256": "7463bb0ea78315365e6c6b74de4e73bbcc8359dfb0c5a737584e077d42c0b03c",
+  "endpoint": "http://127.0.0.1:8000/v1",
+  "server_command": "vllm serve <model_path> --host 127.0.0.1 --port 8000 --served-model-name qwen2.5-7b-instruct --dtype half --gpu-memory-utilization 0.90 --max-model-len 4096 --enable-auto-tool-choice --tool-call-parser hermes --disable-log-requests",
+  "manifest_sha256": "4db93caf6e94a9cb586ae9bbababfe98fd969cd729765de870738b6d03274c90",
+  "smoke_summary": {
+    "completed_task_count": 1,
+    "manifest_sha256": "aeb4bb154d8005935d2eb16394eb0262bde0336accabdab42206d145ec6fd205",
+    "model_execution_mode": "remote_endpoint",
+    "model_id": "qwen2.5-7b-instruct",
+    "native_event_count": 2,
+    "production_latency_claim": false,
+    "raw_trace_path": "/data/txnmem/results/real_model_qwen2.5_7b_smoke/data/native_model_traces.jsonl",
+    "task_count": 1,
+    "task_summaries": [
+      {
+        "evidence": {
+          "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+          "instance_count": 1,
+          "oracle_match_by_variant": {
+            "Naive": {
+              "matched": 0,
+              "rate": 0.0,
+              "total": 1
+            },
+            "TxnMem": {
+              "matched": 0,
+              "rate": 0.0,
+              "total": 1
+            },
+            "TxnMem-NoPolicyCommit": {
+              "matched": 0,
+              "rate": 0.0,
+              "total": 1
+            },
+            "TxnMem-NoRepair": {
+              "matched": 0,
+              "rate": 0.0,
+              "total": 1
+            },
+            "TxnMem-NoTxn": {
+              "matched": 0,
+              "rate": 0.0,
+              "total": 1
+            }
+          },
+          "production_latency_claim": false,
+          "replay_envelope_operation_count": 2,
+          "replay_operation_count": 4,
+          "source_operation_count": 2,
+          "trace_ground_truth_native": true
+        },
+        "status": "completed",
+        "steps": 3,
+        "task_evaluator": {
+          "reasons": [],
+          "success": true
+        },
+        "task_id": "real_model_smoke_001",
+        "variant_summary": {
+          "Naive": {
+            "count": 1,
+            "oracle_matched": 0,
+            "violating": 0
+          },
+          "TxnMem": {
+            "count": 1,
+            "oracle_matched": 0,
+            "violating": 0
+          },
+          "TxnMem-NoPolicyCommit": {
+            "count": 1,
+            "oracle_matched": 0,
+            "violating": 0
+          },
+          "TxnMem-NoRepair": {
+            "count": 1,
+            "oracle_matched": 0,
+            "violating": 0
+          },
+          "TxnMem-NoTxn": {
+            "count": 1,
+            "oracle_matched": 0,
+            "violating": 0
+          }
+        }
+      }
+    ],
+    "trace_ground_truth_native": true,
+    "variants": {
+      "Naive": {
+        "count": 1,
+        "oracle_match_rate": 0.0,
+        "oracle_matched": 0,
+        "violating": 0
+      },
+      "TxnMem": {
+        "count": 1,
+        "oracle_match_rate": 0.0,
+        "oracle_matched": 0,
+        "violating": 0
+      },
+      "TxnMem-NoPolicyCommit": {
+        "count": 1,
+        "oracle_match_rate": 0.0,
+        "oracle_matched": 0,
+        "violating": 0
+      },
+      "TxnMem-NoRepair": {
+        "count": 1,
+        "oracle_match_rate": 0.0,
+        "oracle_matched": 0,
+        "violating": 0
+      },
+      "TxnMem-NoTxn": {
+        "count": 1,
+        "oracle_match_rate": 0.0,
+        "oracle_matched": 0,
+        "violating": 0
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "analysis": "cross_host_model_load_stable_and_endpoint_or_transport_failure_windows",
+  "attempt_count": 544,
+  "claim_boundary": "HTTP failures are endpoint-or-transport failures unless separate network-loss evidence exists; token totals are lower bounds whenever any request lacks endpoint usage, and stable-prefix results do not imply multi-host Agent workers",
+  "completed_cycles": 68,
+  "endpoint_or_transport_failure_attempt_count": 0,
+  "endpoint_or_transport_failure_codes": {},
+  "endpoint_reported_total_tokens": 1083811,
+  "first_endpoint_or_transport_failure_cycle": null,
+  "full_failure_cycles": [],
+  "model_request_count": 1224,
+  "partial_failure_cycles": [],
+  "raw_traces_committed": false,
+  "reported_token_total_is_lower_bound_for_all_requests": false,
+  "responses_with_usage": 1224,
+  "stable_prefix_attempt_count": 544,
+  "stable_prefix_contract_success_count": 544,
+  "stable_prefix_cycle_count": 68,
+  "token_usage_complete": true
+}

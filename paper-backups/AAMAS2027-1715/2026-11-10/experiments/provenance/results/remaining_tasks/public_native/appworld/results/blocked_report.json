@@ -1,0 +1,17 @@
+{
+  "checks": {
+    "available": false,
+    "execution_mode": "native_workflow_agent_run",
+    "module_available": false,
+    "reason": "missing_public_source",
+    "required_module": "appworld",
+    "source_exists": false
+  },
+  "dataset": "appworld",
+  "native_ground_truth": false,
+  "projection_fallback": false,
+  "reason": "blocked_external_dependency",
+  "status": "superseded_historical_baseline",
+  "superseded_by": "../../native_smoke_summary.json",
+  "current_runtime_status": "official_runtime_and_data_installed_native_smoke_completed"
+}

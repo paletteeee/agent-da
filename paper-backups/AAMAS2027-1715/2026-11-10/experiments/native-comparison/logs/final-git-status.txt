@@ -1,0 +1,24 @@
+ M .gitignore
+?? EXTERNAL_COMPARISON_README.md
+?? configs/external_source_manifest.json
+?? configs/txnmem_source_verification.json
+?? data/
+?? docs/superpowers/plans/2026-09-28-external-memory-comparison-progress.md
+?? docs/superpowers/plans/2026-09-28-external-memory-comparison.md
+?? docs/superpowers/specs/2026-09-28-external-memory-comparison.md
+?? examples/
+?? infra/
+?? paper_assets/
+?? requirements-external-mem0.txt
+?? requirements-external-native.txt
+?? requirements-external-report.txt
+?? requirements-remote.txt
+?? scripts/
+?? src/txnmem_external_campaign.py
+?? src/txnmem_external_compare.py
+?? src/txnmem_external_native.py
+?? src/txnmem_external_report.py
+?? tests/test_txnmem_external_campaign.py
+?? tests/test_txnmem_external_compare.py
+?? tests/test_txnmem_external_native.py
+?? tests/test_txnmem_external_review.py

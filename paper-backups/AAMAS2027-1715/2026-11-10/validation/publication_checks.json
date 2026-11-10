@@ -1,0 +1,8 @@
+{
+  "status": "passed",
+  "scan": "High-specificity token/private-key patterns and sensitive filenames; not a guarantee of absence of all secrets.",
+  "new_secret_token_matches": 0,
+  "documentation_links_checked": true,
+  "source_bytes_preserved": true,
+  "third_party_downloaded_sources": "Excluded; fixed revisions and fetching scripts retained."
+}

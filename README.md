@@ -1,3 +1,9 @@
+# AAMAS 2027 Submission 1715 backup
+
+The paper-related source, datasets, raw native-comparison records, and results are indexed in [the 2026-11-10 backup](paper-backups/AAMAS2027-1715/2026-11-10/README.md). Original project files below are retained.
+
+---
+
 # TxnMem Pilot Experiment
 
 This is a dependency-free pilot for the first three controlled workloads:

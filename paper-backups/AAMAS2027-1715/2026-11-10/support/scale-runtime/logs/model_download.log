@@ -1,0 +1,109 @@
+[90mHint: The `hf-cli` skill is not installed. Run `hf skills add -g --claude` to teach your AI agents how to use the `hf` CLI.[0m
+Fetching 12 files:   0%|          | 0/12 [00:00<?, ?it/s]Fetching 12 files:   8%|▊         | 1/12 [00:00<00:09,  1.22it/s]Fetching 12 files:  17%|█▋        | 2/12 [00:00<00:04,  2.38it/s]Fetching 12 files:  25%|██▌       | 3/12 [00:01<00:02,  3.19it/s]Fetching 12 files:  33%|███▎      | 4/12 [00:01<00:03,  2.45it/s]Fetching 12 files:  42%|████▏     | 5/12 [00:01<00:02,  3.12it/s]Fetching 12 files:  50%|█████     | 6/12 [00:02<00:02,  2.93it/s]Fetching 12 files:  50%|█████     | 6/12 [00:04<00:04,  1.41it/s]
+Traceback (most recent call last):
+  File "/home/suma/venvs/txnmem-vllm/bin/hf", line 6, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/huggingface_hub/cli/hf.py", line 133, in main
+    app()
+    ~~~^^
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/click/core.py", line 1569, in __call__
+    return self.main(*args, **kwargs)
+           ~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/click/core.py", line 1490, in main
+    rv = self.invoke(ctx)
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/huggingface_hub/cli/_cli_utils.py", line 131, in invoke
+    return super().invoke(ctx)
+           ~~~~~~~~~~~~~~^^^^^
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/click/core.py", line 1970, in invoke
+    return _process_result(sub_ctx.command.invoke(sub_ctx))
+                           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/click/core.py", line 1353, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/click/core.py", line 907, in invoke
+    return callback(*args, **kwargs)
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/huggingface_hub/cli/_framework.py", line 365, in handler
+    return func(**call_kwargs)
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/huggingface_hub/cli/download.py", line 225, in download
+    _print_result(run_download())
+                  ~~~~~~~~~~~~^^
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/huggingface_hub/cli/download.py", line 187, in run_download
+    return snapshot_download(
+        repo_id=repo_id,
+    ...<10 lines>...
+        dry_run=dry_run,
+    )
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/huggingface_hub/_snapshot_download.py", line 522, in snapshot_download
+    hf_thread_map(
+    ~~~~~~~~~~~~~^
+        _inner_hf_hub_download,
+        ^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+        tqdm_class=tqdm_class,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/huggingface_hub/utils/tqdm.py", line 441, in hf_thread_map
+    results[future_to_index[future]] = future.result()
+                                       ~~~~~~~~~~~~~^^
+  File "/home/suma/miniconda3/lib/python3.14/concurrent/futures/_base.py", line 447, in result
+    return self.__get_result()
+           ~~~~~~~~~~~~~~~~~^^
+  File "/home/suma/miniconda3/lib/python3.14/concurrent/futures/_base.py", line 396, in __get_result
+    raise self._exception
+  File "/home/suma/miniconda3/lib/python3.14/concurrent/futures/thread.py", line 86, in run
+    result = ctx.run(self.task)
+  File "/home/suma/miniconda3/lib/python3.14/concurrent/futures/thread.py", line 73, in run
+    return fn(*args, **kwargs)
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/huggingface_hub/_snapshot_download.py", line 502, in _inner_hf_hub_download
+    hf_hub_download(  # type: ignore
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+        repo_id,
+        ^^^^^^^^
+    ...<14 lines>...
+        dry_run=dry_run,
+        ^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/huggingface_hub/file_download.py", line 998, in hf_hub_download
+    return _hf_hub_download_to_local_dir(
+        # Destination
+    ...<16 lines>...
+        dry_run=dry_run,
+    )
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/huggingface_hub/file_download.py", line 1457, in _hf_hub_download_to_local_dir
+    _download_to_tmp_and_move(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        incomplete_path=paths.incomplete_path(etag),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<8 lines>...
+        tqdm_class=tqdm_class,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/huggingface_hub/file_download.py", line 1960, in _download_to_tmp_and_move
+    xet_get(
+    ~~~~~~~^
+        incomplete_path=tmp_path,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        tqdm_class=tqdm_class,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/suma/venvs/txnmem-vllm/lib/python3.14/site-packages/huggingface_hub/file_download.py", line 565, in xet_get
+    with session.new_file_download_group(
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        token_refresh_url=xet_file_data.refresh_route,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        progress_callback=progress.update_progress,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ) as group:
+    ^
+RuntimeError: Task error: File reconstruction error: CAS Client Error: Request error: HTTP status client error (401 Unauthorized), domain: https://cas-server.xethub.hf.co/v2/reconstructions/c4ecf1a4bf078b3b3124dfec1f9a94bb0a0c6ec098ffac0cb51ae90d497e5d2f

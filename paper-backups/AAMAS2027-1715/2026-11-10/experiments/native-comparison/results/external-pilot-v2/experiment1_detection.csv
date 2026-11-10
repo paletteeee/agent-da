@@ -1,0 +1,10 @@
+system,strategy,attempted,evaluated,violations,first_execution,types,effective_faults,excluded
+Mem0,ordinary,6,4,0,,,0,"{""unsupported_mapping"": 2}"
+Mem0,random,6,3,2,2,aborted_task_residue;partial_update;stale_descendant,2,"{""runtime_error"": 1, ""unsupported_mapping"": 2}"
+Mem0,directed,6,3,3,1,aborted_task_residue;dirty_read;partial_update;stale_descendant,2,"{""runtime_error"": 1, ""unsupported_mapping"": 2}"
+G-Memory,ordinary,6,2,0,,,0,"{""unsupported_mapping"": 4}"
+G-Memory,random,6,2,1,2,aborted_task_residue;partial_update,1,"{""unsupported_mapping"": 4}"
+G-Memory,directed,6,2,2,1,aborted_task_residue;dirty_read;partial_update,1,"{""unsupported_mapping"": 4}"
+A-MEM,ordinary,6,4,0,,,0,"{""unsupported_mapping"": 2}"
+A-MEM,random,6,4,3,2,aborted_task_residue;conflicting_versions;partial_update;stale_descendant,2,"{""unsupported_mapping"": 2}"
+A-MEM,directed,6,4,4,1,aborted_task_residue;conflicting_versions;dirty_read;partial_update;stale_descendant,2,"{""unsupported_mapping"": 2}"

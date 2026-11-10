@@ -1,0 +1,319 @@
+{
+  "schema": "txnmem.provenance_performance.measurement_results.v1",
+  "dataset_id": "provenance_performance_v10_measurements",
+  "result_scope": "measurement_results",
+  "measurement_matrix": {
+    "graph_node_counts": [100, 1000, 10000],
+    "concurrency_levels": [1, 2, 4, 8, 16],
+    "operations": ["read", "search", "derive", "invalidate_repair"],
+    "cell_count": 15,
+    "repetition_count": 450,
+    "sample_count": 14400,
+    "successful_sample_count": 14400,
+    "failed_sample_count": 0,
+    "retry_count": 0,
+    "setup_repair_count": 0
+  },
+  "methodology": {
+    "repetitions_per_cell": 30,
+    "samples_per_cell": 960,
+    "samples_per_operation_per_cell": 240,
+    "latency_unit": "ns",
+    "throughput_unit": "successful_operations_per_second",
+    "latency_population": "successful_operations_only",
+    "throughput_numerator": "successful_operations_only",
+    "bootstrap_unit": "whole_repetition",
+    "bootstrap_repetitions": 10000,
+    "bootstrap_seed": 17
+  },
+  "integrity": {
+    "independent_aggregate_recomputation_matches_source": true
+  },
+  "cells": [
+    {
+      "cell_id": "g100_c1",
+      "graph_node_count": 100,
+      "concurrency": 1,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 59474208.5, "p95": 144262723.8, "p99": 172243813.29},
+      "successful_throughput_ops_per_second": 16.825474628,
+      "throughput_95ci": {"lower": 16.125670016, "upper": 17.477550286},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 4345697.5, "p95": 7260044.5, "p99": 8304568.299999998}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 130018740.5, "p95": 166562639.59999993, "p99": 189990545.01999998}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 21544712.0, "p95": 27350557.649999995, "p99": 31825104.039999984}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 72651012.0, "p95": 93715245.6, "p99": 104302807.28999995}}
+      }
+    },
+    {
+      "cell_id": "g100_c2",
+      "graph_node_count": 100,
+      "concurrency": 2,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 68064383.5, "p95": 330635081.55, "p99": 353102280.67},
+      "successful_throughput_ops_per_second": 21.899463992,
+      "throughput_95ci": {"lower": 20.632091887, "upper": 23.307179885},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 5291878.0, "p95": 7550886.55, "p99": 8309620.109999999}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 223533630.0, "p95": 348081835.6, "p99": 370577153.87}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 29255549.5, "p95": 37670381.05, "p99": 49005182.269999996}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 87079670.5, "p95": 116902995.75, "p99": 131749097.94999996}}
+      }
+    },
+    {
+      "cell_id": "g100_c4",
+      "graph_node_count": 100,
+      "concurrency": 4,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 89755288.0, "p95": 655548937.15, "p99": 725237910.44},
+      "successful_throughput_ops_per_second": 21.151550366,
+      "throughput_95ci": {"lower": 20.058562043, "upper": 22.487822033},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 8139789.0, "p95": 12288388.05, "p99": 13510316.3}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 545988851.0, "p95": 718407229.0, "p99": 755532952.1599998}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 49843426.5, "p95": 74758489.24999999, "p99": 242198623.66999972}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 148983963.5, "p95": 195732490.4, "p99": 213318386.32999998}}
+      }
+    },
+    {
+      "cell_id": "g100_c8",
+      "graph_node_count": 100,
+      "concurrency": 8,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 229865625.5, "p95": 1233670242.55, "p99": 1428238120.72},
+      "successful_throughput_ops_per_second": 20.461595313,
+      "throughput_95ci": {"lower": 19.651022022, "upper": 21.294216522},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 16371067.0, "p95": 24819349.84999999, "p99": 30930499.17999999}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 1095529793.0, "p95": 1413960723.35, "p99": 1555869911.62}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 100378701.5, "p95": 150221380.15, "p99": 295229132.4699996}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 308217965.0, "p95": 385568508.15, "p99": 402216301.5799999}}
+      }
+    },
+    {
+      "cell_id": "g100_c16",
+      "graph_node_count": 100,
+      "concurrency": 16,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 442466277.0, "p95": 1702441682.25, "p99": 1895605343.14},
+      "successful_throughput_ops_per_second": 19.758651282,
+      "throughput_95ci": {"lower": 19.051362709, "upper": 20.521189211},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 39948765.0, "p95": 72051109.14999995, "p99": 84750220.72999999}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 1568181756.5, "p95": 1886405258.3, "p99": 1918774926.19}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 207489005.5, "p95": 294232050.2999999, "p99": 406228136.5899999}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 802607640.0, "p95": 1001114732.2499999, "p99": 1027063651.39}}
+      }
+    },
+    {
+      "cell_id": "g1000_c1",
+      "graph_node_count": 1000,
+      "concurrency": 1,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 62500587.5, "p95": 1533361951.0, "p99": 1617790302.69},
+      "successful_throughput_ops_per_second": 2.534724462,
+      "throughput_95ci": {"lower": 2.506543883, "upper": 2.563749322},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 4282266.0, "p95": 7044610.649999997, "p99": 8095083.929999998}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 1470183283.0, "p95": 1611776904.35, "p99": 1698399475.9799995}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 21356093.5, "p95": 35336013.44999998, "p99": 60630610.38999984}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 72209165.0, "p95": 86694412.4, "p99": 96277965.51999995}}
+      }
+    },
+    {
+      "cell_id": "g1000_c2",
+      "graph_node_count": 1000,
+      "concurrency": 2,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 71584940.5, "p95": 3216800726.65, "p99": 3987922558.47},
+      "successful_throughput_ops_per_second": 2.843982275,
+      "throughput_95ci": {"lower": 2.668030244, "upper": 3.029074603},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 5358341.0, "p95": 8447218.549999999, "p99": 9860928.6}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 2481546646.5, "p95": 3972414443.7999997, "p99": 4082853061.7299995}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 26701372.0, "p95": 45143272.849999905, "p99": 106452771.87999979}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 82557693.0, "p95": 114414096.1, "p99": 118120957.47999996}}
+      }
+    },
+    {
+      "cell_id": "g1000_c4",
+      "graph_node_count": 1000,
+      "concurrency": 4,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 90397199.0, "p95": 6835185953.499997, "p99": 7986409082.07},
+      "successful_throughput_ops_per_second": 2.520705305,
+      "throughput_95ci": {"lower": 2.412019718, "upper": 2.630661881},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 8672285.5, "p95": 13010591.199999996, "p99": 16398421.439999983}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 6046239602.5, "p95": 7932262745.45, "p99": 8432698824.729998}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 57380825.0, "p95": 90833334.39999995, "p99": 138138983.72999936}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 140054613.0, "p95": 246990119.29999998, "p99": 364846108.33}}
+      }
+    },
+    {
+      "cell_id": "g1000_c8",
+      "graph_node_count": 1000,
+      "concurrency": 8,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 174202864.5, "p95": 14894333443.65, "p99": 15938192619.87},
+      "successful_throughput_ops_per_second": 2.239141316,
+      "throughput_95ci": {"lower": 2.165761231, "upper": 2.323210676},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 16096969.5, "p95": 21307453.299999997, "p99": 23882009.68}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 14043598751.0, "p95": 15877103888.4, "p99": 16263585736.42}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 121610348.0, "p95": 173803825.65, "p99": 201158319.00999993}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 283439223.0, "p95": 445627425.75, "p99": 495026370.39999986}}
+      }
+    },
+    {
+      "cell_id": "g1000_c16",
+      "graph_node_count": 1000,
+      "concurrency": 16,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 563288327.5, "p95": 15221788038.6, "p99": 16448678103.15},
+      "successful_throughput_ops_per_second": 2.216910592,
+      "throughput_95ci": {"lower": 2.1541789, "upper": 2.283054163},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 21564670.5, "p95": 35911559.449999996, "p99": 56645122.829999834}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 14413134396.0, "p95": 16410469048.55, "p99": 16594173544.06}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 403209145.0, "p95": 534842983.7, "p99": 599819113.5699999}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 992162687.0, "p95": 1258921706.8999999, "p99": 1351600065.82}}
+      }
+    },
+    {
+      "cell_id": "g10000_c1",
+      "graph_node_count": 10000,
+      "concurrency": 1,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 63877392.5, "p95": 33867706024.5, "p99": 35404603894.519997},
+      "successful_throughput_ops_per_second": 0.12294304,
+      "throughput_95ci": {"lower": 0.122034788, "upper": 0.123855867},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 4596305.5, "p95": 8522286.899999999, "p99": 9520731.159999993}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 32342042307.0, "p95": 35190308078.7, "p99": 36001488727.69}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 21311859.0, "p95": 34551383.8, "p99": 171154773.33999693}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 73928008.5, "p95": 87354934.1, "p99": 92735480.15999997}}
+      }
+    },
+    {
+      "cell_id": "g10000_c2",
+      "graph_node_count": 10000,
+      "concurrency": 2,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 72418696.5, "p95": 90076884504.549988, "p99": 96829864321.899963},
+      "successful_throughput_ops_per_second": 0.099012241,
+      "throughput_95ci": {"lower": 0.095984356, "upper": 0.102353241},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 5828038.0, "p95": 9638747.05, "p99": 10877568.399999993}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 79827864507.0, "p95": 96051102326.35, "p99": 101041575161.98999}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 40559089.5, "p95": 74973574.94999997, "p99": 191997328.5599986}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 84304849.5, "p95": 124643238.64999972, "p99": 216334690.43999976}}
+      }
+    },
+    {
+      "cell_id": "g10000_c4",
+      "graph_node_count": 10000,
+      "concurrency": 4,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 322636849.0, "p95": 248251087347.949982, "p99": 263715226419.230011},
+      "successful_throughput_ops_per_second": 0.067594803,
+      "throughput_95ci": {"lower": 0.066848141, "upper": 0.068441141},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 9811789.0, "p95": 15256134.799999999, "p99": 17214728.29}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 233401061025.5, "p95": 262386947612.39996, "p99": 270818045712.88}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 204925001.0, "p95": 300324136.1999999, "p99": 348342703.6099998}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 639422951.0, "p95": 950115997.6999999, "p99": 1180046792.619998}}
+      }
+    },
+    {
+      "cell_id": "g10000_c8",
+      "graph_node_count": 10000,
+      "concurrency": 8,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 664050458.0, "p95": 531690805580.549988, "p99": 545494198799.72998},
+      "successful_throughput_ops_per_second": 0.063665468,
+      "throughput_95ci": {"lower": 0.061806491, "upper": 0.06598831},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 16759466.0, "p95": 22899153.549999997, "p99": 30288747.07999997}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 501812486156.0, "p95": 545341541732.15, "p99": 548731554915.43}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 405267053.0, "p95": 653317509.6999999, "p99": 851473323.0799985}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 1364088653.0, "p95": 1904850403.2, "p99": 2420955369.679996}}
+      }
+    },
+    {
+      "cell_id": "g10000_c16",
+      "graph_node_count": 10000,
+      "concurrency": 16,
+      "repetition_count": 30,
+      "successful_sample_count": 960,
+      "failed_sample_count": 0,
+      "retry_count": 0,
+      "setup_repair_count": 0,
+      "latency_ns": {"p50": 2037841670.5, "p95": 530274466360.249939, "p99": 545677945942.51001},
+      "successful_throughput_ops_per_second": 0.063491495,
+      "throughput_95ci": {"lower": 0.061534313, "upper": 0.066058248},
+      "operations": {
+        "read": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 22317341.0, "p95": 36740134.64999998, "p99": 46511038.05999999}},
+        "search": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 505359892611.0, "p95": 542509801398.94995, "p99": 579728560511.01}},
+        "derive": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 394861874.5, "p95": 720731395.4499999, "p99": 839124589.1099999}},
+        "invalidate_repair": {"successful_sample_count": 240, "failed_sample_count": 0, "latency_ns": {"p50": 3908517926.0, "p95": 5380257631.25, "p99": 5725808865.769999}}
+      }
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "schema": "txnmem.measurement_results_manifest.v1",
+  "dataset_id": "provenance_performance_v10_measurements",
+  "result_scope": "measurement_results",
+  "expected_counts": {
+    "cells": 15,
+    "repetitions": 450,
+    "operation_rows": 60,
+    "samples": 14400,
+    "successful_samples": 14400,
+    "failed_samples": 0,
+    "retries": 0,
+    "setup_repairs": 0
+  },
+  "validation": {
+    "matrix_complete": true,
+    "cross_format_values_match": true,
+    "percentile_order_valid": true,
+    "confidence_intervals_contain_estimates": true,
+    "independent_aggregate_recomputation_matches_source": true
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "media_type": "text/markdown",
+      "bytes": 1317,
+      "sha256": "449f788bc76d3e33840c71450cf097549b76bd63772b3fdef14114110bcb16b3"
+    },
+    {
+      "path": "aggregate.json",
+      "media_type": "application/json",
+      "cell_records": 15,
+      "bytes": 18505,
+      "sha256": "9045c59ad476dc0870fb51fc4b68469935bd79f83cf82b85bcc9845b7230f378"
+    },
+    {
+      "path": "cells.csv",
+      "media_type": "text/csv",
+      "records": 15,
+      "bytes": 1888,
+      "sha256": "7125b3d1d3a914886dbdb0d942770c5b827dfed786b70636a000cb7d6a41eea3"
+    },
+    {
+      "path": "operations.csv",
+      "media_type": "text/csv",
+      "records": 60,
+      "bytes": 4709,
+      "sha256": "d36fc67f9dcd1f54b92c2e9b02a21ce8dbf46e616d845a2c74faed555abe511f"
+    }
+  ]
+}

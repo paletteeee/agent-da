@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+results/
+external/
+logs/
+
+.venv-mem0/
+
+.venv-report*/

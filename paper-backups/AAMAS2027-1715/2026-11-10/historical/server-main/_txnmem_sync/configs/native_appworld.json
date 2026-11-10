@@ -1,0 +1,27 @@
+{
+  "manifest_version": 1,
+  "dataset_name": "appworld",
+  "tasks": [
+    {
+      "task_id": "appworld-024c982_1",
+      "instruction": "Request $13 publicly on Venmo from my friend, Stacy, with a note, \"For yesterday's meal\".",
+      "prompt": "Request $13 publicly on Venmo from my friend, Stacy, with a note, \"For yesterday's meal\".",
+      "agent_id": "agent_1",
+      "seed": 17,
+      "temperature": 0.0,
+      "max_steps": 30,
+      "failure_schedule": [],
+      "acceptance": {
+        "expected_status": "completed"
+      },
+      "task_dir": "024c982_1",
+      "supervisor": {
+        "first_name": "Joyce",
+        "last_name": "Weaver",
+        "email": "joyce-weav@gmail.com",
+        "phone_number": "3155673041"
+      },
+      "datetime": "2023-05-18T12:00:00"
+    }
+  ]
+}

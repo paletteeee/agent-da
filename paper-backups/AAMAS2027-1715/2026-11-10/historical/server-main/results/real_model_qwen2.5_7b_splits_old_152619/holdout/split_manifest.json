@@ -1,0 +1,10 @@
+{
+  "split": "holdout",
+  "task_ids": [
+    "native_invalidate_source_001",
+    "native_search_001"
+  ],
+  "source_manifest_sha256": "c7e77ac4af9de26da122608d9ed489348f2c20a9f209081f9053439302a62c9f",
+  "split_seed": 17,
+  "holdout_fraction": 0.2
+}

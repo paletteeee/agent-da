@@ -1,0 +1,11 @@
+{
+  "observation_count": 8,
+  "partial_visible_count": 0,
+  "policy_violation_count": 0,
+  "provenance_violation_count": 0,
+  "real_service_evidence": true,
+  "report_sha256": "953fc330142756ebbeeaba8847943cf3e72f3c1fbf3522e3bf038f2587016845",
+  "schema_version": 1,
+  "status": "passed",
+  "unknown_count": 0
+}

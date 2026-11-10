@@ -1,0 +1,61 @@
+{
+  "paper_title": "Transactional Shared Memory for Multiagent Systems via Policy-Consistent Commit and Provenance-Driven Repair",
+  "submission_id": 1715,
+  "paper_sha256": "08ad0f34abacd61de215e0cc0c38d860cacb4da1909649a4588b89ad28249d42",
+  "backup_date": "2026-11-10",
+  "server_export_date": "2026-11-09",
+  "archive_checks": [
+    {
+      "filename": "txnmem_code_20261109.tar.gz",
+      "bytes": 285273443,
+      "sha256": "ac4ebd9795c242ac920d0eec538dbd8ea2b45daf2c925293efb7c6f7f22498a2",
+      "checksum_verified_before_extraction": true,
+      "original_archive_uploaded": false
+    },
+    {
+      "filename": "txnmem_data_20261109.tar.gz",
+      "bytes": 2020416170,
+      "sha256": "0444df35bb3b41d690adfcf4282239e6530091a37322bb78e385d9663baa8120",
+      "checksum_verified_before_extraction": true,
+      "original_archive_uploaded": false
+    },
+    {
+      "filename": "txnmem_scale_20261109.tar.gz",
+      "bytes": 111914142,
+      "sha256": "a759994d293070654f8ab39e879f46733c9856f434e4e334911befa245faa8d3",
+      "checksum_verified_before_extraction": true,
+      "original_archive_uploaded": false
+    }
+  ],
+  "snapshot_roots": {
+    "experiments/native-comparison": "data/txnmem/external-comparison-20260928",
+    "experiments/real-storage": "data/txnmem/multi-agent-correctness-12f6560",
+    "experiments/provenance": "data/txnmem/provenance-ablation-source-eb9c59e",
+    "historical/server-main": "home/suma/txnmem",
+    "historical/submission-20260816": "home/suma/txnmem_submission_20260816",
+    "historical/nonroot-6022abd": "home/suma/txnmem-nonroot-6022abd",
+    "support/scale-runtime": "home/suma/txnmem_scale_runtime"
+  },
+  "existing_github_controlled_commit": "45b2d529066b470f809b54313ae52ae90a1666aa",
+  "scope": "Paper-focused source and experiment snapshots, not a full server/disk backup.",
+  "excluded_categories": [
+    "Unrelated CQ electricity-market experiments and outputs",
+    "Installed virtual environments, caches and compiled Python bytecode",
+    "Model weights (already excluded by the server export)",
+    "Git object databases and binary transfer bundles; source snapshots are included",
+    "Repeated development checkouts not selected as a named snapshot",
+    "Privileged controller private records, signing/authorization material and unrelated failure diagnostics",
+    "Vendored third-party dependency installations under external_data/deps; acquisition scripts and manifests are retained",
+    "LongMemEval runtime data, which is not a reported experiment in this submission",
+    "The original compressed archives remain local; selected contents are stored as individual files",
+    "Downloaded G-Memory/A-MEM source copies; pinned fetch script and per-file hashes are retained, following the supplied campaign reproduction instructions."
+  ],
+  "limitations": [
+    "Some public-runtime reports explicitly state raw_reports_committed=false; this backup does not assert those absent traces were recovered.",
+    "Symbolic links are not dereferenced. Selected source/data snapshots use regular files only.",
+    "Historical and pilot results are preserved separately and are not evidence for final paper claims.",
+    "The supplied PDF is identified by SHA256; the manuscript itself is not uploaded.",
+    "The final multi_agent_controlled_v1/data directory was not found in the three server archives; the generator, final CSV results, and reproducibility hashes are retained from the existing GitHub commit.",
+    "The v10 performance package contains aggregate measurements, not all 14,400 per-operation raw samples."
+  ]
+}

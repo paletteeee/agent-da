@@ -1,0 +1,16 @@
+{
+  "checks": {
+    "available": false,
+    "execution_mode": "native_contextual_agent_run",
+    "module_available": false,
+    "reason": "no_executable_agent_environment",
+    "source_exists": true
+  },
+  "dataset": "locomo",
+  "native_ground_truth": false,
+  "projection_fallback": false,
+  "reason": "blocked_external_dependency",
+  "status": "superseded_historical_baseline",
+  "superseded_by": "../../native_smoke_summary.json",
+  "current_runtime_status": "contextual_agent_runtime_native_smoke_completed"
+}

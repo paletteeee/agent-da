@@ -1,0 +1,49 @@
+{
+  "features": {
+    "agent_count": {
+      "mean_abs_diff": 1.0,
+      "synthetic_mean": 1.0,
+      "synthetic_std": 0.0,
+      "trace_mean": 0.0,
+      "trace_std": 0.0
+    },
+    "branch_factor": {
+      "mean_abs_diff": 0.25,
+      "synthetic_mean": 0.25,
+      "synthetic_std": 0.4330127018922193,
+      "trace_mean": 0.0,
+      "trace_std": 0.0
+    },
+    "operation_count": {
+      "mean_abs_diff": 4.25,
+      "synthetic_mean": 4.25,
+      "synthetic_std": 1.713913650100261,
+      "trace_mean": 0.0,
+      "trace_std": 0.0
+    },
+    "policy_change_rate": {
+      "mean_abs_diff": 0.07291666666666666,
+      "synthetic_mean": 0.07291666666666666,
+      "synthetic_std": 0.1280021429942136,
+      "trace_mean": 0.0,
+      "trace_std": 0.0
+    },
+    "provenance_depth": {
+      "mean_abs_diff": 0.5,
+      "synthetic_mean": 0.5,
+      "synthetic_std": 0.8660254037844386,
+      "trace_mean": 0.0,
+      "trace_std": 0.0
+    },
+    "transaction_size": {
+      "mean_abs_diff": 1.5,
+      "synthetic_mean": 1.5,
+      "synthetic_std": 0.7071067811865476,
+      "trace_mean": 0.0,
+      "trace_std": 0.0
+    }
+  },
+  "synthetic_count": 80,
+  "trace_count": 0,
+  "trace_grounded_status": "not_supplied"
+}

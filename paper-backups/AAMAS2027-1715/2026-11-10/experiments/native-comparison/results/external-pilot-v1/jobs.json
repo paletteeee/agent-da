@@ -1,0 +1,1262 @@
+[
+  {
+    "case_id": "multi_agent_visibility-0-ordinary-normal",
+    "roles": [
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 1,
+    "system": "TxnMem",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_visibility-0-directed-perturbed",
+    "roles": [
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 1,
+    "system": "TxnMem",
+    "trial_index": 1
+  },
+  {
+    "case_id": "interleaved_atomicity-0-ordinary-normal",
+    "roles": [
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 2,
+    "system": "TxnMem",
+    "trial_index": 1
+  },
+  {
+    "case_id": "interleaved_atomicity-0-directed-perturbed",
+    "roles": [
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 2,
+    "system": "TxnMem",
+    "trial_index": 1
+  },
+  {
+    "case_id": "concurrent_supersession-0-ordinary-normal",
+    "roles": [
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 3,
+    "system": "TxnMem",
+    "trial_index": 1
+  },
+  {
+    "case_id": "concurrent_supersession-0-directed-perturbed",
+    "roles": [
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 3,
+    "system": "TxnMem",
+    "trial_index": 1
+  },
+  {
+    "case_id": "actor_policy_scope-0-ordinary-normal",
+    "roles": [
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 4,
+    "system": "TxnMem",
+    "trial_index": 1
+  },
+  {
+    "case_id": "actor_policy_scope-0-directed-perturbed",
+    "roles": [
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 4,
+    "system": "TxnMem",
+    "trial_index": 1
+  },
+  {
+    "case_id": "cross_agent_provenance-0-ordinary-normal",
+    "roles": [
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 5,
+    "system": "TxnMem",
+    "trial_index": 1
+  },
+  {
+    "case_id": "cross_agent_provenance-0-directed-perturbed",
+    "roles": [
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 5,
+    "system": "TxnMem",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_mixed-0-ordinary-normal",
+    "roles": [
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 6,
+    "system": "TxnMem",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_mixed-0-directed-perturbed",
+    "roles": [
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 6,
+    "system": "TxnMem",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_visibility-1-ordinary-normal",
+    "roles": [
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 7,
+    "system": "TxnMem",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_visibility-1-directed-perturbed",
+    "roles": [
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 7,
+    "system": "TxnMem",
+    "trial_index": 2
+  },
+  {
+    "case_id": "interleaved_atomicity-1-ordinary-normal",
+    "roles": [
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 8,
+    "system": "TxnMem",
+    "trial_index": 2
+  },
+  {
+    "case_id": "interleaved_atomicity-1-directed-perturbed",
+    "roles": [
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 8,
+    "system": "TxnMem",
+    "trial_index": 2
+  },
+  {
+    "case_id": "concurrent_supersession-1-ordinary-normal",
+    "roles": [
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 9,
+    "system": "TxnMem",
+    "trial_index": 2
+  },
+  {
+    "case_id": "concurrent_supersession-1-directed-perturbed",
+    "roles": [
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 9,
+    "system": "TxnMem",
+    "trial_index": 2
+  },
+  {
+    "case_id": "actor_policy_scope-1-ordinary-normal",
+    "roles": [
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 10,
+    "system": "TxnMem",
+    "trial_index": 2
+  },
+  {
+    "case_id": "actor_policy_scope-1-directed-perturbed",
+    "roles": [
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 10,
+    "system": "TxnMem",
+    "trial_index": 2
+  },
+  {
+    "case_id": "cross_agent_provenance-1-ordinary-normal",
+    "roles": [
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 11,
+    "system": "TxnMem",
+    "trial_index": 2
+  },
+  {
+    "case_id": "cross_agent_provenance-1-directed-perturbed",
+    "roles": [
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 11,
+    "system": "TxnMem",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_mixed-1-ordinary-normal",
+    "roles": [
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 12,
+    "system": "TxnMem",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_mixed-1-directed-perturbed",
+    "roles": [
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 12,
+    "system": "TxnMem",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_visibility-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 1,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_visibility-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 1,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_visibility-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 1,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "interleaved_atomicity-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 2,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "interleaved_atomicity-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 2,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "interleaved_atomicity-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 2,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "concurrent_supersession-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 3,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "concurrent_supersession-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 3,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "concurrent_supersession-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 3,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "actor_policy_scope-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 4,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "actor_policy_scope-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 4,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "actor_policy_scope-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 4,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "cross_agent_provenance-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 5,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "cross_agent_provenance-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 5,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "cross_agent_provenance-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 5,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_mixed-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 6,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_mixed-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 6,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_mixed-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 6,
+    "system": "Mem0",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_visibility-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 7,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_visibility-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 7,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_visibility-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 7,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "interleaved_atomicity-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 8,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "interleaved_atomicity-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 8,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "interleaved_atomicity-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 8,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "concurrent_supersession-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 9,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "concurrent_supersession-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 9,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "concurrent_supersession-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 9,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "actor_policy_scope-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 10,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "actor_policy_scope-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 10,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "actor_policy_scope-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 10,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "cross_agent_provenance-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 11,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "cross_agent_provenance-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 11,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "cross_agent_provenance-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 11,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_mixed-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 12,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_mixed-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 12,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_mixed-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 12,
+    "system": "Mem0",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_visibility-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 1,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_visibility-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 1,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_visibility-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 1,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "interleaved_atomicity-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 2,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "interleaved_atomicity-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 2,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "interleaved_atomicity-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 2,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "concurrent_supersession-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 3,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "concurrent_supersession-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 3,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "concurrent_supersession-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 3,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "actor_policy_scope-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 4,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "actor_policy_scope-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 4,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "actor_policy_scope-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 4,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "cross_agent_provenance-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 5,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "cross_agent_provenance-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 5,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "cross_agent_provenance-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 5,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_mixed-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 6,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_mixed-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 6,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_mixed-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 6,
+    "system": "G-Memory",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_visibility-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 7,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_visibility-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 7,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_visibility-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 7,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "interleaved_atomicity-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 8,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "interleaved_atomicity-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 8,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "interleaved_atomicity-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 8,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "concurrent_supersession-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 9,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "concurrent_supersession-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 9,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "concurrent_supersession-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 9,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "actor_policy_scope-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 10,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "actor_policy_scope-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 10,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "actor_policy_scope-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 10,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "cross_agent_provenance-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 11,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "cross_agent_provenance-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 11,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "cross_agent_provenance-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 11,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_mixed-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 12,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_mixed-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 12,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_mixed-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 12,
+    "system": "G-Memory",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_visibility-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 1,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_visibility-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 1,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_visibility-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 1,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "interleaved_atomicity-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 2,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "interleaved_atomicity-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 2,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "interleaved_atomicity-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 2,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "concurrent_supersession-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 3,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "concurrent_supersession-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 3,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "concurrent_supersession-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 3,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "actor_policy_scope-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 4,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "actor_policy_scope-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 4,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "actor_policy_scope-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 4,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "cross_agent_provenance-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 5,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "cross_agent_provenance-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 5,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "cross_agent_provenance-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 5,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_mixed-0-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 6,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_mixed-0-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 6,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_mixed-0-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 6,
+    "system": "A-MEM",
+    "trial_index": 1
+  },
+  {
+    "case_id": "multi_agent_visibility-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 7,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_visibility-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 7,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_visibility-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 7,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "interleaved_atomicity-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 8,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "interleaved_atomicity-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 8,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "interleaved_atomicity-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 8,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "concurrent_supersession-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 9,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "concurrent_supersession-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 9,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "concurrent_supersession-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 9,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "actor_policy_scope-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 10,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "actor_policy_scope-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 10,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "actor_policy_scope-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 10,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "cross_agent_provenance-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 11,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "cross_agent_provenance-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 11,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "cross_agent_provenance-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 11,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_mixed-1-ordinary-normal",
+    "roles": [
+      "discovery",
+      "comparison_normal"
+    ],
+    "strategy_trial_index": 12,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_mixed-1-random-perturbed",
+    "roles": [
+      "discovery"
+    ],
+    "strategy_trial_index": 12,
+    "system": "A-MEM",
+    "trial_index": 2
+  },
+  {
+    "case_id": "multi_agent_mixed-1-directed-perturbed",
+    "roles": [
+      "discovery",
+      "comparison_perturbed"
+    ],
+    "strategy_trial_index": 12,
+    "system": "A-MEM",
+    "trial_index": 2
+  }
+]

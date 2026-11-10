@@ -1,0 +1,110 @@
+{
+  "calibration": {
+    "agent_count": 1,
+    "branch_factor": 1,
+    "concurrency": 1,
+    "policy_churn": 0,
+    "provenance_depth": 1,
+    "txn_size": 27
+  },
+  "evidence": {
+    "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+    "instance_count": 10,
+    "oracle_match_by_variant": {
+      "Naive": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      },
+      "TxnMem": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      },
+      "TxnMem-NoPolicyCommit": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      },
+      "TxnMem-NoRepair": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      },
+      "TxnMem-NoTxn": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      }
+    },
+    "production_latency_claim": false,
+    "replay_envelope_operation_count": 20,
+    "replay_operation_count": 292,
+    "source_operation_count": 272,
+    "trace_ground_truth_native": false
+  },
+  "features": {
+    "agent_count": {
+      "mean_abs_diff": 1.0,
+      "synthetic_mean": 0.0,
+      "synthetic_std": 0.0,
+      "trace_mean": 1.0,
+      "trace_std": 0.0
+    },
+    "branch_factor": {
+      "mean_abs_diff": 0.0,
+      "synthetic_mean": 0.0,
+      "synthetic_std": 0.0,
+      "trace_mean": 0.0,
+      "trace_std": 0.0
+    },
+    "operation_count": {
+      "mean_abs_diff": 29.2,
+      "synthetic_mean": 0.0,
+      "synthetic_std": 0.0,
+      "trace_mean": 29.2,
+      "trace_std": 4.467661580737736
+    },
+    "policy_change_rate": {
+      "mean_abs_diff": 0.0,
+      "synthetic_mean": 0.0,
+      "synthetic_std": 0.0,
+      "trace_mean": 0.0,
+      "trace_std": 0.0
+    },
+    "provenance_depth": {
+      "mean_abs_diff": 0.0,
+      "synthetic_mean": 0.0,
+      "synthetic_std": 0.0,
+      "trace_mean": 0.0,
+      "trace_std": 0.0
+    },
+    "transaction_size": {
+      "mean_abs_diff": 27.2,
+      "synthetic_mean": 0.0,
+      "synthetic_std": 0.0,
+      "trace_mean": 27.2,
+      "trace_std": 4.467661580737736
+    }
+  },
+  "split": {
+    "holdout_fraction": 0.2,
+    "holdout_record_count": 2,
+    "seed": 17,
+    "train_record_count": 8
+  },
+  "synthetic_count": 0,
+  "trace_count": 10,
+  "trace_grounded_status": "trace_supplied",
+  "trace_inventory": {
+    "adapters": [
+      "locomo"
+    ],
+    "event_count": 272,
+    "instance_count": 10,
+    "sources": [
+      "official-locomo-2024"
+    ],
+    "status": "trace_supplied"
+  }
+}

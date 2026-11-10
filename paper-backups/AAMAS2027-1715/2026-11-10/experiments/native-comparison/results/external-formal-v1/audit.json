@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "rows": 3300,
+  "replays": 60,
+  "checks": [
+    "all campaign artifact hashes",
+    "all input and observation hashes",
+    "all judgments recomputed from raw evidence",
+    "all replay outcomes recomputed",
+    "per-system observed type union includes explicit censored rows for other strategies"
+  ],
+  "postprocessing_sources": {
+    "scripts/finalize_external_comparison.py": "916f31e2d0c6e8d02ce5327ffe6c657e1222f48e4e3396b45ffe7683e767aa8e",
+    "src/txnmem_external_report.py": "98681e33df3d1d2b4a9df22b91ab78b9680f07c210f6c40168bd5e1d75e888bb"
+  }
+}

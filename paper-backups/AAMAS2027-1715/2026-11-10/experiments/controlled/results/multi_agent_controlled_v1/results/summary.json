@@ -1,0 +1,2152 @@
+{
+  "exhaustive": {
+    "actor_policy_scope/Naive": {
+      "observation_count": 70,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 70,
+          "upper": 0.05202306241026692
+        },
+        "total": 70
+      },
+      "variant": "Naive",
+      "violation_counts": {
+        "actor_authorization_violation": 70,
+        "actor_scope_violation": 70,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 70,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9479769375897331,
+          "successes": 70,
+          "trials": 70,
+          "upper": 1.0
+        },
+        "total": 70
+      },
+      "workload": "actor_policy_scope"
+    },
+    "actor_policy_scope/TxnMem": {
+      "observation_count": 70,
+      "oracle_matches": {
+        "count": 70,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9479769375897331,
+          "successes": 70,
+          "trials": 70,
+          "upper": 1.0
+        },
+        "total": 70
+      },
+      "variant": "TxnMem",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 70,
+          "upper": 0.05202306241026692
+        },
+        "total": 70
+      },
+      "workload": "actor_policy_scope"
+    },
+    "actor_policy_scope/TxnMem-NoPolicyCommit": {
+      "observation_count": 70,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 70,
+          "upper": 0.05202306241026692
+        },
+        "total": 70
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "violation_counts": {
+        "actor_authorization_violation": 70,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 70,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9479769375897331,
+          "successes": 70,
+          "trials": 70,
+          "upper": 1.0
+        },
+        "total": 70
+      },
+      "workload": "actor_policy_scope"
+    },
+    "actor_policy_scope/TxnMem-NoRepair": {
+      "observation_count": 70,
+      "oracle_matches": {
+        "count": 70,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9479769375897331,
+          "successes": 70,
+          "trials": 70,
+          "upper": 1.0
+        },
+        "total": 70
+      },
+      "variant": "TxnMem-NoRepair",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 70,
+          "upper": 0.05202306241026692
+        },
+        "total": 70
+      },
+      "workload": "actor_policy_scope"
+    },
+    "actor_policy_scope/TxnMem-NoTxn": {
+      "observation_count": 70,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 70,
+          "upper": 0.05202306241026692
+        },
+        "total": 70
+      },
+      "variant": "TxnMem-NoTxn",
+      "violation_counts": {
+        "actor_authorization_violation": 70,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 70,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9479769375897331,
+          "successes": 70,
+          "trials": 70,
+          "upper": 1.0
+        },
+        "total": 70
+      },
+      "workload": "actor_policy_scope"
+    },
+    "concurrent_supersession/Naive": {
+      "observation_count": 120,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 120,
+          "upper": 0.031019166418703486
+        },
+        "total": 120
+      },
+      "variant": "Naive",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 120,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 120,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9689808335812966,
+          "successes": 120,
+          "trials": 120,
+          "upper": 1.0
+        },
+        "total": 120
+      },
+      "workload": "concurrent_supersession"
+    },
+    "concurrent_supersession/TxnMem": {
+      "observation_count": 120,
+      "oracle_matches": {
+        "count": 120,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9689808335812966,
+          "successes": 120,
+          "trials": 120,
+          "upper": 1.0
+        },
+        "total": 120
+      },
+      "variant": "TxnMem",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 120,
+          "upper": 0.031019166418703486
+        },
+        "total": 120
+      },
+      "workload": "concurrent_supersession"
+    },
+    "concurrent_supersession/TxnMem-NoPolicyCommit": {
+      "observation_count": 120,
+      "oracle_matches": {
+        "count": 120,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9689808335812966,
+          "successes": 120,
+          "trials": 120,
+          "upper": 1.0
+        },
+        "total": 120
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 120,
+          "upper": 0.031019166418703486
+        },
+        "total": 120
+      },
+      "workload": "concurrent_supersession"
+    },
+    "concurrent_supersession/TxnMem-NoRepair": {
+      "observation_count": 120,
+      "oracle_matches": {
+        "count": 120,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9689808335812966,
+          "successes": 120,
+          "trials": 120,
+          "upper": 1.0
+        },
+        "total": 120
+      },
+      "variant": "TxnMem-NoRepair",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 120,
+          "upper": 0.031019166418703486
+        },
+        "total": 120
+      },
+      "workload": "concurrent_supersession"
+    },
+    "concurrent_supersession/TxnMem-NoTxn": {
+      "observation_count": 120,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 120,
+          "upper": 0.031019166418703486
+        },
+        "total": 120
+      },
+      "variant": "TxnMem-NoTxn",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 120,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 120,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9689808335812966,
+          "successes": 120,
+          "trials": 120,
+          "upper": 1.0
+        },
+        "total": 120
+      },
+      "workload": "concurrent_supersession"
+    },
+    "cross_agent_provenance/Naive": {
+      "observation_count": 4,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 4,
+          "upper": 0.4898908364545973
+        },
+        "total": 4
+      },
+      "variant": "Naive",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 4,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 4,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.5101091635454027,
+          "successes": 4,
+          "trials": 4,
+          "upper": 1.0
+        },
+        "total": 4
+      },
+      "workload": "cross_agent_provenance"
+    },
+    "cross_agent_provenance/TxnMem": {
+      "observation_count": 4,
+      "oracle_matches": {
+        "count": 4,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.5101091635454027,
+          "successes": 4,
+          "trials": 4,
+          "upper": 1.0
+        },
+        "total": 4
+      },
+      "variant": "TxnMem",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 4,
+          "upper": 0.4898908364545973
+        },
+        "total": 4
+      },
+      "workload": "cross_agent_provenance"
+    },
+    "cross_agent_provenance/TxnMem-NoPolicyCommit": {
+      "observation_count": 4,
+      "oracle_matches": {
+        "count": 4,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.5101091635454027,
+          "successes": 4,
+          "trials": 4,
+          "upper": 1.0
+        },
+        "total": 4
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 4,
+          "upper": 0.4898908364545973
+        },
+        "total": 4
+      },
+      "workload": "cross_agent_provenance"
+    },
+    "cross_agent_provenance/TxnMem-NoRepair": {
+      "observation_count": 4,
+      "oracle_matches": {
+        "count": 4,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.5101091635454027,
+          "successes": 4,
+          "trials": 4,
+          "upper": 1.0
+        },
+        "total": 4
+      },
+      "variant": "TxnMem-NoRepair",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 4,
+          "upper": 0.4898908364545973
+        },
+        "total": 4
+      },
+      "workload": "cross_agent_provenance"
+    },
+    "cross_agent_provenance/TxnMem-NoTxn": {
+      "observation_count": 4,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 4,
+          "upper": 0.4898908364545973
+        },
+        "total": 4
+      },
+      "variant": "TxnMem-NoTxn",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 4,
+          "upper": 0.4898908364545973
+        },
+        "total": 4
+      },
+      "workload": "cross_agent_provenance"
+    },
+    "interleaved_atomicity/Naive": {
+      "observation_count": 10,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 10,
+          "upper": 0.2775327998628892
+        },
+        "total": 10
+      },
+      "variant": "Naive",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 10,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 10
+      },
+      "violations": {
+        "count": 10,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.7224672001371107,
+          "successes": 10,
+          "trials": 10,
+          "upper": 1.0
+        },
+        "total": 10
+      },
+      "workload": "interleaved_atomicity"
+    },
+    "interleaved_atomicity/TxnMem": {
+      "observation_count": 10,
+      "oracle_matches": {
+        "count": 10,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.7224672001371107,
+          "successes": 10,
+          "trials": 10,
+          "upper": 1.0
+        },
+        "total": 10
+      },
+      "variant": "TxnMem",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 10,
+          "upper": 0.2775327998628892
+        },
+        "total": 10
+      },
+      "workload": "interleaved_atomicity"
+    },
+    "interleaved_atomicity/TxnMem-NoPolicyCommit": {
+      "observation_count": 10,
+      "oracle_matches": {
+        "count": 10,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.7224672001371107,
+          "successes": 10,
+          "trials": 10,
+          "upper": 1.0
+        },
+        "total": 10
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 10,
+          "upper": 0.2775327998628892
+        },
+        "total": 10
+      },
+      "workload": "interleaved_atomicity"
+    },
+    "interleaved_atomicity/TxnMem-NoRepair": {
+      "observation_count": 10,
+      "oracle_matches": {
+        "count": 10,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.7224672001371107,
+          "successes": 10,
+          "trials": 10,
+          "upper": 1.0
+        },
+        "total": 10
+      },
+      "variant": "TxnMem-NoRepair",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 10,
+          "upper": 0.2775327998628892
+        },
+        "total": 10
+      },
+      "workload": "interleaved_atomicity"
+    },
+    "interleaved_atomicity/TxnMem-NoTxn": {
+      "observation_count": 10,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 10,
+          "upper": 0.2775327998628892
+        },
+        "total": 10
+      },
+      "variant": "TxnMem-NoTxn",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 10,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 10
+      },
+      "violations": {
+        "count": 10,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.7224672001371107,
+          "successes": 10,
+          "trials": 10,
+          "upper": 1.0
+        },
+        "total": 10
+      },
+      "workload": "interleaved_atomicity"
+    },
+    "multi_agent_visibility/Naive": {
+      "observation_count": 3,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 3,
+          "upper": 0.5614970317550454
+        },
+        "total": 3
+      },
+      "variant": "Naive",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 3,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 3,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.4385029682449546,
+          "successes": 3,
+          "trials": 3,
+          "upper": 1.0
+        },
+        "total": 3
+      },
+      "workload": "multi_agent_visibility"
+    },
+    "multi_agent_visibility/TxnMem": {
+      "observation_count": 3,
+      "oracle_matches": {
+        "count": 3,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.4385029682449546,
+          "successes": 3,
+          "trials": 3,
+          "upper": 1.0
+        },
+        "total": 3
+      },
+      "variant": "TxnMem",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 3,
+          "upper": 0.5614970317550454
+        },
+        "total": 3
+      },
+      "workload": "multi_agent_visibility"
+    },
+    "multi_agent_visibility/TxnMem-NoPolicyCommit": {
+      "observation_count": 3,
+      "oracle_matches": {
+        "count": 3,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.4385029682449546,
+          "successes": 3,
+          "trials": 3,
+          "upper": 1.0
+        },
+        "total": 3
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 3,
+          "upper": 0.5614970317550454
+        },
+        "total": 3
+      },
+      "workload": "multi_agent_visibility"
+    },
+    "multi_agent_visibility/TxnMem-NoRepair": {
+      "observation_count": 3,
+      "oracle_matches": {
+        "count": 3,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.4385029682449546,
+          "successes": 3,
+          "trials": 3,
+          "upper": 1.0
+        },
+        "total": 3
+      },
+      "variant": "TxnMem-NoRepair",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 3,
+          "upper": 0.5614970317550454
+        },
+        "total": 3
+      },
+      "workload": "multi_agent_visibility"
+    },
+    "multi_agent_visibility/TxnMem-NoTxn": {
+      "observation_count": 3,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 3,
+          "upper": 0.5614970317550454
+        },
+        "total": 3
+      },
+      "variant": "TxnMem-NoTxn",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 3,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 3,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.4385029682449546,
+          "successes": 3,
+          "trials": 3,
+          "upper": 1.0
+        },
+        "total": 3
+      },
+      "workload": "multi_agent_visibility"
+    }
+  },
+  "schema_version": 1,
+  "seeded": {
+    "actor_policy_scope/Naive": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "variant": "Naive",
+      "violation_counts": {
+        "actor_authorization_violation": 50,
+        "actor_scope_violation": 50,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "workload": "actor_policy_scope"
+    },
+    "actor_policy_scope/TxnMem": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "actor_policy_scope"
+    },
+    "actor_policy_scope/TxnMem-NoPolicyCommit": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "violation_counts": {
+        "actor_authorization_violation": 50,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "workload": "actor_policy_scope"
+    },
+    "actor_policy_scope/TxnMem-NoRepair": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoRepair",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "actor_policy_scope"
+    },
+    "actor_policy_scope/TxnMem-NoTxn": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoTxn",
+      "violation_counts": {
+        "actor_authorization_violation": 50,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "workload": "actor_policy_scope"
+    },
+    "concurrent_supersession/Naive": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "variant": "Naive",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 50,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "workload": "concurrent_supersession"
+    },
+    "concurrent_supersession/TxnMem": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "concurrent_supersession"
+    },
+    "concurrent_supersession/TxnMem-NoPolicyCommit": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "concurrent_supersession"
+    },
+    "concurrent_supersession/TxnMem-NoRepair": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoRepair",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "concurrent_supersession"
+    },
+    "concurrent_supersession/TxnMem-NoTxn": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoTxn",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 50,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "workload": "concurrent_supersession"
+    },
+    "cross_agent_provenance/Naive": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "variant": "Naive",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 50,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "workload": "cross_agent_provenance"
+    },
+    "cross_agent_provenance/TxnMem": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "cross_agent_provenance"
+    },
+    "cross_agent_provenance/TxnMem-NoPolicyCommit": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "cross_agent_provenance"
+    },
+    "cross_agent_provenance/TxnMem-NoRepair": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 26,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.52,
+          "lower": 0.38511744890044614,
+          "successes": 26,
+          "trials": 50,
+          "upper": 0.6520286471342196
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoRepair",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 24,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 24,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.48,
+          "lower": 0.34797135286578046,
+          "successes": 24,
+          "trials": 50,
+          "upper": 0.6148825510995539
+        },
+        "total": 50
+      },
+      "workload": "cross_agent_provenance"
+    },
+    "cross_agent_provenance/TxnMem-NoTxn": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 24,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.48,
+          "lower": 0.34797135286578046,
+          "successes": 24,
+          "trials": 50,
+          "upper": 0.6148825510995539
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoTxn",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "cross_agent_provenance"
+    },
+    "interleaved_atomicity/Naive": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 7,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.14,
+          "lower": 0.06950833427016294,
+          "successes": 7,
+          "trials": 50,
+          "upper": 0.2618619371058554
+        },
+        "total": 50
+      },
+      "variant": "Naive",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 32,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 32
+      },
+      "violations": {
+        "count": 32,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.64,
+          "lower": 0.501410168761127,
+          "successes": 32,
+          "trials": 50,
+          "upper": 0.7586125034815325
+        },
+        "total": 50
+      },
+      "workload": "interleaved_atomicity"
+    },
+    "interleaved_atomicity/TxnMem": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "interleaved_atomicity"
+    },
+    "interleaved_atomicity/TxnMem-NoPolicyCommit": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "interleaved_atomicity"
+    },
+    "interleaved_atomicity/TxnMem-NoRepair": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoRepair",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "interleaved_atomicity"
+    },
+    "interleaved_atomicity/TxnMem-NoTxn": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 7,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.14,
+          "lower": 0.06950833427016294,
+          "successes": 7,
+          "trials": 50,
+          "upper": 0.2618619371058554
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoTxn",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 32,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 32
+      },
+      "violations": {
+        "count": 32,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.64,
+          "lower": 0.501410168761127,
+          "successes": 32,
+          "trials": 50,
+          "upper": 0.7586125034815325
+        },
+        "total": 50
+      },
+      "workload": "interleaved_atomicity"
+    },
+    "multi_agent_mixed/Naive": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "variant": "Naive",
+      "violation_counts": {
+        "actor_authorization_violation": 50,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 50,
+        "cross_txn_flush_violation": 50,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 50
+      },
+      "violations": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "workload": "multi_agent_mixed"
+    },
+    "multi_agent_mixed/TxnMem": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "multi_agent_mixed"
+    },
+    "multi_agent_mixed/TxnMem-NoPolicyCommit": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "multi_agent_mixed"
+    },
+    "multi_agent_mixed/TxnMem-NoRepair": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoRepair",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "multi_agent_mixed"
+    },
+    "multi_agent_mixed/TxnMem-NoTxn": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoTxn",
+      "violation_counts": {
+        "actor_authorization_violation": 50,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 50,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 50
+      },
+      "violations": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "workload": "multi_agent_mixed"
+    },
+    "multi_agent_visibility/Naive": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "variant": "Naive",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 50,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "workload": "multi_agent_visibility"
+    },
+    "multi_agent_visibility/TxnMem": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "multi_agent_visibility"
+    },
+    "multi_agent_visibility/TxnMem-NoPolicyCommit": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "multi_agent_visibility"
+    },
+    "multi_agent_visibility/TxnMem-NoRepair": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoRepair",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 0,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "workload": "multi_agent_visibility"
+    },
+    "multi_agent_visibility/TxnMem-NoTxn": {
+      "observation_count": 50,
+      "oracle_matches": {
+        "count": 0,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 0.0,
+          "lower": 0.0,
+          "successes": 0,
+          "trials": 50,
+          "upper": 0.07134759913335872
+        },
+        "total": 50
+      },
+      "variant": "TxnMem-NoTxn",
+      "violation_counts": {
+        "actor_authorization_violation": 0,
+        "actor_scope_violation": 0,
+        "atomicity_violation": 0,
+        "conflict_consistency_violation": 0,
+        "cross_agent_provenance_violation": 0,
+        "cross_txn_flush_violation": 0,
+        "dirty_read_violation": 50,
+        "recovery_consistency_violation": 0
+      },
+      "violations": {
+        "count": 50,
+        "interval_95": {
+          "confidence": 0.95,
+          "estimate": 1.0,
+          "lower": 0.9286524008666414,
+          "successes": 50,
+          "trials": 50,
+          "upper": 1.0
+        },
+        "total": 50
+      },
+      "workload": "multi_agent_visibility"
+    }
+  }
+}

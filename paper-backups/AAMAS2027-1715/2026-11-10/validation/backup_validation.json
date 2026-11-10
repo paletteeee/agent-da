@@ -1,0 +1,92 @@
+{
+  "status": "passed",
+  "source_files_verified": 2247,
+  "source_bytes_verified": 75597276,
+  "native_inputs": 900,
+  "native_execution_records": 3300,
+  "native_raw_judgments_recomputed": true,
+  "witness_replays_verified": 60,
+  "paper_table_2_matches": true,
+  "paper_table_3_descendants": {
+    "TxnMem": [
+      0,
+      242
+    ],
+    "Mem0": [
+      242,
+      242
+    ],
+    "A-MEM": [
+      242,
+      242
+    ]
+  },
+  "controlled_totals": {
+    "seeded": {
+      "Naive": [
+        300,
+        282,
+        7
+      ],
+      "TxnMem": [
+        300,
+        0,
+        300
+      ],
+      "TxnMem-NoPolicyCommit": [
+        300,
+        50,
+        250
+      ],
+      "TxnMem-NoRepair": [
+        300,
+        24,
+        276
+      ],
+      "TxnMem-NoTxn": [
+        300,
+        232,
+        31
+      ]
+    },
+    "exhaustive": {
+      "Naive": [
+        207,
+        207,
+        0
+      ],
+      "TxnMem": [
+        207,
+        0,
+        207
+      ],
+      "TxnMem-NoPolicyCommit": [
+        207,
+        70,
+        137
+      ],
+      "TxnMem-NoRepair": [
+        207,
+        0,
+        207
+      ],
+      "TxnMem-NoTxn": [
+        207,
+        203,
+        0
+      ]
+    }
+  },
+  "mutation_kill_rate": 0.868,
+  "real_storage_counts": {
+    "TxnMem/committed_complete": 90,
+    "Naive/partial_visible": 60,
+    "Naive/policy_violation": 30,
+    "Naive/provenance_violation": 30,
+    "TxnMem/aborted_clean": 30
+  },
+  "performance_repetitions": 450,
+  "performance_operations": 14400,
+  "public_integration_summary_checks": "passed",
+  "validation_scope": "File integrity and existing experiment evidence; experiments were not rerun."
+}

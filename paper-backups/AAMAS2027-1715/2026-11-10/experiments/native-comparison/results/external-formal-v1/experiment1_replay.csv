@@ -1,0 +1,13 @@
+system,violation,successes,attempts
+Mem0,aborted_task_residue,5,5
+Mem0,dirty_read,5,5
+Mem0,partial_update,5,5
+Mem0,stale_descendant,5,5
+G-Memory,aborted_task_residue,5,5
+G-Memory,dirty_read,5,5
+G-Memory,partial_update,5,5
+A-MEM,aborted_task_residue,5,5
+A-MEM,conflicting_versions,5,5
+A-MEM,dirty_read,5,5
+A-MEM,partial_update,5,5
+A-MEM,stale_descendant,5,5

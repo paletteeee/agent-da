@@ -1,0 +1,121 @@
+Failed to load spaCy lemma model: spaCy is not installed. Install it with: pip install mem0ai[nlp]
+fastembed not installed - BM25 keyword search disabled. Install it with: pip install "mem0ai[extras]"
+{
+  "status": "ok",
+  "implementation": "mem0.Memory 2.0.18; infer=False; embedded Qdrant",
+  "provider_profile": {
+    "embedding": "sha256-counter-v1-64d",
+    "generation": "fixed-response-v1",
+    "scope": "controlled operations; no semantic quality or process-crash claim"
+  },
+  "initial_snapshot": {
+    "unrelated": {
+      "value": "Independent fact remains valid",
+      "native_id": "86fe7a50-f06e-41c6-824c-121ef6375135"
+    }
+  },
+  "final_snapshot": {
+    "w1": {
+      "value": "Fact w1 instance 0",
+      "native_id": "2cfded50-d32d-4a6e-9be8-c8825a9a2048"
+    },
+    "unrelated": {
+      "value": "Independent fact remains valid",
+      "native_id": "86fe7a50-f06e-41c6-824c-121ef6375135"
+    },
+    "w0": {
+      "value": "Fact w0 instance 0",
+      "native_id": "9bc06e44-69ee-45b7-8f21-59e877cf2a69"
+    }
+  },
+  "final_ids": [
+    "unrelated",
+    "w0",
+    "w1"
+  ],
+  "events": [
+    {
+      "operation": "A1",
+      "kind": "begin",
+      "actor": "A",
+      "response": null,
+      "elapsed_ns": 1090
+    },
+    {
+      "operation": "A2",
+      "kind": "put",
+      "actor": "A",
+      "response": null,
+      "elapsed_ns": 7562869
+    },
+    {
+      "operation": "A3",
+      "kind": "put",
+      "actor": "A",
+      "response": null,
+      "elapsed_ns": 7473969
+    },
+    {
+      "operation": "B1",
+      "kind": "begin",
+      "actor": "B",
+      "response": null,
+      "elapsed_ns": 850
+    },
+    {
+      "operation": "B2",
+      "kind": "read",
+      "actor": "B",
+      "response": [
+        "w0"
+      ],
+      "elapsed_ns": 69950
+    },
+    {
+      "operation": "B3",
+      "kind": "commit",
+      "actor": "B",
+      "response": "completed",
+      "elapsed_ns": 800
+    },
+    {
+      "operation": "A4",
+      "kind": "commit",
+      "actor": "A",
+      "response": "completed",
+      "elapsed_ns": 610
+    }
+  ],
+  "reads": [
+    {
+      "operation": "B2",
+      "txn": "B",
+      "key": "w0",
+      "visible": [
+        "w0"
+      ],
+      "completed": []
+    }
+  ],
+  "final_native_reads": {
+    "w1": [
+      "w1"
+    ],
+    "unrelated": [
+      "unrelated"
+    ],
+    "w0": [
+      "w0"
+    ]
+  },
+  "transactions": {
+    "A": "completed",
+    "B": "completed"
+  },
+  "invalidated": [],
+  "revoked": [],
+  "fault_triggered": false,
+  "model_provider_calls": 0,
+  "elapsed_ns": 1847385809
+}
+{'case_id': 'multi_agent_visibility-0-directed-perturbed', 'family': 'multi_agent_visibility', 'strategy': 'directed', 'control': False, 'status': 'ok', 'reason': '', 'correctness_included': True, 'any_violation': 1, 'violations': ['dirty_read'], 'normal_completed': None, 'false_abort_count': None, 'normal_task_count': None, 'stale_descendant_count': 0, 'affected_descendant_count': 0}

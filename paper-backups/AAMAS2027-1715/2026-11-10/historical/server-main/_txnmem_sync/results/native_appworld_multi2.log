@@ -1,0 +1,22 @@
+Traceback (most recent call last):
+  File "/data/txnmem/_txnmem_sync/src/txnmem_experiment.py", line 568, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/data/txnmem/_txnmem_sync/src/txnmem_experiment.py", line 529, in main
+    report = run_benchmark_experiment_manifest(manifest, model, adapter_factory, args.out_dir)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/_txnmem_sync/src/txnmem_real_experiment.py", line 289, in run_benchmark_experiment_manifest
+    run_report = run_benchmark_agent(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/_txnmem_sync/src/txnmem_benchmark_bridge.py", line 375, in run_benchmark_agent
+    messages.append({"role": "user", "content": adapter.reset(task)})
+                                                ^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/_txnmem_sync/src/txnmem_benchmark_bridge.py", line 221, in reset
+    self.environment = AppWorld(
+                       ^^^^^^^^^
+  File "/data/txnmem/_txnmem_sync/external_data/deps/appworld/src/appworld/environment.py", line 652, in __init__
+    self.task = Task.load(
+                ^^^^^^^^^^
+  File "/data/txnmem/_txnmem_sync/external_data/deps/appworld/src/appworld/task.py", line 108, in load
+    raise Exception(f"The task directory ({task_directory}) doesn't exist.")
+Exception: The task directory (./data/tasks/024c982_1) doesn't exist.

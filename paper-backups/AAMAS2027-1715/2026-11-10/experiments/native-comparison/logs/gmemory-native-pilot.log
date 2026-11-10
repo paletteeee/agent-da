@@ -1,0 +1,125 @@
+/data/txnmem/external-comparison-20260928/.venv/lib/python3.12/site-packages/finch/finch.py:12: UserWarning: pynndescent is not installed: No module named 'pynndescent'
+  warnings.warn('pynndescent is not installed: {}'.format(e))
+# api url:  http://127.0.0.1:9
+# api key:  not-a-secret-controlled-provider
+New empty graph created
+{'hop': 1, 'start_insights_threshold': 5, 'rounds_per_insights': 5, 'insights_point_num': 5, 'working_dir': '/data/txnmem/external-comparison-20260928/results/native-state/GMemory_lvu66z72/case'}
+{
+  "status": "ok",
+  "implementation": "GMemory.add_memory/retrieve_memory; task-record mapping",
+  "provider_profile": {
+    "embedding": "sha256-counter-v1-64d",
+    "generation": "fixed-response-v1",
+    "scope": "controlled operations; no semantic quality or process-crash claim"
+  },
+  "initial_snapshot": {
+    "unrelated": {
+      "value": "Independent fact remains valid",
+      "native_id": "3713ef77-5725-44f0-ab63-0be0e71b8b41"
+    }
+  },
+  "final_snapshot": {
+    "unrelated": {
+      "value": "Independent fact remains valid",
+      "native_id": "3713ef77-5725-44f0-ab63-0be0e71b8b41"
+    },
+    "w0": {
+      "value": "Fact w0 instance 0",
+      "native_id": "43e42494-f611-4e51-801a-71d5e2be8c51"
+    },
+    "w1": {
+      "value": "Fact w1 instance 0",
+      "native_id": "064eef78-3f64-4ce1-b83b-928df2e1dfbd"
+    }
+  },
+  "final_ids": [
+    "unrelated",
+    "w0",
+    "w1"
+  ],
+  "events": [
+    {
+      "operation": "A1",
+      "kind": "begin",
+      "actor": "A",
+      "response": null,
+      "elapsed_ns": 1240
+    },
+    {
+      "operation": "A2",
+      "kind": "put",
+      "actor": "A",
+      "response": null,
+      "elapsed_ns": 13536433
+    },
+    {
+      "operation": "A3",
+      "kind": "put",
+      "actor": "A",
+      "response": null,
+      "elapsed_ns": 12911319
+    },
+    {
+      "operation": "B1",
+      "kind": "begin",
+      "actor": "B",
+      "response": null,
+      "elapsed_ns": 630
+    },
+    {
+      "operation": "B2",
+      "kind": "read",
+      "actor": "B",
+      "response": [
+        "w0"
+      ],
+      "elapsed_ns": 8318864
+    },
+    {
+      "operation": "B3",
+      "kind": "commit",
+      "actor": "B",
+      "response": "completed",
+      "elapsed_ns": 910
+    },
+    {
+      "operation": "A4",
+      "kind": "commit",
+      "actor": "A",
+      "response": "completed",
+      "elapsed_ns": 660
+    }
+  ],
+  "reads": [
+    {
+      "operation": "B2",
+      "txn": "B",
+      "key": "w0",
+      "visible": [
+        "w0"
+      ],
+      "completed": []
+    }
+  ],
+  "final_native_reads": {
+    "unrelated": [
+      "unrelated"
+    ],
+    "w0": [
+      "w0"
+    ],
+    "w1": [
+      "w1"
+    ]
+  },
+  "transactions": {
+    "A": "completed",
+    "B": "completed"
+  },
+  "invalidated": [],
+  "revoked": [],
+  "fault_triggered": false,
+  "model_provider_calls": 15,
+  "elapsed_ns": 8073065551
+}
+{'case_id': 'multi_agent_visibility-0-directed-perturbed', 'family': 'multi_agent_visibility', 'strategy': 'directed', 'control': False, 'status': 'ok', 'reason': '', 'correctness_included': True, 'any_violation': 1, 'violations': ['dirty_read'], 'normal_completed': None, 'false_abort_count': None, 'normal_task_count': None, 'stale_descendant_count': 0, 'affected_descendant_count': 0}

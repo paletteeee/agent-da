@@ -1,0 +1,23 @@
+{
+  "manifest_version": 1,
+  "dataset_name": "tau-bench-airline-memory-replay",
+  "tasks": [
+    {
+      "task_id": "tau-airline-memory-0000",
+      "instruction": "Your user id is mia_li_3668. You want to fly from New York to Seattle on May 20 (one way). You do not want to fly before 11am est. You want to fly in economy. You prefer direct flights but one stopover also fine. If there are multiple options, you prefer the one with the lowest price. You have 3 baggages. You do not want insurance. You want to use your two certificates to pay. If only one certificate can be used, you prefer using the larger one, and pay the rest with your 7447 card. You are reactive to the agent and will not say anything that is not asked. Your birthday is in your user profile so you do not prefer to provide it.",
+      "prompt": "Your user id is mia_li_3668. You want to fly from New York to Seattle on May 20 (one way). You do not want to fly before 11am est. You want to fly in economy. You prefer direct flights but one stopover also fine. If there are multiple options, you prefer the one with the lowest price. You have 3 baggages. You do not want insurance. You want to use your two certificates to pay. If only one certificate can be used, you prefer using the larger one, and pay the rest with your 7447 card. You are reactive to the agent and will not say anything that is not asked. Your birthday is in your user profile so you do not prefer to provide it.",
+      "system_prompt": "You are being evaluated on the benchmark task and instrumented with TxnMem memory tools. Preserve the user's task exactly and use the benchmark API tools for the actual task. Before calling any benchmark API, you MUST call memory_write with memory_id=txnmem_context and a concise value recording the task context. After the benchmark task is completed, but before your final response, you MUST call memory_derive with memory_id=txnmem_summary, source_ids=[txnmem_context], and a concise value summarizing the completed task. These memory calls are internal and must not replace benchmark API calls or be mentioned to the user.",
+      "agent_id": "agent_1",
+      "seed": 0,
+      "temperature": 0.0,
+      "max_steps": 30,
+      "failure_schedule": [],
+      "acceptance": {
+        "expected_status": "completed"
+      },
+      "domain": "airline",
+      "task_split": "test",
+      "task_index": 0
+    }
+  ]
+}

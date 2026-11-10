@@ -1,0 +1,32 @@
+.F.....F..F..
+======================================================================
+FAIL: test_atomicity_has_two_writing_agents (test_txnmem_external_compare.ExternalComparisonTests.test_atomicity_has_two_writing_agents)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_external_compare.py", line 26, in test_atomicity_has_two_writing_agents
+    self.assertTrue(c["write_sets"]["B"])
+AssertionError: [] is not true
+
+======================================================================
+FAIL: test_normal_wrong_content_does_not_complete (test_txnmem_external_compare.ExternalComparisonTests.test_normal_wrong_content_does_not_complete)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_external_compare.py", line 31, in test_normal_wrong_content_does_not_complete
+    self.assertEqual(judge(c,o)["normal_completed"],0)
+AssertionError: 1 != 0
+
+======================================================================
+FAIL: test_unknown_transaction_is_inconclusive (test_txnmem_external_compare.ExternalComparisonTests.test_unknown_transaction_is_inconclusive)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_external_compare.py", line 34, in test_unknown_transaction_is_inconclusive
+    self.assertEqual(judge(self.case(),o)["status"],"inconclusive")
+AssertionError: 'ok' != 'inconclusive'
+- ok
++ inconclusive
+
+
+----------------------------------------------------------------------
+Ran 13 tests in 0.073s
+
+FAILED (failures=3)

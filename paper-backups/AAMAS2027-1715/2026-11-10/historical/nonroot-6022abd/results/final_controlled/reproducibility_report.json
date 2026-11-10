@@ -1,0 +1,22 @@
+{
+  "replications": 3,
+  "seed_count_per_replication": 10,
+  "summary_sha256": [
+    "aa8993f7f5af9123dc897dd337d4419791c65616d401e8bf5bc7822d75678609",
+    "aa8993f7f5af9123dc897dd337d4419791c65616d401e8bf5bc7822d75678609",
+    "aa8993f7f5af9123dc897dd337d4419791c65616d401e8bf5bc7822d75678609"
+  ],
+  "identical_summary_hashes": true,
+  "controlled_suite_seed_count": 50,
+  "controlled_instance_count": 400,
+  "variant_row_count": 2000,
+  "schedule_detection": {
+    "causal_rate": 0.875,
+    "random_rate": 0.75,
+    "random_runs": 10
+  },
+  "invariant_coverage_rate": 1.0,
+  "mutation_kill_rate": 0.8571428571428571,
+  "mutation_cases": 350,
+  "mutation_killed": 300
+}

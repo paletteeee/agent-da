@@ -1,0 +1,55 @@
+{
+  "status": "completed_with_smoke_scope",
+  "model_id": "qwen2.5-7b-instruct",
+  "model_execution_mode": "remote_endpoint",
+  "raw_traces_remote_only": true,
+  "projection_fallback": false,
+  "formal_claim": "native_workflow_runtime_smoke_only_not_public_benchmark_accuracy",
+  "benchmarks": {
+    "tau-bench": {
+      "runtime": "official_tau_bench",
+      "task_count": 3,
+      "completed_task_count": 3,
+      "native_event_count": 20,
+      "evaluation_error_count": 0,
+      "official_rewards": [0.0, 0.0, 0.0],
+      "task_evaluator_success_count": 3,
+      "task_evaluator_trial_count": 3,
+      "txnmem_oracle_match_count": 3,
+      "txnmem_oracle_trial_count": 3,
+      "remote_result_dir": "results/native_tau_airline_multi3b"
+    },
+    "appworld": {
+      "runtime": "official_appworld",
+      "task_count": 2,
+      "completed_task_count": 2,
+      "native_event_count": 4,
+      "evaluation_error_count": 0,
+      "official_pass_count": 0,
+      "official_total_count": 14,
+      "task_evaluator_success_count": 2,
+      "task_evaluator_trial_count": 2,
+      "txnmem_oracle_match_count": 2,
+      "txnmem_oracle_trial_count": 2,
+      "remote_result_dir": "results/native_appworld_multi2b"
+    },
+    "locomo": {
+      "runtime": "contextual_locomo_agent",
+      "conversation_count": 5,
+      "completed_conversation_count": 4,
+      "native_event_count": 40,
+      "evaluation_error_count": 0,
+      "model_network_error_count": 1,
+      "variant_oracle_match_counts": {
+        "Naive": "5/5",
+        "TxnMem": "4/5",
+        "TxnMem-NoPolicyCommit": "4/5",
+        "TxnMem-NoRepair": "4/5",
+        "TxnMem-NoTxn": "5/5"
+      },
+      "txnmem_oracle_match_count": 4,
+      "txnmem_oracle_trial_count": 5,
+      "remote_result_dir": "results/native_locomo_5conv2"
+    }
+  }
+}

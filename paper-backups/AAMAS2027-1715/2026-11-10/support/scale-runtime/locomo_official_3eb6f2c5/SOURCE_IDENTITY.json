@@ -1,0 +1,12 @@
+{
+  "archive_sha256": "6b79b8bc2637397c7297ada08a30c6f57aa77cddbe28106ee91db33680a2f6d3",
+  "commit": "3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376",
+  "files": {
+    "LICENSE.txt": "41003d4a74749c0220e33dd415042164b5a1093ed401f36277234f772d22d3d0",
+    "README.MD": "9f8e6fd00a3400aa687109f40ed53715f0a2c028ee3f8c465bdfa96475640e8a",
+    "task_eval/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "task_eval/evaluation.py": "8e3be5d57ff2ff9ec5cd05939592f468c5f3f1fd95d13e431932bdf6bf0fd6fd"
+  },
+  "retrieved_utc_date": "2026-08-19",
+  "source": "https://github.com/snap-research/locomo"
+}

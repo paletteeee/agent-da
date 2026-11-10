@@ -1,0 +1,74 @@
+WARNING: Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ProtocolError('Connection aborted.', ConnectionResetError(104, '连接被对方重置'))': /simple/mem0ai/
+Collecting mem0ai==2.0.18
+  Downloading mem0ai-2.0.18-py3-none-any.whl.metadata (15 kB)
+Collecting chromadb<1.2,>=1.0.9
+  Downloading chromadb-1.1.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.2 kB)
+Collecting langchain-chroma==0.2.6
+  Downloading langchain_chroma-0.2.6-py3-none-any.whl.metadata (1.1 kB)
+Collecting langchain-community<0.4
+  Downloading langchain_community-0.3.31-py3-none-any.whl.metadata (3.0 kB)
+Collecting networkx
+  Downloading networkx-3.7-py3-none-any.whl.metadata (6.7 kB)
+Collecting finch-clust
+  Downloading finch_clust-0.2.3-py3-none-any.whl.metadata (3.9 kB)
+Collecting pytest
+  Using cached pytest-9.1.1-py3-none-any.whl.metadata (7.6 kB)
+Collecting rank-bm25
+  Downloading rank_bm25-0.2.2-py3-none-any.whl.metadata (3.2 kB)
+Collecting litellm
+  Downloading litellm-1.103.0-cp310-abi3-manylinux_2_28_x86_64.whl.metadata (42 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 43.0/43.0 kB 323.0 kB/s eta 0:00:00
+Collecting nltk
+  Downloading nltk-3.10.3-py3-none-any.whl.metadata (3.2 kB)
+Collecting httpx>=0.28.0 (from mem0ai==2.0.18)
+  Using cached httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Collecting openai>=1.90.0 (from mem0ai==2.0.18)
+  Downloading openai-3.19.2-py3-none-any.whl.metadata (44 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 44.3/44.3 kB 57.2 kB/s eta 0:00:00
+Collecting posthog>=7.14.0 (from mem0ai==2.0.18)
+  Downloading posthog-7.60.1-py3-none-any.whl.metadata (5.6 kB)
+Collecting protobuf<7.0.0,>=5.29.6 (from mem0ai==2.0.18)
+  Using cached protobuf-6.33.6-cp39-abi3-manylinux2014_x86_64.whl.metadata (593 bytes)
+Collecting pydantic>=2.7.3 (from mem0ai==2.0.18)
+  Using cached pydantic-2.13.5-py3-none-any.whl.metadata (110 kB)
+Collecting pytz>=2024.1 (from mem0ai==2.0.18)
+  Downloading pytz-2026.4-py2.py3-none-any.whl.metadata (22 kB)
+Collecting qdrant-client>=1.12.0 (from mem0ai==2.0.18)
+  Downloading qdrant_client-1.19.1-py3-none-any.whl.metadata (11 kB)
+Collecting sqlalchemy>=2.0.31 (from mem0ai==2.0.18)
+  Downloading sqlalchemy-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (9.7 kB)
+Collecting langchain-core>=0.3.76 (from langchain-chroma==0.2.6)
+  Downloading langchain_core-1.6.5-py3-none-any.whl.metadata (4.8 kB)
+Collecting numpy>=1.26.0 (from langchain-chroma==0.2.6)
+  Downloading numpy-2.5.3-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+Collecting build>=1.0.3 (from chromadb<1.2,>=1.0.9)
+  Downloading build-1.6.1-py3-none-any.whl.metadata (5.6 kB)
+Collecting pybase64>=1.4.1 (from chromadb<1.2,>=1.0.9)
+  Downloading pybase64-1.5.0-cp312-cp312-manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64.whl.metadata (11 kB)
+Collecting uvicorn>=0.18.3 (from uvicorn[standard]>=0.18.3->chromadb<1.2,>=1.0.9)
+  Downloading uvicorn-0.54.0-py3-none-any.whl.metadata (6.6 kB)
+INFO: pip is looking at multiple versions of chromadb to determine which version is compatible with other requirements. This could take a while.
+Collecting chromadb<1.2,>=1.0.9
+  Downloading chromadb-1.1.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.2 kB)
+  Downloading chromadb-1.0.21-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.3 kB)
+  Downloading chromadb-1.0.20-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.3 kB)
+ERROR: Cannot install chromadb==1.0.20, chromadb==1.0.21, chromadb==1.1.0, chromadb==1.1.1 and mem0ai==2.0.18 because these package versions have conflicting dependencies.
+
+The conflict is caused by:
+    mem0ai 2.0.18 depends on posthog>=7.14.0
+    chromadb 1.1.1 depends on posthog<6.0.0 and >=2.4.0
+    mem0ai 2.0.18 depends on posthog>=7.14.0
+    chromadb 1.1.0 depends on posthog<6.0.0 and >=2.4.0
+    mem0ai 2.0.18 depends on posthog>=7.14.0
+    chromadb 1.0.21 depends on posthog<6.0.0 and >=2.4.0
+    mem0ai 2.0.18 depends on posthog>=7.14.0
+    chromadb 1.0.20 depends on posthog<6.0.0 and >=2.4.0
+
+To fix this you could try to:
+1. loosen the range of package versions you've specified
+2. remove package versions to allow pip attempt to solve the dependency conflict
+
+ERROR: ResolutionImpossible: for help visit https://pip.pypa.io/en/latest/topics/dependency-resolution/#dealing-with-dependency-conflicts
+
+[notice] A new release of pip is available: 24.0 -> 26.2.1
+[notice] To update, run: /data/txnmem/external-comparison-20260928/.venv/bin/python -m pip install --upgrade pip

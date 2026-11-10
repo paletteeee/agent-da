@@ -1,0 +1,16 @@
+# 排除项：可重新下载的基础模型
+model: Qwen2.5-7B-Instruct-AWQ  (HuggingFace, 量化版)
+path: /home/suma/txnmem_scale_runtime/models/Qwen2.5-7B-Instruct-AWQ
+5.2G	/home/suma/txnmem_scale_runtime/models/Qwen2.5-7B-Instruct-AWQ
+总计 5451592
+-rw-rw-r-- 1 suma suma        841  8月 18 18:18 config.json
+-rw-rw-r-- 1 suma suma        243  8月 18 18:18 generation_config.json
+-rw-rw-r-- 1 suma suma      11343  8月 18 18:18 LICENSE
+-rw-rw-r-- 1 suma suma    1671839  8月 18 18:18 merges.txt
+-rw-rw-r-- 1 suma suma 3996422976  8月 18 18:36 model-00001-of-00002.safetensors
+-rw-rw-r-- 1 suma suma 1574406784  8月 18 18:27 model-00002-of-00002.safetensors
+-rw-rw-r-- 1 suma suma      62662  8月 18 18:18 model.safetensors.index.json
+-rw-rw-r-- 1 suma suma       6368  8月 18 18:18 README.md
+-rw-rw-r-- 1 suma suma       7305  8月 18 18:18 tokenizer_config.json
+-rw-rw-r-- 1 suma suma    7031645  8月 18 18:18 tokenizer.json
+-rw-rw-r-- 1 suma suma    2776833  8月 18 18:18 vocab.json

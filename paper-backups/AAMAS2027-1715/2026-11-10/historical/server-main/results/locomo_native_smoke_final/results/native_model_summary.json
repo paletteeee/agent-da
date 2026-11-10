@@ -1,0 +1,24 @@
+{
+  "completed_task_count": 0,
+  "evaluation_error_count": 0,
+  "native_event_count": 0,
+  "production_latency_claim": false,
+  "raw_trace_path": "/data/txnmem/results/locomo_native_smoke_final/data/native_model_traces.jsonl",
+  "task_count": 1,
+  "task_summaries": [
+    {
+      "failure_code": "model_network_error",
+      "status": "failed",
+      "steps": 1,
+      "task_evaluator": {
+        "reasons": [
+          "run_not_completed"
+        ],
+        "success": false
+      },
+      "task_id": "locomo:conv-26"
+    }
+  ],
+  "trace_ground_truth_native": true,
+  "variants": {}
+}

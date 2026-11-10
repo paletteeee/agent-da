@@ -1,0 +1,50 @@
+{
+  "manifest_version": 1,
+  "dataset_name": "txnmem-native-real-model-recommended-holdout",
+  "tasks": [
+    {
+      "task_id": "native_invalidate_source_001",
+      "agent_id": "agent_model",
+      "system_prompt": "Use memory tools and preserve explicit provenance.",
+      "prompt": "Write a source fact using memory_id fixture_source, then derive a second memory from it.",
+      "seed": 4,
+      "temperature": 0.0,
+      "max_steps": 10,
+      "failure_schedule": [
+        {
+          "trigger": {
+            "kind": "memory_write",
+            "count": 1
+          },
+          "action": {
+            "type": "invalidate",
+            "target": "fixture_source"
+          }
+        }
+      ],
+      "acceptance": {
+        "expected_status": "completed",
+        "required_event_kinds": [
+          "memory_write",
+          "memory_derive"
+        ]
+      }
+    },
+    {
+      "task_id": "native_search_001",
+      "agent_id": "agent_model",
+      "system_prompt": "Use memory search before deciding whether a new memory is needed.",
+      "prompt": "Search for a generic preference and write a memory only if no matching memory is found.",
+      "seed": 7,
+      "temperature": 0.0,
+      "max_steps": 10,
+      "failure_schedule": [],
+      "acceptance": {
+        "expected_status": "completed",
+        "required_event_kinds": [
+          "memory_search"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "manifest_version": 1,
+  "seed": 17,
+  "tau_bench": {
+    "domain": "airline",
+    "split": "test",
+    "limit": 50
+  },
+  "appworld": {
+    "limit": 20
+  },
+  "locomo": {
+    "limit": 10
+  },
+  "repetitions": 1,
+  "memory_backend": "sqlite"
+}

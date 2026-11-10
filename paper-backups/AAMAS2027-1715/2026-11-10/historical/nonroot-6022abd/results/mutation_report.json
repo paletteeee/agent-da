@@ -1,0 +1,621 @@
+{
+  "cases": [
+    {
+      "instance_id": "atomic_multi_write_seed_0",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "atomic_multi_write_seed_1",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "atomic_multi_write_seed_2",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "atomic_multi_write_seed_3",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "atomic_multi_write_seed_4",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "atomic_multi_write_seed_5",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "atomic_multi_write_seed_6",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "atomic_multi_write_seed_7",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "atomic_multi_write_seed_8",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "atomic_multi_write_seed_9",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "mixed_stress_seed_0",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "mixed_stress_seed_1",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "mixed_stress_seed_2",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "mixed_stress_seed_3",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "mixed_stress_seed_4",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "mixed_stress_seed_5",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "mixed_stress_seed_6",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "mixed_stress_seed_7",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "mixed_stress_seed_8",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "mixed_stress_seed_9",
+      "killed": true,
+      "mismatches": [
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "partial_commit"
+    },
+    {
+      "instance_id": "revoke_before_commit_seed_0",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "revoke_before_commit_seed_1",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "revoke_before_commit_seed_2",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "revoke_before_commit_seed_3",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "revoke_before_commit_seed_4",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "revoke_before_commit_seed_5",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "revoke_before_commit_seed_6",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "revoke_before_commit_seed_7",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "revoke_before_commit_seed_8",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "revoke_before_commit_seed_9",
+      "killed": true,
+      "mismatches": [
+        "transaction_state",
+        "committed_memory_ids",
+        "visible_memory_ids"
+      ],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "mixed_stress_seed_0",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "mixed_stress_seed_1",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "mixed_stress_seed_2",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "mixed_stress_seed_3",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "mixed_stress_seed_4",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "mixed_stress_seed_5",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "mixed_stress_seed_6",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "mixed_stress_seed_7",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "mixed_stress_seed_8",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "mixed_stress_seed_9",
+      "killed": false,
+      "mismatches": [],
+      "mutant": "remove_commit_revalidation"
+    },
+    {
+      "instance_id": "provenance_chain_repair_seed_0",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_chain_repair_seed_1",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_chain_repair_seed_2",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_chain_repair_seed_3",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_chain_repair_seed_4",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_chain_repair_seed_5",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_chain_repair_seed_6",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_chain_repair_seed_7",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_chain_repair_seed_8",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_chain_repair_seed_9",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_branch_repair_seed_0",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_branch_repair_seed_1",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_branch_repair_seed_2",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_branch_repair_seed_3",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_branch_repair_seed_4",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_branch_repair_seed_5",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_branch_repair_seed_6",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_branch_repair_seed_7",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_branch_repair_seed_8",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "provenance_branch_repair_seed_9",
+      "killed": true,
+      "mismatches": [
+        "invalid_memory_ids"
+      ],
+      "mutant": "disable_provenance_traversal"
+    },
+    {
+      "instance_id": "scope_bypass_seed_0",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids"
+      ],
+      "mutant": "bypass_scope_check"
+    },
+    {
+      "instance_id": "scope_bypass_seed_1",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids"
+      ],
+      "mutant": "bypass_scope_check"
+    },
+    {
+      "instance_id": "scope_bypass_seed_2",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids"
+      ],
+      "mutant": "bypass_scope_check"
+    },
+    {
+      "instance_id": "scope_bypass_seed_3",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids"
+      ],
+      "mutant": "bypass_scope_check"
+    },
+    {
+      "instance_id": "scope_bypass_seed_4",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids"
+      ],
+      "mutant": "bypass_scope_check"
+    },
+    {
+      "instance_id": "scope_bypass_seed_5",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids"
+      ],
+      "mutant": "bypass_scope_check"
+    },
+    {
+      "instance_id": "scope_bypass_seed_6",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids"
+      ],
+      "mutant": "bypass_scope_check"
+    },
+    {
+      "instance_id": "scope_bypass_seed_7",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids"
+      ],
+      "mutant": "bypass_scope_check"
+    },
+    {
+      "instance_id": "scope_bypass_seed_8",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids"
+      ],
+      "mutant": "bypass_scope_check"
+    },
+    {
+      "instance_id": "scope_bypass_seed_9",
+      "killed": true,
+      "mismatches": [
+        "visible_memory_ids"
+      ],
+      "mutant": "bypass_scope_check"
+    }
+  ],
+  "kill_rate": 0.8571428571428571,
+  "mutants": {
+    "bypass_scope_check": {
+      "kill_rate": 1.0,
+      "killed": 10,
+      "target_case_count": 10,
+      "variant": "Naive"
+    },
+    "disable_provenance_traversal": {
+      "kill_rate": 1.0,
+      "killed": 20,
+      "target_case_count": 20,
+      "variant": "TxnMem-NoRepair"
+    },
+    "partial_commit": {
+      "kill_rate": 1.0,
+      "killed": 20,
+      "target_case_count": 20,
+      "variant": "TxnMem-NoTxn"
+    },
+    "remove_commit_revalidation": {
+      "kill_rate": 0.5,
+      "killed": 10,
+      "target_case_count": 20,
+      "variant": "TxnMem-NoPolicyCommit"
+    }
+  }
+}

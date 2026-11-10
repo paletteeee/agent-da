@@ -1,0 +1,3016 @@
+2026-08-03 18:06:39,497 - modelscope - INFO - Got 10 files, start to download ...
+Downloading Model from https://www.modelscope.cn to directory: /data/models/Qwen/Qwen2.5-0.5B-Instruct
+Processing 10 items:   0%|          | 0.00/10.0 [00:00<?, ?it/s]
+Downloading [config.json]:   0%|          | 0.00/659 [00:00<?, ?B/s][A
+
+Downloading [configuration.json]:   0%|          | 0.00/2.00 [00:00<?, ?B/s][A[A
+
+
+Downloading [generation_config.json]:   0%|          | 0.00/242 [00:00<?, ?B/s][A[A[A
+
+
+
+Downloading [LICENSE]:   0%|          | 0.00/11.1k [00:00<?, ?B/s][A[A[A[A
+
+
+
+
+Downloading [merges.txt]:   0%|          | 0.00/1.59M [00:00<?, ?B/s][A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   0%|          | 0.00/942M [00:00<?, ?B/s][A[A[A[A[A[A
+
+
+
+
+
+
+Downloading [README.md]:   0%|          | 0.00/4.80k [00:00<?, ?B/s][A[A[A[A[A[A[A
+
+
+
+
+
+
+
+Downloading [tokenizer.json]:   0%|          | 0.00/6.71M [00:00<?, ?B/s][A[A[A[A[A[A[A[A
+
+
+
+
+
+
+Downloading [README.md]: 100%|██████████| 4.80k/4.80k [00:00<00:00, 13.6kB/s][A[A[A[A[A[A[ADownloading [README.md]: 100%|██████████| 4.80k/4.80k [00:00<00:00, 13.6kB/s]
+
+
+
+
+
+
+
+Downloading [tokenizer_config.json]:   0%|          | 0.00/7.13k [00:00<?, ?B/s][A[A[A[A[A[A[A
+
+Downloading [configuration.json]: 100%|██████████| 2.00/2.00 [00:00<00:00, 5.17B/s][A[AProcessing 10 items:  10%|█         | 1.00/10.0 [00:00<00:03, 2.56it/s]
+
+
+
+Downloading [LICENSE]: 100%|██████████| 11.1k/11.1k [00:00<00:00, 29.6kB/s][A[A[A[A
+Downloading [config.json]: 100%|██████████| 659/659 [00:00<00:00, 1.67kB/s][ADownloading [configuration.json]: 100%|██████████| 2.00/2.00 [00:00<00:00, 5.08B/s]
+Downloading [LICENSE]: 100%|██████████| 11.1k/11.1k [00:00<00:00, 29.3kB/s]
+Downloading [config.json]: 100%|██████████| 659/659 [00:00<00:00, 1.66kB/s]
+
+
+
+Downloading [generation_config.json]: 100%|██████████| 242/242 [00:00<00:00, 607B/s][A[A[ADownloading [generation_config.json]: 100%|██████████| 242/242 [00:00<00:00, 604B/s]
+
+Downloading [vocab.json]:   0%|          | 0.00/2.65M [00:00<?, ?B/s][A
+
+
+
+
+Downloading [merges.txt]:  63%|██████▎   | 1.00M/1.59M [00:00<00:00, 2.53MB/s][A[A[A[A[ADownloading [merges.txt]: 100%|██████████| 1.59M/1.59M [00:00<00:00, 3.94MB/s]
+
+
+
+
+
+
+
+
+Downloading [tokenizer.json]:  15%|█▍        | 1.00M/6.71M [00:00<00:02, 2.44MB/s][A[A[A[A[A[A[A[A
+
+
+
+
+
+
+
+Downloading [tokenizer.json]: 100%|██████████| 6.71M/6.71M [00:00<00:00, 16.7MB/s][A[A[A[A[A[A[A[ADownloading [tokenizer.json]: 100%|██████████| 6.71M/6.71M [00:00<00:00, 13.2MB/s]
+Processing 10 items:  70%|███████   | 7.00/10.0 [00:00<00:00, 15.3it/s]
+
+
+
+
+
+
+Downloading [tokenizer_config.json]: 100%|██████████| 7.13k/7.13k [00:00<00:00, 35.0kB/s][A[A[A[A[A[A[ADownloading [tokenizer_config.json]: 100%|██████████| 7.13k/7.13k [00:00<00:00, 34.9kB/s]
+
+Downloading [vocab.json]:  38%|███▊      | 1.00M/2.65M [00:00<00:00, 4.19MB/s][ADownloading [vocab.json]: 100%|██████████| 2.65M/2.65M [00:00<00:00, 10.3MB/s]
+
+
+
+
+
+
+Downloading [model.safetensors]:   0%|          | 1.00M/942M [00:00<13:18, 1.24MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   0%|          | 2.00M/942M [00:00<06:37, 2.48MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   0%|          | 3.00M/942M [00:01<04:18, 3.80MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   1%|          | 5.00M/942M [00:01<02:33, 6.40MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   1%|          | 7.00M/942M [00:01<01:54, 8.58MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   1%|          | 9.00M/942M [00:01<01:36, 10.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   1%|          | 11.0M/942M [00:01<01:24, 11.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   1%|▏         | 13.0M/942M [00:01<01:18, 12.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   2%|▏         | 15.0M/942M [00:01<01:13, 13.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   2%|▏         | 17.0M/942M [00:02<01:11, 13.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   2%|▏         | 19.0M/942M [00:02<01:10, 13.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   2%|▏         | 21.0M/942M [00:02<01:08, 14.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   2%|▏         | 23.0M/942M [00:02<01:07, 14.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   3%|▎         | 25.0M/942M [00:02<01:05, 14.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   3%|▎         | 27.0M/942M [00:02<01:04, 14.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   3%|▎         | 29.0M/942M [00:02<01:03, 15.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   3%|▎         | 31.0M/942M [00:03<01:02, 15.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   4%|▎         | 33.0M/942M [00:03<01:02, 15.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   4%|▎         | 35.0M/942M [00:03<01:02, 15.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   4%|▍         | 37.0M/942M [00:03<01:01, 15.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   4%|▍         | 39.0M/942M [00:03<01:01, 15.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   4%|▍         | 41.0M/942M [00:03<01:01, 15.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   5%|▍         | 43.0M/942M [00:03<01:00, 15.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   5%|▍         | 45.0M/942M [00:03<01:00, 15.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   5%|▍         | 47.0M/942M [00:04<01:00, 15.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   5%|▌         | 49.0M/942M [00:04<01:00, 15.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   5%|▌         | 51.0M/942M [00:04<00:59, 15.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   6%|▌         | 53.0M/942M [00:04<00:59, 15.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   6%|▌         | 55.0M/942M [00:04<00:59, 15.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   6%|▌         | 57.0M/942M [00:04<00:59, 15.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   6%|▋         | 59.0M/942M [00:04<00:59, 15.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   6%|▋         | 61.0M/942M [00:05<00:58, 15.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   7%|▋         | 63.0M/942M [00:05<00:59, 15.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   7%|▋         | 65.0M/942M [00:05<00:59, 15.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   7%|▋         | 67.0M/942M [00:05<00:59, 15.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   7%|▋         | 69.0M/942M [00:05<00:58, 15.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   8%|▊         | 71.0M/942M [00:05<00:58, 15.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   8%|▊         | 73.0M/942M [00:05<01:07, 13.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   8%|▊         | 75.0M/942M [00:06<01:04, 14.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   8%|▊         | 77.0M/942M [00:06<01:02, 14.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   8%|▊         | 79.0M/942M [00:06<01:00, 15.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   9%|▊         | 81.0M/942M [00:06<00:59, 15.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   9%|▉         | 83.0M/942M [00:06<00:59, 15.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   9%|▉         | 85.0M/942M [00:06<00:58, 15.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   9%|▉         | 87.0M/942M [00:06<00:58, 15.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:   9%|▉         | 89.0M/942M [00:07<00:57, 15.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  10%|▉         | 91.0M/942M [00:07<00:57, 15.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  10%|▉         | 93.0M/942M [00:07<00:57, 15.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  10%|█         | 95.0M/942M [00:07<00:56, 15.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  10%|█         | 97.0M/942M [00:07<00:56, 15.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  11%|█         | 99.0M/942M [00:07<00:56, 15.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  11%|█         | 101M/942M [00:07<00:56, 15.6MB/s] [A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  11%|█         | 103M/942M [00:07<00:56, 15.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  11%|█         | 105M/942M [00:08<00:55, 15.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  11%|█▏        | 107M/942M [00:08<00:55, 15.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  12%|█▏        | 109M/942M [00:08<00:55, 15.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  12%|█▏        | 111M/942M [00:08<00:55, 15.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  12%|█▏        | 113M/942M [00:08<00:55, 15.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  12%|█▏        | 115M/942M [00:08<00:54, 15.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  12%|█▏        | 117M/942M [00:08<00:54, 15.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  13%|█▎        | 119M/942M [00:09<00:55, 15.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  13%|█▎        | 121M/942M [00:09<00:54, 15.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  13%|█▎        | 123M/942M [00:09<00:54, 15.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  13%|█▎        | 125M/942M [00:09<00:54, 15.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  13%|█▎        | 127M/942M [00:09<00:54, 15.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  14%|█▎        | 129M/942M [00:09<00:57, 14.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  14%|█▍        | 131M/942M [00:09<01:03, 13.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  14%|█▍        | 133M/942M [00:10<01:06, 12.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  14%|█▍        | 135M/942M [00:10<01:08, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  15%|█▍        | 137M/942M [00:10<01:09, 12.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  15%|█▍        | 139M/942M [00:10<01:09, 12.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  15%|█▍        | 141M/942M [00:10<01:08, 12.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  15%|█▌        | 143M/942M [00:10<01:08, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  15%|█▌        | 145M/942M [00:11<01:07, 12.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  16%|█▌        | 147M/942M [00:11<01:06, 12.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  16%|█▌        | 149M/942M [00:11<01:05, 12.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  16%|█▌        | 151M/942M [00:11<01:14, 11.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  16%|█▌        | 153M/942M [00:11<01:17, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  16%|█▋        | 155M/942M [00:12<01:19, 10.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  17%|█▋        | 157M/942M [00:12<01:19, 10.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  17%|█▋        | 158M/942M [00:12<01:19, 10.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  17%|█▋        | 159M/942M [00:12<01:19, 10.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  17%|█▋        | 160M/942M [00:12<01:19, 10.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  17%|█▋        | 162M/942M [00:12<01:18, 10.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  17%|█▋        | 164M/942M [00:13<01:16, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  18%|█▊        | 166M/942M [00:13<01:14, 10.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  18%|█▊        | 168M/942M [00:13<01:13, 11.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  18%|█▊        | 170M/942M [00:13<01:12, 11.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  18%|█▊        | 172M/942M [00:13<01:10, 11.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  18%|█▊        | 174M/942M [00:13<01:09, 11.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  19%|█▊        | 176M/942M [00:14<01:07, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  19%|█▉        | 178M/942M [00:14<01:06, 12.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  19%|█▉        | 180M/942M [00:14<01:05, 12.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  19%|█▉        | 182M/942M [00:14<01:04, 12.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  20%|█▉        | 184M/942M [00:14<01:02, 12.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  20%|█▉        | 186M/942M [00:14<01:01, 12.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  20%|█▉        | 188M/942M [00:15<01:00, 13.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  20%|██        | 190M/942M [00:15<00:59, 13.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  20%|██        | 192M/942M [00:15<01:00, 13.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  21%|██        | 194M/942M [00:15<00:58, 13.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  21%|██        | 196M/942M [00:15<00:57, 13.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  21%|██        | 198M/942M [00:15<00:56, 13.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  21%|██        | 200M/942M [00:15<00:56, 13.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  21%|██▏       | 202M/942M [00:16<00:58, 13.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  22%|██▏       | 204M/942M [00:16<01:02, 12.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  22%|██▏       | 206M/942M [00:16<01:04, 12.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  22%|██▏       | 208M/942M [00:16<01:05, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  22%|██▏       | 210M/942M [00:16<01:05, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  22%|██▏       | 212M/942M [00:17<01:04, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  23%|██▎       | 214M/942M [00:17<01:03, 12.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  23%|██▎       | 216M/942M [00:17<01:02, 12.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  23%|██▎       | 218M/942M [00:17<01:01, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  23%|██▎       | 220M/942M [00:17<01:00, 12.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  24%|██▎       | 222M/942M [00:17<00:59, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  24%|██▍       | 224M/942M [00:18<01:00, 12.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  24%|██▍       | 226M/942M [00:18<01:05, 11.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  24%|██▍       | 228M/942M [00:18<01:08, 11.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  24%|██▍       | 230M/942M [00:18<01:09, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  25%|██▍       | 232M/942M [00:18<01:10, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  25%|██▍       | 234M/942M [00:19<01:10, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  25%|██▌       | 236M/942M [00:19<01:09, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  25%|██▌       | 238M/942M [00:19<01:08, 10.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  25%|██▌       | 240M/942M [00:19<01:07, 11.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  26%|██▌       | 242M/942M [00:19<01:05, 11.2MB/s][A[A[A[A[A[AProcessing 10 items:  90%|█████████ | 9.00/10.0 [00:20<00:00, 15.3it/s]
+
+
+
+
+
+Downloading [model.safetensors]:  26%|██▌       | 244M/942M [00:20<01:06, 11.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  26%|██▌       | 246M/942M [00:20<01:04, 11.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  26%|██▋       | 248M/942M [00:20<01:03, 11.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  27%|██▋       | 250M/942M [00:20<01:02, 11.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  27%|██▋       | 252M/942M [00:20<01:02, 11.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  27%|██▋       | 254M/942M [00:20<01:01, 11.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  27%|██▋       | 256M/942M [00:21<01:01, 11.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  27%|██▋       | 258M/942M [00:21<01:00, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  28%|██▊       | 260M/942M [00:21<01:00, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  28%|██▊       | 262M/942M [00:21<01:01, 11.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  28%|██▊       | 264M/942M [00:21<01:00, 11.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  28%|██▊       | 266M/942M [00:21<01:00, 11.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  28%|██▊       | 268M/942M [00:22<00:59, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  29%|██▊       | 270M/942M [00:22<00:59, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  29%|██▉       | 272M/942M [00:22<00:59, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  29%|██▉       | 274M/942M [00:22<00:59, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  29%|██▉       | 276M/942M [00:22<00:58, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  30%|██▉       | 278M/942M [00:23<00:58, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  30%|██▉       | 280M/942M [00:23<00:57, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  30%|██▉       | 282M/942M [00:23<00:56, 12.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  30%|███       | 284M/942M [00:23<00:56, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  30%|███       | 286M/942M [00:23<00:55, 12.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  31%|███       | 288M/942M [00:23<00:54, 12.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  31%|███       | 290M/942M [00:24<00:53, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  31%|███       | 292M/942M [00:24<00:53, 12.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  31%|███       | 294M/942M [00:24<00:52, 12.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  31%|███▏      | 296M/942M [00:24<00:51, 13.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  32%|███▏      | 298M/942M [00:24<00:50, 13.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  32%|███▏      | 300M/942M [00:24<00:49, 13.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  32%|███▏      | 302M/942M [00:24<00:48, 13.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  32%|███▏      | 304M/942M [00:25<00:48, 13.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  32%|███▏      | 306M/942M [00:25<00:47, 14.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  33%|███▎      | 308M/942M [00:25<00:47, 14.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  33%|███▎      | 310M/942M [00:25<00:51, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  33%|███▎      | 312M/942M [00:25<00:54, 12.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  33%|███▎      | 314M/942M [00:25<00:54, 12.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  34%|███▎      | 316M/942M [00:26<00:55, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  34%|███▎      | 318M/942M [00:26<00:54, 12.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  34%|███▍      | 320M/942M [00:26<00:53, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  34%|███▍      | 322M/942M [00:26<00:52, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  34%|███▍      | 324M/942M [00:26<00:51, 12.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  35%|███▍      | 326M/942M [00:26<00:50, 12.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  35%|███▍      | 328M/942M [00:27<00:53, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  35%|███▌      | 330M/942M [00:27<00:55, 11.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  35%|███▌      | 332M/942M [00:27<00:58, 10.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  35%|███▌      | 334M/942M [00:27<00:59, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  36%|███▌      | 336M/942M [00:27<01:00, 10.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  36%|███▌      | 338M/942M [00:28<01:00, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  36%|███▌      | 340M/942M [00:28<00:59, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  36%|███▋      | 342M/942M [00:28<00:58, 10.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  37%|███▋      | 344M/942M [00:28<00:57, 10.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  37%|███▋      | 346M/942M [00:28<00:56, 11.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  37%|███▋      | 348M/942M [00:29<00:55, 11.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  37%|███▋      | 350M/942M [00:29<00:54, 11.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  37%|███▋      | 352M/942M [00:29<00:53, 11.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  38%|███▊      | 354M/942M [00:29<00:51, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  38%|███▊      | 356M/942M [00:29<00:50, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  38%|███▊      | 358M/942M [00:29<00:49, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  38%|███▊      | 360M/942M [00:30<00:48, 12.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  38%|███▊      | 362M/942M [00:30<00:47, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  39%|███▊      | 364M/942M [00:30<00:47, 12.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  39%|███▉      | 366M/942M [00:30<00:46, 13.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  39%|███▉      | 368M/942M [00:30<00:45, 13.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  39%|███▉      | 370M/942M [00:30<00:44, 13.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  39%|███▉      | 372M/942M [00:31<00:43, 13.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  40%|███▉      | 374M/942M [00:31<00:43, 13.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  40%|███▉      | 376M/942M [00:31<00:43, 13.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  40%|████      | 378M/942M [00:31<00:42, 13.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  40%|████      | 380M/942M [00:31<00:48, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  41%|████      | 382M/942M [00:31<00:50, 11.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  41%|████      | 384M/942M [00:32<00:50, 11.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  41%|████      | 386M/942M [00:32<00:50, 11.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  41%|████      | 388M/942M [00:32<00:49, 11.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  41%|████▏     | 390M/942M [00:32<00:48, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  42%|████▏     | 392M/942M [00:32<00:47, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  42%|████▏     | 394M/942M [00:32<00:46, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  42%|████▏     | 396M/942M [00:33<00:45, 12.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  42%|████▏     | 398M/942M [00:33<00:44, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  42%|████▏     | 400M/942M [00:33<00:43, 12.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  43%|████▎     | 402M/942M [00:33<00:43, 13.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  43%|████▎     | 404M/942M [00:33<00:49, 11.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  43%|████▎     | 406M/942M [00:34<00:51, 11.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  43%|████▎     | 408M/942M [00:34<00:52, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  44%|████▎     | 410M/942M [00:34<00:52, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  44%|████▎     | 412M/942M [00:34<00:52, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  44%|████▍     | 414M/942M [00:34<00:51, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  44%|████▍     | 416M/942M [00:35<00:50, 10.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  44%|████▍     | 418M/942M [00:35<00:50, 11.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  45%|████▍     | 420M/942M [00:35<00:48, 11.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  45%|████▍     | 422M/942M [00:35<00:47, 11.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  45%|████▍     | 424M/942M [00:35<00:46, 11.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  45%|████▌     | 426M/942M [00:35<00:45, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  45%|████▌     | 428M/942M [00:36<00:44, 12.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  46%|████▌     | 430M/942M [00:36<00:43, 12.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  46%|████▌     | 432M/942M [00:36<00:42, 12.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  46%|████▌     | 434M/942M [00:36<00:42, 12.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  46%|████▋     | 436M/942M [00:36<00:41, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  46%|████▋     | 438M/942M [00:36<00:40, 13.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  47%|████▋     | 440M/942M [00:37<00:39, 13.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  47%|████▋     | 442M/942M [00:37<00:39, 13.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  47%|████▋     | 444M/942M [00:37<00:47, 11.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  47%|████▋     | 446M/942M [00:37<00:54, 9.52MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  47%|████▋     | 447M/942M [00:37<00:57, 9.08MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  48%|████▊     | 448M/942M [00:38<00:59, 8.71MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  48%|████▊     | 449M/942M [00:38<01:01, 8.48MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  48%|████▊     | 450M/942M [00:38<01:01, 8.38MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  48%|████▊     | 451M/942M [00:38<01:01, 8.31MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  48%|████▊     | 452M/942M [00:38<01:01, 8.31MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  48%|████▊     | 453M/942M [00:38<01:01, 8.35MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  48%|████▊     | 454M/942M [00:38<01:01, 8.38MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  48%|████▊     | 455M/942M [00:38<01:00, 8.51MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  48%|████▊     | 456M/942M [00:39<00:58, 8.66MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  48%|████▊     | 457M/942M [00:39<00:58, 8.76MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  49%|████▊     | 458M/942M [00:39<00:57, 8.90MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  49%|████▊     | 459M/942M [00:39<00:56, 9.04MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  49%|████▉     | 460M/942M [00:39<00:55, 9.19MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  49%|████▉     | 461M/942M [00:39<00:54, 9.34MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  49%|████▉     | 462M/942M [00:39<00:53, 9.44MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  49%|████▉     | 463M/942M [00:39<00:54, 9.24MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  49%|████▉     | 464M/942M [00:39<00:52, 9.51MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  49%|████▉     | 465M/942M [00:40<00:51, 9.68MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  49%|████▉     | 466M/942M [00:40<00:50, 9.80MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  50%|████▉     | 467M/942M [00:40<00:49, 9.98MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  50%|████▉     | 469M/942M [00:40<00:49, 10.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  50%|████▉     | 471M/942M [00:40<00:47, 10.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  50%|█████     | 473M/942M [00:40<00:46, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  50%|█████     | 475M/942M [00:40<00:45, 10.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  51%|█████     | 477M/942M [00:41<00:43, 11.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  51%|█████     | 479M/942M [00:41<00:42, 11.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  51%|█████     | 481M/942M [00:41<00:41, 11.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  51%|█████▏    | 483M/942M [00:41<00:41, 11.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  51%|█████▏    | 485M/942M [00:41<00:40, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  52%|█████▏    | 487M/942M [00:42<00:39, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  52%|█████▏    | 489M/942M [00:42<00:38, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  52%|█████▏    | 491M/942M [00:42<00:37, 12.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  52%|█████▏    | 493M/942M [00:42<00:36, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  53%|█████▎    | 495M/942M [00:42<00:36, 13.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  53%|█████▎    | 497M/942M [00:42<00:35, 13.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  53%|█████▎    | 499M/942M [00:42<00:34, 13.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  53%|█████▎    | 501M/942M [00:43<00:34, 13.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  53%|█████▎    | 503M/942M [00:43<00:33, 13.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  54%|█████▎    | 505M/942M [00:43<00:33, 13.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  54%|█████▍    | 507M/942M [00:43<00:32, 13.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  54%|█████▍    | 509M/942M [00:43<00:32, 14.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  54%|█████▍    | 511M/942M [00:43<00:32, 14.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  54%|█████▍    | 513M/942M [00:44<00:32, 13.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  55%|█████▍    | 515M/942M [00:44<00:32, 13.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  55%|█████▍    | 517M/942M [00:44<00:31, 14.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  55%|█████▌    | 519M/942M [00:44<00:31, 14.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  55%|█████▌    | 521M/942M [00:44<00:30, 14.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  56%|█████▌    | 523M/942M [00:44<00:30, 14.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  56%|█████▌    | 525M/942M [00:44<00:30, 14.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  56%|█████▌    | 527M/942M [00:45<00:30, 14.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  56%|█████▌    | 529M/942M [00:45<00:29, 14.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  56%|█████▋    | 531M/942M [00:45<00:29, 14.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  57%|█████▋    | 533M/942M [00:45<00:29, 14.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  57%|█████▋    | 535M/942M [00:45<00:29, 14.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  57%|█████▋    | 537M/942M [00:45<00:29, 14.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  57%|█████▋    | 539M/942M [00:45<00:28, 14.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  57%|█████▋    | 541M/942M [00:46<00:32, 13.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  58%|█████▊    | 543M/942M [00:46<00:32, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  58%|█████▊    | 545M/942M [00:46<00:32, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  58%|█████▊    | 547M/942M [00:46<00:32, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  58%|█████▊    | 549M/942M [00:46<00:33, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  58%|█████▊    | 551M/942M [00:47<00:36, 11.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  59%|█████▊    | 553M/942M [00:47<00:37, 10.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  59%|█████▉    | 555M/942M [00:47<00:38, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  59%|█████▉    | 557M/942M [00:47<00:38, 10.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  59%|█████▉    | 559M/942M [00:47<00:38, 10.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  60%|█████▉    | 561M/942M [00:48<00:38, 10.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  60%|█████▉    | 563M/942M [00:48<00:37, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  60%|█████▉    | 565M/942M [00:48<00:36, 10.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  60%|██████    | 567M/942M [00:48<00:35, 11.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  60%|██████    | 569M/942M [00:48<00:34, 11.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  61%|██████    | 571M/942M [00:48<00:34, 11.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  61%|██████    | 573M/942M [00:49<00:33, 11.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  61%|██████    | 575M/942M [00:49<00:32, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  61%|██████    | 577M/942M [00:49<00:31, 12.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  61%|██████▏   | 579M/942M [00:49<00:31, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  62%|██████▏   | 581M/942M [00:49<00:30, 12.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  62%|██████▏   | 583M/942M [00:49<00:29, 12.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  62%|██████▏   | 585M/942M [00:50<00:29, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  62%|██████▏   | 587M/942M [00:50<00:28, 13.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  63%|██████▎   | 589M/942M [00:50<00:28, 13.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  63%|██████▎   | 591M/942M [00:50<00:27, 13.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  63%|██████▎   | 593M/942M [00:50<00:26, 13.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  63%|██████▎   | 595M/942M [00:50<00:26, 13.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  63%|██████▎   | 597M/942M [00:51<00:26, 13.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  64%|██████▎   | 599M/942M [00:51<00:25, 14.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  64%|██████▍   | 601M/942M [00:51<00:25, 14.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  64%|██████▍   | 603M/942M [00:51<00:28, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  64%|██████▍   | 605M/942M [00:51<00:29, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  64%|██████▍   | 607M/942M [00:51<00:29, 11.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  65%|██████▍   | 609M/942M [00:52<00:29, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  65%|██████▍   | 611M/942M [00:52<00:29, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  65%|██████▌   | 613M/942M [00:52<00:28, 12.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  65%|██████▌   | 615M/942M [00:52<00:28, 12.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  65%|██████▌   | 617M/942M [00:52<00:27, 12.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  66%|██████▌   | 619M/942M [00:52<00:26, 12.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  66%|██████▌   | 621M/942M [00:53<00:26, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  66%|██████▌   | 623M/942M [00:53<00:27, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  66%|██████▋   | 625M/942M [00:53<00:29, 11.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  67%|██████▋   | 627M/942M [00:53<00:30, 11.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  67%|██████▋   | 629M/942M [00:53<00:30, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  67%|██████▋   | 631M/942M [00:54<00:30, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  67%|██████▋   | 633M/942M [00:54<00:30, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  67%|██████▋   | 635M/942M [00:54<00:29, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  68%|██████▊   | 637M/942M [00:54<00:29, 10.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  68%|██████▊   | 639M/942M [00:54<00:28, 11.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  68%|██████▊   | 641M/942M [00:55<00:28, 11.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  68%|██████▊   | 643M/942M [00:55<00:27, 11.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  68%|██████▊   | 645M/942M [00:55<00:26, 11.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  69%|██████▊   | 647M/942M [00:55<00:26, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  69%|██████▉   | 649M/942M [00:55<00:25, 12.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  69%|██████▉   | 651M/942M [00:55<00:25, 12.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  69%|██████▉   | 653M/942M [00:56<00:24, 12.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  70%|██████▉   | 655M/942M [00:56<00:23, 12.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  70%|██████▉   | 657M/942M [00:56<00:23, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  70%|██████▉   | 659M/942M [00:56<00:22, 12.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  70%|███████   | 661M/942M [00:56<00:22, 13.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  70%|███████   | 663M/942M [00:56<00:21, 13.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  71%|███████   | 665M/942M [00:56<00:21, 13.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  71%|███████   | 667M/942M [00:57<00:21, 13.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  71%|███████   | 669M/942M [00:57<00:20, 13.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  71%|███████   | 671M/942M [00:57<00:20, 14.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  71%|███████▏  | 673M/942M [00:57<00:23, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  72%|███████▏  | 675M/942M [00:57<00:24, 11.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  72%|███████▏  | 677M/942M [00:58<00:24, 11.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  72%|███████▏  | 679M/942M [00:58<00:23, 11.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  72%|███████▏  | 681M/942M [00:58<00:23, 11.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  72%|███████▏  | 683M/942M [00:58<00:22, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  73%|███████▎  | 685M/942M [00:58<00:22, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  73%|███████▎  | 687M/942M [00:58<00:21, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  73%|███████▎  | 689M/942M [00:59<00:21, 12.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  73%|███████▎  | 691M/942M [00:59<00:20, 12.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  74%|███████▎  | 693M/942M [00:59<00:20, 12.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  74%|███████▍  | 695M/942M [00:59<00:19, 13.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  74%|███████▍  | 697M/942M [00:59<00:21, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  74%|███████▍  | 699M/942M [00:59<00:22, 11.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  74%|███████▍  | 701M/942M [01:00<00:23, 10.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  75%|███████▍  | 703M/942M [01:00<00:23, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  75%|███████▍  | 705M/942M [01:00<00:23, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  75%|███████▌  | 707M/942M [01:00<00:22, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  75%|███████▌  | 709M/942M [01:00<00:22, 10.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  75%|███████▌  | 711M/942M [01:01<00:22, 11.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  76%|███████▌  | 713M/942M [01:01<00:21, 11.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  76%|███████▌  | 715M/942M [01:01<00:21, 11.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  76%|███████▌  | 717M/942M [01:01<00:20, 11.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  76%|███████▋  | 719M/942M [01:01<00:19, 11.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  77%|███████▋  | 721M/942M [01:01<00:19, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  77%|███████▋  | 723M/942M [01:02<00:18, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  77%|███████▋  | 725M/942M [01:02<00:18, 12.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  77%|███████▋  | 727M/942M [01:02<00:17, 12.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  77%|███████▋  | 729M/942M [01:02<00:17, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  78%|███████▊  | 731M/942M [01:02<00:17, 13.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  78%|███████▊  | 733M/942M [01:02<00:16, 13.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  78%|███████▊  | 735M/942M [01:03<00:16, 13.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  78%|███████▊  | 737M/942M [01:03<00:15, 13.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  78%|███████▊  | 739M/942M [01:03<00:15, 13.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  79%|███████▊  | 741M/942M [01:03<00:15, 13.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  79%|███████▉  | 743M/942M [01:03<00:16, 12.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  79%|███████▉  | 745M/942M [01:03<00:17, 12.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  79%|███████▉  | 747M/942M [01:04<00:17, 11.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  79%|███████▉  | 749M/942M [01:04<00:17, 11.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  80%|███████▉  | 751M/942M [01:04<00:17, 11.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  80%|███████▉  | 753M/942M [01:04<00:16, 11.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  80%|████████  | 755M/942M [01:04<00:16, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  80%|████████  | 757M/942M [01:04<00:16, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  81%|████████  | 759M/942M [01:05<00:15, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  81%|████████  | 761M/942M [01:05<00:15, 12.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  81%|████████  | 763M/942M [01:05<00:14, 12.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  81%|████████  | 765M/942M [01:05<00:14, 12.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  81%|████████▏ | 767M/942M [01:05<00:14, 13.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  82%|████████▏ | 769M/942M [01:06<00:15, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  82%|████████▏ | 771M/942M [01:06<00:15, 11.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  82%|████████▏ | 773M/942M [01:06<00:16, 10.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  82%|████████▏ | 775M/942M [01:06<00:16, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  82%|████████▏ | 777M/942M [01:06<00:16, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  83%|████████▎ | 779M/942M [01:07<00:16, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  83%|████████▎ | 781M/942M [01:07<00:17, 9.95MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  83%|████████▎ | 783M/942M [01:07<00:16, 10.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  83%|████████▎ | 785M/942M [01:07<00:15, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  84%|████████▎ | 787M/942M [01:07<00:14, 10.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  84%|████████▎ | 789M/942M [01:07<00:14, 11.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  84%|████████▍ | 791M/942M [01:08<00:13, 11.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  84%|████████▍ | 793M/942M [01:08<00:13, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  84%|████████▍ | 795M/942M [01:08<00:12, 12.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  85%|████████▍ | 797M/942M [01:08<00:12, 12.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  85%|████████▍ | 799M/942M [01:08<00:12, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  85%|████████▌ | 801M/942M [01:08<00:11, 12.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  85%|████████▌ | 803M/942M [01:09<00:11, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  85%|████████▌ | 805M/942M [01:09<00:11, 13.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  86%|████████▌ | 807M/942M [01:09<00:10, 13.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  86%|████████▌ | 809M/942M [01:09<00:10, 13.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  86%|████████▌ | 811M/942M [01:09<00:10, 13.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  86%|████████▋ | 813M/942M [01:09<00:09, 13.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  86%|████████▋ | 815M/942M [01:10<00:09, 13.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  87%|████████▋ | 817M/942M [01:10<00:09, 13.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  87%|████████▋ | 819M/942M [01:10<00:09, 14.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  87%|████████▋ | 821M/942M [01:10<00:09, 13.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  87%|████████▋ | 823M/942M [01:10<00:10, 12.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  88%|████████▊ | 825M/942M [01:10<00:10, 12.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  88%|████████▊ | 827M/942M [01:11<00:10, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  88%|████████▊ | 829M/942M [01:11<00:09, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  88%|████████▊ | 831M/942M [01:11<00:09, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  88%|████████▊ | 833M/942M [01:11<00:09, 12.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  89%|████████▊ | 835M/942M [01:11<00:09, 12.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  89%|████████▉ | 837M/942M [01:11<00:08, 12.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  89%|████████▉ | 839M/942M [01:12<00:08, 12.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  89%|████████▉ | 841M/942M [01:12<00:09, 11.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  89%|████████▉ | 843M/942M [01:12<00:09, 11.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  90%|████████▉ | 845M/942M [01:12<00:09, 10.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  90%|████████▉ | 847M/942M [01:12<00:09, 10.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  90%|█████████ | 849M/942M [01:13<00:09, 10.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  90%|█████████ | 851M/942M [01:13<00:09, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  91%|█████████ | 853M/942M [01:13<00:08, 10.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  91%|█████████ | 855M/942M [01:13<00:08, 10.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  91%|█████████ | 857M/942M [01:13<00:08, 11.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  91%|█████████ | 859M/942M [01:14<00:07, 11.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  91%|█████████▏| 861M/942M [01:14<00:07, 11.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  92%|█████████▏| 863M/942M [01:14<00:07, 11.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  92%|█████████▏| 865M/942M [01:14<00:06, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  92%|█████████▏| 867M/942M [01:14<00:06, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  92%|█████████▏| 869M/942M [01:14<00:06, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  92%|█████████▏| 871M/942M [01:15<00:05, 12.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  93%|█████████▎| 873M/942M [01:15<00:05, 12.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  93%|█████████▎| 875M/942M [01:15<00:05, 12.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  93%|█████████▎| 877M/942M [01:15<00:05, 13.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  93%|█████████▎| 879M/942M [01:15<00:05, 13.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  93%|█████████▎| 881M/942M [01:15<00:04, 13.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  94%|█████████▎| 883M/942M [01:15<00:04, 13.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  94%|█████████▍| 885M/942M [01:16<00:04, 13.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  94%|█████████▍| 887M/942M [01:16<00:04, 13.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  94%|█████████▍| 889M/942M [01:16<00:03, 14.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  95%|█████████▍| 891M/942M [01:16<00:04, 12.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  95%|█████████▍| 893M/942M [01:16<00:04, 12.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  95%|█████████▍| 895M/942M [01:17<00:04, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  95%|█████████▌| 897M/942M [01:17<00:04, 11.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  95%|█████████▌| 899M/942M [01:17<00:03, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  96%|█████████▌| 901M/942M [01:17<00:03, 12.0MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  96%|█████████▌| 903M/942M [01:17<00:03, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  96%|█████████▌| 905M/942M [01:17<00:03, 12.3MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  96%|█████████▋| 907M/942M [01:18<00:02, 12.5MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  96%|█████████▋| 909M/942M [01:18<00:02, 12.7MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  97%|█████████▋| 911M/942M [01:18<00:02, 12.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  97%|█████████▋| 913M/942M [01:18<00:02, 11.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  97%|█████████▋| 915M/942M [01:18<00:02, 10.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  97%|█████████▋| 917M/942M [01:19<00:02, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  98%|█████████▊| 919M/942M [01:19<00:02, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  98%|█████████▊| 921M/942M [01:19<00:02, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  98%|█████████▊| 923M/942M [01:19<00:01, 10.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  98%|█████████▊| 925M/942M [01:19<00:01, 10.8MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  98%|█████████▊| 927M/942M [01:19<00:01, 10.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  99%|█████████▊| 929M/942M [01:20<00:01, 11.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  99%|█████████▉| 931M/942M [01:20<00:01, 11.2MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  99%|█████████▉| 933M/942M [01:20<00:00, 11.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  99%|█████████▉| 935M/942M [01:20<00:00, 11.6MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]:  99%|█████████▉| 937M/942M [01:20<00:00, 11.9MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]: 100%|█████████▉| 939M/942M [01:21<00:00, 12.1MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]: 100%|█████████▉| 941M/942M [01:21<00:00, 12.4MB/s][A[A[A[A[A[A
+
+
+
+
+
+Downloading [model.safetensors]: 100%|██████████| 942M/942M [01:21<00:00, 12.5MB/s][A[A[A[A[A[ADownloading [model.safetensors]: 100%|██████████| 942M/942M [01:21<00:00, 12.2MB/s]
+Processing 10 items: 100%|██████████| 10.0/10.0 [01:21<00:00, 10.5s/it]Processing 10 items: 100%|██████████| 10.0/10.0 [01:21<00:00, 8.13s/it]
+2026-08-03 18:08:00,831 - modelscope - INFO - Download model 'Qwen/Qwen2.5-0.5B-Instruct' successfully.
+2026-08-03 18:08:00,833 - modelscope - INFO - Creating symbolic link [/data/models/Qwen/Qwen2.5-0.5B-Instruct].
+/data/models/Qwen/Qwen2___5-0___5B-Instruct

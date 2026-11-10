@@ -1,0 +1,244 @@
+"""Injectable memory backend and deterministic Agent replay harness."""
+
+from __future__ import annotations
+
+import copy
+import json
+import sqlite3
+from pathlib import Path
+from typing import Any, Callable, Iterable
+
+from txnmem_event_contract import validate_events
+from txnmem_trace import trace_to_instance
+
+
+class InstrumentedMemoryBackend:
+    """Small backend used to record actual memory events from an Agent.
+
+    A production connector can implement the same methods and retain the
+    event contract.  The benchmark then consumes recorded events rather than
+    manufacturing provenance edges after the fact.
+    """
+
+    def __init__(self, memories: dict[str, dict[str, Any]] | None = None):
+        self.memories = copy.deepcopy(memories or {})
+        for memory in self.memories.values():
+            memory.setdefault("version", 1)
+        self.events: list[dict[str, Any]] = []
+
+    def _event(self, kind: str, **fields: Any) -> dict[str, Any]:
+        event = {
+            "event_id": f"backend_event_{len(self.events) + 1:04d}",
+            "kind": kind,
+            "step": len(self.events) + 1,
+            "agent_id": fields.get("agent_id", "agent_1"),
+        }
+        event.update({key: value for key, value in fields.items() if value is not None})
+        self.events.append(event)
+        return event
+
+    def record_control_event(self, kind: str, **fields: Any) -> dict[str, Any]:
+        """Record a policy/failure control event through the same event boundary."""
+
+        return self._event(kind, **fields)
+
+    def write(self, memory_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
+        previous = self.memories.get(memory_id)
+        memory = {
+            "memory_id": memory_id,
+            "value": value if value is not None else memory_id,
+            "status": "active",
+            "agent_id": fields.get("agent_id", "agent_1"),
+            "scope": fields.get("scope", "tenant:user_001"),
+            "derived_from": list(fields.get("source_ids", [])),
+            "version": int(previous.get("version", 1)) + 1 if previous else 1,
+        }
+        self.memories[memory_id] = memory
+        self._event("memory_write", memory_id=memory_id, value=memory["value"], **fields)
+        return copy.deepcopy(memory)
+
+    def read(self, memory_id: str | None = None, **fields: Any) -> dict[str, Any] | None:
+        memory = self.memories.get(memory_id) if memory_id is not None else None
+        self._event("memory_read", memory_id=memory_id, **fields)
+        return copy.deepcopy(memory) if memory and memory.get("status") == "active" else None
+
+    def search(self, query: str | None = None, **fields: Any) -> list[dict[str, Any]]:
+        matches = [
+            copy.deepcopy(memory)
+            for memory in self.memories.values()
+            if memory.get("status") == "active"
+            and (query is None or query in {memory.get("memory_id"), memory.get("value"), memory.get("attribute")})
+        ]
+        self._event("memory_search", query=query, **fields)
+        return matches
+
+    def derive(self, memory_id: str, source_ids: Iterable[str], value: Any = None, **fields: Any) -> dict[str, Any]:
+        source_ids = list(source_ids)
+        if any(source_id not in self.memories for source_id in source_ids):
+            raise KeyError("derive source is missing")
+        memory = self.write(memory_id, value=value, source_ids=source_ids, **fields)
+        # Keep one canonical derive event for provenance; the write event is
+        # still useful to a backend audit log, so do not remove it.
+        self.events[-1]["kind"] = "memory_derive"
+        self.events[-1]["source_ids"] = source_ids
+        return memory
+
+    def propagate(self, memory_id: str, source_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
+        memory = self.write(memory_id, value=value, source_ids=[source_id], **fields)
+        self.events[-1]["kind"] = "memory_propagate"
+        self.events[-1]["source_id"] = source_id
+        return memory
+
+    def supersede(self, old_memory_id: str, new_memory_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
+        if old_memory_id not in self.memories:
+            raise KeyError(old_memory_id)
+        memory = self.write(new_memory_id, value=value, supersedes_id=old_memory_id, **fields)
+        self.memories[old_memory_id]["status"] = "superseded"
+        self.memories[old_memory_id]["version"] = int(
+            self.memories[old_memory_id].get("version", 1)
+        ) + 1
+        self._event(
+            "memory_supersede",
+            old_memory_id=old_memory_id,
+            new_memory_id=new_memory_id,
+            **fields,
+        )
+        return memory
+
+    def invalidate(self, memory_id: str, **fields: Any) -> None:
+        if memory_id in self.memories:
+            self.memories[memory_id]["status"] = "invalid"
+            self.memories[memory_id]["version"] = int(
+                self.memories[memory_id].get("version", 1)
+            ) + 1
+        self._event("invalidate", memory_id=memory_id, **fields)
+
+    def snapshot(self) -> dict[str, Any]:
+        return copy.deepcopy(self.memories)
+
+    def validated_events(self) -> list[dict[str, Any]]:
+        """Validate and return a JSON-safe copy of the native event log."""
+
+        return validate_events(self.events)
+
+
+class SQLiteInstrumentedMemoryBackend(InstrumentedMemoryBackend):
+    """Persist memory state in SQLite while retaining the native event contract.
+
+    The database is intentionally per-run and stores raw memory payloads only on
+    the execution host. Aggregate reports still contain event counts and oracle
+    summaries, never the SQLite payloads.
+    """
+
+    def __init__(self, db_path: str | Path, memories: dict[str, dict[str, Any]] | None = None):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._connection = sqlite3.connect(str(self.db_path))
+        self._connection.execute(
+            "CREATE TABLE IF NOT EXISTS memories ("
+            "memory_id TEXT PRIMARY KEY, payload TEXT NOT NULL, status TEXT NOT NULL)"
+        )
+        self._connection.commit()
+        super().__init__(memories)
+        rows = self._connection.execute("SELECT payload FROM memories ORDER BY memory_id").fetchall()
+        if rows:
+            self.memories = {str(json.loads(row[0])["memory_id"]): json.loads(row[0]) for row in rows}
+            for memory in self.memories.values():
+                memory.setdefault("version", 1)
+                self._persist_memory(memory)
+            self._connection.commit()
+        else:
+            for memory in self.memories.values():
+                self._persist_memory(memory)
+            self._connection.commit()
+
+    def _persist_memory(self, memory: dict[str, Any]) -> None:
+        payload = json.dumps(memory, ensure_ascii=False, sort_keys=True)
+        self._connection.execute(
+            "INSERT INTO memories(memory_id, payload, status) VALUES (?, ?, ?) "
+            "ON CONFLICT(memory_id) DO UPDATE SET payload=excluded.payload, status=excluded.status",
+            (str(memory["memory_id"]), payload, str(memory.get("status", "active"))),
+        )
+
+    def write(self, memory_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
+        memory = super().write(memory_id, value=value, **fields)
+        self._persist_memory(memory)
+        self._connection.commit()
+        return memory
+
+    def read(self, memory_id: str | None = None, **fields: Any) -> dict[str, Any] | None:
+        memory = None
+        if memory_id is not None:
+            row = self._connection.execute(
+                "SELECT payload FROM memories WHERE memory_id = ?", (memory_id,)
+            ).fetchone()
+            if row is not None:
+                memory = json.loads(row[0])
+                self.memories[memory_id] = memory
+        self._event("memory_read", memory_id=memory_id, **fields)
+        return copy.deepcopy(memory) if memory and memory.get("status") == "active" else None
+
+    def search(self, query: str | None = None, **fields: Any) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            "SELECT payload FROM memories WHERE status = 'active' ORDER BY memory_id"
+        ).fetchall()
+        memories = [json.loads(row[0]) for row in rows]
+        for memory in memories:
+            self.memories[str(memory["memory_id"])] = memory
+        matches = [
+            copy.deepcopy(memory)
+            for memory in memories
+            if query is None
+            or any(query == candidate for candidate in (memory.get("memory_id"), memory.get("value"), memory.get("attribute")))
+        ]
+        self._event("memory_search", query=query, **fields)
+        return matches
+
+    def supersede(self, old_memory_id: str, new_memory_id: str, value: Any = None, **fields: Any) -> dict[str, Any]:
+        memory = super().supersede(old_memory_id, new_memory_id, value=value, **fields)
+        self._persist_memory(self.memories[old_memory_id])
+        self._persist_memory(memory)
+        self._connection.commit()
+        return memory
+
+    def invalidate(self, memory_id: str, **fields: Any) -> None:
+        super().invalidate(memory_id, **fields)
+        if memory_id in self.memories:
+            self._persist_memory(self.memories[memory_id])
+            self._connection.commit()
+
+    def close(self) -> None:
+        self._connection.commit()
+        self._connection.close()
+
+    def __enter__(self) -> "SQLiteInstrumentedMemoryBackend":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        self.close()
+
+
+class AgentReplayRunner:
+    """Run explicit Agent actions against an injectable backend."""
+
+    def __init__(self, backend: InstrumentedMemoryBackend):
+        self.backend = backend
+
+    def run(self, actions: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+        for action in actions:
+            if not isinstance(action, dict):
+                raise ValueError("Agent actions must be mappings")
+            operation = dict(action)
+            operation_type = str(operation.pop("type", operation.pop("kind", "")))
+            if operation_type in {"begin_txn", "commit"}:
+                continue
+            if not hasattr(self.backend, operation_type):
+                raise ValueError(f"unsupported Agent action: {operation_type}")
+            getattr(self.backend, operation_type)(**operation)
+        return copy.deepcopy(self.backend.events)
+
+    def run_agent(self, agent: Callable[[InstrumentedMemoryBackend], Iterable[dict[str, Any]]]) -> list[dict[str, Any]]:
+        return self.run(agent(self.backend))
+
+    def to_instance(self, instance_id: str, seed: int = 0) -> dict[str, Any]:
+        return trace_to_instance(self.backend.validated_events(), instance_id, seed=seed)

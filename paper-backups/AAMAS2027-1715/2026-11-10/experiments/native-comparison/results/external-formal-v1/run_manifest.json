@@ -1,0 +1,429 @@
+{
+  "artifacts": {
+    "amem-observations.jsonl": "0e6834205ab58a0052ee3cf65b03e61db363a99dd0cd29b14e0c95e66482e6ae",
+    "amem-replays.jsonl": "00652415dde075baca6516f61222a8ed77eb53be053d682b1790bb73d74f6704",
+    "amem-rows.json": "b121a195c0ed25dd50e9ff2e6a5bb94da25734f4d865748e85c3f2cae6cd2287",
+    "amem-witnesses.json": "e7dab93a6cc748430f2cc6ab97c02c87e4cb3c4eed27cfc76fc97af6cde3aef8",
+    "amem-worker.log": "8f4cc59b9e0a3d56be25a0e9058688355cc1fa812c120e917a6c0b7832978386",
+    "capabilities.json": "7175ca279872370606e164fd008578f7de72d937f95e5e1b700c1f6d9127ddd7",
+    "environment.json": "79be6ef8b71ad73997fd6a5eaa1ecd9e16b177ac36396fc37ddc212dc612bbdb",
+    "gmemory-observations.jsonl": "d8eeb140ba1a3404229615d24cb07a2ca8d80eab58b004dcc4bac47a69b9282d",
+    "gmemory-replays.jsonl": "7dae562e0f805d03bd7ce36dad2135ac17a75887ee884d61941a22478c4a1027",
+    "gmemory-rows.json": "45ed365bbcb1bc6c409e94738a9d321a4d7a55e50cc383e2291da74a79f6e57a",
+    "gmemory-witnesses.json": "0dfc8e1512ba30ad394f96cf6253e85dd9e8333a57d54f2cc918361a56a99c04",
+    "gmemory-worker.log": "cc7afc2318e3ec77f82e0020b81168f8ce2e2ef11686cec8bda581a92b04feb8",
+    "inputs.jsonl": "90d82af3406976005dd7df203292985ce063c51fe217ff58473f4337be8aab86",
+    "jobs.json": "5c80c8846ad142606d73b3d83310ad96247a6947564da5513970f5ecb42cf020",
+    "mem0-observations.jsonl": "13067a1641a5d5f2574120e4b0141347d510e04f04729940f72057dec8c04b7a",
+    "mem0-replays.jsonl": "7f1b1895827f770e51c9500dce51d2fb6f51f8592f82b8a50e9164871dfb4174",
+    "mem0-rows.json": "1b9b630e001b14f3da176df8f35d1dad8db925b7f58cba167ad2a0dba4b5a81d",
+    "mem0-witnesses.json": "6b573bda3db1c2566b8485085102e28cff87265b94148ee569fa9080488863e5",
+    "mem0-worker.log": "07d8025ed633fc61ce3abcfd44254f27b06f288f7251aaca610fb3fd1d40d443",
+    "replay_summary.json": "737d53ef8efd15a2784f06fd9764db33f77a8bca491eb588213427c2742f9f62",
+    "results.csv": "9b10f75bfd87186324cc5a344b1f408910a849823ed6ba03027cb4b26d77c05c",
+    "summary.json": "5e51f33b5f4376aecaba60ed1fa041c44281d839b66aa4afe86d6e8836598bef",
+    "txnmem-observations.jsonl": "d59b384c5585516b93ad32491483748e3c1392eec043c5761cfb2da85d98f08c",
+    "txnmem-replays.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "txnmem-rows.json": "bcfb55cf3bb7b591025ed2bca0bab0e72d5b2d611e68679413444cdc83664d5e",
+    "txnmem-witnesses.json": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+    "txnmem-worker.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "distinct_inputs": 900,
+  "ended_utc": "2026-09-28T13:41:40.470506+00:00",
+  "execution_count": 3300,
+  "fault_model": "operation-boundary controller interruption; not process kill or storage recovery",
+  "inputs_sha256": "90d82af3406976005dd7df203292985ce063c51fe217ff58473f4337be8aab86",
+  "pilot_overlap": "Technical pilot seeds 0,1 reused; no held-out inference",
+  "provider_profile": {
+    "embedding": "sha256-counter-v1-64d",
+    "generation": "fixed-response-v1",
+    "scope": "controlled operations; no semantic quality or process-crash claim"
+  },
+  "replay_attempts": 60,
+  "replay_count": 5,
+  "results_count": 3300,
+  "runtime_errors": 100,
+  "sampling_scope": "Reduced normalized programs; source parameters not all exercised",
+  "seeds": 50,
+  "shared_evidence": "E1 directed/ordinary native executions are reused in E2, not independent replications",
+  "source_commit": "bade14dc459038a438f3d6432b2b6172d0004459",
+  "source_files": {
+    "src/txnmem_external_campaign.py": "370bdb29ef05768d7444f06a0bc6d05d2e5fd9ddffa6f8d7746896e28818f0c8",
+    "src/txnmem_external_compare.py": "9c2a37105ab720b62aaadbe817f0e08b838a5ca3eb389ce7bbfd2b83a78cbf69",
+    "src/txnmem_external_native.py": "522d70c3daa40e2ee74cd6d6ef8ff86d14a07442584e3dc6bc5ed5593b5c399e",
+    "src/txnmem_external_report.py": "98681e33df3d1d2b4a9df22b91ab78b9680f07c210f6c40168bd5e1d75e888bb"
+  },
+  "started_utc": "2026-09-28T13:36:52.429043+00:00",
+  "status": "completed",
+  "systems": [
+    "TxnMem",
+    "Mem0",
+    "G-Memory",
+    "A-MEM"
+  ],
+  "txnmem_verification": {
+    "files": [
+      {
+        "actual_git_blob": "90fa2bc86a03a7e5a5b2429758b86e39008b4799",
+        "expected_git_blob": "90fa2bc86a03a7e5a5b2429758b86e39008b4799",
+        "matches": true,
+        "path": "src/locomo_agent_runtime.py"
+      },
+      {
+        "actual_git_blob": "9522fab88dd4895c2d1de76f0152a199f7ffae57",
+        "expected_git_blob": "9522fab88dd4895c2d1de76f0152a199f7ffae57",
+        "matches": true,
+        "path": "src/locomo_official_eval.py"
+      },
+      {
+        "actual_git_blob": "a86bfede1828ba5d613e327f7ac61cf773b3d2ed",
+        "expected_git_blob": "a86bfede1828ba5d613e327f7ac61cf773b3d2ed",
+        "matches": true,
+        "path": "src/locomo_paired_eval.py"
+      },
+      {
+        "actual_git_blob": "c20333fb9a28b2646da884c29338317b63b81421",
+        "expected_git_blob": "c20333fb9a28b2646da884c29338317b63b81421",
+        "matches": true,
+        "path": "src/txnmem_appworld_projection.py"
+      },
+      {
+        "actual_git_blob": "43f87b7fbc600e0aec111100a6ebb3f38241241c",
+        "expected_git_blob": "43f87b7fbc600e0aec111100a6ebb3f38241241c",
+        "matches": true,
+        "path": "src/txnmem_artifact_audit.py"
+      },
+      {
+        "actual_git_blob": "bd7079743c86b4a55fad217e845e1d1cfa2b59b6",
+        "expected_git_blob": "bd7079743c86b4a55fad217e845e1d1cfa2b59b6",
+        "matches": true,
+        "path": "src/txnmem_backend.py"
+      },
+      {
+        "actual_git_blob": "34c821af7bdddd82598e549d06c9db93b29312f9",
+        "expected_git_blob": "34c821af7bdddd82598e549d06c9db93b29312f9",
+        "matches": true,
+        "path": "src/txnmem_backend_performance.py"
+      },
+      {
+        "actual_git_blob": "f76b47ebfc21b6075bb6d514900e722f5baab6e4",
+        "expected_git_blob": "f76b47ebfc21b6075bb6d514900e722f5baab6e4",
+        "matches": true,
+        "path": "src/txnmem_bench_adapters.py"
+      },
+      {
+        "actual_git_blob": "26987e5a91af0243c7e18c6973442dd9a071a15a",
+        "expected_git_blob": "26987e5a91af0243c7e18c6973442dd9a071a15a",
+        "matches": true,
+        "path": "src/txnmem_benchmark_bridge.py"
+      },
+      {
+        "actual_git_blob": "181f5e93fa6672e10c9ba7fc061029bfa7a06848",
+        "expected_git_blob": "181f5e93fa6672e10c9ba7fc061029bfa7a06848",
+        "matches": true,
+        "path": "src/txnmem_benchmark_manifests.py"
+      },
+      {
+        "actual_git_blob": "158e25900c1631f4c82d160462ea74bf7a5270a2",
+        "expected_git_blob": "158e25900c1631f4c82d160462ea74bf7a5270a2",
+        "matches": true,
+        "path": "src/txnmem_claim_audit.py"
+      },
+      {
+        "actual_git_blob": "a2f45ed053b67e7c07be22654cb4da8027ea3ab7",
+        "expected_git_blob": "a2f45ed053b67e7c07be22654cb4da8027ea3ab7",
+        "matches": true,
+        "path": "src/txnmem_concurrency.py"
+      },
+      {
+        "actual_git_blob": "c544219d09fbc3950f07b25116caa5bfbf525fc4",
+        "expected_git_blob": "c544219d09fbc3950f07b25116caa5bfbf525fc4",
+        "matches": true,
+        "path": "src/txnmem_conditions.py"
+      },
+      {
+        "actual_git_blob": "085ce854e10df12837d1e146b27d74f0fef7d6e0",
+        "expected_git_blob": "085ce854e10df12837d1e146b27d74f0fef7d6e0",
+        "matches": true,
+        "path": "src/txnmem_coverage.py"
+      },
+      {
+        "actual_git_blob": "900986025a64d6335ffe2152bb02a8939032290c",
+        "expected_git_blob": "900986025a64d6335ffe2152bb02a8939032290c",
+        "matches": true,
+        "path": "src/txnmem_differential.py"
+      },
+      {
+        "actual_git_blob": "d0ca1c75bb8ebb75ba4a9f2c5e020118f6abe06a",
+        "expected_git_blob": "d0ca1c75bb8ebb75ba4a9f2c5e020118f6abe06a",
+        "matches": true,
+        "path": "src/txnmem_distributed.py"
+      },
+      {
+        "actual_git_blob": "87736dc79962cdb7d7ff48281bf74e2c3adc1529",
+        "expected_git_blob": "87736dc79962cdb7d7ff48281bf74e2c3adc1529",
+        "matches": true,
+        "path": "src/txnmem_distributed_protocol.py"
+      },
+      {
+        "actual_git_blob": "78045179745050955bb5edcc4390bcf201c8f4ad",
+        "expected_git_blob": "78045179745050955bb5edcc4390bcf201c8f4ad",
+        "matches": true,
+        "path": "src/txnmem_event_contract.py"
+      },
+      {
+        "actual_git_blob": "9f03a8aa7cdc13e272f85fd7fc0387b1286e1040",
+        "expected_git_blob": "9f03a8aa7cdc13e272f85fd7fc0387b1286e1040",
+        "matches": true,
+        "path": "src/txnmem_evidence_aggregates.py"
+      },
+      {
+        "actual_git_blob": "9e628f0fefec8791dfeb0133e2cf19979c8433c1",
+        "expected_git_blob": "9e628f0fefec8791dfeb0133e2cf19979c8433c1",
+        "matches": true,
+        "path": "src/txnmem_experiment.py"
+      },
+      {
+        "actual_git_blob": "6f2cb9b60e62cc15796569433c50832f86bb630f",
+        "expected_git_blob": "6f2cb9b60e62cc15796569433c50832f86bb630f",
+        "matches": true,
+        "path": "src/txnmem_failure_controller.py"
+      },
+      {
+        "actual_git_blob": "95363884e0c2e44f33708d3dd773c129ef027f5b",
+        "expected_git_blob": "95363884e0c2e44f33708d3dd773c129ef027f5b",
+        "matches": true,
+        "path": "src/txnmem_interleavings.py"
+      },
+      {
+        "actual_git_blob": "36d64d770cf23847cb703f28c1639a899bc1cf90",
+        "expected_git_blob": "36d64d770cf23847cb703f28c1639a899bc1cf90",
+        "matches": true,
+        "path": "src/txnmem_invariants.py"
+      },
+      {
+        "actual_git_blob": "2ac1f58b6fb206f0ce40a44e37a88842a3b4f6dc",
+        "expected_git_blob": "2ac1f58b6fb206f0ce40a44e37a88842a3b4f6dc",
+        "matches": true,
+        "path": "src/txnmem_manuscript_audit.py"
+      },
+      {
+        "actual_git_blob": "4971c1e02b26994f925ecfa8717138eff62166aa",
+        "expected_git_blob": "4971c1e02b26994f925ecfa8717138eff62166aa",
+        "matches": true,
+        "path": "src/txnmem_metrics.py"
+      },
+      {
+        "actual_git_blob": "bb0d775729b3837a4e15f58b52032b29e13a9434",
+        "expected_git_blob": "bb0d775729b3837a4e15f58b52032b29e13a9434",
+        "matches": true,
+        "path": "src/txnmem_model_identity.py"
+      },
+      {
+        "actual_git_blob": "b40247e93d26b70766945c768e019d059c8956c0",
+        "expected_git_blob": "b40247e93d26b70766945c768e019d059c8956c0",
+        "matches": true,
+        "path": "src/txnmem_model_load.py"
+      },
+      {
+        "actual_git_blob": "7d08baf690781e7f0418cd155f8e5818280d4a8f",
+        "expected_git_blob": "7d08baf690781e7f0418cd155f8e5818280d4a8f",
+        "matches": true,
+        "path": "src/txnmem_model_load_analysis.py"
+      },
+      {
+        "actual_git_blob": "a4f0c1fb705c42e01c391d08b46c00c0e0d4d235",
+        "expected_git_blob": "a4f0c1fb705c42e01c391d08b46c00c0e0d4d235",
+        "matches": true,
+        "path": "src/txnmem_model_load_repetitions.py"
+      },
+      {
+        "actual_git_blob": "800ec650194bbb7d84e1ec6435ef0fa68081e6bb",
+        "expected_git_blob": "800ec650194bbb7d84e1ec6435ef0fa68081e6bb",
+        "matches": true,
+        "path": "src/txnmem_model_protocol.py"
+      },
+      {
+        "actual_git_blob": "e76056d2e2bfba0b913842233c85813a9c4c120b",
+        "expected_git_blob": "e76056d2e2bfba0b913842233c85813a9c4c120b",
+        "matches": true,
+        "path": "src/txnmem_multiagent_audit.py"
+      },
+      {
+        "actual_git_blob": "58203954534461c9c170185bf9b52601afee8132",
+        "expected_git_blob": "58203954534461c9c170185bf9b52601afee8132",
+        "matches": true,
+        "path": "src/txnmem_multiagent_experiment.py"
+      },
+      {
+        "actual_git_blob": "e21f6c1c77f4a7f91ee0ec14772c60117dd9254c",
+        "expected_git_blob": "e21f6c1c77f4a7f91ee0ec14772c60117dd9254c",
+        "matches": true,
+        "path": "src/txnmem_multiagent_invariants.py"
+      },
+      {
+        "actual_git_blob": "31681883f9a373e7f64b8a579d88738522a68375",
+        "expected_git_blob": "31681883f9a373e7f64b8a579d88738522a68375",
+        "matches": true,
+        "path": "src/txnmem_multiagent_storage.py"
+      },
+      {
+        "actual_git_blob": "d362c67c45d643d4ed953e00574c404c48b5a31f",
+        "expected_git_blob": "d362c67c45d643d4ed953e00574c404c48b5a31f",
+        "matches": true,
+        "path": "src/txnmem_multiagent_storage_experiment.py"
+      },
+      {
+        "actual_git_blob": "f898463dea7f011132f413fda1f4f2cf8347eb35",
+        "expected_git_blob": "f898463dea7f011132f413fda1f4f2cf8347eb35",
+        "matches": true,
+        "path": "src/txnmem_multiagent_workloads.py"
+      },
+      {
+        "actual_git_blob": "df4b54756bfaef5ffef958e7dbbefa469b89b47f",
+        "expected_git_blob": "df4b54756bfaef5ffef958e7dbbefa469b89b47f",
+        "matches": true,
+        "path": "src/txnmem_mutation.py"
+      },
+      {
+        "actual_git_blob": "d3423ac304b761ff5adc5aa386a99df266b9fae0",
+        "expected_git_blob": "d3423ac304b761ff5adc5aa386a99df266b9fae0",
+        "matches": true,
+        "path": "src/txnmem_paper_projection.py"
+      },
+      {
+        "actual_git_blob": "da8d3fca59bdd58e811fca9a4d7a471803c02c72",
+        "expected_git_blob": "da8d3fca59bdd58e811fca9a4d7a471803c02c72",
+        "matches": true,
+        "path": "src/txnmem_path_privacy.py"
+      },
+      {
+        "actual_git_blob": "47548238600d248149532a881d671a4d7dbdbc06",
+        "expected_git_blob": "47548238600d248149532a881d671a4d7dbdbc06",
+        "matches": true,
+        "path": "src/txnmem_performance.py"
+      },
+      {
+        "actual_git_blob": "c6560d2402145a6717f51769c0338eae8734ab55",
+        "expected_git_blob": "c6560d2402145a6717f51769c0338eae8734ab55",
+        "matches": true,
+        "path": "src/txnmem_prompt_comparison.py"
+      },
+      {
+        "actual_git_blob": "ec3642ad3fe893783ea17b73fdb47a4786eebab0",
+        "expected_git_blob": "ec3642ad3fe893783ea17b73fdb47a4786eebab0",
+        "matches": true,
+        "path": "src/txnmem_public_native.py"
+      },
+      {
+        "actual_git_blob": "1b0e601eab304d53be70e60c6c2968a4244bac26",
+        "expected_git_blob": "1b0e601eab304d53be70e60c6c2968a4244bac26",
+        "matches": true,
+        "path": "src/txnmem_real_agent.py"
+      },
+      {
+        "actual_git_blob": "7563a8ac75f86368f121781f2263f3bfed295aa5",
+        "expected_git_blob": "7563a8ac75f86368f121781f2263f3bfed295aa5",
+        "matches": true,
+        "path": "src/txnmem_real_experiment.py"
+      },
+      {
+        "actual_git_blob": "c81577624f66a2d07221385fa369af145727da91",
+        "expected_git_blob": "c81577624f66a2d07221385fa369af145727da91",
+        "matches": true,
+        "path": "src/txnmem_realism.py"
+      },
+      {
+        "actual_git_blob": "a260f528fdb64f6be54dd3c2a15eb7781d5c99b6",
+        "expected_git_blob": "a260f528fdb64f6be54dd3c2a15eb7781d5c99b6",
+        "matches": true,
+        "path": "src/txnmem_reference.py"
+      },
+      {
+        "actual_git_blob": "300bdd2ba34856921a66b30ec698c3b688657779",
+        "expected_git_blob": "300bdd2ba34856921a66b30ec698c3b688657779",
+        "matches": true,
+        "path": "src/txnmem_repair.py"
+      },
+      {
+        "actual_git_blob": "d664c6cfb8e7a2c19013461b6099a87b75ee5d2d",
+        "expected_git_blob": "d664c6cfb8e7a2c19013461b6099a87b75ee5d2d",
+        "matches": true,
+        "path": "src/txnmem_schedules.py"
+      },
+      {
+        "actual_git_blob": "bbbc4522dc4c115c5ebda65e1ae170da54ecd479",
+        "expected_git_blob": "bbbc4522dc4c115c5ebda65e1ae170da54ecd479",
+        "matches": true,
+        "path": "src/txnmem_schema.py"
+      },
+      {
+        "actual_git_blob": "e0dadd5e04d1b2ccec27a5b4454e2eb3b6a51f1c",
+        "expected_git_blob": "e0dadd5e04d1b2ccec27a5b4454e2eb3b6a51f1c",
+        "matches": true,
+        "path": "src/txnmem_service_faults.py"
+      },
+      {
+        "actual_git_blob": "431b4d46e20f2e3d88706d49bfc9edd3210ba741",
+        "expected_git_blob": "431b4d46e20f2e3d88706d49bfc9edd3210ba741",
+        "matches": true,
+        "path": "src/txnmem_simulator.py"
+      },
+      {
+        "actual_git_blob": "390d913fd2f259f9b4429b7fc6197b99d5db99ef",
+        "expected_git_blob": "390d913fd2f259f9b4429b7fc6197b99d5db99ef",
+        "matches": true,
+        "path": "src/txnmem_statistics.py"
+      },
+      {
+        "actual_git_blob": "779eab1caa6a4961a3316c8be92dfa2ba7de06bf",
+        "expected_git_blob": "779eab1caa6a4961a3316c8be92dfa2ba7de06bf",
+        "matches": true,
+        "path": "src/txnmem_trace.py"
+      },
+      {
+        "actual_git_blob": "40ff6233e38c28ea27bbf5826413ca2c1f2e2b51",
+        "expected_git_blob": "40ff6233e38c28ea27bbf5826413ca2c1f2e2b51",
+        "matches": true,
+        "path": "src/txnmem_trace_pipeline.py"
+      },
+      {
+        "actual_git_blob": "39e04ac6480f5443c706ff59ef90cf989d1e2801",
+        "expected_git_blob": "39e04ac6480f5443c706ff59ef90cf989d1e2801",
+        "matches": true,
+        "path": "src/txnmem_vector_graph_backend.py"
+      },
+      {
+        "actual_git_blob": "47fecd5cd6d82edba13009d987f2e2e235fd1283",
+        "expected_git_blob": "47fecd5cd6d82edba13009d987f2e2e235fd1283",
+        "matches": true,
+        "path": "src/txnmem_workloads.py"
+      }
+    ],
+    "upstream_commit": "45b2d529066b470f809b54313ae52ae90a1666aa"
+  },
+  "upstream_sources": {
+    "external/A-mem/SOURCE_REVISION": "7af016116efe59db23e97fcd0ff6e133d16d80b5c4e1a23fdb8c3d060d91d15c",
+    "external/A-mem/agentic_memory/__init__.py": "36a9e7f1c95b82ffb99743e0c5c4ce95d83c9a430aac59f84ef3cbfab6145068",
+    "external/A-mem/agentic_memory/llm_controller.py": "44e7d228326fe78dd8ecb8c8176364511547f5fef7cd7d58e433e883caeae0bb",
+    "external/A-mem/agentic_memory/memory_system.py": "fa58c3ed405e37d298a3d11e5cd69459bc9709004461c0e01fc0c497c77c949b",
+    "external/A-mem/agentic_memory/retrievers.py": "a4cd9645b9df0774f7f67bdfff3cf4d1a41911b4bac3843208db2019b57e311d",
+    "external/GMemory/SOURCE_REVISION": "c4ced0c5592a272883cbf7bbd0e8b132f8a5f364bd59e8b9aff92eee6e7bcb20",
+    "external/GMemory/configs/configs.yaml": "36ac2caef4fd876507f35e0ad602fe3fe9db00408b5b13f0af9af51a739fd958",
+    "external/GMemory/mas/__init__.py": "7b0e01454d96f25e664d11ee49a23d592671767b6079dd1414be42991d4e7b17",
+    "external/GMemory/mas/llm.py": "ea14e611f0be96de3151f1b44941cec808059742774c4eaac5c6838e9fddc72b",
+    "external/GMemory/mas/memory/__init__.py": "b4c003de4159c40de0bb3fc114db7b4b4984f75ca6ba4b7e323e149712be38e9",
+    "external/GMemory/mas/memory/common.py": "bccaba14f5c5738b099b6141d68e556845a0cf05ff5605852f0a7cd3c3b2403a",
+    "external/GMemory/mas/memory/mas_memory/GMemory.py": "3c1bd5466226deffce5d8608abad806939f36c15d0a1f4f45d6a3e1607fca3e4",
+    "external/GMemory/mas/memory/mas_memory/__init__.py": "5faff5e41ec49cd822cdf4b5bfd54933fa70e992b8f366a9b27f2caff0ebbf9c",
+    "external/GMemory/mas/memory/mas_memory/chatdev.py": "abcd2be80c40da6fa39458bcf6163873089f391510b94bb8781c9e63dc0bd2bd",
+    "external/GMemory/mas/memory/mas_memory/generative.py": "3f296cc738b908e985213352ad7aee9a1ef48031c6d1a35acf22c77479cae107",
+    "external/GMemory/mas/memory/mas_memory/memory_base.py": "2f8c6014c9d819d9a9fa358b86e50da66e0bdbe7ff7ccf654f3064543a1f67b4",
+    "external/GMemory/mas/memory/mas_memory/memorybank.py": "f986acca5b4c09d4c064bbfb9732ac70173964447bc08a3bca7a003991adbc38",
+    "external/GMemory/mas/memory/mas_memory/metagpt.py": "f90d4469078ec33ce3d0480abe0427d4565e6fa71a564d226bbff31dfb5a2f0c",
+    "external/GMemory/mas/memory/mas_memory/prompt.py": "883fa75870ba6a55814c8c568823844884d03df3fdf933f5aa3bb39dfbdaf546",
+    "external/GMemory/mas/memory/mas_memory/voyager.py": "9914f79e472569493f3625dfa87527b27a62408d075fa19ae7a87d0b11ff96a5",
+    "external/GMemory/mas/memory/utils.py": "9b3cb4b233152e8cd8b174357610cb641cc2cd0387322c0a2e56aaa279afa13e",
+    "external/GMemory/mas/utils.py": "0cc2a8ff493b06976254c7e182fac60cca6915679dab0159f0f669a3d4df9a82"
+  }
+}

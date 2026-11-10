@@ -1,0 +1,389 @@
+...........s.........s.s..s..........................................................E..................EE...................................................FF..EE.EEE..E................................................................................................EEEEEEEEEE....E..E.............................................................................wrote benchmark native trace and summary -> /tmp/tmp_1oim2n3/out/smoke
+wrote benchmark native batch summary -> /tmp/tmp_1oim2n3/out/batch/results/native_batch_summary.json
+wrote backend performance report -> /tmp/tmphj6qzjmo/results/backend_performance.json
+.....................................................
+======================================================================
+ERROR: test_txnmem_ccfa_docx (unittest.loader._FailedTest.test_txnmem_ccfa_docx)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_txnmem_ccfa_docx
+Traceback (most recent call last):
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/unittest/loader.py", line 394, in _find_test_path
+    module = self._get_module_from_name(name)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/unittest/loader.py", line 337, in _get_module_from_name
+    __import__(name)
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_ccfa_docx.py", line 16, in <module>
+    from docx import Document
+ModuleNotFoundError: No module named 'docx'
+
+
+======================================================================
+ERROR: test_state_verified_profile_rejects_superficially_asserted_incomplete_evidence (test_txnmem_claim_audit.PaperClaimLedgerTests.test_state_verified_profile_rejects_superficially_asserted_incomplete_evidence) (name='partial')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_claim_audit.py", line 543, in test_state_verified_profile_rejects_superficially_asserted_incomplete_evidence
+    ledger = self._state_verified_profile_fixture(root)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_claim_audit.py", line 495, in _state_verified_profile_fixture
+    artifact.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1027, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/submission_evidence/toxiproxy_state_verified_30/aggregate.json'
+
+======================================================================
+ERROR: test_state_verified_profile_rejects_superficially_asserted_incomplete_evidence (test_txnmem_claim_audit.PaperClaimLedgerTests.test_state_verified_profile_rejects_superficially_asserted_incomplete_evidence)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_claim_audit.py", line 556, in test_state_verified_profile_rejects_superficially_asserted_incomplete_evidence
+    {item["code"] for item in report["findings"]},
+                              ^^^^^^
+UnboundLocalError: cannot access local variable 'report' where it is not associated with a value
+
+======================================================================
+ERROR: test_rejects_active_artifact_byte_drift (test_txnmem_manuscript_audit.ManuscriptAuditTests.test_rejects_active_artifact_byte_drift)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_manuscript_audit.py", line 260, in test_rejects_active_artifact_byte_drift
+    self._isolated_evidence_root(root)
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_manuscript_audit.py", line 92, in _isolated_evidence_root
+    shutil.copy2(source, target)
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/shutil.py", line 475, in copy2
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/shutil.py", line 260, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/appworld_projection_regenerated/projection_inventory.json'
+
+======================================================================
+ERROR: test_rejects_active_claim_manifest_byte_drift (test_txnmem_manuscript_audit.ManuscriptAuditTests.test_rejects_active_claim_manifest_byte_drift)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_manuscript_audit.py", line 273, in test_rejects_active_claim_manifest_byte_drift
+    self._isolated_evidence_root(root)
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_manuscript_audit.py", line 92, in _isolated_evidence_root
+    shutil.copy2(source, target)
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/shutil.py", line 475, in copy2
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/shutil.py", line 260, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/appworld_projection_regenerated/projection_inventory.json'
+
+======================================================================
+ERROR: test_rejects_claim_audit_without_current_ledger_digest (test_txnmem_manuscript_audit.ManuscriptAuditTests.test_rejects_claim_audit_without_current_ledger_digest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_manuscript_audit.py", line 217, in test_rejects_claim_audit_without_current_ledger_digest
+    payload = json.loads(current_audit.read_text(encoding="utf-8"))
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1027, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/paper_evidence/claim_audit.json'
+
+======================================================================
+ERROR: test_rejects_figure_output_byte_drift (test_txnmem_manuscript_audit.ManuscriptAuditTests.test_rejects_figure_output_byte_drift)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_manuscript_audit.py", line 300, in test_rejects_figure_output_byte_drift
+    self._isolated_evidence_root(root)
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_manuscript_audit.py", line 92, in _isolated_evidence_root
+    shutil.copy2(source, target)
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/shutil.py", line 475, in copy2
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/shutil.py", line 260, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/appworld_projection_regenerated/projection_inventory.json'
+
+======================================================================
+ERROR: test_rejects_figure_source_byte_drift (test_txnmem_manuscript_audit.ManuscriptAuditTests.test_rejects_figure_source_byte_drift)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_manuscript_audit.py", line 286, in test_rejects_figure_source_byte_drift
+    self._isolated_evidence_root(root)
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_manuscript_audit.py", line 92, in _isolated_evidence_root
+    shutil.copy2(source, target)
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/shutil.py", line 475, in copy2
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/shutil.py", line 260, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/appworld_projection_regenerated/projection_inventory.json'
+
+======================================================================
+ERROR: test_rejects_stale_passed_claim_report_even_with_current_ledger_digest (test_txnmem_manuscript_audit.ManuscriptAuditTests.test_rejects_stale_passed_claim_report_even_with_current_ledger_digest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_manuscript_audit.py", line 243, in test_rejects_stale_passed_claim_report_even_with_current_ledger_digest
+    self._isolated_evidence_root(root)
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_manuscript_audit.py", line 92, in _isolated_evidence_root
+    shutil.copy2(source, target)
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/shutil.py", line 475, in copy2
+    copyfile(src, dst, follow_symlinks=follow_symlinks)
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/shutil.py", line 260, in copyfile
+    with open(src, 'rb') as fsrc:
+         ^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/appworld_projection_regenerated/projection_inventory.json'
+
+======================================================================
+ERROR: test_all_required_figures_are_generated_with_complete_manifest (test_txnmem_paper_figures.PaperFigureBuilderTests.test_all_required_figures_are_generated_with_complete_manifest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_paper_figures.py", line 22, in test_all_required_figures_are_generated_with_complete_manifest
+    manifest = build_all(ROOT, out_dir)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 386, in build_all
+    {"path": source_path, "sha256": _sha256(root / source_path)}
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 37, in _sha256
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+                          ^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1019, in read_bytes
+    with self.open(mode='rb') as f:
+         ^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/final_controlled/results/schedule_baseline.json'
+
+======================================================================
+ERROR: test_architecture_svg_encodes_revalidation_before_persist (test_txnmem_paper_figures.PaperFigureBuilderTests.test_architecture_svg_encodes_revalidation_before_persist)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_paper_figures.py", line 114, in test_architecture_svg_encodes_revalidation_before_persist
+    manifest = build_all(ROOT, out_dir)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 386, in build_all
+    {"path": source_path, "sha256": _sha256(root / source_path)}
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 37, in _sha256
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+                          ^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1019, in read_bytes
+    with self.open(mode='rb') as f:
+         ^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/final_controlled/results/schedule_baseline.json'
+
+======================================================================
+ERROR: test_evidence_figure_reports_state_verified_toxiproxy_boundary (test_txnmem_paper_figures.PaperFigureBuilderTests.test_evidence_figure_reports_state_verified_toxiproxy_boundary)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_paper_figures.py", line 98, in test_evidence_figure_reports_state_verified_toxiproxy_boundary
+    manifest = build_all(ROOT, out_dir)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 386, in build_all
+    {"path": source_path, "sha256": _sha256(root / source_path)}
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 37, in _sha256
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+                          ^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1019, in read_bytes
+    with self.open(mode='rb') as f:
+         ^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/final_controlled/results/schedule_baseline.json'
+
+======================================================================
+ERROR: test_figure_semantics_do_not_overclaim_transactions_or_future_repair (test_txnmem_paper_figures.PaperFigureBuilderTests.test_figure_semantics_do_not_overclaim_transactions_or_future_repair)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_paper_figures.py", line 81, in test_figure_semantics_do_not_overclaim_transactions_or_future_repair
+    manifest = build_all(ROOT, out_dir)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 386, in build_all
+    {"path": source_path, "sha256": _sha256(root / source_path)}
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 37, in _sha256
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+                          ^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1019, in read_bytes
+    with self.open(mode='rb') as f:
+         ^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/final_controlled/results/schedule_baseline.json'
+
+======================================================================
+ERROR: test_manifest_declares_required_source_dependencies (test_txnmem_paper_figures.PaperFigureBuilderTests.test_manifest_declares_required_source_dependencies)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_paper_figures.py", line 161, in test_manifest_declares_required_source_dependencies
+    manifest = build_all(ROOT, Path(tmp) / "figures")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 386, in build_all
+    {"path": source_path, "sha256": _sha256(root / source_path)}
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 37, in _sha256
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+                          ^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1019, in read_bytes
+    with self.open(mode='rb') as f:
+         ^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/final_controlled/results/schedule_baseline.json'
+
+======================================================================
+ERROR: test_motivation_risk_rectangles_do_not_overlap (test_txnmem_paper_figures.PaperFigureBuilderTests.test_motivation_risk_rectangles_do_not_overlap)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_paper_figures.py", line 133, in test_motivation_risk_rectangles_do_not_overlap
+    manifest = build_all(ROOT, out_dir)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 386, in build_all
+    {"path": source_path, "sha256": _sha256(root / source_path)}
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 37, in _sha256
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+                          ^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1019, in read_bytes
+    with self.open(mode='rb') as f:
+         ^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/final_controlled/results/schedule_baseline.json'
+
+======================================================================
+ERROR: test_outputs_and_hashes_are_deterministic (test_txnmem_paper_figures.PaperFigureBuilderTests.test_outputs_and_hashes_are_deterministic)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_paper_figures.py", line 56, in test_outputs_and_hashes_are_deterministic
+    first = build_all(ROOT, Path(first_tmp) / "figures")
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 386, in build_all
+    {"path": source_path, "sha256": _sha256(root / source_path)}
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 37, in _sha256
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+                          ^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1019, in read_bytes
+    with self.open(mode='rb') as f:
+         ^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/final_controlled/results/schedule_baseline.json'
+
+======================================================================
+ERROR: test_secondary_svg_labels_meet_one_column_size_floor (test_txnmem_paper_figures.PaperFigureBuilderTests.test_secondary_svg_labels_meet_one_column_size_floor)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_paper_figures.py", line 148, in test_secondary_svg_labels_meet_one_column_size_floor
+    manifest = build_all(ROOT, out_dir)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 386, in build_all
+    {"path": source_path, "sha256": _sha256(root / source_path)}
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 37, in _sha256
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+                          ^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1019, in read_bytes
+    with self.open(mode='rb') as f:
+         ^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/final_controlled/results/schedule_baseline.json'
+
+======================================================================
+ERROR: test_svg_assets_are_code_native_and_have_no_replacement_glyphs (test_txnmem_paper_figures.PaperFigureBuilderTests.test_svg_assets_are_code_native_and_have_no_replacement_glyphs)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_paper_figures.py", line 64, in test_svg_assets_are_code_native_and_have_no_replacement_glyphs
+    manifest = build_all(ROOT, out_dir)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 386, in build_all
+    {"path": source_path, "sha256": _sha256(root / source_path)}
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_paper_figures.py", line 37, in _sha256
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+                          ^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1019, in read_bytes
+    with self.open(mode='rb') as f:
+         ^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/data/txnmem/external-comparison-20260928/results/final_controlled/results/schedule_baseline.json'
+
+======================================================================
+ERROR: test_txnmem_paper_projection (unittest.loader._FailedTest.test_txnmem_paper_projection)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_txnmem_paper_projection
+Traceback (most recent call last):
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/unittest/loader.py", line 394, in _find_test_path
+    module = self._get_module_from_name(name)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/unittest/loader.py", line 337, in _get_module_from_name
+    __import__(name)
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_paper_projection.py", line 14, in <module>
+    from build_txnmem_ccfa_docx import _controlled_rows  # noqa: E402
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/external-comparison-20260928/scripts/build_txnmem_ccfa_docx.py", line 27, in <module>
+    from docx import Document
+ModuleNotFoundError: No module named 'docx'
+
+
+======================================================================
+ERROR: test_txnmem_paper_work_report (unittest.loader._FailedTest.test_txnmem_paper_work_report)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_txnmem_paper_work_report
+Traceback (most recent call last):
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/unittest/loader.py", line 394, in _find_test_path
+    module = self._get_module_from_name(name)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/unittest/loader.py", line 337, in _get_module_from_name
+    __import__(name)
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_paper_work_report.py", line 15, in <module>
+    from docx import Document
+ModuleNotFoundError: No module named 'docx'
+
+
+======================================================================
+ERROR: test_whole_review_added_diff_contains_no_private_absolute_paths (test_txnmem_path_privacy.AddedPathPrivacyTests.test_whole_review_added_diff_contains_no_private_absolute_paths)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_path_privacy.py", line 57, in test_whole_review_added_diff_contains_no_private_absolute_paths
+    completed = subprocess.run(
+                ^^^^^^^^^^^^^^^
+  File "/home/suma/miniconda3/envs/txnmem/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['git', 'diff', '--unified=0', '321e7a7d122584a96f69e1a5dd421eadc52dc4fc']' returned non-zero exit status 128.
+
+======================================================================
+FAIL: test_accepts_required_sections_and_active_claims (test_txnmem_manuscript_audit.ManuscriptAuditTests.test_accepts_required_sections_and_active_claims)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_manuscript_audit.py", line 181, in test_accepts_required_sections_and_active_claims
+    self.assertEqual(report["finding_count"], 0)
+AssertionError: 12 != 0
+
+======================================================================
+FAIL: test_current_draft_conforms_to_manuscript_contract (test_txnmem_manuscript_audit.ManuscriptAuditTests.test_current_draft_conforms_to_manuscript_contract)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/data/txnmem/external-comparison-20260928/tests/test_txnmem_manuscript_audit.py", line 330, in test_current_draft_conforms_to_manuscript_contract
+    self.assertEqual(report["finding_count"], 0)
+AssertionError: 12 != 0
+
+----------------------------------------------------------------------
+Ran 412 tests in 14.098s
+
+FAILED (failures=2, errors=21, skipped=4)

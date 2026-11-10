@@ -1,0 +1,286 @@
+{
+  "invariant_coverage": {
+    "coverage_rate": 1.0,
+    "covered": [
+      "abort_visibility",
+      "commit_idempotence",
+      "commit_requires_prepare",
+      "network_drop_safety",
+      "no_half_commit"
+    ],
+    "target_count": 5
+  },
+  "minimal_counterexamples": [],
+  "production_claim": false,
+  "reports": [
+    {
+      "invariants": {
+        "coverage_rate": 1.0,
+        "covered": [
+          "abort_visibility",
+          "commit_idempotence",
+          "commit_requires_prepare",
+          "network_drop_safety",
+          "no_half_commit"
+        ],
+        "invariants": [
+          "no_half_commit",
+          "abort_visibility",
+          "commit_requires_prepare",
+          "commit_idempotence",
+          "network_drop_safety"
+        ],
+        "violation_count": 0,
+        "violations": []
+      },
+      "protocol": {
+        "committed_ids": [
+          "p1",
+          "p2"
+        ],
+        "events": [
+          {
+            "action": "prepare",
+            "participant_ids": [
+              "p1",
+              "p2"
+            ],
+            "step": 1
+          },
+          {
+            "action": "commit",
+            "participant_ids": [
+              "p1",
+              "p2"
+            ],
+            "retry": false,
+            "step": 2
+          }
+        ],
+        "final_states": {
+          "p1": "COMMITTED",
+          "p2": "COMMITTED"
+        },
+        "metrics": {
+          "commit_attempts": 1,
+          "event_count": 2,
+          "retry_count": 0
+        },
+        "participant_ids": [
+          "p1",
+          "p2"
+        ]
+      },
+      "schedule_index": 1
+    },
+    {
+      "invariants": {
+        "coverage_rate": 1.0,
+        "covered": [
+          "abort_visibility",
+          "commit_idempotence",
+          "commit_requires_prepare",
+          "network_drop_safety",
+          "no_half_commit"
+        ],
+        "invariants": [
+          "no_half_commit",
+          "abort_visibility",
+          "commit_requires_prepare",
+          "commit_idempotence",
+          "network_drop_safety"
+        ],
+        "violation_count": 0,
+        "violations": []
+      },
+      "protocol": {
+        "committed_ids": [],
+        "events": [
+          {
+            "action": "prepare",
+            "participant_ids": [
+              "p1",
+              "p2"
+            ],
+            "step": 1
+          },
+          {
+            "action": "abort",
+            "reason": "explicit_abort",
+            "step": 2
+          }
+        ],
+        "final_states": {
+          "p1": "ABORTED",
+          "p2": "ABORTED"
+        },
+        "metrics": {
+          "commit_attempts": 0,
+          "event_count": 2,
+          "retry_count": 0
+        },
+        "participant_ids": [
+          "p1",
+          "p2"
+        ]
+      },
+      "schedule_index": 2
+    },
+    {
+      "invariants": {
+        "coverage_rate": 1.0,
+        "covered": [
+          "abort_visibility",
+          "commit_idempotence",
+          "commit_requires_prepare",
+          "network_drop_safety",
+          "no_half_commit"
+        ],
+        "invariants": [
+          "no_half_commit",
+          "abort_visibility",
+          "commit_requires_prepare",
+          "commit_idempotence",
+          "network_drop_safety"
+        ],
+        "violation_count": 0,
+        "violations": []
+      },
+      "protocol": {
+        "committed_ids": [],
+        "events": [
+          {
+            "action": "prepare",
+            "participant_ids": [
+              "p1",
+              "p2"
+            ],
+            "step": 1
+          },
+          {
+            "action": "crash_after_prepare",
+            "participant_id": "p2",
+            "step": 2
+          },
+          {
+            "action": "abort",
+            "reason": "participant_crashed_after_prepare",
+            "step": 3
+          }
+        ],
+        "final_states": {
+          "p1": "ABORTED",
+          "p2": "ABORTED"
+        },
+        "metrics": {
+          "commit_attempts": 0,
+          "event_count": 3,
+          "retry_count": 0
+        },
+        "participant_ids": [
+          "p1",
+          "p2"
+        ]
+      },
+      "schedule_index": 3
+    },
+    {
+      "invariants": {
+        "coverage_rate": 1.0,
+        "covered": [
+          "abort_visibility",
+          "commit_idempotence",
+          "commit_requires_prepare",
+          "network_drop_safety",
+          "no_half_commit"
+        ],
+        "invariants": [
+          "no_half_commit",
+          "abort_visibility",
+          "commit_requires_prepare",
+          "commit_idempotence",
+          "network_drop_safety"
+        ],
+        "violation_count": 0,
+        "violations": []
+      },
+      "protocol": {
+        "committed_ids": [
+          "p1",
+          "p2"
+        ],
+        "events": [
+          {
+            "action": "prepare",
+            "participant_ids": [
+              "p1",
+              "p2"
+            ],
+            "step": 1
+          },
+          {
+            "action": "network_drop",
+            "participant_id": "p2",
+            "phase": "commit",
+            "step": 2
+          },
+          {
+            "action": "retry_required",
+            "dropped_participants": [
+              "p2"
+            ],
+            "phase": "commit",
+            "step": 3
+          },
+          {
+            "action": "retry_required",
+            "dropped_participants": [
+              "p2"
+            ],
+            "phase": "commit",
+            "step": 4
+          },
+          {
+            "action": "commit",
+            "participant_ids": [
+              "p1",
+              "p2"
+            ],
+            "retry": true,
+            "step": 5
+          },
+          {
+            "action": "commit_idempotent",
+            "retry": true,
+            "step": 6
+          }
+        ],
+        "final_states": {
+          "p1": "COMMITTED",
+          "p2": "COMMITTED"
+        },
+        "metrics": {
+          "commit_attempts": 3,
+          "event_count": 6,
+          "retry_count": 1
+        },
+        "participant_ids": [
+          "p1",
+          "p2"
+        ]
+      },
+      "schedule_index": 4
+    }
+  ],
+  "schedule_count": 4,
+  "schedule_coverage": {
+    "actions": {
+      "abort": 1,
+      "commit": 2,
+      "crash_after_prepare": 1,
+      "network_drop": 1,
+      "prepare": 4,
+      "retry_commit": 2
+    }
+  }
+}

@@ -1,0 +1,5748 @@
+import copy
+import contextlib
+import ctypes
+import errno
+import functools
+import hashlib
+import inspect
+import json
+import math
+import os
+import stat
+import sys
+import threading
+import time
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+from types import ModuleType, SimpleNamespace
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+import txnmem_provenance_performance as provenance_module
+import txnmem_provenance_execution_collector as collector_module
+from txnmem_backend import InstrumentedMemoryBackend
+from txnmem_provenance_performance import (
+    FormalEligibilityError,
+    FormalEligibilityReason,
+    ProvenancePerformanceError,
+    aggregate_matrix,
+    aggregate_ablation,
+    build_layered_dag,
+    candidate_attestation_material,
+    canonical_graph_sha256,
+    expand_matrix,
+    formal_config_file_sha256,
+    formal_matrix_config_sha256,
+    formal_matrix_workload_sha256,
+    load_strict_json_file,
+    provenance_bundle_id,
+    promote_provenance_candidate,
+    publish_provenance_bundle,
+    run_matrix_cell,
+    validate_matrix_config,
+)
+from txnmem_topology_attestation import (
+    FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
+    FORMAL_PROVENANCE_TOPOLOGY_ATTESTATION_SHA256_BY_RUN,
+    execution_authorization_proof,
+    sanitize_topology_attestation,
+)
+from txnmem_toxiproxy_metrics import (
+    derive_proxy_counter_deltas,
+    proxy_counter_payload_sha256,
+)
+
+
+@contextlib.contextmanager
+def _temporarily_non_dumpable():
+    raw_prctl = ctypes.CDLL(None, use_errno=True).prctl
+    raw_prctl.argtypes = [
+        ctypes.c_int,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+    ]
+    raw_prctl.restype = ctypes.c_int
+    original = raw_prctl(3, 0, 0, 0, 0)
+    if original not in {0, 1}:
+        raise RuntimeError("test process dumpable state is not restorable")
+    if raw_prctl(4, 0, 0, 0, 0) != 0 or raw_prctl(3, 0, 0, 0, 0) != 0:
+        raise RuntimeError("cannot establish non-dumpable test process")
+    try:
+        yield
+    finally:
+        if (
+            raw_prctl(4, original, 0, 0, 0) != 0
+            or raw_prctl(3, 0, 0, 0, 0) != original
+        ):
+            raise RuntimeError("cannot restore test process dumpable state")
+
+
+def _with_non_dumpable_test_process(test):
+    @functools.wraps(test)
+    def wrapped(*args, **kwargs):
+        with _temporarily_non_dumpable():
+            return test(*args, **kwargs)
+
+    return wrapped
+
+
+def _proxy_snapshot(phase, *, qdrant, neo4j):
+    routes = []
+    for identity, values in zip(
+        (
+            ("qdrant", "txnmem-qdrant", "0.0.0.0:19000", "qdrant:6333"),
+            ("neo4j", "txnmem-neo4j", "0.0.0.0:19001", "neo4j:7687"),
+        ),
+        (qdrant, neo4j),
+    ):
+        routes.append(
+            {
+                "role": identity[0],
+                "proxy_name": identity[1],
+                "listener": identity[2],
+                "upstream": identity[3],
+                "received_upstream_bytes": values[0],
+                "sent_upstream_bytes": values[1],
+                "received_downstream_bytes": values[2],
+                "sent_downstream_bytes": values[3],
+                "total_bytes": sum(values),
+            }
+        )
+    document = {
+        "schema": "txnmem-provenance-proxy-counters-v1",
+        "phase": phase,
+        "routes": routes,
+        "toxiproxy_total_bytes": sum(row["total_bytes"] for row in routes),
+    }
+    document["snapshot_sha256"] = hashlib.sha256(
+        provenance_module._canonical_json_bytes(document)
+    ).hexdigest()
+    return document
+
+
+class _FixtureBackend(InstrumentedMemoryBackend):
+    supports_parallel_provenance_preload = True
+    performance_variant = "TxnMem"
+
+    def __init__(
+        self,
+        namespace,
+        *,
+        available=True,
+        isolated=True,
+        inventory_override=None,
+        qdrant_version="1.15.4",
+        neo4j_version="5.26.0",
+    ):
+        super().__init__()
+        self.namespace = namespace
+        self.available = available
+        self.isolated = isolated
+        self.inventory_override = inventory_override
+        self.qdrant_version = qdrant_version
+        self.neo4j_version = neo4j_version
+        self.max_retries = 0
+        self.neo4j_max_transaction_retry_time_seconds = 0.0
+        self._retry_count = 0
+        self._preload_lock = threading.Lock()
+
+    def preload_provenance_record(self, memory_id, source_ids, *, value):
+        with self._preload_lock:
+            time.sleep(0.001)
+            if source_ids:
+                self.derive(memory_id, source_ids, value=value)
+            else:
+                self.write(memory_id, value=value)
+        return 0
+
+    def healthcheck(self):
+        return {
+            "qdrant": {"available": self.available, "version": self.qdrant_version},
+            "neo4j": {"available": self.available, "version": self.neo4j_version},
+        }
+    def performance_environment(self):
+        return {
+            "schema": "txnmem-provenance-environment-v1",
+            "isolation_verified": self.isolated,
+            "co_tenant_load_detected": not self.isolated,
+            "source": "host-observation-v1",
+            "cpu_logical_count": 8,
+            "memory_total_bytes": 16 * 1024**3,
+            "disk_medium": "ssd",
+            "toxiproxy_version": "2.9.0",
+        }
+
+    def metrics(self):
+        return {"retry_count": self._retry_count}
+
+    def provenance_inventory(self, limit=None):
+        if self.inventory_override is not None:
+            return copy.deepcopy(self.inventory_override)
+        nodes = sorted(self.memories)
+        edges = sorted(
+            (str(source_id), str(memory_id))
+            for memory_id, row in self.memories.items()
+            for source_id in row.get("derived_from", [])
+        )
+        return {
+            "classification": "complete",
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "graph_sha256": canonical_graph_sha256(nodes, edges),
+            "status_counts": {
+                status: sum(
+                    1 for row in self.memories.values() if row.get("status") == status
+                )
+                for status in sorted(
+                    {str(row.get("status")) for row in self.memories.values()}
+                )
+            },
+        }
+
+
+def _txnmem_factory(factory):
+    factory.performance_variant = "TxnMem"
+    return factory
+
+
+class ProvenanceGraphTests(unittest.TestCase):
+    def test_layered_dag_is_exact_acyclic_and_deterministic(self):
+        first = build_layered_dag(100, seed=17)
+        second = build_layered_dag(100, seed=17)
+        changed = build_layered_dag(100, seed=18)
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(first.nodes), 100)
+        self.assertEqual(first.node_count, 100)
+        self.assertEqual(first.edge_count, len(first.edges))
+        positions = {node: index for index, node in enumerate(first.nodes)}
+        self.assertTrue(all(positions[source] < positions[target] for source, target in first.edges))
+        self.assertEqual(first.graph_sha256, canonical_graph_sha256(first.nodes, first.edges))
+        self.assertNotEqual(first.graph_sha256, changed.graph_sha256)
+
+    def test_bad_graph_sizes_are_rejected(self):
+        for node_count in (0, -1, True):
+            with self.subTest(node_count=node_count):
+                with self.assertRaises(ValueError):
+                    build_layered_dag(node_count, seed=17)
+
+
+class ProvenanceMatrixTests(unittest.TestCase):
+    def _formal_config(self):
+        root = Path(__file__).resolve().parents[1]
+        return json.loads(
+            (root / "configs" / "provenance_performance_matrix.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+    def test_repository_formal_config_and_wrapper_are_exact(self):
+        root = Path(__file__).resolve().parents[1]
+        config_path = root / "configs" / "provenance_performance_matrix.json"
+        script_path = root / "scripts" / "run_provenance_performance.sh"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+
+        cells = expand_matrix(config)
+
+        self.assertEqual(config["graph_node_counts"], [100, 1000, 10000])
+        self.assertEqual(config["concurrency_levels"], [1, 2, 4, 8, 16])
+        self.assertEqual(config["repetitions"], 30)
+        self.assertEqual(len(cells), 15)
+        script = script_path.read_text(encoding="utf-8")
+        self.assertIn("/opt/txnmem-formal-controller/txnmem_formal_controller.py", script)
+        self.assertIn("/usr/bin/python3 -I -S -B", script)
+        self.assertIn("/usr/bin/env -i", script)
+        self.assertNotIn("PYTHONPATH", script)
+        self.assertIn("--launch-out", script)
+        self.assertIn("--completion-out", script)
+        self.assertNotIn("--environment-attestation", script)
+        self.assertNotIn("--formal", script)
+        self.assertNotIn("--topology-attestation", script)
+        self.assertIn("diagnostic candidate", script)
+        self.assertIn("TXNMEM_NEO4J_PASSWORD", script)
+        self.assertNotIn("txnmem-local-only", script)
+        transport_gate = 'if [[ "$transport" != "local_loopback" ]]'
+        self.assertIn(transport_gate, script)
+        self.assertLess(
+            script.index(transport_gate),
+            script.index("/usr/bin/env -i"),
+        )
+
+    def test_repository_ablation_config_is_closed_three_cell_contract(self):
+        self.assertTrue(
+            hasattr(provenance_module, "validate_provenance_ablation_config")
+        )
+        config = load_strict_json_file(
+            Path(__file__).resolve().parents[1]
+            / "configs"
+            / "provenance_ablation_v10.json"
+        )
+
+        validated = provenance_module.validate_provenance_ablation_config(
+            config,
+            formal=True,
+        )
+
+        self.assertEqual(validated, provenance_module.FORMAL_ABLATION_CONFIG)
+        self.assertEqual(validated["schema"], "txnmem-provenance-ablation-v1")
+        self.assertEqual(validated["run_identity"], "provenance-ablation-v10")
+        self.assertEqual(
+            validated["variants"],
+            ["TxnMem", "MemoryOnly-NoProvenance"],
+        )
+        self.assertEqual(
+            validated["cells"],
+            [
+                {"graph_node_count": 100, "concurrency": 1},
+                {"graph_node_count": 1000, "concurrency": 4},
+                {"graph_node_count": 10000, "concurrency": 16},
+            ],
+        )
+        self.assertEqual(validated["repetitions"], 30)
+        self.assertEqual(
+            validated["repetition_seeds"],
+            [
+                17, 1017, 2017, 3017, 4017, 5017, 6017, 7017, 8017, 9017,
+                10017, 11017, 12017, 13017, 14017, 15017, 16017, 17017,
+                18017, 19017, 20017, 21017, 22017, 23017, 24017, 25017,
+                26017, 27017, 28017, 29017,
+            ],
+        )
+        self.assertEqual(validated["bootstrap_repetitions"], 10_000)
+        self.assertEqual(validated["graph_seed"], 17)
+        self.assertEqual(validated["bootstrap_seed"], 1701)
+        self.assertEqual(validated["variant_order_seed"], 1702)
+        self.assertEqual(validated["request_timeout_seconds"], 30.0)
+        self.assertEqual(validated["cell_stall_timeout_seconds"], 3600.0)
+        self.assertEqual(
+            provenance_module.expand_provenance_ablation(validated),
+            [
+                {"cell_id": "n100-c1", "graph_node_count": 100, "concurrency": 1, "variant": "TxnMem", "repetitions": 30},
+                {"cell_id": "n100-c1", "graph_node_count": 100, "concurrency": 1, "variant": "MemoryOnly-NoProvenance", "repetitions": 30},
+                {"cell_id": "n1000-c4", "graph_node_count": 1000, "concurrency": 4, "variant": "TxnMem", "repetitions": 30},
+                {"cell_id": "n1000-c4", "graph_node_count": 1000, "concurrency": 4, "variant": "MemoryOnly-NoProvenance", "repetitions": 30},
+                {"cell_id": "n10000-c16", "graph_node_count": 10000, "concurrency": 16, "variant": "TxnMem", "repetitions": 30},
+                {"cell_id": "n10000-c16", "graph_node_count": 10000, "concurrency": 16, "variant": "MemoryOnly-NoProvenance", "repetitions": 30},
+            ],
+        )
+
+        for field, value in (
+            ("schema", "txnmem-provenance-performance-v2"),
+            ("run_identity", "formal-provenance-v10"),
+            ("variants", ["TxnMem"]),
+            ("repetitions", 29),
+            ("repetition_seeds", validated["repetition_seeds"][:-1]),
+            ("bootstrap_repetitions", 9999),
+            ("request_timeout_seconds", float("nan")),
+            ("cell_stall_timeout_seconds", 0.0),
+        ):
+            changed = copy.deepcopy(validated)
+            changed[field] = value
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError):
+                    provenance_module.validate_provenance_ablation_config(
+                        changed,
+                        formal=True,
+                    )
+
+        extra = copy.deepcopy(validated)
+        extra["unknown"] = True
+        with self.assertRaises(ValueError):
+            provenance_module.validate_provenance_ablation_config(
+                extra,
+                formal=True,
+            )
+
+    def test_formal_matrix_has_exactly_fifteen_cells_and_thirty_repetitions(self):
+        cells = expand_matrix(
+            {
+                "graph_node_counts": [100, 1000, 10000],
+                "concurrency_levels": [1, 2, 4, 8, 16],
+                "repetitions": 30,
+                "graph_seed": 17,
+                "operations_per_type": 8,
+            }
+        )
+        self.assertEqual(len(cells), 15)
+        self.assertEqual({cell["repetitions"] for cell in cells}, {30})
+        self.assertEqual(len({cell["cell_id"] for cell in cells}), 15)
+
+    def test_matrix_rejects_duplicate_or_nonpositive_axes(self):
+        base = {
+            "graph_node_counts": [10, 20],
+            "concurrency_levels": [1, 2],
+            "repetitions": 2,
+            "operations_per_type": 1,
+        }
+        for key, value in (
+            ("graph_node_counts", [10, 10]),
+            ("concurrency_levels", [1, 0]),
+            ("repetitions", 0),
+            ("operations_per_type", -1),
+        ):
+            config = dict(base)
+            config[key] = value
+            with self.subTest(key=key, value=value):
+                with self.assertRaises(ValueError):
+                    expand_matrix(config)
+
+    def test_formal_config_is_closed_exact_and_finite(self):
+        config = self._formal_config()
+        self.assertEqual(config["cell_stall_timeout_seconds"], 3600.0)
+        validated = validate_matrix_config(config, formal=True)
+        self.assertEqual(validated, config)
+
+        mutations = []
+        for key, value in (
+            ("schema", "wrong"),
+            ("graph_seed", 18),
+            ("operations_per_type", 1),
+            ("bootstrap_repetitions", True),
+            ("bootstrap_seed", 17.0),
+            ("request_timeout_seconds", math.nan),
+            ("cell_stall_timeout_seconds", math.nan),
+        ):
+            changed = copy.deepcopy(config)
+            changed[key] = value
+            mutations.append((key, changed))
+        extra = copy.deepcopy(config)
+        extra["unknown"] = "field"
+        mutations.append(("unknown", extra))
+
+        for name, changed in mutations:
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError):
+                    validate_matrix_config(changed, formal=True)
+
+    def test_strict_json_file_rejects_duplicate_keys_nonfinite_and_symlink(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            duplicate = root / "duplicate.json"
+            duplicate.write_text('{"schema":"a","schema":"b"}', encoding="utf-8")
+            nonfinite = root / "nonfinite.json"
+            nonfinite.write_text('{"value":NaN}', encoding="utf-8")
+            target = root / "target.json"
+            target.write_text('{"value":1}', encoding="utf-8")
+            linked = root / "linked.json"
+            linked.symlink_to(target)
+            real_parent = root / "real-parent"
+            real_parent.mkdir()
+            parent_target = real_parent / "config.json"
+            parent_target.write_text('{"value":1}', encoding="utf-8")
+            parent_link = root / "parent-link"
+            parent_link.symlink_to(real_parent, target_is_directory=True)
+
+            for source in (duplicate, nonfinite, linked, parent_link / "config.json"):
+                with self.subTest(source=source.name):
+                    with self.assertRaises(ValueError):
+                        load_strict_json_file(source)
+
+    def test_small_two_by_two_fixture_closes_state_and_uses_unique_namespaces(self):
+        cells = expand_matrix(
+            {
+                "graph_node_counts": [10, 20],
+                "concurrency_levels": [1, 2],
+                "repetitions": 2,
+                "graph_seed": 17,
+                "operations_per_type": 1,
+            }
+        )
+        seen_namespaces = []
+
+        def factory(namespace):
+            seen_namespaces.append(namespace)
+            return _FixtureBackend(namespace)
+        factory.performance_variant = "TxnMem"
+
+        reports = []
+        for cell in cells:
+            graph = build_layered_dag(cell["graph_node_count"], cell["graph_seed"])
+            reports.append(
+                run_matrix_cell(
+                    factory,
+                    graph,
+                    concurrency=cell["concurrency"],
+                    repetitions=cell["repetitions"],
+                    operations_per_type=cell["operations_per_type"],
+                    run_id="fixture-run",
+                    formal=True,
+                )
+            )
+
+        self.assertEqual(len(reports), 4)
+        self.assertEqual(len(seen_namespaces), 8)
+        self.assertEqual(len(set(seen_namespaces)), 8)
+        for report in reports:
+            self.assertEqual(len(report["repetitions"]), 2)
+            self.assertTrue(all(row["state_closed"] for row in report["repetitions"]))
+            self.assertTrue(all(row["eligible_for_formal"] for row in report["repetitions"]))
+            self.assertEqual(
+                {sample["operation"] for sample in report["samples"]},
+                {"read", "search", "derive", "invalidate_repair"},
+            )
+            forbidden = {"value", "payload", "memory_id", "source_ids", "query"}
+            self.assertTrue(
+                all(not forbidden.intersection(sample) for sample in report["samples"])
+            )
+
+    def test_matrix_progress_callback_reports_only_completed_repetitions(self):
+        snapshots = []
+
+        report = run_matrix_cell(
+            _txnmem_factory(lambda namespace: _FixtureBackend(namespace)),
+            build_layered_dag(2, seed=17),
+            concurrency=1,
+            repetitions=2,
+            operations_per_type=1,
+            run_id="progress-fixture",
+            formal=True,
+            progress_callback=snapshots.append,
+        )
+
+        self.assertEqual(len(report["repetitions"]), 2)
+        self.assertEqual(len(report["samples"]), 8)
+        self.assertEqual(
+            snapshots,
+            [
+                {
+                    "cell_id": "n2-c1",
+                    "completed_repetition_count": 1,
+                    "completed_operation_sample_count": 4,
+                },
+                {
+                    "cell_id": "n2-c1",
+                    "completed_repetition_count": 2,
+                    "completed_operation_sample_count": 8,
+                },
+            ],
+        )
+
+    def test_protected_diagnostic_stops_at_first_ineligible_repetition(self):
+        created = []
+        snapshots = []
+
+        def factory(namespace):
+            created.append(namespace)
+            return _FixtureBackend(namespace, isolated=False)
+        factory.performance_variant = "TxnMem"
+
+        with self.assertRaisesRegex(
+            ProvenancePerformanceError,
+            "verified isolation",
+        ):
+            run_matrix_cell(
+                factory,
+                build_layered_dag(2, seed=17),
+                concurrency=1,
+                repetitions=3,
+                operations_per_type=1,
+                run_id="protected-first-ineligible",
+                formal=False,
+                require_formal_eligibility=True,
+                progress_callback=snapshots.append,
+            )
+
+        self.assertEqual(len(created), 1)
+        self.assertEqual(snapshots, [])
+
+    def test_explicit_ineligible_environment_fails_before_backend_factory(self):
+        created = []
+        environment = _FixtureBackend("environment").performance_environment()
+        environment["isolation_verified"] = False
+        environment["co_tenant_load_detected"] = False
+
+        def factory(namespace):
+            created.append(namespace)
+            return _FixtureBackend(namespace)
+        factory.performance_variant = "TxnMem"
+
+        with self.assertRaisesRegex(
+            ProvenancePerformanceError,
+            "verified isolation",
+        ) as raised:
+            run_matrix_cell(
+                factory,
+                build_layered_dag(2, seed=17),
+                concurrency=1,
+                repetitions=3,
+                operations_per_type=1,
+                run_id="explicit-first-ineligible",
+                formal=False,
+                require_formal_eligibility=True,
+                environment_attestation=environment,
+            )
+
+        self.assertEqual(created, [])
+        self.assertEqual(
+            getattr(raised.exception, "reason_code", None),
+            "environment_ineligible",
+        )
+
+    def test_protected_diagnostic_stops_after_completed_repetitions(self):
+        created = []
+        snapshots = []
+
+        def factory(namespace):
+            created.append(namespace)
+            return _FixtureBackend(namespace, isolated=len(created) != 3)
+        factory.performance_variant = "TxnMem"
+
+        with self.assertRaisesRegex(
+            ProvenancePerformanceError,
+            "verified isolation",
+        ):
+            run_matrix_cell(
+                factory,
+                build_layered_dag(2, seed=17),
+                concurrency=1,
+                repetitions=4,
+                operations_per_type=1,
+                run_id="protected-third-ineligible",
+                formal=False,
+                require_formal_eligibility=True,
+                progress_callback=snapshots.append,
+            )
+
+        self.assertEqual(len(created), 3)
+        self.assertEqual(
+            snapshots,
+            [
+                {
+                    "cell_id": "n2-c1",
+                    "completed_repetition_count": 1,
+                    "completed_operation_sample_count": 4,
+                },
+                {
+                    "cell_id": "n2-c1",
+                    "completed_repetition_count": 2,
+                    "completed_operation_sample_count": 8,
+                },
+            ],
+        )
+
+    def test_diagnostic_mode_retains_formally_ineligible_repetitions(self):
+        created = []
+
+        def factory(namespace):
+            created.append(namespace)
+            return _FixtureBackend(namespace, isolated=len(created) != 3)
+
+        report = run_matrix_cell(
+            factory,
+            build_layered_dag(2, seed=17),
+            concurrency=1,
+            repetitions=3,
+            operations_per_type=1,
+            run_id="diagnostic-third-ineligible",
+            formal=False,
+            require_formal_eligibility=False,
+        )
+
+        self.assertFalse(report["formal_requested"])
+        self.assertEqual(len(created), 3)
+        self.assertEqual(len(report["repetitions"]), 3)
+        self.assertFalse(report["repetitions"][2]["eligible_for_formal"])
+
+    def test_require_formal_eligibility_requires_an_exact_boolean(self):
+        graph = build_layered_dag(2, seed=17)
+
+        for value in (0, 1, "true", None):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "require_formal_eligibility must be a boolean",
+                ):
+                    run_matrix_cell(
+                        lambda namespace: _FixtureBackend(namespace),
+                        graph,
+                        concurrency=1,
+                        repetitions=1,
+                        operations_per_type=1,
+                        run_id="invalid-require-formal-eligibility",
+                        require_formal_eligibility=value,
+                    )
+
+    def test_real_backend_preload_uses_fixed_layered_parallelism_and_accounts_repair(self):
+        class ParallelPreloadBackend:
+            supports_parallel_provenance_preload = True
+
+            def __init__(self):
+                self.completed = set()
+                self.lock = threading.Lock()
+                self.active = 0
+                self.peak = 0
+
+            def preload_provenance_record(self, memory_id, source_ids, *, value):
+                with self.lock:
+                    if not set(source_ids).issubset(self.completed):
+                        raise AssertionError("preload crossed a DAG layer boundary")
+                    self.active += 1
+                    self.peak = max(self.peak, self.active)
+                time.sleep(0.002)
+                with self.lock:
+                    self.completed.add(memory_id)
+                    self.active -= 1
+                return int(memory_id.endswith("000029"))
+
+        graph = build_layered_dag(100, seed=17)
+        backend = ParallelPreloadBackend()
+
+        metadata = provenance_module._preload_graph(backend, graph)
+
+        self.assertEqual(backend.completed, set(graph.nodes))
+        self.assertGreater(backend.peak, 1)
+        self.assertEqual(
+            metadata["preload_worker_limit"],
+            provenance_module.PROVENANCE_PRELOAD_WORKERS,
+        )
+        self.assertGreater(metadata["preload_observed_peak_concurrency"], 1)
+        self.assertLessEqual(
+            metadata["preload_observed_peak_concurrency"],
+            metadata["preload_worker_limit"],
+        )
+        self.assertEqual(metadata["setup_repair_limit_per_record"], 1)
+        self.assertEqual(metadata["setup_repair_count"], 1)
+
+    def test_vector_graph_factory_reuses_clients_and_closes_shared_driver_once(self):
+        class SharedNeo4j:
+            def __init__(self):
+                self.close_count = 0
+
+            def close(self):
+                self.close_count += 1
+
+        shared_qdrant = object()
+        shared_neo4j = SharedNeo4j()
+        constructed = []
+
+        class Backend:
+            def __init__(self, *args, **kwargs):
+                constructed.append((args, kwargs))
+
+        environment = _FixtureBackend("factory").performance_environment()
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient",
+            return_value=shared_qdrant,
+        ) as qdrant_constructor, patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient",
+            return_value=shared_neo4j,
+        ) as neo4j_constructor, patch(
+            "txnmem_vector_graph_backend.VectorGraphMemoryBackend", Backend
+        ):
+            factory = provenance_module.make_vector_graph_backend_factory(
+                qdrant_url="http://qdrant",
+                neo4j_uri="bolt://neo4j",
+                neo4j_auth=("neo4j", "password"),
+                environment_attestation=environment,
+                request_timeout_seconds=30.0,
+            )
+            factory("namespace-a")
+            factory("namespace-b")
+            factory.close()
+            factory.close()
+
+        qdrant_constructor.assert_called_once()
+        neo4j_constructor.assert_called_once_with(
+            "bolt://neo4j",
+            ("neo4j", "password"),
+            notifications_min_severity="OFF",
+            migrate_legacy=False,
+            request_timeout_seconds=30.0,
+        )
+        self.assertEqual(len(constructed), 2)
+        self.assertTrue(
+            all(call[1]["qdrant_client"] is shared_qdrant for call in constructed)
+        )
+        self.assertTrue(
+            all(call[1]["neo4j_client"] is shared_neo4j for call in constructed)
+        )
+        self.assertTrue(all(call[1]["close_clients"] is False for call in constructed))
+        self.assertEqual(shared_neo4j.close_count, 1)
+
+    def test_vector_graph_factory_rejects_invalid_timeout_before_client_construction(self):
+        class TimeoutSubclass(float):
+            pass
+
+        invalid_timeouts = (
+            True,
+            0.0,
+            -1.0,
+            float("nan"),
+            float("inf"),
+            TimeoutSubclass(30.0),
+        )
+        environment = _FixtureBackend("factory-timeout").performance_environment()
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient"
+        ) as qdrant_constructor, patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient"
+        ) as neo4j_constructor:
+            for timeout in invalid_timeouts:
+                with self.subTest(timeout=timeout):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "request_timeout_seconds",
+                    ):
+                        provenance_module.make_vector_graph_backend_factory(
+                            qdrant_url="http://qdrant",
+                            neo4j_uri="bolt://neo4j",
+                            neo4j_auth=("neo4j", "password"),
+                            environment_attestation=environment,
+                            request_timeout_seconds=timeout,
+                        )
+        qdrant_constructor.assert_not_called()
+        neo4j_constructor.assert_not_called()
+
+    def test_vector_graph_factory_close_failure_remains_retryable(self):
+        class SharedNeo4j:
+            def __init__(self):
+                self.close_count = 0
+
+            def close(self):
+                self.close_count += 1
+                if self.close_count == 1:
+                    raise RuntimeError("close boundary failed")
+
+        shared_neo4j = SharedNeo4j()
+        environment = _FixtureBackend("factory-close").performance_environment()
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient",
+            return_value=object(),
+        ), patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient",
+            return_value=shared_neo4j,
+        ):
+            factory = provenance_module.make_vector_graph_backend_factory(
+                qdrant_url="http://qdrant",
+                neo4j_uri="bolt://neo4j",
+                neo4j_auth=("neo4j", "password"),
+                environment_attestation=environment,
+            )
+
+        with self.assertRaisesRegex(RuntimeError, "close boundary"):
+            factory.close()
+        factory.close()
+
+        self.assertEqual(shared_neo4j.close_count, 2)
+
+    def test_vector_graph_factory_does_not_close_during_backend_construction(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        class SharedNeo4j:
+            def __init__(self):
+                self.close_count = 0
+
+            def close(self):
+                self.close_count += 1
+
+        shared_neo4j = SharedNeo4j()
+
+        class BlockingBackend:
+            def __init__(self, *args, **kwargs):
+                entered.set()
+                if not release.wait(timeout=5):
+                    raise AssertionError("backend construction release timed out")
+
+        environment = _FixtureBackend("factory-race").performance_environment()
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient",
+            return_value=object(),
+        ), patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient",
+            return_value=shared_neo4j,
+        ), patch(
+            "txnmem_vector_graph_backend.VectorGraphMemoryBackend",
+            BlockingBackend,
+        ):
+            factory = provenance_module.make_vector_graph_backend_factory(
+                qdrant_url="http://qdrant",
+                neo4j_uri="bolt://neo4j",
+                neo4j_auth=("neo4j", "password"),
+                environment_attestation=environment,
+            )
+            created = []
+            creator = threading.Thread(
+                target=lambda: created.append(factory("namespace"))
+            )
+            closer = threading.Thread(target=factory.close)
+            creator.start()
+            self.assertTrue(entered.wait(timeout=5))
+            closer.start()
+            try:
+                time.sleep(0.02)
+                self.assertEqual(shared_neo4j.close_count, 0)
+            finally:
+                release.set()
+                creator.join(timeout=5)
+                closer.join(timeout=5)
+
+        self.assertFalse(creator.is_alive())
+        self.assertFalse(closer.is_alive())
+        self.assertEqual(len(created), 1)
+        self.assertEqual(shared_neo4j.close_count, 1)
+
+    def test_ablation_factory_preserves_full_txnmem_backend_path(self):
+        self.assertTrue(
+            hasattr(provenance_module, "make_provenance_ablation_backend_factory")
+        )
+        shared_qdrant = object()
+
+        class SharedNeo4j:
+            max_transaction_retry_time_seconds = 0.0
+
+            def __init__(self):
+                self.close_count = 0
+
+            def close(self):
+                self.close_count += 1
+
+        shared_neo4j = SharedNeo4j()
+        backend = SimpleNamespace()
+        environment = _FixtureBackend("factory-full").performance_environment()
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient",
+            return_value=shared_qdrant,
+        ), patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient",
+            return_value=shared_neo4j,
+        ), patch(
+            "txnmem_vector_graph_backend.VectorGraphMemoryBackend",
+            return_value=backend,
+        ) as full_constructor:
+            factory = provenance_module.make_provenance_ablation_backend_factory(
+                variant="TxnMem",
+                qdrant_url="http://qdrant",
+                neo4j_uri="bolt://neo4j",
+                neo4j_auth=("neo4j", "password"),
+                environment_attestation=environment,
+            )
+            self.assertIs(factory("full-namespace"), backend)
+            factory.close()
+
+        full_constructor.assert_called_once()
+        self.assertIs(full_constructor.call_args.kwargs["qdrant_client"], shared_qdrant)
+        self.assertIs(full_constructor.call_args.kwargs["neo4j_client"], shared_neo4j)
+        self.assertEqual(shared_neo4j.close_count, 1)
+
+    def test_memory_only_neo4j_health_client_is_read_only(self):
+        self.assertTrue(hasattr(provenance_module, "_Neo4jHealthClient"))
+        constructed = []
+        queries = []
+
+        class Query(str):
+            def __new__(cls, text, *, timeout):
+                value = super().__new__(cls, text)
+                value.timeout = timeout
+                return value
+
+        class Result:
+            @staticmethod
+            def single():
+                return {"ok": 1, "version": "5.26.0"}
+
+        class Session:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+            @staticmethod
+            def run(query):
+                queries.append(query)
+                return Result()
+
+        class Driver:
+            def __init__(self):
+                self.close_count = 0
+
+            @staticmethod
+            def session():
+                return Session()
+
+            def close(self):
+                self.close_count += 1
+
+        driver = Driver()
+
+        class GraphDatabase:
+            @staticmethod
+            def driver(uri, **kwargs):
+                constructed.append((uri, kwargs))
+                return driver
+
+        neo4j_module = ModuleType("neo4j")
+        neo4j_module.GraphDatabase = GraphDatabase
+        neo4j_module.Query = Query
+        with patch.dict(sys.modules, {"neo4j": neo4j_module}):
+            client = provenance_module._Neo4jHealthClient(
+                "bolt://neo4j",
+                ("neo4j", "password"),
+                request_timeout_seconds=30.0,
+            )
+            self.assertEqual(
+                client.healthcheck(),
+                {"available": True, "version": "5.26.0"},
+            )
+            client.close()
+
+        self.assertEqual(
+            constructed,
+            [
+                (
+                    "bolt://neo4j",
+                    {
+                        "auth": ("neo4j", "password"),
+                        "max_transaction_retry_time": 0.0,
+                        "connection_timeout": 30.0,
+                        "connection_acquisition_timeout": 30.0,
+                        "notifications_min_severity": "OFF",
+                    },
+                )
+            ],
+        )
+        self.assertEqual(len(queries), 1)
+        self.assertEqual(queries[0].timeout, 30.0)
+        self.assertIn("CALL dbms.components()", queries[0])
+        self.assertNotIn("CREATE", queries[0])
+        self.assertNotIn("CONSTRAINT", queries[0])
+        self.assertNotIn("INDEX", queries[0])
+        self.assertEqual(driver.close_count, 1)
+
+    def test_memory_only_factory_persists_crud_without_provenance_side_effects(self):
+        self.assertTrue(
+            hasattr(provenance_module, "make_provenance_ablation_backend_factory")
+        )
+        class MemoryQdrant:
+            def __init__(self):
+                self.points = {}
+                self.upsert_payloads = []
+
+            def upsert(self, namespace, point_id, vector, payload, idempotency_key):
+                stored = copy.deepcopy(payload)
+                self.points[(namespace, point_id)] = stored
+                self.upsert_payloads.append(stored)
+
+            def retrieve(self, namespace, point_id):
+                row = self.points.get((namespace, point_id))
+                return copy.deepcopy(row) if row is not None else None
+
+            def search(self, namespace, vector, limit):
+                return [
+                    copy.deepcopy(row)
+                    for (row_namespace, _point_id), row in self.points.items()
+                    if row_namespace == namespace and row.get("status") == "active"
+                ][:limit]
+
+            def scan_namespace(self, namespace, limit=1000):
+                return {
+                    "read_ok": True,
+                    "rows": [
+                        copy.deepcopy(row)
+                        for (row_namespace, _point_id), row in self.points.items()
+                        if row_namespace == namespace
+                    ][:limit],
+                }
+
+            def delete(self, namespace, point_id, idempotency_key):
+                self.points.pop((namespace, point_id), None)
+
+            def healthcheck(self):
+                return {"available": True, "version": "1.15.4"}
+
+        class HealthOnlyNeo4j:
+            max_transaction_retry_time_seconds = 0.0
+
+            def __init__(self):
+                self.calls = []
+
+            def healthcheck(self):
+                self.calls.append("healthcheck")
+                return {"available": True, "version": "5.26.0"}
+
+            def close(self):
+                self.calls.append("close")
+
+            def __getattr__(self, name):
+                raise AssertionError(
+                    f"memory-only backend reached Neo4j provenance method {name}"
+                )
+
+        qdrant = MemoryQdrant()
+        neo4j = HealthOnlyNeo4j()
+        environment = _FixtureBackend("factory-control").performance_environment()
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient",
+            return_value=qdrant,
+        ), patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient",
+            side_effect=AssertionError(
+                "memory-only mode must not initialize graph schema"
+            ),
+        ) as graph_client_constructor, patch.object(
+            provenance_module,
+            "_Neo4jHealthClient",
+            return_value=neo4j,
+            create=True,
+        ), patch(
+            "txnmem_vector_graph_backend.VectorGraphMemoryBackend",
+            side_effect=AssertionError("full backend must not be instantiated"),
+        ) as full_constructor:
+            factory = provenance_module.make_provenance_ablation_backend_factory(
+                variant="MemoryOnly-NoProvenance",
+                qdrant_url="http://qdrant",
+                neo4j_uri="bolt://neo4j",
+                neo4j_auth=("neo4j", "password"),
+                environment_attestation=environment,
+            )
+            backend = factory("control-namespace")
+
+            created = backend.write("root", value="root-v1")
+            updated = backend.write("root", value="root-v2")
+            derived = backend.derive("derived", ["root"], value="derived-v1")
+            propagated = backend.propagate(
+                "propagated", "root", value="propagated-v1"
+            )
+
+            self.assertEqual(created["version"], 1)
+            self.assertEqual(updated["version"], 2)
+            self.assertEqual(backend.read("root")["value"], "root-v2")
+            self.assertEqual(derived["memory_id"], "derived")
+            self.assertEqual(propagated["memory_id"], "propagated")
+            self.assertEqual(
+                {row["memory_id"] for row in backend.search("root-v2")},
+                {"root", "derived", "propagated"},
+            )
+
+            backend.invalidate("derived")
+            self.assertIsNone(backend.read("derived"))
+            backend.invalidate("propagated")
+            self.assertIsNone(backend.read("propagated"))
+            self.assertEqual(
+                backend.performance_inventory(),
+                {
+                    "classification": "complete",
+                    "node_count": 3,
+                    "edge_count": 0,
+                    "graph_sha256": canonical_graph_sha256(
+                        ("derived", "propagated", "root"), ()
+                    ),
+                    "status_counts": {"active": 1, "invalid": 2},
+                },
+            )
+            self.assertEqual(
+                backend.healthcheck(),
+                {
+                    "namespace": "control-namespace",
+                    "qdrant": {"available": True, "version": "1.15.4"},
+                    "neo4j": {"available": True, "version": "5.26.0"},
+                },
+            )
+            self.assertEqual(backend.metrics()["retry_count"], 0)
+            self.assertFalse(hasattr(backend, "provenance_inventory"))
+            self.assertFalse(hasattr(backend, "preload_provenance_record"))
+            self.assertFalse(hasattr(backend, "traverse_provenance"))
+            self.assertFalse(hasattr(backend, "repair_provenance"))
+            self.assertEqual(
+                [event["kind"] for event in backend.events],
+                [
+                    "memory_write",
+                    "memory_write",
+                    "memory_derive",
+                    "memory_propagate",
+                    "memory_read",
+                    "memory_search",
+                    "invalidate",
+                    "memory_read",
+                    "invalidate",
+                    "memory_read",
+                ],
+            )
+            factory.close()
+
+        full_constructor.assert_not_called()
+        graph_client_constructor.assert_not_called()
+        self.assertEqual(neo4j.calls, ["healthcheck", "close"])
+        for payload in qdrant.upsert_payloads:
+            self.assertFalse(
+                {"derived_from", "source_ids", "supersedes_id"}.intersection(
+                    payload
+                )
+            )
+
+    def test_memory_only_independent_writes_overlap_and_same_key_updates_serialize(self):
+        class ConcurrentQdrant:
+            def __init__(self):
+                self.points = {}
+                self.lock = threading.Lock()
+                self.independent_release = threading.Event()
+                self.active_upserts = 0
+                self.peak_upserts = 0
+                self.active_by_id = {}
+                self.peak_by_id = {}
+
+            def retrieve(self, namespace, point_id):
+                with self.lock:
+                    row = self.points.get((namespace, point_id))
+                    return copy.deepcopy(row) if row is not None else None
+
+            def upsert(self, namespace, point_id, vector, payload, idempotency_key):
+                with self.lock:
+                    self.active_upserts += 1
+                    self.peak_upserts = max(
+                        self.peak_upserts,
+                        self.active_upserts,
+                    )
+                    active = self.active_by_id.get(point_id, 0) + 1
+                    self.active_by_id[point_id] = active
+                    self.peak_by_id[point_id] = max(
+                        self.peak_by_id.get(point_id, 0),
+                        active,
+                    )
+                    if point_id.startswith("independent-") and self.active_upserts == 4:
+                        self.independent_release.set()
+                if point_id.startswith("independent-"):
+                    self.independent_release.wait(timeout=0.2)
+                else:
+                    time.sleep(0.02)
+                with self.lock:
+                    self.points[(namespace, point_id)] = copy.deepcopy(payload)
+                    self.active_upserts -= 1
+                    self.active_by_id[point_id] -= 1
+
+        qdrant = ConcurrentQdrant()
+        backend = provenance_module._MemoryOnlyNoProvenanceBackend(
+            "concurrency-namespace",
+            qdrant_client=qdrant,
+            neo4j_health_client=SimpleNamespace(
+                max_transaction_retry_time_seconds=0.0
+            ),
+            embedder=lambda value: [float(len(str(value)))],
+        )
+
+        start = threading.Barrier(4)
+
+        def independent_write(index):
+            start.wait(timeout=2)
+            return backend.write(
+                f"independent-{index}",
+                value=f"value-{index}",
+            )
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            independent = list(executor.map(independent_write, range(4)))
+
+        self.assertEqual(qdrant.peak_upserts, 4)
+        self.assertEqual(
+            {row["memory_id"] for row in independent},
+            {"independent-0", "independent-1", "independent-2", "independent-3"},
+        )
+
+        qdrant.peak_upserts = 0
+        start = threading.Barrier(4)
+
+        def shared_write(index):
+            start.wait(timeout=2)
+            return backend.write("shared", value=f"revision-{index}")
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            shared = list(executor.map(shared_write, range(4)))
+
+        self.assertEqual(qdrant.peak_by_id["shared"], 1)
+        self.assertEqual(sorted(row["version"] for row in shared), [1, 2, 3, 4])
+        self.assertEqual(qdrant.points[("concurrency-namespace", "shared")]["version"], 4)
+        self.assertEqual(backend.snapshot()["shared"]["version"], 4)
+
+    def test_concurrent_derive_and_propagate_keep_operation_local_events(self):
+        class Qdrant:
+            def __init__(self):
+                self.points = {}
+                self.lock = threading.Lock()
+
+            def retrieve(self, namespace, point_id):
+                with self.lock:
+                    row = self.points.get((namespace, point_id))
+                    return copy.deepcopy(row) if row is not None else None
+
+            def upsert(self, namespace, point_id, vector, payload, idempotency_key):
+                with self.lock:
+                    self.points[(namespace, point_id)] = copy.deepcopy(payload)
+
+        backend = provenance_module._MemoryOnlyNoProvenanceBackend(
+            "event-namespace",
+            qdrant_client=Qdrant(),
+            neo4j_health_client=SimpleNamespace(
+                max_transaction_retry_time_seconds=0.0
+            ),
+            embedder=lambda _value: [0.0],
+        )
+        backend.write("root", value="root")
+        original_event = backend._event
+        write_events_appended = threading.Barrier(2)
+
+        def synchronized_event(kind, **fields):
+            event = original_event(kind, **fields)
+            if kind == "memory_write" and fields.get("memory_id") in {
+                "derived-a",
+                "propagated-b",
+            }:
+                write_events_appended.wait(timeout=2)
+            return event
+
+        backend._event = synchronized_event
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            derived_future = executor.submit(
+                backend.derive,
+                "derived-a",
+                ["root"],
+                "derived-value",
+            )
+            propagated_future = executor.submit(
+                backend.propagate,
+                "propagated-b",
+                "root",
+                "propagated-value",
+            )
+            derived_future.result(timeout=2)
+            propagated_future.result(timeout=2)
+
+        events = {
+            event.get("memory_id"): event
+            for event in backend.events
+            if event.get("memory_id") in {"derived-a", "propagated-b"}
+        }
+        self.assertEqual(
+            events["derived-a"],
+            {
+                "event_id": events["derived-a"]["event_id"],
+                "kind": "memory_derive",
+                "step": events["derived-a"]["step"],
+                "agent_id": "agent_1",
+                "memory_id": "derived-a",
+                "value": "derived-value",
+                "source_ids": ["root"],
+            },
+        )
+        self.assertEqual(
+            events["propagated-b"],
+            {
+                "event_id": events["propagated-b"]["event_id"],
+                "kind": "memory_propagate",
+                "step": events["propagated-b"]["step"],
+                "agent_id": "agent_1",
+                "memory_id": "propagated-b",
+                "value": "propagated-value",
+                "source_ids": ["root"],
+                "source_id": "root",
+            },
+        )
+
+    def test_both_ablation_factories_execute_the_same_logical_crud_surface(self):
+        from tests.test_txnmem_vector_graph_backend import (
+            _FakeNeo4j,
+            _FakeQdrant,
+        )
+
+        environment = _FixtureBackend("common-crud").performance_environment()
+        required_methods = {
+            "write",
+            "read",
+            "search",
+            "derive",
+            "propagate",
+            "invalidate",
+        }
+
+        def exercise(backend):
+            self.assertTrue(
+                all(callable(getattr(backend, name, None)) for name in required_methods)
+            )
+            self.assertFalse(hasattr(backend, "delete"))
+            self.assertEqual(backend.write("root", value="root-value")["memory_id"], "root")
+            self.assertEqual(backend.read("root")["value"], "root-value")
+            self.assertTrue(backend.search("root-value"))
+            self.assertEqual(
+                backend.derive("derived", ["root"], value="derived-value")[
+                    "memory_id"
+                ],
+                "derived",
+            )
+            self.assertEqual(
+                backend.propagate(
+                    "propagated",
+                    "root",
+                    value="propagated-value",
+                )["memory_id"],
+                "propagated",
+            )
+            backend.invalidate("derived")
+            self.assertIsNone(backend.read("derived"))
+
+        for variant in provenance_module.PROVENANCE_ABLATION_VARIANTS:
+            with self.subTest(variant=variant):
+                qdrant = _FakeQdrant()
+                neo4j = _FakeNeo4j()
+                with patch(
+                    "txnmem_vector_graph_backend._QdrantHTTPClient",
+                    return_value=qdrant,
+                ), patch(
+                    "txnmem_vector_graph_backend._Neo4jBoltClient",
+                    return_value=neo4j,
+                ), patch.object(
+                    provenance_module,
+                    "_Neo4jHealthClient",
+                    return_value=neo4j,
+                ):
+                    factory = provenance_module.make_provenance_ablation_backend_factory(
+                        variant=variant,
+                        qdrant_url="http://qdrant",
+                        neo4j_uri="bolt://neo4j",
+                        neo4j_auth=("neo4j", "password"),
+                        environment_attestation=environment,
+                    )
+                    try:
+                        exercise(factory(f"common-crud-{variant}"))
+                    finally:
+                        factory.close()
+
+    def test_ablation_factory_rejects_unregistered_variant_before_clients(self):
+        self.assertTrue(
+            hasattr(provenance_module, "make_provenance_ablation_backend_factory")
+        )
+        environment = _FixtureBackend("factory-invalid").performance_environment()
+        with patch(
+            "txnmem_vector_graph_backend._QdrantHTTPClient"
+        ) as qdrant_constructor, patch(
+            "txnmem_vector_graph_backend._Neo4jBoltClient"
+        ) as neo4j_constructor, patch.object(
+            provenance_module,
+            "_Neo4jHealthClient",
+            create=True,
+        ) as neo4j_health_constructor:
+            for variant in ("txnmem", "MemoryOnly", "", None, True):
+                with self.subTest(variant=variant):
+                    with self.assertRaisesRegex(ValueError, "variant"):
+                        provenance_module.make_provenance_ablation_backend_factory(
+                            variant=variant,
+                            qdrant_url="http://qdrant",
+                            neo4j_uri="bolt://neo4j",
+                            neo4j_auth=("neo4j", "password"),
+                            environment_attestation=environment,
+                        )
+        qdrant_constructor.assert_not_called()
+        neo4j_constructor.assert_not_called()
+        neo4j_health_constructor.assert_not_called()
+
+    def test_both_real_ablation_factories_satisfy_variant_specific_formal_state(self):
+        from tests.test_txnmem_vector_graph_backend import (
+            _FakeNeo4j,
+            _FakeQdrant,
+        )
+
+        environment = _FixtureBackend("formal-ablation").performance_environment()
+        graph = build_layered_dag(10, seed=17)
+        reports = {}
+        for variant in provenance_module.PROVENANCE_ABLATION_VARIANTS:
+            with self.subTest(variant=variant):
+                qdrant = _FakeQdrant()
+                neo4j = _FakeNeo4j()
+                with patch(
+                    "txnmem_vector_graph_backend._QdrantHTTPClient",
+                    return_value=qdrant,
+                ), patch(
+                    "txnmem_vector_graph_backend._Neo4jBoltClient",
+                    return_value=neo4j,
+                ), patch.object(
+                    provenance_module, "_Neo4jHealthClient", return_value=neo4j,
+                ):
+                    factory = provenance_module.make_provenance_ablation_backend_factory(
+                        variant=variant,
+                        qdrant_url="http://qdrant",
+                        neo4j_uri="bolt://neo4j",
+                        neo4j_auth=("neo4j", "password"),
+                        environment_attestation=environment,
+                    )
+                    try:
+                        reports[variant] = run_matrix_cell(
+                            factory,
+                            graph,
+                            concurrency=1,
+                            repetitions=1,
+                            operations_per_type=1,
+                            run_id=f"formal-ablation-{variant}",
+                            formal=True,
+                            environment_attestation=environment,
+                        )
+                    finally:
+                        factory.close()
+
+        full = reports["TxnMem"]["repetitions"][0]
+        control = reports["MemoryOnly-NoProvenance"]["repetitions"][0]
+        self.assertEqual(full["preload_inventory"]["edge_count"], graph.edge_count)
+        self.assertGreater(full["final_inventory"]["edge_count"], graph.edge_count)
+        self.assertEqual(control["preload_inventory"]["edge_count"], 0)
+        self.assertEqual(control["final_inventory"]["edge_count"], 0)
+        self.assertEqual(
+            [sample["operation"] for sample in reports["TxnMem"]["samples"]],
+            [
+                sample["operation"]
+                for sample in reports["MemoryOnly-NoProvenance"]["samples"]
+            ],
+        )
+
+    def test_formal_run_rejects_unknown_backend_performance_variant(self):
+        graph = build_layered_dag(10, seed=17)
+        backend = _FixtureBackend("unknown-variant")
+        backend.performance_variant = "Unknown"
+        with self.assertRaises(FormalEligibilityError) as raised:
+            run_matrix_cell(
+                lambda _namespace: backend,
+                graph,
+                concurrency=1,
+                repetitions=1,
+                operations_per_type=1,
+                run_id="unknown-variant",
+                formal=True,
+            )
+        self.assertEqual(
+            raised.exception.reason_code,
+            "performance_variant_unregistered",
+        )
+
+    def test_formal_variant_contract_requires_matching_closed_factory_and_backend_selectors(self):
+        missing = object()
+        graph = build_layered_dag(10, seed=17)
+        cases = (
+            ("factory_missing", missing, "TxnMem"),
+            ("backend_missing", "TxnMem", missing),
+            ("both_missing", missing, missing),
+            ("non_string", True, True),
+            ("unknown", "Unknown", "Unknown"),
+            ("conflict", "TxnMem", "MemoryOnly-NoProvenance"),
+        )
+        for name, factory_variant, backend_variant in cases:
+            with self.subTest(name=name):
+                writes = []
+                backend = SimpleNamespace(write=lambda *_args, **_kwargs: writes.append(1))
+                if backend_variant is not missing:
+                    backend.performance_variant = backend_variant
+                class Factory:
+                    def __call__(self, _namespace):
+                        return backend
+                factory = Factory()
+                if factory_variant is not missing:
+                    factory.performance_variant = factory_variant
+                with self.assertRaises(FormalEligibilityError) as raised:
+                    run_matrix_cell(
+                        factory,
+                        graph,
+                        concurrency=1,
+                        repetitions=1,
+                        operations_per_type=1,
+                        run_id=f"closed-variant-{name}",
+                        formal=True,
+                    )
+                self.assertEqual(
+                    raised.exception.reason_code,
+                    "performance_variant_unregistered",
+                )
+                self.assertEqual(writes, [])
+
+        for variant in provenance_module.PROVENANCE_ABLATION_VARIANTS:
+            with self.subTest(valid=variant):
+                self.assertEqual(
+                    provenance_module._formal_performance_variant(
+                        SimpleNamespace(performance_variant=variant),
+                        SimpleNamespace(performance_variant=variant),
+                    ),
+                    variant,
+                )
+
+    def test_formal_run_fails_closed_on_health_isolation_or_inventory(self):
+        graph = build_layered_dag(10, seed=17)
+        cases = {
+            "health": (
+                _txnmem_factory(lambda namespace: _FixtureBackend(namespace, available=False)),
+                "service_health_unavailable",
+            ),
+            "co_tenant": (
+                _txnmem_factory(lambda namespace: _FixtureBackend(namespace, isolated=False)),
+                "environment_ineligible",
+            ),
+            "partial": (
+                _txnmem_factory(lambda namespace: _FixtureBackend(
+                    namespace,
+                    inventory_override={
+                        "classification": "partial",
+                        "node_count": 0,
+                        "edge_count": 0,
+                        "graph_sha256": "0" * 64,
+                        "status_counts": {},
+                    },
+                )),
+                "namespace_not_empty",
+            ),
+        }
+        for name, (factory, expected_reason) in cases.items():
+            with self.subTest(name=name):
+                with self.assertRaises(ProvenancePerformanceError) as raised:
+                    run_matrix_cell(
+                        factory,
+                        graph,
+                        concurrency=1,
+                        repetitions=1,
+                        operations_per_type=1,
+                        run_id=f"fail-{name}",
+                        formal=True,
+                    )
+                self.assertEqual(
+                    getattr(raised.exception, "reason_code", None),
+                    expected_reason,
+                )
+
+    def test_formal_eligibility_reason_enum_is_closed(self):
+        self.assertEqual(
+            {reason.value for reason in FormalEligibilityReason},
+            {
+                "environment_ineligible",
+                "namespace_collision",
+                "service_health_unavailable",
+                "namespace_not_empty",
+                "parallel_preload_loader_missing",
+                "preload_recovery_accounting_invalid",
+                "preload_state_mismatch",
+                "performance_variant_unregistered",
+                "retry_policy_ineligible",
+                "retry_metric_unavailable",
+                "repetition_state_ineligible",
+            },
+        )
+        with self.assertRaises(TypeError):
+            FormalEligibilityError("environment_ineligible", "unsafe")
+
+    def test_remaining_formal_eligibility_gates_have_safe_reason_codes(self):
+        graph = build_layered_dag(2, seed=17)
+
+        class MissingParallelLoader(_FixtureBackend):
+            preload_provenance_record = None
+
+        class InvalidRecoveryAccounting(_FixtureBackend):
+            def preload_provenance_record(self, memory_id, source_ids, *, value):
+                super().preload_provenance_record(
+                    memory_id, source_ids, value=value
+                )
+                return 2
+
+        class MissingPreloadState(_FixtureBackend):
+            def preload_provenance_record(self, memory_id, source_ids, *, value):
+                return 0
+
+        class InvalidRetryPolicy(_FixtureBackend):
+            def __init__(self, namespace):
+                super().__init__(namespace)
+                self.max_retries = 1
+
+        class MissingRetryMetric(_FixtureBackend):
+            def metrics(self):
+                return {}
+
+        cases = {
+            "parallel-loader": (
+                MissingParallelLoader,
+                "parallel_preload_loader_missing",
+            ),
+            "recovery-accounting": (
+                InvalidRecoveryAccounting,
+                "preload_recovery_accounting_invalid",
+            ),
+            "preload-state": (MissingPreloadState, "preload_state_mismatch"),
+            "retry-policy": (InvalidRetryPolicy, "retry_policy_ineligible"),
+            "retry-metric": (MissingRetryMetric, "retry_metric_unavailable"),
+        }
+        for name, (backend_type, expected_reason) in cases.items():
+            with self.subTest(name=name):
+                with self.assertRaises(ProvenancePerformanceError) as raised:
+                    run_matrix_cell(
+                        backend_type,
+                        graph,
+                        concurrency=1,
+                        repetitions=1,
+                        operations_per_type=1,
+                        run_id=f"safe-reason-{name}",
+                        formal=True,
+                    )
+                self.assertEqual(
+                    getattr(raised.exception, "reason_code", None),
+                    expected_reason,
+                )
+
+    def test_namespace_collision_has_safe_reason_code(self):
+        with patch.object(
+            provenance_module,
+            "_namespace",
+            return_value="txnmem-prov-collision-fixture",
+        ), self.assertRaises(ProvenancePerformanceError) as raised:
+            run_matrix_cell(
+                _txnmem_factory(lambda namespace: _FixtureBackend(namespace)),
+                build_layered_dag(2, seed=17),
+                concurrency=1,
+                repetitions=2,
+                operations_per_type=1,
+                run_id="safe-reason-namespace-collision",
+                formal=True,
+            )
+
+        self.assertEqual(
+            getattr(raised.exception, "reason_code", None),
+            "namespace_collision",
+        )
+
+    def test_formal_environment_attestation_rejects_secret_bearing_fields(self):
+        graph = build_layered_dag(10, seed=17)
+
+        with self.assertRaises(ProvenancePerformanceError):
+            run_matrix_cell(
+                _txnmem_factory(lambda namespace: _FixtureBackend(namespace)),
+                graph,
+                concurrency=1,
+                repetitions=1,
+                operations_per_type=1,
+                run_id="secret-attestation",
+                formal=True,
+                environment_attestation={
+                    "schema": "txnmem-provenance-environment-v1",
+                    "isolation_verified": True,
+                    "co_tenant_load_detected": False,
+                    "source": "host-observation-v1",
+                    "cpu_logical_count": 8,
+                    "memory_total_bytes": 16 * 1024**3,
+                    "disk_medium": "ssd",
+                    "toxiproxy_version": "2.9.0",
+                    "password": "must-not-be-hashed-into-evidence",
+                },
+            )
+
+    def test_formal_environment_rejects_sensitive_source_nonfinite_and_bad_versions(self):
+        graph = build_layered_dag(10, seed=17)
+        base = _FixtureBackend("fixture").performance_environment()
+        cases = []
+        source_url = copy.deepcopy(base)
+        source_url["source"] = "https://alice:secret@203.0.113.10:6333/private"
+        cases.append(("source", source_url, {}))
+        nonfinite = copy.deepcopy(base)
+        nonfinite["memory_total_bytes"] = math.nan
+        cases.append(("nonfinite", nonfinite, {}))
+        cases.append(
+            (
+                "health-version",
+                base,
+                {"qdrant_version": "https://alice:secret@203.0.113.10:6333"},
+            )
+        )
+        cases.append(("health-ip", base, {"qdrant_version": "198.51.100.7"}))
+        cases.append(("health-short-ip", base, {"qdrant_version": "127.1"}))
+        cases.append(("health-three-part-ip", base, {"qdrant_version": "203.0.113"}))
+        toxiproxy_ip = copy.deepcopy(base)
+        toxiproxy_ip["toxiproxy_version"] = "203.0.113.10"
+        cases.append(("toxiproxy-ip", toxiproxy_ip, {}))
+        toxiproxy_secret = copy.deepcopy(base)
+        toxiproxy_secret["toxiproxy_version"] = "1.2-password_demoSecret"
+        cases.append(("toxiproxy-secret", toxiproxy_secret, {}))
+        toxiproxy_three_part_ip = copy.deepcopy(base)
+        toxiproxy_three_part_ip["toxiproxy_version"] = "203.0.113"
+        cases.append(("toxiproxy-three-part-ip", toxiproxy_three_part_ip, {}))
+
+        for name, attestation, backend_kwargs in cases:
+            with self.subTest(name=name):
+                with self.assertRaises(ProvenancePerformanceError):
+                    run_matrix_cell(
+                        _txnmem_factory(lambda namespace: _FixtureBackend(namespace, **backend_kwargs)),
+                        graph,
+                        concurrency=1,
+                        repetitions=1,
+                        operations_per_type=1,
+                        run_id=f"unsafe-{name}",
+                        formal=True,
+                        environment_attestation=attestation,
+                    )
+
+    def test_formal_inventory_rejects_bool_counts(self):
+        graph = build_layered_dag(1, seed=17)
+        inventory = {
+            "classification": "complete",
+            "node_count": True,
+            "edge_count": False,
+            "graph_sha256": graph.graph_sha256,
+            "status_counts": {"active": True},
+        }
+        with self.assertRaises(ProvenancePerformanceError):
+            run_matrix_cell(
+                _txnmem_factory(lambda namespace: _FixtureBackend(
+                    namespace, inventory_override=inventory
+                )),
+                graph,
+                concurrency=1,
+                repetitions=1,
+                operations_per_type=1,
+                run_id="bool-inventory",
+                formal=True,
+            )
+
+    def test_formal_run_rejects_retry_metric_delta_and_records_peak_concurrency(self):
+        graph = build_layered_dag(10, seed=17)
+
+        class RetryingBackend(_FixtureBackend):
+            def metrics(self):
+                self._retry_count += 1
+                return {"retry_count": self._retry_count}
+
+        with self.assertRaises(ProvenancePerformanceError) as raised:
+            run_matrix_cell(
+                _txnmem_factory(lambda namespace: RetryingBackend(namespace)),
+                graph,
+                concurrency=2,
+                repetitions=1,
+                operations_per_type=1,
+                run_id="hidden-retry",
+                formal=True,
+            )
+        self.assertEqual(
+            getattr(raised.exception, "reason_code", None),
+            "repetition_state_ineligible",
+        )
+
+        report = run_matrix_cell(
+            _txnmem_factory(lambda namespace: _FixtureBackend(namespace)),
+            graph,
+            concurrency=2,
+            repetitions=1,
+            operations_per_type=1,
+            run_id="peak-concurrency",
+            formal=True,
+        )
+        peak = report["repetitions"][0]["observed_peak_concurrency"]
+        self.assertEqual(peak, 2)
+
+    def test_formal_measured_failure_retains_private_cause_and_closed_operation(self):
+        graph = build_layered_dag(2, seed=17)
+        observed_failures = []
+
+        class InvalidationBoundaryFailure(RuntimeError):
+            pass
+
+        class FailingInvalidateBackend(_FixtureBackend):
+            def invalidate(self, memory_id, **fields):
+                failure = InvalidationBoundaryFailure(
+                    f"private-token for {memory_id}"
+                )
+                failure._txnmem_service = "qdrant"
+                failure._txnmem_operation = "canonical-invalidate"
+                observed_failures.append(failure)
+                raise failure
+
+        with self.assertRaises(FormalEligibilityError) as raised:
+            run_matrix_cell(
+                _txnmem_factory(lambda namespace: FailingInvalidateBackend(namespace)),
+                graph,
+                concurrency=1,
+                repetitions=1,
+                operations_per_type=1,
+                run_id="measured-failure-cause-fixture",
+                formal=True,
+            )
+
+        self.assertEqual(raised.exception.reason_code, "repetition_state_ineligible")
+        operation_failure = raised.exception.__cause__
+        self.assertIsNotNone(operation_failure)
+        self.assertEqual(
+            getattr(operation_failure, "_txnmem_operation", None),
+            "invalidate_repair",
+        )
+        self.assertIs(operation_failure.__cause__, observed_failures[0])
+        self.assertNotIn("private-token", str(operation_failure))
+
+    def test_formal_measured_failure_precedes_post_measurement_boundaries(self):
+        graph = build_layered_dag(2, seed=17)
+
+        class MeasuredFailure(RuntimeError):
+            pass
+
+        class FailingInvalidateBackend(_FixtureBackend):
+            def invalidate(self, memory_id, **fields):
+                raise MeasuredFailure("measured boundary failed")
+
+        class FailingPostMetricBackend(FailingInvalidateBackend):
+            def __init__(self, namespace):
+                super().__init__(namespace)
+                self.metric_calls = 0
+
+            def metrics(self):
+                self.metric_calls += 1
+                if self.metric_calls > 1:
+                    raise RuntimeError("post-measurement metric failed")
+                return {"retry_count": self._retry_count}
+
+        class FailingFinalInventoryBackend(FailingInvalidateBackend):
+            def __init__(self, namespace):
+                super().__init__(namespace)
+                self.inventory_calls = 0
+
+            def provenance_inventory(self, limit=None):
+                self.inventory_calls += 1
+                if self.inventory_calls > 2:
+                    raise RuntimeError("post-measurement inventory failed")
+                return super().provenance_inventory(limit=limit)
+
+        for name, backend_type in (
+            ("metric", FailingPostMetricBackend),
+            ("inventory", FailingFinalInventoryBackend),
+        ):
+            with self.subTest(name=name):
+                with self.assertRaises(FormalEligibilityError) as raised:
+                    run_matrix_cell(
+                        _txnmem_factory(lambda namespace, backend_type=backend_type: backend_type(
+                            namespace
+                        )),
+                        graph,
+                        concurrency=1,
+                        repetitions=1,
+                        operations_per_type=1,
+                        run_id=f"measured-before-{name}",
+                        formal=True,
+                    )
+
+                self.assertEqual(
+                    raised.exception.reason_code,
+                    "repetition_state_ineligible",
+                )
+                operation_failure = raised.exception.__cause__
+                self.assertEqual(
+                    getattr(operation_failure, "_txnmem_operation", None),
+                    "invalidate_repair",
+                )
+                self.assertIsInstance(operation_failure.__cause__, MeasuredFailure)
+
+    def test_formal_measured_failure_survives_cleanup_failure(self):
+        graph = build_layered_dag(2, seed=17)
+        created = []
+
+        class MeasuredFailure(RuntimeError):
+            pass
+
+        class FailingBackend(_FixtureBackend):
+            def __init__(self, namespace):
+                super().__init__(namespace)
+                self.close_calls = 0
+
+            def invalidate(self, memory_id, **fields):
+                raise MeasuredFailure("measured boundary failed")
+
+            def close(self):
+                self.close_calls += 1
+                raise RuntimeError("cleanup boundary failed")
+
+        def factory(namespace):
+            backend = FailingBackend(namespace)
+            created.append(backend)
+            return backend
+        factory.performance_variant = "TxnMem"
+
+        with self.assertRaises(FormalEligibilityError) as raised:
+            run_matrix_cell(
+                factory,
+                graph,
+                concurrency=1,
+                repetitions=1,
+                operations_per_type=1,
+                run_id="measured-before-cleanup",
+                formal=True,
+            )
+
+        operation_failure = raised.exception.__cause__
+        self.assertEqual(
+            getattr(operation_failure, "_txnmem_operation", None),
+            "invalidate_repair",
+        )
+        self.assertIsInstance(operation_failure.__cause__, MeasuredFailure)
+        self.assertEqual(created[0].close_calls, 1)
+
+    def test_cleanup_failure_propagates_without_primary_failure(self):
+        graph = build_layered_dag(2, seed=17)
+
+        class CleanupFailure(RuntimeError):
+            pass
+
+        class FailingCloseBackend(_FixtureBackend):
+            def close(self):
+                raise CleanupFailure("cleanup boundary failed")
+
+        with self.assertRaises(CleanupFailure):
+            run_matrix_cell(
+                _txnmem_factory(lambda namespace: FailingCloseBackend(namespace)),
+                graph,
+                concurrency=1,
+                repetitions=1,
+                operations_per_type=1,
+                run_id="cleanup-without-primary",
+                formal=True,
+            )
+
+    def test_cleanup_failure_is_not_hidden_by_callers_exception_context(self):
+        graph = build_layered_dag(2, seed=17)
+
+        class CleanupFailure(RuntimeError):
+            pass
+
+        class FailingCloseBackend(_FixtureBackend):
+            def close(self):
+                raise CleanupFailure("cleanup boundary failed")
+
+        try:
+            raise RuntimeError("unrelated caller exception")
+        except RuntimeError:
+            with self.assertRaises(CleanupFailure):
+                run_matrix_cell(
+                    _txnmem_factory(lambda namespace: FailingCloseBackend(namespace)),
+                    graph,
+                    concurrency=1,
+                    repetitions=1,
+                    operations_per_type=1,
+                    run_id="cleanup-inside-caller-except",
+                    formal=True,
+                )
+
+    def test_concurrent_measured_failure_selection_uses_plan_order(self):
+        graph = build_layered_dag(2, seed=17)
+
+        class ReadFailure(RuntimeError):
+            pass
+
+        class SearchFailure(RuntimeError):
+            pass
+
+        class FailingBackend(_FixtureBackend):
+            def __init__(self, namespace):
+                super().__init__(namespace)
+                self.search_failed = threading.Event()
+
+            def read(self, memory_id, *args, **kwargs):
+                if not self.search_failed.wait(timeout=5):
+                    raise AssertionError("search failure was not observed")
+                raise ReadFailure("read failed after search")
+
+            def search(self, query, *args, **kwargs):
+                self.search_failed.set()
+                raise SearchFailure("search failed first")
+
+        for attempt in range(3):
+            with self.subTest(attempt=attempt):
+                with self.assertRaises(FormalEligibilityError) as raised:
+                    run_matrix_cell(
+                        _txnmem_factory(lambda namespace: FailingBackend(namespace)),
+                        graph,
+                        concurrency=2,
+                        repetitions=1,
+                        operations_per_type=1,
+                        run_id=f"deterministic-failure-selection-{attempt}",
+                        formal=True,
+                    )
+
+                operation_failure = raised.exception.__cause__
+                self.assertEqual(
+                    getattr(operation_failure, "_txnmem_operation", None),
+                    "read",
+                )
+                self.assertIsInstance(operation_failure.__cause__, ReadFailure)
+
+    def test_diagnostic_report_drops_private_exception_before_serialization(self):
+        graph = build_layered_dag(2, seed=17)
+
+        class FailingReadBackend(_FixtureBackend):
+            def read(self, memory_id, *args, **kwargs):
+                raise RuntimeError("diagnostic-secret-marker")
+
+        report = run_matrix_cell(
+            lambda namespace: FailingReadBackend(namespace),
+            graph,
+            concurrency=1,
+            repetitions=1,
+            operations_per_type=1,
+            run_id="diagnostic-private-field-scrub",
+            formal=False,
+        )
+
+        serialized = json.dumps(report)
+        self.assertNotIn("diagnostic-secret-marker", serialized)
+
+        def assert_public(value):
+            if isinstance(value, dict):
+                self.assertNotIn("_failure", value)
+                for nested in value.values():
+                    assert_public(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    assert_public(nested)
+            else:
+                self.assertNotIsInstance(value, BaseException)
+
+        assert_public(report)
+
+
+class ProvenanceAggregationTests(unittest.TestCase):
+    AUTHORIZATION_NONCE = b"provenance-fixture-authorization-nonce-0001"
+    @staticmethod
+    def _small_formal_config(concurrency_levels=None):
+        return {
+            "schema": "txnmem-provenance-performance-v2",
+            "graph_node_counts": [10],
+            "concurrency_levels": list(concurrency_levels or [1]),
+            "repetitions": 2,
+            "graph_seed": 17,
+            "operations_per_type": 1,
+            "bootstrap_repetitions": 100,
+            "bootstrap_seed": 17,
+            "request_timeout_seconds": 30.0,
+            "cell_stall_timeout_seconds": 3600.0,
+        }
+
+    def _topology_attestation(self, reports, config, service_versions=None):
+        service_versions = service_versions or {}
+        run_hash = reports[0]["run_id_sha256"]
+        environment_hash = reports[0]["repetitions"][0]["environment"][
+            "attestation_sha256"
+        ]
+        samples = [row for report in reports for row in report["samples"]]
+        repetitions = [
+            row for report in reports for row in report["repetitions"]
+        ]
+        config_hash = formal_matrix_config_sha256()
+        try:
+            config_file_hash = provenance_module.formal_config_file_sha256()
+        except ValueError:
+            config_file_hash = "f" * 64
+        material = {
+            "schema": "txnmem-provenance-candidate-attestation-material-v1",
+            "candidate_bundle_id": provenance_bundle_id(
+                config_sha256=config_hash,
+                run_id_sha256=run_hash,
+                formal=False,
+                backend="vector-graph",
+            ),
+            "run_id_sha256": run_hash,
+            "config_sha256": config_hash,
+            "config_file_sha256": config_file_hash,
+            "workload_sha256": formal_matrix_workload_sha256(),
+            "environment_attestation_sha256": environment_hash,
+            "evidence_manifest_sha256": provenance_module.cell_reports_sha256(reports),
+            "matrix_cell_count": len(config["graph_node_counts"])
+            * len(config["concurrency_levels"]),
+            "repetition_count": len(config["graph_node_counts"])
+            * len(config["concurrency_levels"])
+            * config["repetitions"],
+            "operation_sample_count": len(config["graph_node_counts"])
+            * len(config["concurrency_levels"])
+            * config["repetitions"]
+            * config["operations_per_type"]
+            * 4,
+            "observed_service_versions": {
+                "qdrant": service_versions.get("qdrant", "1.15.4"),
+                "neo4j": service_versions.get("neo4j", "5.26.0"),
+                "toxiproxy": service_versions.get("toxiproxy", "2.9.0"),
+            },
+            "candidate_operation_samples_sha256": provenance_module.canonical_jsonl_sha256(
+                samples
+            ),
+            "candidate_repetitions_sha256": provenance_module.canonical_jsonl_sha256(
+                repetitions
+            ),
+        }
+        return self._topology_from_candidate_material(material)
+
+    def _topology_from_candidate_material(self, material, candidate_seal=None):
+        source_manifest = {
+            "schema": "txnmem-provenance-source-manifest-v1",
+            "source_commit": "a" * 40,
+            "files": [
+                {
+                    "path": "src/txnmem_experiment.py",
+                    "blob_sha256": "b" * 64,
+                }
+            ],
+        }
+        shared = {
+            "collector_id": "txnmem-provenance-execution-collector-v1",
+            "formal_execution_requested": True,
+            "run_id_sha256": material["run_id_sha256"],
+            "config_sha256": material["config_sha256"],
+            "config_file_sha256": material["config_file_sha256"],
+            "workload_sha256": material["workload_sha256"],
+            "environment_attestation_sha256": material[
+                "environment_attestation_sha256"
+            ],
+            "source_commit": "a" * 40,
+            "source_manifest": source_manifest,
+            "source_manifest_sha256": hashlib.sha256(
+                provenance_module._canonical_json_bytes(source_manifest)
+            ).hexdigest(),
+            "collector_sha256": "c" * 64,
+            "runner_sha256": "d" * 64,
+            "transport": "local_loopback",
+            "matrix_cell_count": material["matrix_cell_count"],
+            "repetition_count": material["repetition_count"],
+            "operation_sample_count": material["operation_sample_count"],
+        }
+        command_manifest = {
+            "schema": "txnmem-provenance-command-manifest-v3",
+            "transport": "local_loopback",
+            "argv_sha256": "e" * 64,
+            "argv_template": [
+                "<python-executable>",
+                "-I",
+                "-S",
+                "-B",
+                "<immutable-source>/src/txnmem_provenance_runner.py",
+                "provenance-performance",
+                "--backend",
+                "vector-graph",
+                "--config",
+                "<immutable-source>/configs/provenance_performance_matrix.json",
+                "--run-id",
+                "<run-id>",
+                "--out-dir",
+                "<candidate-root>",
+                "--service-url",
+                "<qdrant-endpoint>",
+                "--environment-attestation",
+                "<environment-attestation>",
+            ],
+            "python_executable_path_sha256": "f" * 64,
+            "python_executable_sha256": "0" * 64,
+            "python_implementation": "CPython",
+            "python_version": "3.11.9",
+            "runtime_manifest": {
+                "schema": "txnmem-provenance-runtime-manifest-v1",
+                "python": {
+                    "implementation": "CPython",
+                    "version": "3.11.9",
+                    "executable_sha256": "0" * 64,
+                    "build_sha256": "8" * 64,
+                    "compiler_sha256": "9" * 64,
+                    "platform_sha256": "a" * 64,
+                },
+                "distributions": [
+                    {
+                        "name": "neo4j",
+                        "version": "5.28.1",
+                        "files": [
+                            {
+                                "path": "neo4j/__init__.py",
+                                "sha256": "b" * 64,
+                            }
+                        ],
+                        "files_sha256": hashlib.sha256(
+                            provenance_module._canonical_json_bytes(
+                                [
+                                    {
+                                        "path": "neo4j/__init__.py",
+                                        "sha256": "b" * 64,
+                                    }
+                                ]
+                            )
+                        ).hexdigest(),
+                        "declared_requirements_sha256": "c" * 64,
+                    }
+                ],
+            },
+            "working_directory_sha256": "1" * 64,
+            "source_manifest_sha256": shared["source_manifest_sha256"],
+            "runner_sha256": shared["runner_sha256"],
+            "config_file_sha256": shared["config_file_sha256"],
+            "run_id_sha256": shared["run_id_sha256"],
+            "candidate_root_sha256": "2" * 64,
+            "environment_attestation_sha256": shared[
+                "environment_attestation_sha256"
+            ],
+            "environment_attestation_file_sha256": "d" * 64,
+            "qdrant_endpoint_sha256": "3" * 64,
+            "qdrant_endpoint_port": 19000,
+            "neo4j_endpoint_sha256": "4" * 64,
+            "neo4j_endpoint_port": 19001,
+            "toxiproxy_endpoint_sha256": "7" * 64,
+            "literal_environment": {
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "PYTHONDONTWRITEBYTECODE": "1",
+            },
+            "hashed_environment": {
+                "TXNMEM_NEO4J_URI": "5" * 64,
+                "TXNMEM_NEO4J_USER": "6" * 64,
+                "TXNMEM_PROVENANCE_RUNTIME_SITE": "8" * 64,
+            },
+            "secret_environment_variables": ["TXNMEM_NEO4J_PASSWORD"],
+            "gate_environment_variable": "TXNMEM_PROVENANCE_START_GATE_FD",
+            "ready_environment_variable": "TXNMEM_PROVENANCE_READY_FD",
+            "completion_environment_variable": "TXNMEM_PROVENANCE_COMPLETION_FD",
+            "completion_receipt_required": True,
+            "progress_environment_variable": "TXNMEM_PROVENANCE_PROGRESS_FD",
+            "progress_binding_environment_variable": "TXNMEM_PROVENANCE_PROGRESS_BINDING_SHA256",
+            "progress_channel_required": True,
+            "backend_timeout_policy": {
+                "qdrant_request_seconds": 30.0,
+                "neo4j_connection_seconds": 30.0,
+                "neo4j_connection_acquisition_seconds": 30.0,
+                "neo4j_transaction_query_seconds": 30.0,
+            },
+            "runtime_environment_variable": "TXNMEM_PROVENANCE_RUNTIME_SITE",
+            "inherited_environment": False,
+        }
+        command_manifest["runtime_manifest_sha256"] = hashlib.sha256(
+            provenance_module._canonical_json_bytes(
+                command_manifest["runtime_manifest"]
+            )
+        ).hexdigest()
+        command_manifest["runtime_lock_file_sha256"] = "9" * 64
+        command_manifest["runtime_snapshot_path_sha256"] = "8" * 64
+        command_manifest["external_tools"] = [
+            {
+                "role": role,
+                "requested_path_sha256": value * 64,
+                "resolved_path_sha256": value * 64,
+                "executable_sha256": "0" * 64 if role == "python" else value * 64,
+                "owner_uid": 0,
+                "mode": 0o555,
+            }
+            for role, value in (
+                ("docker", "1"),
+                ("git", "2"),
+                ("nft", "3"),
+                ("python", "4"),
+            )
+        ]
+        progress_binding = {
+            "schema": "txnmem-provenance-progress-binding-v1",
+            "source_manifest_sha256": command_manifest["source_manifest_sha256"],
+            "argv_sha256": command_manifest["argv_sha256"],
+            "config_file_sha256": command_manifest["config_file_sha256"],
+            "run_id_sha256": command_manifest["run_id_sha256"],
+            "candidate_root_sha256": command_manifest["candidate_root_sha256"],
+        }
+        command_manifest["progress_binding_sha256"] = hashlib.sha256(
+            provenance_module._canonical_json_bytes(progress_binding)
+        ).hexdigest()
+        child_identity = "candidate-process:4321:fixture-start"
+        shared["command_manifest"] = command_manifest
+        shared["command_sha256"] = hashlib.sha256(
+            provenance_module._canonical_json_bytes(command_manifest)
+        ).hexdigest()
+        shared["child_process"] = {
+            "pid": 4321,
+            "start_identity": child_identity,
+            "uid": 65532,
+            "executable_sha256": command_manifest["python_executable_sha256"],
+            "argv_sha256": command_manifest["argv_sha256"],
+            "cmdline_sha256": "a" * 64,
+        }
+        shared["network_guard"] = {
+            "schema": "txnmem-provenance-network-guard-v3",
+            "table_name_sha256": "b" * 64,
+            "runner_uid": 65532,
+            "controller_uid": 0,
+            "allowed_ipv4_loopback_ports": [19000, 19001],
+            "allowed_root_ingress_ports": [8474, 19000, 19001],
+            "root_ingress_destination_exact": True,
+            "management_port_root_only": True,
+            "non_runner_proxy_traffic_blocked": True,
+            "host_bridge_access_blocked": True,
+            "forwarded_bridge_access_blocked": True,
+            "backend_ipv4_subnet_sha256": "8" * 64,
+            "ingress_ipv4_subnet_sha256": "9" * 64,
+            "backend_bridge_interface_sha256": "0" * 64,
+            "ingress_bridge_interface_sha256": "1" * 64,
+            "toxiproxy_ingress_ipv4_sha256": hashlib.sha256(
+                b"172.20.0.2"
+            ).hexdigest(),
+            "policy_sha256": "c" * 64,
+            "ruleset_sha256": "d" * 64,
+        }
+        from txnmem_provenance_contract import (
+            FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS,
+        )
+
+        shared["backend_isolation"] = {
+            "schema": "txnmem-provenance-backend-isolation-v3",
+            "network_name_sha256": "e" * 64,
+            "network_id_sha256": "f" * 64,
+            "ingress_network_name_sha256": "6" * 64,
+            "ingress_network_id_sha256": "7" * 64,
+            "toxiproxy_ingress_ipv4": "172.20.0.2",
+            "toxiproxy_ingress_ipv4_sha256": hashlib.sha256(
+                b"172.20.0.2"
+            ).hexdigest(),
+            "toxiproxy_ingress_endpoint_id_sha256": hashlib.sha256(
+                ("4" * 64).encode("utf-8")
+            ).hexdigest(),
+            "toxiproxy_ingress_membership_verified": True,
+            "ingress_unique_workload_container_verified": True,
+            "backend_network_internal": True,
+            "ingress_network_external": True,
+            "ingress_proxy_only": True,
+            "backend_network_driver": "bridge",
+            "ingress_network_driver": "bridge",
+            "backend_network_scope": "local",
+            "ingress_network_scope": "local",
+            "network_driver_options_empty": True,
+            "docker_default_ipam_driver_verified": True,
+            "private_non_overlapping_ipv4_subnets_verified": True,
+            "backend_ipv4_subnet_sha256": "8" * 64,
+            "ingress_ipv4_subnet_sha256": "9" * 64,
+            "backend_bridge_interface_sha256": "0" * 64,
+            "ingress_bridge_interface_sha256": "1" * 64,
+            "networks_non_attachable": True,
+            "networks_non_swarm_ingress": True,
+            "networks_non_config_only": True,
+            "direct_backend_ports_unpublished": True,
+            "proxy_ports_loopback_only": True,
+            "published_proxy_ports": [8474, 19000, 19001],
+            "containers": [
+                {
+                    "role": role,
+                    "container_id_sha256": value * 64,
+                    "runtime_image_id_sha256": {
+                        "qdrant": "d",
+                        "neo4j": "e",
+                        "toxiproxy": "f",
+                    }[role]
+                    * 64,
+                    "manifest_digest": FORMAL_CONTAINER_IMAGE_MANIFEST_DIGESTS[
+                        role
+                    ],
+                }
+                for role, value in (
+                    ("qdrant", "a"),
+                    ("neo4j", "b"),
+                    ("toxiproxy", "c"),
+                )
+            ],
+        }
+        versions = {
+            "client": "3.11.9",
+            **material["observed_service_versions"],
+        }
+        launch_roles = [
+            {
+                "role": role,
+                "host_identity": "candidate-client"
+                if role in {"client", "toxiproxy"}
+                else "candidate-backend",
+                "listener_owner": (
+                    child_identity if role == "client" else f"{role}-owner"
+                ),
+                "service_version": versions[role],
+                "rtt_ms": 0.1,
+            }
+            for role in ("client", "qdrant", "neo4j", "toxiproxy")
+        ]
+        completion_roles = copy.deepcopy(launch_roles)
+        baseline_a = _proxy_snapshot(
+            "baseline_a",
+            qdrant=(11, 13, 17, 19),
+            neo4j=(23, 29, 31, 37),
+        )
+        baseline_b = _proxy_snapshot(
+            "baseline_b",
+            qdrant=(11, 13, 17, 19),
+            neo4j=(23, 29, 31, 37),
+        )
+        final = _proxy_snapshot(
+            "final",
+            qdrant=(21, 33, 47, 69),
+            neo4j=(73, 89, 101, 127),
+        )
+        proxy_deltas = derive_proxy_counter_deltas(baseline_b, final)
+        proxy_routes = [
+            {
+                "role": "qdrant",
+                "proxy_name": "txnmem-qdrant",
+                "listen": "0.0.0.0:19000",
+                "upstream": "qdrant:6333",
+                "enabled": True,
+                "toxics_count": 0,
+            },
+            {
+                "role": "neo4j",
+                "proxy_name": "txnmem-neo4j",
+                "listen": "0.0.0.0:19001",
+                "upstream": "neo4j:7687",
+                "enabled": True,
+                "toxics_count": 0,
+            },
+        ]
+        launch = {
+            "schema": "txnmem-provenance-execution-launch-raw-v4",
+            **shared,
+            "roles": launch_roles,
+            "proxy_routes": copy.deepcopy(proxy_routes),
+            "proxy_counter_baseline_a": baseline_a,
+            "proxy_counter_baseline_b": baseline_b,
+            "proxy_route_rearm_verified": True,
+            "authorization_nonce_sha256": hashlib.sha256(
+                self.AUTHORIZATION_NONCE
+            ).hexdigest(),
+        }
+        launch["authorization_proof_sha256"] = execution_authorization_proof(
+            self.AUTHORIZATION_NONCE, launch
+        )
+        launch_raw = (
+            json.dumps(launch, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+        completion = {
+            "schema": "txnmem-provenance-execution-completion-raw-v5",
+            **shared,
+            "launch_file_sha256": hashlib.sha256(launch_raw).hexdigest(),
+            "exit_code": 0,
+            "candidate_bundle_id": material["candidate_bundle_id"],
+            "evidence_manifest_sha256": material["evidence_manifest_sha256"],
+            "candidate_operation_samples_sha256": material[
+                "candidate_operation_samples_sha256"
+            ],
+            "candidate_repetitions_sha256": material[
+                "candidate_repetitions_sha256"
+            ],
+            "candidate_seal": candidate_seal
+            or {
+                "schema": "txnmem-provenance-candidate-seal-v1",
+                "root_device": 11,
+                "root_inode": 22,
+                "directory_count": 3,
+                "file_count": 4,
+                "tree_sha256": "f" * 64,
+                "completion_receipt_sha256": hashlib.sha256(
+                    provenance_module._canonical_json_bytes(material)
+                ).hexdigest(),
+            },
+            "execution_monitor": {
+                "schema": "txnmem-provenance-execution-monitor-v2",
+                "sampling_interval_ms": 250,
+                "sample_count": 3,
+                "first_sample_monotonic_ns": 1_000_000_000,
+                "last_sample_monotonic_ns": 1_500_000_000,
+                "gate_release_monotonic_ns": 1_100_000_000,
+                "child_exit_monotonic_ns": 1_400_000_000,
+                "max_observed_gap_ns": 250_000_000,
+                "violation_count": 0,
+                "cpu_logical_count": 8,
+                "load1_limit_milli": 8000,
+                "max_load1_milli": 1250,
+                "invariants": [
+                    "backend_isolation",
+                    "continuous_load_ceiling",
+                    "host_environment",
+                    "network_guard",
+                    "runner_uid_process_set",
+                    "terminal_process_exit",
+                    "toxiproxy_routes",
+                ],
+                "samples_sha256": "1" * 64,
+                "first_sample_sha256": "2" * 64,
+                "last_sample_sha256": "3" * 64,
+            },
+            "roles": completion_roles,
+            "proxy_routes": copy.deepcopy(proxy_routes),
+            "proxy_counter_baseline_b_sha256": proxy_counter_payload_sha256(
+                baseline_b
+            ),
+            "proxy_counter_final": final,
+            "proxy_counter_deltas": proxy_deltas,
+            "authorization_nonce_sha256": hashlib.sha256(
+                self.AUTHORIZATION_NONCE
+            ).hexdigest(),
+        }
+        completion["authorization_proof_sha256"] = execution_authorization_proof(
+            self.AUTHORIZATION_NONCE, completion
+        )
+        completion_raw = (
+            json.dumps(completion, ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n"
+        ).encode("utf-8")
+        with patch.dict(
+            FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
+            {
+                launch["run_id_sha256"]: hashlib.sha256(
+                    self.AUTHORIZATION_NONCE
+                ).hexdigest()
+            },
+            clear=True,
+        ):
+            return sanitize_topology_attestation(
+                launch,
+                completion,
+                launch_file_sha256=hashlib.sha256(launch_raw).hexdigest(),
+                completion_file_sha256=hashlib.sha256(completion_raw).hexdigest(),
+                authorization_nonce=self.AUTHORIZATION_NONCE,
+            )
+
+    def _aggregate_small_formal(self, reports, config=None, topology=None):
+        config = config or self._small_formal_config()
+        with patch.object(provenance_module, "FORMAL_MATRIX_CONFIG", config):
+            topology = topology or self._topology_attestation(reports, config)
+            with patch(
+                "txnmem_provenance_performance.formal_config_file_sha256",
+                return_value=topology["config_file_sha256"],
+            ), patch.dict(
+                FORMAL_PROVENANCE_TOPOLOGY_ATTESTATION_SHA256_BY_RUN,
+                {
+                    topology["run_id_sha256"]: topology[
+                        "attestation_sha256"
+                    ]
+                },
+                clear=True,
+            ), patch.dict(
+                FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
+                {
+                    topology["run_id_sha256"]: hashlib.sha256(
+                        self.AUTHORIZATION_NONCE
+                    ).hexdigest()
+                },
+                clear=True,
+            ):
+                return aggregate_matrix(
+                    reports,
+                    bootstrap_repetitions=config["bootstrap_repetitions"],
+                    seed=config["bootstrap_seed"],
+                    topology_attestation=topology,
+                )
+
+    def _valid_formal_report(self):
+        graph = build_layered_dag(10, seed=17)
+        return run_matrix_cell(
+            _txnmem_factory(lambda namespace: _FixtureBackend(namespace)),
+            graph,
+            concurrency=1,
+            repetitions=2,
+            operations_per_type=1,
+            run_id="formal-aggregate-fixture",
+            formal=True,
+        )
+
+    def _diagnostic_publication_fixture(self):
+        config = self._small_formal_config()
+        graph = build_layered_dag(10, seed=17)
+        cell_report = run_matrix_cell(
+            lambda namespace: _FixtureBackend(namespace),
+            graph,
+            concurrency=1,
+            repetitions=2,
+            operations_per_type=1,
+            run_id="publisher-precommit-fixture",
+            formal=False,
+        )
+        samples = list(cell_report["samples"])
+        repetitions = list(cell_report["repetitions"])
+        config_hash = hashlib.sha256(
+            provenance_module._canonical_json_bytes(config)
+        ).hexdigest()
+        bundle_id = provenance_bundle_id(
+            config_sha256=config_hash,
+            run_id_sha256=cell_report["run_id_sha256"],
+            formal=False,
+            backend="vector-graph",
+        )
+        report = {
+            "schema": "txnmem-provenance-performance-report-v1",
+            "backend": "vector-graph",
+            "formal_requested": False,
+            "bundle_id": bundle_id,
+            "publication_status": "complete",
+            "production_backend_claim": False,
+            "config": copy.deepcopy(config),
+            "config_sha256": config_hash,
+            "config_file_sha256": "e" * 64,
+            "run_id_sha256": cell_report["run_id_sha256"],
+            "matrix_cell_count": 1,
+            "repetition_count": len(repetitions),
+            "operation_sample_count": len(samples),
+            "operation_samples_sha256": provenance_module.canonical_jsonl_sha256(
+                samples
+            ),
+            "repetitions_sha256": provenance_module.canonical_jsonl_sha256(
+                repetitions
+            ),
+            "graphs": [graph.metadata()],
+            "aggregate": aggregate_matrix(
+                cell_report,
+                bootstrap_repetitions=100,
+                seed=17,
+                require_formal=False,
+            ),
+            "topology_attestation_sha256": None,
+        }
+        return bundle_id, samples, repetitions, report
+
+    def _report(self):
+        samples = [
+            {
+                "cell_id": "n10-c1",
+                "repetition": 0,
+                "operation": "read",
+                "latency_ns": 10,
+                "success": True,
+                "retry_count": 0,
+            },
+            {
+                "cell_id": "n10-c1",
+                "repetition": 0,
+                "operation": "derive",
+                "latency_ns": 20,
+                "success": True,
+                "retry_count": 1,
+            },
+            {
+                "cell_id": "n10-c1",
+                "repetition": 0,
+                "operation": "search",
+                "latency_ns": 1_000_000_000,
+                "success": False,
+                "retry_count": 2,
+                "error_class": "TimeoutError",
+            },
+            {
+                "cell_id": "n10-c1",
+                "repetition": 1,
+                "operation": "read",
+                "latency_ns": 30,
+                "success": True,
+                "retry_count": 0,
+            },
+        ]
+        repetitions = [
+            {
+                "cell_id": "n10-c1",
+                "repetition": 0,
+                "elapsed_ns": 1_000_000_000,
+                "success_count": 2,
+                "failure_count": 1,
+                "retry_count": 3,
+                "eligible_for_formal": True,
+                "graph_node_count": 10,
+                "concurrency": 1,
+                "preload_method": "sequential-semantic-v1",
+                "preload_worker_limit": 1,
+                "preload_observed_peak_concurrency": 1,
+                "setup_repair_limit_per_record": 0,
+                "setup_repair_count": 0,
+                "setup_elapsed_ns": 1,
+                "retry_scope": "measured_operations_only",
+            },
+            {
+                "cell_id": "n10-c1",
+                "repetition": 1,
+                "elapsed_ns": 2_000_000_000,
+                "success_count": 1,
+                "failure_count": 0,
+                "retry_count": 0,
+                "eligible_for_formal": True,
+                "graph_node_count": 10,
+                "concurrency": 1,
+                "preload_method": "sequential-semantic-v1",
+                "preload_worker_limit": 1,
+                "preload_observed_peak_concurrency": 1,
+                "setup_repair_limit_per_record": 0,
+                "setup_repair_count": 0,
+                "setup_elapsed_ns": 1,
+                "retry_scope": "measured_operations_only",
+            },
+        ]
+        return {"samples": samples, "repetitions": repetitions}
+
+    def test_aggregate_uses_only_successes_for_latency_and_throughput_numerator(self):
+        aggregate = aggregate_matrix(
+            self._report(),
+            bootstrap_repetitions=200,
+            seed=17,
+            require_formal=False,
+        )
+        row = aggregate["rows"][0]
+        self.assertEqual(row["successful_operation_count"], 3)
+        self.assertEqual(row["failed_operation_count"], 1)
+        self.assertAlmostEqual(row["successful_throughput_ops_per_second"], 1.0)
+        self.assertLessEqual(row["p50_latency_ns"], row["p95_latency_ns"])
+        self.assertLessEqual(row["p95_latency_ns"], row["p99_latency_ns"])
+        self.assertLess(row["p99_latency_ns"], 1_000_000_000)
+        self.assertEqual(row["retry_count"], 3)
+
+    def test_repetition_cluster_bootstrap_is_deterministic(self):
+        first = aggregate_matrix(
+            self._report(), bootstrap_repetitions=500, seed=17, require_formal=False
+        )
+        second = aggregate_matrix(
+            self._report(), bootstrap_repetitions=500, seed=17, require_formal=False
+        )
+        self.assertEqual(first, second)
+        interval = first["rows"][0]["successful_throughput_95ci"]
+        self.assertLessEqual(interval["lower"], interval["estimate"])
+        self.assertLessEqual(interval["estimate"], interval["upper"])
+
+    def test_ineligible_repetition_is_not_silently_aggregated(self):
+        report = self._report()
+        report["repetitions"][1]["eligible_for_formal"] = False
+        with self.assertRaises(ProvenancePerformanceError):
+            aggregate_matrix(
+                report, bootstrap_repetitions=100, seed=17, require_formal=False
+            )
+
+    def test_diagnostic_aggregate_requires_explicit_opt_in(self):
+        report = self._report()
+        report["repetitions"][1]["eligible_for_formal"] = False
+        report["repetitions"][1]["eligible_for_diagnostic"] = True
+
+        aggregate = aggregate_matrix(
+            report,
+            bootstrap_repetitions=100,
+            seed=17,
+            require_formal=False,
+        )
+
+        self.assertEqual(aggregate["evidence_scope"], "diagnostic")
+        self.assertEqual(aggregate["rows"][0]["repetition_count"], 2)
+
+    def test_formal_aggregate_rejects_samples_shifted_between_repetitions(self):
+        report = self._valid_formal_report()
+        source = report["repetitions"][0]
+        target = report["repetitions"][1]
+        shifted = next(
+            row for row in report["samples"] if row["repetition"] == source["repetition"]
+        )
+        shifted["repetition"] = target["repetition"]
+        shifted["namespace_sha256"] = target["namespace_sha256"]
+
+        with self.assertRaises(ProvenancePerformanceError):
+            self._aggregate_small_formal([report])
+
+    def test_formal_aggregate_rejects_duplicate_namespace_identity(self):
+        report = self._valid_formal_report()
+        first = report["repetitions"][0]
+        second = report["repetitions"][1]
+        second["namespace_sha256"] = first["namespace_sha256"]
+        for sample in report["samples"]:
+            if sample["repetition"] == second["repetition"]:
+                sample["namespace_sha256"] = first["namespace_sha256"]
+
+        with self.assertRaises(ProvenancePerformanceError):
+            self._aggregate_small_formal([report])
+
+    def test_formal_aggregate_rejects_repetition_metadata_drift(self):
+        report = self._valid_formal_report()
+        report["repetitions"][1]["concurrency"] = 2
+
+        with self.assertRaises(ProvenancePerformanceError):
+            self._aggregate_small_formal([report])
+
+    def test_formal_aggregate_rejects_invalid_preload_accounting(self):
+        mutations = (
+            ("preload_worker_limit", True),
+            ("preload_worker_limit", 0),
+            (
+                "preload_worker_limit",
+                provenance_module.PROVENANCE_PRELOAD_WORKERS + 1,
+            ),
+            ("preload_observed_peak_concurrency", 0),
+            ("setup_repair_limit_per_record", 2),
+            ("setup_repair_count", True),
+            ("setup_repair_count", -1),
+            ("setup_repair_count", 11),
+            ("setup_elapsed_ns", 0),
+            ("retry_scope", "all_operations"),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field, value=value):
+                report = self._valid_formal_report()
+                report["repetitions"][0][field] = value
+                with self.assertRaises(ProvenancePerformanceError):
+                    self._aggregate_small_formal([report])
+
+    def test_formal_aggregate_requires_exact_layered_preload_contract(self):
+        mutations = (
+            {
+                "preload_method": "sequential-semantic-v1",
+                "preload_worker_limit": 1,
+                "preload_observed_peak_concurrency": 1,
+                "setup_repair_limit_per_record": 0,
+                "setup_repair_count": 0,
+            },
+            {"setup_repair_limit_per_record": 0, "setup_repair_count": 0},
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                report = self._valid_formal_report()
+                report["repetitions"][0].update(mutation)
+                with self.assertRaises(ProvenancePerformanceError):
+                    self._aggregate_small_formal([report])
+
+        report = self._valid_formal_report()
+        current_limit = report["repetitions"][0]["preload_worker_limit"]
+        self.assertGreater(current_limit, 1)
+        report["repetitions"][0]["preload_worker_limit"] = current_limit - 1
+        report["repetitions"][0]["preload_observed_peak_concurrency"] = min(
+            report["repetitions"][0]["preload_observed_peak_concurrency"],
+            current_limit - 1,
+        )
+        with self.assertRaises(ProvenancePerformanceError):
+            self._aggregate_small_formal([report])
+
+    def test_diagnostic_aggregate_validates_v2_setup_accounting_exactly(self):
+        mutations = (
+            ("preload_method", "unregistered"),
+            ("preload_worker_limit", True),
+            ("preload_observed_peak_concurrency", -1),
+            ("setup_repair_limit_per_record", True),
+            ("setup_repair_count", -1),
+            ("setup_elapsed_ns", True),
+            ("retry_scope", "all_operations"),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field, value=value):
+                report = self._valid_formal_report()
+                report["repetitions"][0][field] = value
+                with self.assertRaises(ProvenancePerformanceError):
+                    aggregate_matrix(
+                        report,
+                        bootstrap_repetitions=100,
+                        seed=17,
+                        require_formal=False,
+                    )
+
+        report = self._valid_formal_report()
+        report["repetitions"][0].pop("setup_elapsed_ns")
+        with self.assertRaises(ProvenancePerformanceError):
+            aggregate_matrix(
+                report,
+                bootstrap_repetitions=100,
+                seed=17,
+                require_formal=False,
+            )
+
+    def test_formal_aggregate_rejects_bool_integer_and_negative_accounting(self):
+        report = {
+            "samples": [
+                {
+                    "cell_id": "n1-c1",
+                    "repetition": 0,
+                    "namespace_sha256": "a" * 64,
+                    "operation": "read",
+                    "latency_ns": 1,
+                    "success": True,
+                    "retry_count": 0,
+                }
+            ],
+            "repetitions": [
+                {
+                    "cell_id": "n1-c1",
+                    "repetition": 0,
+                    "namespace_sha256": "a" * 64,
+                    "elapsed_ns": True,
+                    "success_count": True,
+                    "failure_count": 0,
+                    "retry_count": -1,
+                    "eligible_for_formal": True,
+                    "graph_node_count": True,
+                    "concurrency": True,
+                }
+            ],
+        }
+
+        with self.assertRaises(ProvenancePerformanceError):
+            aggregate_matrix(
+                report,
+                bootstrap_repetitions=100,
+                seed=17,
+            )
+
+    def test_require_formal_must_be_an_exact_boolean(self):
+        with self.assertRaises(ProvenancePerformanceError):
+            aggregate_matrix(
+                self._valid_formal_report(),
+                bootstrap_repetitions=100,
+                seed=17,
+                require_formal=1,
+            )
+
+    def test_formal_aggregate_rejects_diagnostic_producer(self):
+        graph = build_layered_dag(10, seed=17)
+        report = run_matrix_cell(
+            lambda namespace: _FixtureBackend(namespace),
+            graph,
+            concurrency=1,
+            repetitions=2,
+            operations_per_type=1,
+            run_id="diagnostic-promotion",
+            formal=False,
+        )
+
+        config = self._small_formal_config()
+        with patch.object(provenance_module, "FORMAL_MATRIX_CONFIG", config):
+            topology = self._topology_attestation([report], config)
+        report["formal_requested"] = True
+        with self.assertRaises(ProvenancePerformanceError):
+            self._aggregate_small_formal([report], config=config, topology=topology)
+
+    def test_production_formal_aggregate_rejects_small_matrix(self):
+        report = self._valid_formal_report()
+        with self.assertRaises(ProvenancePerformanceError):
+            aggregate_matrix(
+                report,
+                bootstrap_repetitions=10_000,
+                seed=17,
+            )
+
+    def test_registered_test_contract_accepts_complete_multi_cell_matrix(self):
+        graph = build_layered_dag(10, seed=17)
+        reports = [
+            run_matrix_cell(
+                _txnmem_factory(lambda namespace: _FixtureBackend(namespace)),
+                graph,
+                concurrency=concurrency,
+                repetitions=2,
+                operations_per_type=1,
+                run_id="complete-formal-matrix",
+                formal=True,
+            )
+            for concurrency in (1, 2)
+        ]
+
+        aggregate = self._aggregate_small_formal(
+            reports,
+            config=self._small_formal_config(concurrency_levels=[1, 2]),
+        )
+
+        self.assertEqual(aggregate["evidence_scope"], "formal")
+        self.assertEqual(len(aggregate["rows"]), 2)
+
+    def test_production_formal_contract_is_frozen_to_15_by_30_by_32(self):
+        cells = expand_matrix(provenance_module.FORMAL_MATRIX_CONFIG)
+        self.assertEqual(len(cells), 15)
+        self.assertEqual(sum(cell["repetitions"] for cell in cells), 450)
+        self.assertEqual(
+            sum(
+                cell["repetitions"] * cell["operations_per_type"] * 4
+                for cell in cells
+            ),
+            14_400,
+        )
+        self.assertEqual(
+            provenance_module.FORMAL_MATRIX_CONFIG["bootstrap_repetitions"], 10_000
+        )
+        root = Path(__file__).resolve().parents[1]
+        self.assertEqual(
+            formal_config_file_sha256(),
+            hashlib.sha256(
+                (root / "configs" / "provenance_performance_matrix.json").read_bytes()
+            ).hexdigest(),
+        )
+
+    def test_formal_aggregate_rejects_unregistered_attestation_and_bootstrap_drift(self):
+        report = self._valid_formal_report()
+        config = self._small_formal_config()
+        with patch.object(provenance_module, "FORMAL_MATRIX_CONFIG", config):
+            topology = self._topology_attestation([report], config)
+            with self.assertRaises(ProvenancePerformanceError):
+                aggregate_matrix(
+                    report,
+                    bootstrap_repetitions=100,
+                    seed=17,
+                    topology_attestation=topology,
+                )
+            with patch.dict(
+                FORMAL_PROVENANCE_TOPOLOGY_ATTESTATION_SHA256_BY_RUN,
+                {topology["run_id_sha256"]: topology["attestation_sha256"]},
+                clear=True,
+            ), patch.dict(
+                FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
+                {
+                    topology["run_id_sha256"]: hashlib.sha256(
+                        self.AUTHORIZATION_NONCE
+                    ).hexdigest()
+                },
+                clear=True,
+            ):
+                with self.assertRaises(ProvenancePerformanceError):
+                    aggregate_matrix(
+                        report,
+                        bootstrap_repetitions=10,
+                        seed=17,
+                        topology_attestation=topology,
+                    )
+
+    def test_formal_aggregate_rejects_peak_below_requested_concurrency(self):
+        graph = build_layered_dag(10, seed=17)
+        report = run_matrix_cell(
+            _txnmem_factory(lambda namespace: _FixtureBackend(namespace)),
+            graph,
+            concurrency=2,
+            repetitions=2,
+            operations_per_type=1,
+            run_id="peak-forgery",
+            formal=True,
+        )
+        report["repetitions"][0]["observed_peak_concurrency"] = 1
+        with self.assertRaises(ProvenancePerformanceError):
+            self._aggregate_small_formal(
+                [report],
+                config=self._small_formal_config(concurrency_levels=[2]),
+            )
+
+    def test_formal_aggregate_cross_checks_attested_service_versions(self):
+        report = self._valid_formal_report()
+        config = self._small_formal_config()
+        with patch.object(provenance_module, "FORMAL_MATRIX_CONFIG", config):
+            topology = self._topology_attestation(
+                [report], config, service_versions={"qdrant": "1.11.5"}
+            )
+
+        with self.assertRaises(ProvenancePerformanceError):
+            self._aggregate_small_formal(
+                [report], config=config, topology=topology
+            )
+
+    def test_publisher_rejects_empty_forged_formal_bundle(self):
+        config_hash = formal_matrix_config_sha256()
+        run_hash = "a" * 64
+        bundle_id = provenance_bundle_id(
+            config_sha256=config_hash,
+            run_id_sha256=run_hash,
+            formal=True,
+            backend="vector-graph",
+        )
+        forged = {
+            "bundle_id": bundle_id,
+            "formal_requested": True,
+            "operation_samples_sha256": provenance_module.canonical_jsonl_sha256(
+                []
+            ),
+            "repetitions_sha256": provenance_module.canonical_jsonl_sha256([]),
+        }
+
+        with TemporaryDirectory() as tmp:
+            with self.assertRaises((ProvenancePerformanceError, ValueError)):
+                publish_provenance_bundle(
+                    tmp,
+                    bundle_id=bundle_id,
+                    operation_samples=[],
+                    repetitions=[],
+                    report=forged,
+                    topology_attestation=None,
+                )
+            self.assertFalse((Path(tmp) / "bundles" / f"{bundle_id}.json").exists())
+
+    def test_real_publisher_precommit_hook_is_the_atomic_pointer_gate(self):
+        parameters = inspect.signature(publish_provenance_bundle).parameters
+        self.assertIn("_precommit_check", parameters)
+        if "_precommit_check" not in parameters:
+            return
+        from txnmem_formal_io import FormalStore
+
+        bundle_id, samples, repetitions, report = (
+            self._diagnostic_publication_fixture()
+        )
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def fail_at_precommit():
+                objects = list((root / "bundle_objects").iterdir())
+                self.assertEqual(len(objects), 1)
+                self.assertTrue((objects[0] / "COMPLETED.json").is_file())
+                self.assertFalse(
+                    (root / "bundles" / f"{bundle_id}.json").exists()
+                )
+                raise RuntimeError("precommit-interruption")
+
+            with self.assertRaisesRegex(RuntimeError, "precommit-interruption"):
+                publish_provenance_bundle(
+                    root,
+                    bundle_id=bundle_id,
+                    operation_samples=samples,
+                    repetitions=repetitions,
+                    report=report,
+                    _precommit_check=fail_at_precommit,
+                )
+
+            self.assertFalse(
+                (root / "bundles" / f"{bundle_id}.json").exists()
+            )
+
+        bundle_id, samples, repetitions, report = (
+            self._diagnostic_publication_fixture()
+        )
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events = []
+            real_link = os.link
+
+            def observed_link(source, target, **kwargs):
+                events.append("pointer")
+                return real_link(source, target, **kwargs)
+
+            with patch(
+                "txnmem_formal_io.os.link",
+                side_effect=observed_link,
+            ):
+                publish_provenance_bundle(
+                    root,
+                    bundle_id=bundle_id,
+                    operation_samples=samples,
+                    repetitions=repetitions,
+                    report=report,
+                    _precommit_check=lambda: events.append("precommit"),
+                )
+
+            self.assertEqual(events, ["precommit", "pointer"])
+
+        bundle_id, samples, repetitions, report = (
+            self._diagnostic_publication_fixture()
+        )
+        with TemporaryDirectory() as tmp:
+            with self.assertRaises(TypeError):
+                publish_provenance_bundle(
+                    tmp,
+                    bundle_id=bundle_id,
+                    operation_samples=samples,
+                    repetitions=repetitions,
+                    report=report,
+                    _precommit_check="forbidden",
+                )
+            self.assertFalse((Path(tmp) / "bundle_objects").exists())
+
+    def test_formal_pointer_writer_cannot_publish_replaced_staging_entry(self):
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        payload = {
+            "schema": "pointer-fixture-v1",
+            "publication_status": "complete",
+            "value": 13,
+        }
+        expected = (
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n"
+        ).encode("utf-8")
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            store = FormalStore(root)
+            store.ensure_directory("bundles")
+            bundles = root / "bundles"
+            final_path = bundles / "pointer.json"
+            attacker = root / "attacker.json"
+            attacker.write_bytes(b'{"attacker":true}\n')
+            substitution_attempted = False
+
+            def substitute_named_staging_entry():
+                nonlocal substitution_attempted
+                staging = [path for path in bundles.iterdir()]
+                if not staging:
+                    return
+                self.assertEqual(len(staging), 1)
+                substitution_attempted = True
+                staging[0].unlink()
+                staging[0].symlink_to(attacker)
+
+            with patch(
+                "txnmem_formal_io._require_non_dumpable", return_value=None
+            ):
+                try:
+                    store._publish_json_exclusive(
+                        "bundles",
+                        "pointer.json",
+                        payload=payload,
+                        _precommit_check=substitute_named_staging_entry,
+                    )
+                except FormalIOError:
+                    pass
+
+            self.assertFalse(final_path.is_symlink())
+            if final_path.exists():
+                self.assertEqual(final_path.read_bytes(), expected)
+            self.assertFalse(
+                any(path.name != "pointer.json" for path in bundles.iterdir())
+            )
+            if sys.platform.startswith("linux") and hasattr(os, "O_TMPFILE"):
+                self.assertFalse(substitution_attempted)
+
+    def test_formal_pointer_writer_never_falls_back_to_named_temporary_file(self):
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            store = FormalStore(root)
+            store.ensure_directory("bundles")
+            opened_parents = []
+            real_open_parent = store._open_parent
+
+            def observed_open_parent(*parts, **kwargs):
+                result = real_open_parent(*parts, **kwargs)
+                opened_parents.append(result[0])
+                return result
+
+            with patch.object(
+                store, "_open_parent", side_effect=observed_open_parent
+            ), patch(
+                "txnmem_formal_io._require_non_dumpable", return_value=None
+            ), patch(
+                "txnmem_formal_io._open_anonymous_inode",
+                side_effect=OSError("anonymous-inode-unavailable"),
+                create=True,
+            ), patch(
+                "txnmem_formal_io.secrets.token_hex",
+                side_effect=AssertionError("named temporary fallback is forbidden"),
+            ) as entropy, self.assertRaises(FormalIOError):
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload={"publication_status": "complete"},
+                )
+
+            entropy.assert_not_called()
+            self.assertEqual(len(opened_parents), 1)
+            with self.assertRaises(OSError):
+                os.fstat(opened_parents[0])
+            self.assertEqual(list((root / "bundles").iterdir()), [])
+
+    def test_compatibility_name_entropy_failure_occurs_before_parent_open(self):
+        from txnmem_formal_io import FormalStore
+
+        class EntropyFailure(BaseException):
+            pass
+
+        failure = EntropyFailure("entropy-failure")
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(store, "_open_parent") as open_parent, patch(
+                "txnmem_formal_io.secrets.token_hex", side_effect=failure
+            ), self.assertRaises(BaseException) as raised:
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload={"publication_status": "complete"},
+                    _allow_named_fallback=True,
+                )
+
+        self.assertIs(raised.exception, failure)
+        open_parent.assert_not_called()
+
+    def test_formal_pointer_writer_closes_anonymous_and_parent_fds_once_on_link_failure(self):
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        payload = {"publication_status": "complete"}
+        expected = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+        anonymous_metadata = [
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=0,
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(expected),
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(expected),
+            ),
+        ]
+        closed = []
+
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_parent", return_value=(90, "pointer.json")
+            ), patch(
+                "txnmem_formal_io._open_anonymous_inode",
+                return_value=91,
+                create=True,
+            ), patch(
+                "txnmem_formal_io._open_anonymous_inode_read_only",
+                return_value=92,
+                create=True,
+            ), patch(
+                "txnmem_formal_io._require_non_dumpable",
+                return_value=None,
+                create=True,
+            ), patch(
+                "txnmem_formal_io._link_anonymous_inode",
+                side_effect=OSError("fd-bound-link-failure"),
+                create=True,
+            ), patch(
+                "txnmem_formal_io.os.fstat", side_effect=anonymous_metadata
+            ), patch(
+                "txnmem_formal_io.os.write", return_value=len(expected)
+            ), patch(
+                "txnmem_formal_io.os.fsync"
+            ), patch(
+                "txnmem_formal_io.os.close",
+                side_effect=lambda descriptor: closed.append(descriptor),
+            ), patch(
+                "txnmem_formal_io.fcntl.fcntl", return_value=os.O_RDONLY
+            ), self.assertRaises(FormalIOError):
+                store._publish_json_exclusive(
+                    "bundles", "pointer.json", payload=payload
+                )
+
+        self.assertEqual(closed, [91, 92, 90])
+
+    def test_formal_non_dumpable_query_is_exact_and_linux_only(self):
+        import txnmem_formal_io as formal_io
+
+        require_non_dumpable = getattr(
+            formal_io, "_require_non_dumpable", None
+        )
+        self.assertIsNotNone(require_non_dumpable)
+        if require_non_dumpable is None:
+            return
+        calls = []
+
+        def prctl(*arguments):
+            calls.append(arguments)
+            return 0
+
+        with patch.object(formal_io.sys, "platform", "linux"):
+            require_non_dumpable(prctl=prctl)
+        self.assertEqual(calls, [(3, 0, 0, 0, 0)])
+
+        with patch.object(formal_io.sys, "platform", "linux"), self.assertRaisesRegex(
+            formal_io.FormalIOError, "non-dumpable"
+        ):
+            require_non_dumpable(prctl=lambda *_arguments: 1)
+        with patch.object(formal_io.sys, "platform", "darwin"), self.assertRaisesRegex(
+            formal_io.FormalIOError, "Linux"
+        ):
+            require_non_dumpable(prctl=prctl)
+
+    def test_formal_pointer_transitions_to_read_only_before_precommit_and_link(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalStore
+
+        payload = {"publication_status": "complete"}
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+        metadata = [
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=0,
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(encoded),
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(encoded),
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=1,
+                st_size=len(encoded),
+            ),
+        ]
+        events = []
+        reads = iter((encoded, b""))
+
+        def close(descriptor):
+            events.append(("close", descriptor))
+
+        def precommit():
+            events.append(("precommit",))
+
+        def link(descriptor, parent, name):
+            events.append(("link", descriptor, parent, name))
+
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_parent", return_value=(90, "pointer.json")
+            ), patch.object(
+                formal_io,
+                "_require_non_dumpable",
+                side_effect=lambda: events.append(("dumpable",)),
+                create=True,
+            ), patch.object(
+                formal_io,
+                "_open_anonymous_inode",
+                side_effect=lambda _parent: events.append(("anonymous",)) or 91,
+            ), patch.object(
+                formal_io,
+                "_open_anonymous_inode_read_only",
+                side_effect=lambda descriptor: events.append(
+                    ("reopen-read-only", descriptor)
+                )
+                or 92,
+                create=True,
+            ), patch.object(
+                formal_io.os, "fstat", side_effect=metadata
+            ), patch.object(
+                formal_io.os, "write", return_value=len(encoded)
+            ), patch.object(
+                formal_io.os, "read", side_effect=lambda _fd, _size: next(reads)
+            ), patch.object(
+                formal_io.os, "fsync"
+            ), patch.object(
+                formal_io.os, "close", side_effect=close
+            ), patch.object(
+                formal_io,
+                "fcntl",
+                SimpleNamespace(
+                    F_GETFL=formal_io.fcntl.F_GETFL,
+                    fcntl=lambda _fd, _operation: os.O_RDONLY,
+                ),
+                create=True,
+            ), patch.object(
+                formal_io, "_link_anonymous_inode", side_effect=link
+            ):
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload=payload,
+                    _precommit_check=precommit,
+                )
+
+        self.assertLess(events.index(("dumpable",)), events.index(("anonymous",)))
+        self.assertLess(
+            events.index(("reopen-read-only", 91)), events.index(("close", 91))
+        )
+        self.assertLess(events.index(("close", 91)), events.index(("precommit",)))
+        self.assertLess(events.index(("precommit",)), events.index(("link", 92, 90, "pointer.json")))
+        self.assertEqual(
+            [event for event in events if event[0] == "close"],
+            [("close", 91), ("close", 92), ("close", 90)],
+        )
+
+    def test_writable_anonymous_close_failure_forbids_precommit_and_link(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        payload = {"publication_status": "complete"}
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+        metadata = [
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=0,
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(encoded),
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(encoded),
+            ),
+        ]
+        closes = []
+
+        def close(descriptor):
+            closes.append(descriptor)
+            if descriptor == 91:
+                raise OSError("writable-close-failure")
+
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_parent", return_value=(90, "pointer.json")
+            ), patch.object(
+                formal_io, "_require_non_dumpable", return_value=None, create=True
+            ), patch.object(
+                formal_io, "_open_anonymous_inode", return_value=91
+            ), patch.object(
+                formal_io, "_open_anonymous_inode_read_only", return_value=92, create=True
+            ), patch.object(
+                formal_io.os, "fstat", side_effect=metadata
+            ), patch.object(
+                formal_io.os, "write", return_value=len(encoded)
+            ), patch.object(
+                formal_io.os, "fsync"
+            ), patch.object(
+                formal_io.os, "close", side_effect=close
+            ), patch.object(
+                formal_io,
+                "fcntl",
+                SimpleNamespace(
+                    F_GETFL=formal_io.fcntl.F_GETFL,
+                    fcntl=lambda _fd, _operation: os.O_RDONLY,
+                ),
+                create=True,
+            ), patch.object(
+                formal_io, "_link_anonymous_inode"
+            ) as link, self.assertRaises(FormalIOError):
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload=payload,
+                    _precommit_check=lambda: self.fail(
+                        "precommit ran after writable close failure"
+                    ),
+                )
+
+        link.assert_not_called()
+        self.assertEqual(closes.count(91), 1)
+        self.assertEqual(closes.count(92), 1)
+        self.assertEqual(closes.count(90), 1)
+
+    def test_formal_pointer_rejects_commit_fd_identity_flags_and_postlink_bytes(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        payload = {"publication_status": "complete"}
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+
+        cases = (
+            ("identity", 12, os.O_RDONLY, encoded),
+            ("flags", 11, os.O_WRONLY, encoded),
+            ("postlink-bytes", 11, os.O_RDONLY, b"forged\n"),
+        )
+        for name, commit_ino, flags, observed_bytes in cases:
+            with self.subTest(name=name), TemporaryDirectory() as tmp:
+                store = FormalStore(Path(tmp).resolve())
+                reads = iter((observed_bytes, b""))
+                fstat_counts = {91: 0, 92: 0}
+
+                def fstat(descriptor):
+                    fstat_counts[descriptor] += 1
+                    if descriptor == 91 and fstat_counts[descriptor] == 1:
+                        return SimpleNamespace(
+                            st_dev=7,
+                            st_ino=11,
+                            st_mode=stat.S_IFREG | 0o600,
+                            st_nlink=0,
+                            st_size=0,
+                        )
+                    if descriptor == 91 and fstat_counts[descriptor] == 2:
+                        return SimpleNamespace(
+                            st_dev=7,
+                            st_ino=11,
+                            st_mode=stat.S_IFREG | 0o600,
+                            st_nlink=0,
+                            st_size=len(encoded),
+                        )
+                    if descriptor == 92 and fstat_counts[descriptor] == 1:
+                        return SimpleNamespace(
+                            st_dev=7,
+                            st_ino=commit_ino,
+                            st_mode=stat.S_IFREG | 0o600,
+                            st_nlink=0,
+                            st_size=len(encoded),
+                        )
+                    return SimpleNamespace(
+                        st_dev=7,
+                        st_ino=11,
+                        st_mode=stat.S_IFREG | 0o600,
+                        st_nlink=1,
+                        st_size=len(encoded),
+                    )
+
+                with patch.object(
+                    store, "_open_parent", return_value=(90, "pointer.json")
+                ), patch.object(
+                    formal_io, "_require_non_dumpable", return_value=None, create=True
+                ), patch.object(
+                    formal_io, "_open_anonymous_inode", return_value=91
+                ), patch.object(
+                    formal_io, "_open_anonymous_inode_read_only", return_value=92, create=True
+                ), patch.object(
+                    formal_io.os, "fstat", side_effect=fstat
+                ), patch.object(
+                    formal_io.os, "write", return_value=len(encoded)
+                ), patch.object(
+                    formal_io.os,
+                    "read",
+                    side_effect=lambda _fd, _size: next(reads),
+                ), patch.object(
+                    formal_io.os, "fsync"
+                ), patch.object(
+                    formal_io.os, "close"
+                ), patch.object(
+                    formal_io,
+                    "fcntl",
+                    SimpleNamespace(
+                        F_GETFL=formal_io.fcntl.F_GETFL,
+                        fcntl=lambda _fd, _operation: flags,
+                    ),
+                    create=True,
+                ), patch.object(
+                    formal_io, "_link_anonymous_inode"
+                ), self.assertRaises(FormalIOError):
+                    store._publish_json_exclusive(
+                        "bundles", "pointer.json", payload=payload
+                    )
+
+    def test_directory_walk_close_failures_preserve_primary_and_close_each_fd_once(self):
+        from txnmem_formal_io import FormalStore
+
+        class OldCloseFailure(BaseException):
+            pass
+
+        class ChildCloseFailure(BaseException):
+            pass
+
+        primary = OldCloseFailure("old-close-primary")
+        secondary = ChildCloseFailure("child-close-secondary")
+        for operation in ("open_parent", "ensure_directory"):
+            with self.subTest(operation=operation), TemporaryDirectory() as tmp:
+                store = FormalStore(Path(tmp).resolve())
+                closes = []
+
+                def close(descriptor):
+                    closes.append(descriptor)
+                    if descriptor == 10:
+                        raise primary
+                    if descriptor == 11:
+                        raise secondary
+
+                with patch.object(
+                    store, "_open_root", return_value=10
+                ), patch(
+                    "txnmem_formal_io.os.open", return_value=11
+                ), patch(
+                    "txnmem_formal_io.os.close", side_effect=close
+                ), self.assertRaises(BaseException) as raised:
+                    if operation == "open_parent":
+                        store._open_parent(("child", "file.json"), create=False)
+                    else:
+                        store.ensure_directory("child")
+
+                self.assertIs(raised.exception, primary)
+                self.assertEqual(closes, [10, 11])
+
+    def test_directory_walk_cleanup_cannot_replace_open_primary(self):
+        from txnmem_formal_io import FormalStore
+
+        class OpenFailure(BaseException):
+            pass
+
+        primary = OpenFailure("open-primary")
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            closes = []
+            with patch.object(
+                store, "_open_root", return_value=10
+            ), patch(
+                "txnmem_formal_io.os.open", side_effect=primary
+            ), patch(
+                "txnmem_formal_io.os.close",
+                side_effect=lambda descriptor: closes.append(descriptor)
+                or (_ for _ in ()).throw(OSError("cleanup-secondary")),
+            ), self.assertRaises(BaseException) as raised:
+                store._open_parent(("child", "file.json"), create=False)
+
+        self.assertIs(raised.exception, primary)
+        self.assertEqual(closes, [10])
+
+    def test_credential_preflight_links_only_through_read_only_fd_and_leaves_no_name(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalStore
+
+        probe = b"txnmem-fd-bound-publication-preflight\n"
+        metadata = [
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=0,
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(probe),
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(probe),
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=1,
+                st_size=len(probe),
+            ),
+        ]
+        events = []
+        reads = iter((probe, b""))
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_root", return_value=90
+            ), patch.object(
+                formal_io, "_require_non_dumpable", return_value=None, create=True
+            ), patch.object(
+                formal_io, "_open_anonymous_inode", return_value=91
+            ), patch.object(
+                formal_io, "_open_anonymous_inode_read_only", return_value=92, create=True
+            ), patch.object(
+                formal_io.os, "fstat", side_effect=metadata
+            ), patch.object(
+                formal_io.os, "write", return_value=len(probe)
+            ), patch.object(
+                formal_io.os, "read", side_effect=lambda _fd, _size: next(reads)
+            ), patch.object(
+                formal_io.os, "fsync"
+            ), patch.object(
+                formal_io.os,
+                "close",
+                side_effect=lambda descriptor: events.append(("close", descriptor)),
+            ), patch.object(
+                formal_io,
+                "fcntl",
+                SimpleNamespace(
+                    F_GETFL=formal_io.fcntl.F_GETFL,
+                    fcntl=lambda _fd, _operation: os.O_RDONLY,
+                ),
+                create=True,
+            ), patch.object(
+                formal_io,
+                "_link_anonymous_inode",
+                side_effect=lambda descriptor, parent, name: events.append(
+                    ("link", descriptor, parent, name)
+                ),
+            ), patch.object(
+                formal_io.os,
+                "unlink",
+                side_effect=lambda name, *, dir_fd: events.append(
+                    ("unlink", name, dir_fd)
+                ),
+            ):
+                store._require_fd_bound_publication_support()
+
+        self.assertLess(events.index(("close", 91)), events.index(("link", 92, 90, ".txnmem-fd-bound-publication-preflight")))
+        self.assertLess(events.index(("link", 92, 90, ".txnmem-fd-bound-publication-preflight")), events.index(("unlink", ".txnmem-fd-bound-publication-preflight", 90)))
+        self.assertEqual(
+            [event for event in events if event[0] == "close"],
+            [("close", 91), ("close", 92), ("close", 90)],
+        )
+
+    def test_credential_preflight_writable_close_failure_never_links(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        probe = b"txnmem-fd-bound-publication-preflight\n"
+        metadata = [
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=0,
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(probe),
+            ),
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=len(probe),
+            ),
+        ]
+        closes = []
+
+        def close(descriptor):
+            closes.append(descriptor)
+            if descriptor == 91:
+                raise OSError("preflight-writable-close-failure")
+
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_root", return_value=90
+            ), patch.object(
+                formal_io, "_require_non_dumpable", return_value=None, create=True
+            ), patch.object(
+                formal_io, "_open_anonymous_inode", return_value=91
+            ), patch.object(
+                formal_io, "_open_anonymous_inode_read_only", return_value=92, create=True
+            ), patch.object(
+                formal_io.os, "fstat", side_effect=metadata
+            ), patch.object(
+                formal_io.os, "write", return_value=len(probe)
+            ), patch.object(
+                formal_io.os, "fsync"
+            ), patch.object(
+                formal_io.os, "close", side_effect=close
+            ), patch.object(
+                formal_io,
+                "fcntl",
+                SimpleNamespace(
+                    F_GETFL=formal_io.fcntl.F_GETFL,
+                    fcntl=lambda _fd, _operation: os.O_RDONLY,
+                ),
+                create=True,
+            ), patch.object(
+                formal_io, "_link_anonymous_inode"
+            ) as link, self.assertRaises(FormalIOError):
+                store._require_fd_bound_publication_support()
+
+        link.assert_not_called()
+        self.assertEqual(closes.count(91), 1)
+        self.assertEqual(closes.count(92), 1)
+        self.assertEqual(closes.count(90), 1)
+
+    def test_root_empty_path_success_does_not_substitute_for_runner_fallback(self):
+        import txnmem_formal_io as formal_io
+
+        with patch.object(formal_io, "_call_linkat") as root_linkat:
+            formal_io._link_anonymous_inode(92, 90, "probe")
+
+        root_linkat.assert_called_once_with(
+            92,
+            b"",
+            90,
+            "probe",
+            formal_io._AT_EMPTY_PATH,
+        )
+
+        fallback_denied = PermissionError(
+            errno.EACCES, "runner proc-fd fallback denied"
+        )
+        with patch.object(
+            formal_io,
+            "_call_linkat",
+            side_effect=[
+                PermissionError(errno.EPERM, "AT_EMPTY_PATH denied"),
+                fallback_denied,
+            ],
+        ) as runner_linkat, self.assertRaises(PermissionError) as raised:
+            formal_io._link_anonymous_inode(92, 90, "probe")
+
+        self.assertIs(raised.exception, fallback_denied)
+        self.assertEqual(
+            runner_linkat.call_args_list[1].args,
+            (
+                formal_io._AT_FDCWD,
+                b"/proc/self/fd/92",
+                90,
+                "probe",
+                formal_io._AT_SYMLINK_FOLLOW,
+            ),
+        )
+
+    def test_formal_anonymous_prelink_faults_never_reach_visibility(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        payload = {"publication_status": "complete"}
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+
+        def metadata(*, inode=11, mode=0o600, size=0):
+            return SimpleNamespace(
+                st_dev=7,
+                st_ino=inode,
+                st_mode=stat.S_IFREG | mode,
+                st_nlink=0,
+                st_size=size,
+            )
+
+        cases = {
+            "zero-write": {
+                "stats": [metadata()],
+                "write": [0],
+            },
+            "first-fstat-mode": {
+                "stats": [metadata(mode=0o644)],
+                "write": [],
+            },
+            "first-fstat-size": {
+                "stats": [metadata(size=1)],
+                "write": [],
+            },
+            "second-fstat-identity": {
+                "stats": [metadata(), metadata(inode=12, size=len(encoded))],
+                "write": [len(encoded)],
+            },
+            "second-fstat-mode": {
+                "stats": [metadata(), metadata(mode=0o644, size=len(encoded))],
+                "write": [len(encoded)],
+            },
+            "second-fstat-size": {
+                "stats": [metadata(), metadata(size=len(encoded) - 1)],
+                "write": [len(encoded)],
+            },
+            "file-fsync": {
+                "stats": [metadata()],
+                "write": [len(encoded)],
+                "fsync": OSError("file-fsync-failure"),
+            },
+            "read-only-reopen": {
+                "stats": [metadata(), metadata(size=len(encoded))],
+                "write": [len(encoded)],
+                "reopen": OSError("read-only-reopen-failure"),
+            },
+        }
+        for name, fixture in cases.items():
+            with self.subTest(name=name), TemporaryDirectory() as tmp:
+                store = FormalStore(Path(tmp).resolve())
+                reopen_failure = fixture.get("reopen")
+                with patch.object(
+                    store, "_open_parent", return_value=(90, "pointer.json")
+                ), patch.object(
+                    formal_io, "_require_non_dumpable", return_value=None
+                ), patch.object(
+                    formal_io, "_open_anonymous_inode", return_value=91
+                ), patch.object(
+                    formal_io,
+                    "_open_anonymous_inode_read_only",
+                    side_effect=reopen_failure,
+                    return_value=92,
+                ), patch.object(
+                    formal_io.os, "fstat", side_effect=fixture["stats"]
+                ), patch.object(
+                    formal_io.os, "write", side_effect=fixture["write"]
+                ), patch.object(
+                    formal_io.os,
+                    "fsync",
+                    side_effect=fixture.get("fsync"),
+                ), patch.object(
+                    formal_io.os, "close"
+                ), patch.object(
+                    formal_io, "_link_anonymous_inode"
+                ) as link, self.assertRaises(FormalIOError):
+                    store._publish_json_exclusive(
+                        "bundles", "pointer.json", payload=payload
+                    )
+                link.assert_not_called()
+
+    def test_formal_anonymous_partial_writes_are_completed_before_read_only_commit(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalStore
+
+        payload = {"publication_status": "complete"}
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+        fstat_counts = {91: 0, 92: 0}
+
+        def fstat(descriptor):
+            fstat_counts[descriptor] += 1
+            if descriptor == 91 and fstat_counts[descriptor] == 1:
+                links, size = 0, 0
+            elif descriptor == 92 and fstat_counts[descriptor] == 2:
+                links, size = 1, len(encoded)
+            else:
+                links, size = 0, len(encoded)
+            return SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=links,
+                st_size=size,
+            )
+
+        reads = iter((encoded, b""))
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_parent", return_value=(90, "pointer.json")
+            ), patch.object(
+                formal_io, "_require_non_dumpable", return_value=None
+            ), patch.object(
+                formal_io, "_open_anonymous_inode", return_value=91
+            ), patch.object(
+                formal_io, "_open_anonymous_inode_read_only", return_value=92
+            ), patch.object(
+                formal_io.os, "fstat", side_effect=fstat
+            ), patch.object(
+                formal_io.os, "write", side_effect=[1, len(encoded) - 1]
+            ) as write, patch.object(
+                formal_io.os, "read", side_effect=lambda _fd, _size: next(reads)
+            ), patch.object(
+                formal_io.os, "fsync"
+            ), patch.object(
+                formal_io.os, "close"
+            ), patch.object(
+                formal_io.fcntl, "fcntl", return_value=os.O_RDONLY
+            ), patch.object(
+                formal_io, "_link_anonymous_inode"
+            ):
+                store._publish_json_exclusive(
+                    "bundles", "pointer.json", payload=payload
+                )
+
+        self.assertEqual(write.call_count, 2)
+        self.assertEqual(write.call_args_list[0].args, (91, encoded))
+        self.assertEqual(write.call_args_list[1].args, (91, encoded[1:]))
+
+    def test_formal_publication_preserves_baseexception_when_commit_cleanup_fails(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalStore
+
+        class PublicationPrimary(BaseException):
+            pass
+
+        primary = PublicationPrimary("publication-primary")
+        origin = []
+        payload = {"publication_status": "complete"}
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+        stats = [
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=0,
+                st_size=size,
+            )
+            for size in (0, len(encoded), len(encoded))
+        ]
+
+        def precommit():
+            try:
+                raise primary
+            except BaseException as exc:
+                origin.append(exc.__traceback__)
+                raise
+
+        def close(descriptor):
+            if descriptor in {92, 90}:
+                raise OSError("cleanup-secondary")
+
+        caught = None
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_parent", return_value=(90, "pointer.json")
+            ), patch.object(
+                formal_io, "_require_non_dumpable", return_value=None
+            ), patch.object(
+                formal_io, "_open_anonymous_inode", return_value=91
+            ), patch.object(
+                formal_io, "_open_anonymous_inode_read_only", return_value=92
+            ), patch.object(
+                formal_io.os, "fstat", side_effect=stats
+            ), patch.object(
+                formal_io.os, "write", return_value=len(encoded)
+            ), patch.object(
+                formal_io.os, "fsync"
+            ), patch.object(
+                formal_io.os, "close", side_effect=close
+            ), patch.object(
+                formal_io.fcntl, "fcntl", return_value=os.O_RDONLY
+            ), patch.object(
+                formal_io, "_link_anonymous_inode"
+            ) as link:
+                try:
+                    store._publish_json_exclusive(
+                        "bundles",
+                        "pointer.json",
+                        payload=payload,
+                        _precommit_check=precommit,
+                    )
+                except BaseException as exc:
+                    caught = (exc, exc.__traceback__)
+
+        self.assertIsNotNone(caught)
+        self.assertIs(caught[0], primary)
+        traceback_nodes = []
+        current = caught[1]
+        while current is not None:
+            traceback_nodes.append(current)
+            current = current.tb_next
+        self.assertIn(origin[0], traceback_nodes)
+        link.assert_not_called()
+
+    def test_preflight_preserves_baseexception_when_unlink_and_fd_cleanup_fail(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalStore
+
+        class UnlinkPrimary(BaseException):
+            pass
+
+        primary = UnlinkPrimary("unlink-primary")
+        origin = []
+        probe = b"txnmem-fd-bound-publication-preflight\n"
+        stats = [
+            SimpleNamespace(
+                st_dev=7,
+                st_ino=11,
+                st_mode=stat.S_IFREG | 0o600,
+                st_nlink=links,
+                st_size=size,
+            )
+            for links, size in (
+                (0, 0),
+                (0, len(probe)),
+                (0, len(probe)),
+                (1, len(probe)),
+            )
+        ]
+        unlink_calls = 0
+
+        def unlink(_name, *, dir_fd):
+            nonlocal unlink_calls
+            self.assertEqual(dir_fd, 90)
+            unlink_calls += 1
+            if unlink_calls == 1:
+                try:
+                    raise primary
+                except BaseException as exc:
+                    origin.append(exc.__traceback__)
+                    raise
+            raise OSError("unlink-cleanup-secondary")
+
+        def close(descriptor):
+            if descriptor in {92, 90}:
+                raise OSError("fd-cleanup-secondary")
+
+        reads = iter((probe, b""))
+        caught = None
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_root", return_value=90
+            ), patch.object(
+                formal_io, "_require_non_dumpable", return_value=None
+            ), patch.object(
+                formal_io, "_open_anonymous_inode", return_value=91
+            ), patch.object(
+                formal_io, "_open_anonymous_inode_read_only", return_value=92
+            ), patch.object(
+                formal_io.os, "fstat", side_effect=stats
+            ), patch.object(
+                formal_io.os, "write", return_value=len(probe)
+            ), patch.object(
+                formal_io.os, "read", side_effect=lambda _fd, _size: next(reads)
+            ), patch.object(
+                formal_io.os, "fsync"
+            ), patch.object(
+                formal_io.os, "unlink", side_effect=unlink
+            ), patch.object(
+                formal_io.os, "close", side_effect=close
+            ), patch.object(
+                formal_io.fcntl, "fcntl", return_value=os.O_RDONLY
+            ), patch.object(
+                formal_io, "_link_anonymous_inode"
+            ):
+                try:
+                    store._require_fd_bound_publication_support()
+                except BaseException as exc:
+                    caught = (exc, exc.__traceback__)
+
+        self.assertIsNotNone(caught)
+        self.assertIs(caught[0], primary)
+        traceback_nodes = []
+        current = caught[1]
+        while current is not None:
+            traceback_nodes.append(current)
+            current = current.tb_next
+        self.assertIn(origin[0], traceback_nodes)
+        self.assertEqual(unlink_calls, 2)
+
+    def test_directory_fd_adoption_preserves_exact_close_failure_traceback_and_attempts_child_once(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalStore
+
+        class ParentCloseFailure(BaseException):
+            pass
+
+        primary = ParentCloseFailure("parent-close-primary")
+        origin = []
+        close_calls = []
+
+        def close(descriptor):
+            close_calls.append(descriptor)
+            if descriptor == 40:
+                try:
+                    raise primary
+                except BaseException as exc:
+                    origin.append(exc.__traceback__)
+                    raise
+
+        caught = None
+        with TemporaryDirectory() as tmp:
+            store = FormalStore(Path(tmp).resolve())
+            with patch.object(
+                store, "_open_root", return_value=40
+            ), patch.object(
+                formal_io.os, "open", return_value=41
+            ), patch.object(
+                formal_io.os, "close", side_effect=close
+            ):
+                try:
+                    store.ensure_directory("child")
+                except BaseException as exc:
+                    caught = (exc, exc.__traceback__)
+
+        self.assertIsNotNone(caught)
+        self.assertIs(caught[0], primary)
+        traceback_nodes = []
+        current = caught[1]
+        while current is not None:
+            traceback_nodes.append(current)
+            current = current.tb_next
+        self.assertIn(origin[0], traceback_nodes)
+        self.assertIs(origin[0].tb_frame.f_code, close.__code__)
+        self.assertEqual(close_calls, [40, 41])
+
+    def test_directory_fd_adoption_never_double_closes_reissued_parent_number(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalStore
+
+        class ParentCloseFailure(BaseException):
+            pass
+
+        primary = ParentCloseFailure("parent-close-after-kernel-close")
+        real_close = os.close
+        real_dup2 = os.dup2
+        real_open = os.open
+        close_calls = []
+        reissued_descriptor = None
+        reissued_was_closed = False
+        caught = None
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            store = FormalStore(root)
+            parent_descriptor = real_open(
+                root,
+                os.O_RDONLY | os.O_DIRECTORY,
+            )
+            child_descriptor = real_open(
+                root,
+                os.O_RDONLY | os.O_DIRECTORY,
+            )
+
+            def close(descriptor):
+                nonlocal reissued_descriptor, reissued_was_closed
+                close_calls.append(descriptor)
+                if descriptor == parent_descriptor and reissued_descriptor is None:
+                    real_close(descriptor)
+                    replacement = real_open(os.devnull, os.O_RDONLY)
+                    if replacement != parent_descriptor:
+                        real_dup2(replacement, parent_descriptor)
+                        real_close(replacement)
+                    reissued_descriptor = parent_descriptor
+                    raise primary
+                if descriptor == reissued_descriptor:
+                    reissued_was_closed = True
+                real_close(descriptor)
+
+            try:
+                with patch.object(
+                    store, "_open_root", return_value=parent_descriptor
+                ), patch.object(
+                    formal_io.os, "open", return_value=child_descriptor
+                ), patch.object(
+                    formal_io.os, "close", side_effect=close
+                ):
+                    try:
+                        store.ensure_directory("child")
+                    except BaseException as exc:
+                        caught = exc
+
+                self.assertIs(caught, primary)
+                self.assertEqual(
+                    close_calls,
+                    [parent_descriptor, child_descriptor],
+                )
+                self.assertFalse(reissued_was_closed)
+                os.fstat(reissued_descriptor)
+            finally:
+                if reissued_descriptor is not None:
+                    real_close(reissued_descriptor)
+                else:
+                    for descriptor in (child_descriptor, parent_descriptor):
+                        try:
+                            real_close(descriptor)
+                        except OSError:
+                            pass
+
+    def test_formal_postlink_sync_and_descriptor_close_faults_are_observable_once(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        payload = {"publication_status": "complete"}
+        encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+        for fault in ("directory-fsync", "commit-close", "parent-close"):
+            with self.subTest(fault=fault), TemporaryDirectory() as tmp:
+                fstat_counts = {91: 0, 92: 0}
+                closes = []
+                reads = iter((encoded, b""))
+
+                def fstat(descriptor):
+                    fstat_counts[descriptor] += 1
+                    if descriptor == 91 and fstat_counts[descriptor] == 1:
+                        links, size = 0, 0
+                    elif descriptor == 92 and fstat_counts[descriptor] == 2:
+                        links, size = 1, len(encoded)
+                    else:
+                        links, size = 0, len(encoded)
+                    return SimpleNamespace(
+                        st_dev=7,
+                        st_ino=11,
+                        st_mode=stat.S_IFREG | 0o600,
+                        st_nlink=links,
+                        st_size=size,
+                    )
+
+                def fsync(descriptor):
+                    if fault == "directory-fsync" and descriptor == 90:
+                        raise OSError("directory-fsync-failure")
+
+                def close(descriptor):
+                    closes.append(descriptor)
+                    if fault == "commit-close" and descriptor == 92:
+                        raise OSError("commit-close-failure")
+                    if fault == "parent-close" and descriptor == 90:
+                        raise OSError("parent-close-failure")
+
+                store = FormalStore(Path(tmp).resolve())
+                with patch.object(
+                    store, "_open_parent", return_value=(90, "pointer.json")
+                ), patch.object(
+                    formal_io, "_require_non_dumpable", return_value=None
+                ), patch.object(
+                    formal_io, "_open_anonymous_inode", return_value=91
+                ), patch.object(
+                    formal_io, "_open_anonymous_inode_read_only", return_value=92
+                ), patch.object(
+                    formal_io.os, "fstat", side_effect=fstat
+                ), patch.object(
+                    formal_io.os, "write", return_value=len(encoded)
+                ), patch.object(
+                    formal_io.os, "read", side_effect=lambda _fd, _size: next(reads)
+                ), patch.object(
+                    formal_io.os, "fsync", side_effect=fsync
+                ), patch.object(
+                    formal_io.os, "close", side_effect=close
+                ), patch.object(
+                    formal_io.fcntl, "fcntl", return_value=os.O_RDONLY
+                ), patch.object(
+                    formal_io, "_link_anonymous_inode"
+                ) as link, self.assertRaises(FormalIOError):
+                    store._publish_json_exclusive(
+                        "bundles", "pointer.json", payload=payload
+                    )
+
+                link.assert_called_once_with(92, 90, "pointer.json")
+                self.assertEqual(closes, [91, 92, 90])
+
+    def test_preflight_link_sync_and_descriptor_close_faults_are_observable_once(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        probe = b"txnmem-fd-bound-publication-preflight\n"
+        probe_name = ".txnmem-fd-bound-publication-preflight"
+        for fault in (
+            "link",
+            "directory-fsync",
+            "commit-close",
+            "parent-close",
+        ):
+            with self.subTest(fault=fault), TemporaryDirectory() as tmp:
+                fstat_counts = {91: 0, 92: 0}
+                closes = []
+                unlinks = []
+                reads = iter((probe, b""))
+
+                def fstat(descriptor):
+                    fstat_counts[descriptor] += 1
+                    if descriptor == 91 and fstat_counts[descriptor] == 1:
+                        links, size = 0, 0
+                    elif descriptor == 92 and fstat_counts[descriptor] == 2:
+                        links, size = 1, len(probe)
+                    else:
+                        links, size = 0, len(probe)
+                    return SimpleNamespace(
+                        st_dev=7,
+                        st_ino=11,
+                        st_mode=stat.S_IFREG | 0o600,
+                        st_nlink=links,
+                        st_size=size,
+                    )
+
+                def link(*_arguments):
+                    if fault == "link":
+                        raise OSError("link-failure")
+
+                def fsync(descriptor):
+                    if fault == "directory-fsync" and descriptor == 90:
+                        raise OSError("directory-fsync-failure")
+
+                def close(descriptor):
+                    closes.append(descriptor)
+                    if fault == "commit-close" and descriptor == 92:
+                        raise OSError("commit-close-failure")
+                    if fault == "parent-close" and descriptor == 90:
+                        raise OSError("parent-close-failure")
+
+                store = FormalStore(Path(tmp).resolve())
+                with patch.object(
+                    store, "_open_root", return_value=90
+                ), patch.object(
+                    formal_io, "_require_non_dumpable", return_value=None
+                ), patch.object(
+                    formal_io, "_open_anonymous_inode", return_value=91
+                ), patch.object(
+                    formal_io, "_open_anonymous_inode_read_only", return_value=92
+                ), patch.object(
+                    formal_io.os, "fstat", side_effect=fstat
+                ), patch.object(
+                    formal_io.os, "write", return_value=len(probe)
+                ), patch.object(
+                    formal_io.os, "read", side_effect=lambda _fd, _size: next(reads)
+                ), patch.object(
+                    formal_io.os, "fsync", side_effect=fsync
+                ), patch.object(
+                    formal_io.os,
+                    "unlink",
+                    side_effect=lambda name, *, dir_fd: unlinks.append(
+                        (name, dir_fd)
+                    ),
+                ), patch.object(
+                    formal_io.os, "close", side_effect=close
+                ), patch.object(
+                    formal_io.fcntl, "fcntl", return_value=os.O_RDONLY
+                ), patch.object(
+                    formal_io, "_link_anonymous_inode", side_effect=link
+                ), self.assertRaises(FormalIOError):
+                    store._require_fd_bound_publication_support()
+
+                self.assertEqual(closes, [91, 92, 90])
+                if fault == "link":
+                    self.assertEqual(unlinks, [])
+                else:
+                    self.assertEqual(unlinks, [(probe_name, 90)])
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and hasattr(os, "O_TMPFILE"),
+        "Linux O_TMPFILE/linkat only",
+    )
+    @_with_non_dumpable_test_process
+    def test_formal_pointer_writer_real_anonymous_inode_linkat_has_no_residue(self):
+        import txnmem_formal_io as formal_io
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        payload = {
+            "schema": "pointer-fixture-v1",
+            "publication_status": "complete",
+            "value": 17,
+        }
+        expected = (
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n"
+        ).encode("utf-8")
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            store = FormalStore(root)
+            store.ensure_directory("bundles")
+            bundles = root / "bundles"
+            store._require_fd_bound_publication_support("bundles")
+            self.assertEqual(list(bundles.iterdir()), [])
+            observations = []
+
+            def precommit():
+                observations.append(tuple(bundles.iterdir()))
+
+            store._publish_json_exclusive(
+                "bundles",
+                "pointer.json",
+                payload=payload,
+                _precommit_check=precommit,
+            )
+
+            self.assertEqual(observations, [()])
+            self.assertEqual((bundles / "pointer.json").read_bytes(), expected)
+            self.assertEqual(
+                sorted(path.name for path in bundles.iterdir()), ["pointer.json"]
+            )
+
+        for existing_kind in ("file", "symlink"):
+            with self.subTest(existing=existing_kind), TemporaryDirectory() as tmp:
+                root = Path(tmp).resolve()
+                store = FormalStore(root)
+                store.ensure_directory("bundles")
+                final_path = root / "bundles" / "pointer.json"
+                sentinel = root / "sentinel.json"
+                sentinel.write_bytes(b"sentinel\n")
+                if existing_kind == "file":
+                    final_path.write_bytes(b"original\n")
+                else:
+                    final_path.symlink_to(sentinel)
+                with self.assertRaises(FormalIOError):
+                    store._publish_json_exclusive(
+                        "bundles", "pointer.json", payload=payload
+                    )
+                if existing_kind == "file":
+                    self.assertEqual(final_path.read_bytes(), b"original\n")
+                else:
+                    self.assertTrue(final_path.is_symlink())
+                self.assertEqual(
+                    sorted(path.name for path in (root / "bundles").iterdir()),
+                    ["pointer.json"],
+                )
+
+        class PointerInterruption(BaseException):
+            pass
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            store = FormalStore(root)
+            store.ensure_directory("bundles")
+            before = PointerInterruption("before-link")
+            with self.assertRaises(BaseException) as raised:
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload=payload,
+                    _precommit_check=lambda: (_ for _ in ()).throw(before),
+                )
+            self.assertIs(raised.exception, before)
+            self.assertEqual(list((root / "bundles").iterdir()), [])
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            store = FormalStore(root)
+            store.ensure_directory("bundles")
+            after = PointerInterruption("after-link")
+            real_link = formal_io._link_anonymous_inode
+
+            def link_then_interrupt(*args):
+                real_link(*args)
+                raise after
+
+            with patch.object(
+                formal_io,
+                "_link_anonymous_inode",
+                side_effect=link_then_interrupt,
+            ), self.assertRaises(BaseException) as raised:
+                store._publish_json_exclusive(
+                    "bundles", "pointer.json", payload=payload
+                )
+            self.assertIs(raised.exception, after)
+            self.assertEqual(
+                (root / "bundles" / "pointer.json").read_bytes(), expected
+            )
+            self.assertEqual(
+                sorted(path.name for path in (root / "bundles").iterdir()),
+                ["pointer.json"],
+            )
+
+    def test_pointer_writer_materializes_before_atomic_no_replace_link(self):
+        from txnmem_formal_io import FormalStore
+
+        payload = {
+            "schema": "pointer-fixture-v1",
+            "publication_status": "complete",
+            "value": 7,
+        }
+        expected = (
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode("utf-8")
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            store = FormalStore(root)
+            store.ensure_directory("bundles")
+            final_path = root / "bundles" / "pointer.json"
+            hook_observations = []
+            link_observations = []
+            real_link = os.link
+
+            def precommit():
+                temporary = [
+                    path
+                    for path in (root / "bundles").iterdir()
+                    if path.name != final_path.name
+                ]
+                hook_observations.append(
+                    (
+                        final_path.exists(),
+                        len(temporary),
+                        temporary[0].read_bytes() if len(temporary) == 1 else b"",
+                        temporary[0].stat().st_mode & 0o777
+                        if len(temporary) == 1
+                        else None,
+                    )
+                )
+
+            def observed_link(source, target, **kwargs):
+                link_observations.append((source, target, dict(kwargs)))
+                return real_link(source, target, **kwargs)
+
+            with patch(
+                "txnmem_formal_io.os.link",
+                side_effect=observed_link,
+            ):
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload=payload,
+                    _precommit_check=precommit,
+                    _allow_named_fallback=True,
+                )
+
+            final_bytes = final_path.read_bytes()
+            residue = sorted(path.name for path in (root / "bundles").iterdir())
+
+        self.assertEqual(hook_observations, [(False, 1, expected, 0o600)])
+        self.assertEqual(len(link_observations), 1)
+        self.assertEqual(link_observations[0][1], "pointer.json")
+        self.assertIs(link_observations[0][2]["follow_symlinks"], False)
+        self.assertEqual(final_bytes, expected)
+        self.assertEqual(residue, ["pointer.json"])
+
+    def test_pointer_writer_interruption_is_absent_or_complete(self):
+        from txnmem_formal_io import FormalStore
+
+        class PointerInterruption(BaseException):
+            pass
+
+        payload = {
+            "schema": "pointer-fixture-v1",
+            "publication_status": "complete",
+        }
+        expected = (
+            json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            store = FormalStore(root)
+            store.ensure_directory("bundles")
+            final_path = root / "bundles" / "pointer.json"
+            before = PointerInterruption("before-link")
+
+            with self.assertRaises(BaseException) as raised:
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload=payload,
+                    _precommit_check=lambda: (_ for _ in ()).throw(before),
+                    _allow_named_fallback=True,
+                )
+
+            self.assertIs(raised.exception, before)
+            self.assertFalse(final_path.exists())
+            self.assertEqual(list((root / "bundles").iterdir()), [])
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            store = FormalStore(root)
+            store.ensure_directory("bundles")
+            final_path = root / "bundles" / "pointer.json"
+            after = PointerInterruption("after-link")
+            real_link = os.link
+
+            def link_then_interrupt(source, target, **kwargs):
+                real_link(source, target, **kwargs)
+                raise after
+
+            with patch(
+                "txnmem_formal_io.os.link",
+                side_effect=link_then_interrupt,
+            ), self.assertRaises(BaseException) as raised:
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload=payload,
+                    _precommit_check=lambda: None,
+                    _allow_named_fallback=True,
+                )
+
+            self.assertIs(raised.exception, after)
+            self.assertEqual(final_path.read_bytes(), expected)
+            self.assertEqual(
+                sorted(path.name for path in (root / "bundles").iterdir()),
+                ["pointer.json"],
+            )
+
+    def test_pointer_writer_filesystem_failures_never_publish_partial_bytes(self):
+        from txnmem_formal_io import FormalIOError, FormalStore
+
+        payload = {
+            "schema": "pointer-fixture-v1",
+            "publication_status": "complete",
+            "value": 11,
+        }
+        expected = (
+            json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+
+        def new_store():
+            temporary = TemporaryDirectory()
+            root = Path(temporary.name).resolve()
+            store = FormalStore(root)
+            store.ensure_directory("bundles")
+            return temporary, root, store
+
+        for failure_name in ("short-write", "file-fsync", "link"):
+            with self.subTest(failure=failure_name):
+                temporary, root, store = new_store()
+                with temporary:
+                    final_path = root / "bundles" / "pointer.json"
+                    if failure_name == "short-write":
+                        operation_patch = patch(
+                            "txnmem_formal_io.os.write",
+                            side_effect=[1, 0],
+                        )
+                    elif failure_name == "file-fsync":
+                        operation_patch = patch(
+                            "txnmem_formal_io.os.fsync",
+                            side_effect=OSError("file-fsync-failure"),
+                        )
+                    else:
+                        operation_patch = patch(
+                            "txnmem_formal_io.os.link",
+                            side_effect=OSError("link-failure"),
+                        )
+                    with operation_patch, self.assertRaises(FormalIOError):
+                        store._publish_json_exclusive(
+                            "bundles",
+                            "pointer.json",
+                            payload=payload,
+                            _allow_named_fallback=True,
+                        )
+                    self.assertFalse(final_path.exists())
+                    self.assertEqual(list((root / "bundles").iterdir()), [])
+
+        temporary, root, store = new_store()
+        with temporary:
+            final_path = root / "bundles" / "pointer.json"
+            real_open = os.open
+
+            def fail_temporary_open(path, flags, *args, **kwargs):
+                if flags & os.O_CREAT:
+                    raise OSError("temporary-open-failure")
+                return real_open(path, flags, *args, **kwargs)
+
+            with patch(
+                "txnmem_formal_io.os.open",
+                side_effect=fail_temporary_open,
+            ), self.assertRaises(FormalIOError):
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload=payload,
+                    _allow_named_fallback=True,
+                )
+            self.assertFalse(final_path.exists())
+            self.assertEqual(list((root / "bundles").iterdir()), [])
+
+        for substitution in ("existing", "symlink"):
+            with self.subTest(substitution=substitution):
+                temporary, root, store = new_store()
+                with temporary:
+                    final_path = root / "bundles" / "pointer.json"
+                    sentinel = root / "sentinel.json"
+                    sentinel.write_text("sentinel", encoding="utf-8")
+                    if substitution == "existing":
+                        final_path.write_text("original", encoding="utf-8")
+                    else:
+                        final_path.symlink_to(sentinel)
+                    with self.assertRaises(FormalIOError):
+                        store._publish_json_exclusive(
+                            "bundles",
+                            "pointer.json",
+                            payload=payload,
+                            _allow_named_fallback=True,
+                        )
+                    if substitution == "existing":
+                        self.assertEqual(final_path.read_bytes(), b"original")
+                    else:
+                        self.assertTrue(final_path.is_symlink())
+                    self.assertFalse(
+                        any(
+                            path.name not in {"pointer.json"}
+                            for path in (root / "bundles").iterdir()
+                        )
+                    )
+
+        temporary, root, store = new_store()
+        with temporary:
+            final_path = root / "bundles" / "pointer.json"
+            real_fsync = os.fsync
+            fsync_calls = 0
+
+            def fail_first_directory_sync(descriptor):
+                nonlocal fsync_calls
+                fsync_calls += 1
+                if fsync_calls == 2:
+                    raise OSError("directory-fsync-failure")
+                return real_fsync(descriptor)
+
+            with patch(
+                "txnmem_formal_io.os.fsync",
+                side_effect=fail_first_directory_sync,
+            ), self.assertRaises(FormalIOError):
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload=payload,
+                    _allow_named_fallback=True,
+                )
+            self.assertEqual(final_path.read_bytes(), expected)
+            self.assertEqual(
+                sorted(path.name for path in (root / "bundles").iterdir()),
+                ["pointer.json"],
+            )
+
+        temporary, root, store = new_store()
+        with temporary:
+            final_path = root / "bundles" / "pointer.json"
+            with patch(
+                "txnmem_formal_io.os.unlink",
+                side_effect=OSError("temporary-cleanup-failure"),
+            ), self.assertRaises(FormalIOError):
+                store._publish_json_exclusive(
+                    "bundles",
+                    "pointer.json",
+                    payload=payload,
+                    _allow_named_fallback=True,
+                )
+            self.assertEqual(final_path.read_bytes(), expected)
+            private_residue = [
+                path
+                for path in (root / "bundles").iterdir()
+                if path.name != "pointer.json"
+            ]
+            self.assertEqual(len(private_residue), 1)
+            self.assertTrue(private_residue[0].name.startswith(".pointer.json."))
+
+        bundle_id, _samples, _repetitions, _report = (
+            self._diagnostic_publication_fixture()
+        )
+        temporary, root, store = new_store()
+        with temporary:
+            stale = root / "bundles" / f".{bundle_id}.json.stale.tmp"
+            stale.write_bytes(expected)
+            with self.assertRaises((FormalIOError, ProvenancePerformanceError)):
+                candidate_attestation_material(root, bundle_id)
+            self.assertTrue(stale.is_file())
+            self.assertFalse((root / "bundles" / f"{bundle_id}.json").exists())
+
+    def test_formal_named_bundle_cannot_dispatch_to_diagnostic_validator(self):
+        config_hash = formal_matrix_config_sha256()
+        run_hash = "b" * 64
+        bundle_id = provenance_bundle_id(
+            config_sha256=config_hash,
+            run_id_sha256=run_hash,
+            formal=True,
+            backend="vector-graph",
+        )
+        forged = {
+            "schema": "txnmem-provenance-performance-report-v1",
+            "backend": "vector-graph",
+            "formal_requested": False,
+            "bundle_id": bundle_id,
+            "publication_status": "complete",
+            "production_backend_claim": False,
+            "config": copy.deepcopy(provenance_module.FORMAL_MATRIX_CONFIG),
+            "config_sha256": config_hash,
+            "config_file_sha256": "f" * 64,
+            "run_id_sha256": run_hash,
+            "matrix_cell_count": 0,
+            "repetition_count": 0,
+            "operation_sample_count": 0,
+            "operation_samples_sha256": provenance_module.canonical_jsonl_sha256(
+                []
+            ),
+            "repetitions_sha256": provenance_module.canonical_jsonl_sha256([]),
+            "graphs": [],
+            "aggregate": {"evidence_scope": "diagnostic", "rows": []},
+            "topology_attestation_sha256": None,
+        }
+
+        with TemporaryDirectory() as tmp:
+            with self.assertRaises((ProvenancePerformanceError, ValueError)):
+                publish_provenance_bundle(
+                    tmp,
+                    bundle_id=bundle_id,
+                    operation_samples=[],
+                    repetitions=[],
+                    report=forged,
+                )
+            self.assertFalse((Path(tmp) / "bundles" / f"{bundle_id}.json").exists())
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and hasattr(os, "O_TMPFILE"),
+        "Linux formal fd-bound publication only",
+    )
+    @_with_non_dumpable_test_process
+    def test_publisher_revalidates_and_exclusively_points_to_valid_formal_object(self):
+        config = self._small_formal_config()
+        report = self._valid_formal_report()
+        reports = [report]
+        operation_samples = list(report["samples"])
+        repetitions = list(report["repetitions"])
+        with patch.object(provenance_module, "FORMAL_MATRIX_CONFIG", config), patch(
+            "txnmem_provenance_performance.formal_config_file_sha256",
+            return_value="e" * 64,
+        ):
+            topology = self._topology_attestation(reports, config)
+            with patch.dict(
+                FORMAL_PROVENANCE_TOPOLOGY_ATTESTATION_SHA256_BY_RUN,
+                {topology["run_id_sha256"]: topology["attestation_sha256"]},
+                clear=True,
+            ), patch.dict(
+                FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
+                {
+                    topology["run_id_sha256"]: hashlib.sha256(
+                        self.AUTHORIZATION_NONCE
+                    ).hexdigest()
+                },
+                clear=True,
+            ):
+                aggregate = aggregate_matrix(
+                    reports,
+                    bootstrap_repetitions=100,
+                    seed=17,
+                    topology_attestation=topology,
+                )
+                config_hash = formal_matrix_config_sha256()
+                bundle_id = provenance_bundle_id(
+                    config_sha256=config_hash,
+                    run_id_sha256=report["run_id_sha256"],
+                    formal=True,
+                    backend="vector-graph",
+                )
+                publication = {
+                    "schema": "txnmem-provenance-performance-report-v1",
+                    "backend": "vector-graph",
+                    "formal_requested": True,
+                    "bundle_id": bundle_id,
+                    "publication_status": "complete",
+                    "production_backend_claim": True,
+                    "config": copy.deepcopy(config),
+                    "config_sha256": config_hash,
+                    "config_file_sha256": "e" * 64,
+                    "run_id_sha256": report["run_id_sha256"],
+                    "matrix_cell_count": 1,
+                    "repetition_count": 2,
+                    "operation_sample_count": 8,
+                    "operation_samples_sha256": provenance_module.canonical_jsonl_sha256(
+                        operation_samples
+                    ),
+                    "repetitions_sha256": provenance_module.canonical_jsonl_sha256(
+                        repetitions
+                    ),
+                    "graphs": [report["graph"]],
+                    "aggregate": aggregate,
+                    "topology_attestation_sha256": topology["attestation_sha256"],
+                }
+                with TemporaryDirectory() as tmp:
+                    output_path = publish_provenance_bundle(
+                        tmp,
+                        bundle_id=bundle_id,
+                        operation_samples=operation_samples,
+                        repetitions=repetitions,
+                        report=publication,
+                        topology_attestation=topology,
+                    )
+                    output_exists = output_path.is_file()
+                    pointer = Path(tmp) / "bundles" / f"{bundle_id}.json"
+                    before = pointer.read_bytes()
+                    with self.assertRaises(ValueError):
+                        publish_provenance_bundle(
+                            tmp,
+                            bundle_id=bundle_id,
+                            operation_samples=operation_samples,
+                            repetitions=repetitions,
+                            report=publication,
+                            topology_attestation=topology,
+                        )
+                    after = pointer.read_bytes()
+
+        self.assertTrue(output_exists)
+        self.assertEqual(before, after)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and hasattr(os, "O_TMPFILE"),
+        "Linux formal fd-bound promotion only",
+    )
+    @_with_non_dumpable_test_process
+    def test_two_stage_candidate_attestation_and_promotion_reuses_exact_bytes(self):
+        config = self._small_formal_config()
+        graph = build_layered_dag(10, seed=17)
+        diagnostic_cell = run_matrix_cell(
+            lambda namespace: _FixtureBackend(namespace),
+            graph,
+            concurrency=1,
+            repetitions=2,
+            operations_per_type=1,
+            run_id="two-stage-candidate",
+            formal=False,
+        )
+        samples = list(diagnostic_cell["samples"])
+        repetitions = list(diagnostic_cell["repetitions"])
+        diagnostic_aggregate = aggregate_matrix(
+            diagnostic_cell,
+            bootstrap_repetitions=100,
+            seed=17,
+            require_formal=False,
+        )
+        config_hash = hashlib.sha256(
+            provenance_module._canonical_json_bytes(config)
+        ).hexdigest()
+        run_hash = diagnostic_cell["run_id_sha256"]
+        candidate_id = provenance_bundle_id(
+            config_sha256=config_hash,
+            run_id_sha256=run_hash,
+            formal=False,
+            backend="vector-graph",
+        )
+        candidate_report = {
+            "schema": "txnmem-provenance-performance-report-v1",
+            "backend": "vector-graph",
+            "formal_requested": False,
+            "bundle_id": candidate_id,
+            "publication_status": "complete",
+            "production_backend_claim": False,
+            "config": copy.deepcopy(config),
+            "config_sha256": config_hash,
+            "config_file_sha256": "e" * 64,
+            "run_id_sha256": run_hash,
+            "matrix_cell_count": 1,
+            "repetition_count": 2,
+            "operation_sample_count": 8,
+            "operation_samples_sha256": provenance_module.canonical_jsonl_sha256(
+                samples
+            ),
+            "repetitions_sha256": provenance_module.canonical_jsonl_sha256(
+                repetitions
+            ),
+            "graphs": [graph.metadata()],
+            "aggregate": diagnostic_aggregate,
+            "topology_attestation_sha256": None,
+        }
+
+        with TemporaryDirectory() as candidate_tmp, TemporaryDirectory() as formal_tmp:
+            with patch.object(provenance_module, "FORMAL_MATRIX_CONFIG", config), patch(
+                "txnmem_provenance_performance.formal_config_file_sha256",
+                return_value="e" * 64,
+            ):
+                publish_provenance_bundle(
+                    candidate_tmp,
+                    bundle_id=candidate_id,
+                    operation_samples=samples,
+                    repetitions=repetitions,
+                    report=candidate_report,
+                )
+                candidate_pointer = (
+                    Path(candidate_tmp) / "bundles" / f"{candidate_id}.json"
+                )
+                candidate_before = candidate_pointer.read_bytes()
+                candidate_pointer_payload = json.loads(candidate_before)
+                candidate_object_root = (
+                    Path(candidate_tmp)
+                    / "bundle_objects"
+                    / candidate_pointer_payload["object_id"]
+                )
+                candidate_sample_bytes = (
+                    candidate_object_root
+                    / "data"
+                    / "provenance_operation_samples.jsonl"
+                ).read_bytes()
+                candidate_repetition_bytes = (
+                    candidate_object_root
+                    / "data"
+                    / "provenance_repetitions.jsonl"
+                ).read_bytes()
+                material = candidate_attestation_material(
+                    candidate_tmp, candidate_id
+                )
+                candidate_seal = collector_module._seal_candidate_tree(
+                    Path(candidate_tmp),
+                    expected_owner_uid=collector_module.os.getuid(),
+                    sealed_owner_uid=collector_module.os.getuid(),
+                    sealed_owner_gid=collector_module.os.getgid(),
+                    completion_receipt=material,
+                )
+                topology = self._topology_from_candidate_material(
+                    material, candidate_seal=candidate_seal
+                )
+                with patch.dict(
+                    FORMAL_PROVENANCE_TOPOLOGY_ATTESTATION_SHA256_BY_RUN,
+                    {run_hash: topology["attestation_sha256"]},
+                    clear=True,
+                ), patch.dict(
+                    FORMAL_PROVENANCE_LAUNCH_NONCE_SHA256_BY_RUN,
+                    {
+                        run_hash: hashlib.sha256(
+                            self.AUTHORIZATION_NONCE
+                        ).hexdigest()
+                    },
+                    clear=True,
+                ):
+                    formal_path = promote_provenance_candidate(
+                        candidate_tmp,
+                        candidate_id,
+                        topology_attestation=topology,
+                        out_dir=formal_tmp,
+                    )
+                candidate_after = candidate_pointer.read_bytes()
+                formal_pointers = list((Path(formal_tmp) / "bundles").glob("*.json"))
+                formal_pointer_payload = json.loads(
+                    formal_pointers[0].read_text(encoding="utf-8")
+                )
+                formal_object_root = (
+                    Path(formal_tmp)
+                    / "bundle_objects"
+                    / formal_pointer_payload["object_id"]
+                )
+                formal_sample_bytes = (
+                    formal_object_root
+                    / "data"
+                    / "provenance_operation_samples.jsonl"
+                ).read_bytes()
+                formal_repetition_bytes = (
+                    formal_object_root
+                    / "data"
+                    / "provenance_repetitions.jsonl"
+                ).read_bytes()
+                retained_topology = json.loads(
+                    (
+                        formal_object_root
+                        / "evidence"
+                        / "topology_attestation.json"
+                    ).read_text(encoding="utf-8")
+                )
+                formal_completion = json.loads(
+                    (formal_object_root / "COMPLETED.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                for path in sorted(
+                    Path(candidate_tmp).rglob("*"),
+                    key=lambda item: len(item.parts),
+                    reverse=True,
+                ):
+                    path.chmod(0o700 if path.is_dir() else 0o600)
+                Path(candidate_tmp).chmod(0o700)
+
+        self.assertEqual(candidate_before, candidate_after)
+        self.assertEqual(candidate_sample_bytes, formal_sample_bytes)
+        self.assertEqual(candidate_repetition_bytes, formal_repetition_bytes)
+        self.assertEqual(retained_topology, topology)
+        self.assertEqual(
+            retained_topology["command_manifest"]["runtime_manifest"],
+            topology["command_manifest"]["runtime_manifest"],
+        )
+        self.assertEqual(
+            retained_topology["source_manifest"], topology["source_manifest"]
+        )
+        self.assertEqual(
+            retained_topology["proxy_routes"], topology["proxy_routes"]
+        )
+        self.assertEqual(
+            formal_completion["topology_attestation_sha256"],
+            topology["attestation_sha256"],
+        )
+        self.assertEqual(
+            formal_completion["topology_attestation_canonical_sha256"],
+            hashlib.sha256(
+                provenance_module._canonical_json_bytes(topology)
+            ).hexdigest(),
+        )
+        self.assertTrue(material["evidence_manifest_sha256"])
+        self.assertEqual(len(formal_pointers), 1)
+        self.assertTrue(str(formal_path).endswith("provenance_performance.json"))
+
+
+class ProvenanceAblationAggregationTests(unittest.TestCase):
+    @staticmethod
+    def _evidence(*, repetitions=2):
+        rows = []
+        samples = []
+        for repetition in range(repetitions):
+            seed = 17 + repetition * 1000
+            for variant, elapsed_ns, common_latency in (
+                ("TxnMem", 2_000_000_000, 20 + repetition),
+                ("MemoryOnly-NoProvenance", 1_000_000_000, 10 + repetition),
+            ):
+                operations = ["read", "write", "derive", "propagate"]
+                if variant == "TxnMem":
+                    operations.append("traverse")
+                variant_samples = [
+                    {
+                        "cell_id": "n100-c1",
+                        "variant": variant,
+                        "repetition": repetition,
+                        "repetition_seed": seed,
+                        "operation": operation,
+                        "operation_id": f"{operation}:0",
+                        "latency_ns": (
+                            50 + repetition if operation == "traverse" else common_latency
+                        ),
+                        "success": True,
+                        "timeout": False,
+                        "error_category": None,
+                    }
+                    for operation in operations
+                ]
+                samples.extend(variant_samples)
+                rows.append(
+                    {
+                        "cell_id": "n100-c1",
+                        "variant": variant,
+                        "repetition": repetition,
+                        "repetition_seed": seed,
+                        "graph_node_count": 100,
+                        "concurrency": 1,
+                        "eligible_for_formal": True,
+                        "elapsed_ns": elapsed_ns,
+                        "success_count": len(variant_samples),
+                        "failure_count": 0,
+                        "timeout_count": 0,
+                        "error_count": 0,
+                    }
+                )
+        return {"samples": samples, "repetitions": rows}
+
+    def test_pairs_equal_cell_repetition_and_seed_with_expected_signs(self):
+        result = aggregate_ablation(
+            self._evidence(), bootstrap_repetitions=250, seed=41
+        )
+        paired = result["paired_cells"][0]
+        self.assertEqual(paired["eligible_pair_count"], 2)
+        self.assertEqual(paired["missing_pair_count"], 0)
+        self.assertGreater(paired["common_latency_overhead_pct"]["estimate"], 0)
+        self.assertLess(paired["throughput_change_pct"]["estimate"], 0)
+
+    def test_missing_ineligible_and_zero_denominator_pairs_are_separated(self):
+        evidence = self._evidence(repetitions=4)
+        evidence["repetitions"] = [
+            row
+            for row in evidence["repetitions"]
+            if not (
+                row["repetition"] == 1
+                and row["variant"] == "MemoryOnly-NoProvenance"
+            )
+        ]
+        evidence["samples"] = [
+            row
+            for row in evidence["samples"]
+            if not (
+                row["repetition"] == 1
+                and row["variant"] == "MemoryOnly-NoProvenance"
+            )
+        ]
+        next(
+            row
+            for row in evidence["repetitions"]
+            if row["repetition"] == 2 and row["variant"] == "TxnMem"
+        )["eligible_for_formal"] = False
+        for sample in evidence["samples"]:
+            if (
+                sample["repetition"] == 3
+                and sample["variant"] == "MemoryOnly-NoProvenance"
+                and sample["operation"] in {"read", "write", "derive", "propagate"}
+            ):
+                sample["latency_ns"] = 0
+
+        paired = aggregate_ablation(
+            evidence, bootstrap_repetitions=100, seed=11
+        )["paired_cells"][0]
+        self.assertEqual(paired["eligible_pair_count"], 1)
+        self.assertEqual(paired["missing_pair_count"], 1)
+        self.assertEqual(paired["ineligible_pair_count"], 1)
+        self.assertEqual(paired["zero_denominator_pair_count"], 1)
+
+    def test_control_has_no_synthetic_traversal_distribution(self):
+        result = aggregate_ablation(
+            self._evidence(), bootstrap_repetitions=100, seed=7
+        )
+        control = next(
+            row
+            for row in result["variant_cells"]
+            if row["variant"] == "MemoryOnly-NoProvenance"
+        )
+        full = next(
+            row for row in result["variant_cells"] if row["variant"] == "TxnMem"
+        )
+        self.assertEqual(control["traversal_sample_count"], 0)
+        self.assertIsNone(control["traversal_latency_ns"])
+        self.assertEqual(full["traversal_sample_count"], 2)
+        self.assertIsNotNone(full["traversal_latency_ns"])
+
+    def test_control_traversal_sample_is_rejected_not_treated_as_zero(self):
+        evidence = self._evidence(repetitions=1)
+        fake = copy.deepcopy(evidence["samples"][0])
+        fake.update(
+            {
+                "variant": "MemoryOnly-NoProvenance",
+                "operation": "traverse",
+                "latency_ns": 0,
+            }
+        )
+        evidence["samples"].append(fake)
+        with self.assertRaisesRegex(ProvenancePerformanceError, "traversal"):
+            aggregate_ablation(evidence, bootstrap_repetitions=10, seed=7)
+
+    def test_bootstrap_is_deterministic_and_uses_whole_repetitions(self):
+        evidence = self._evidence(repetitions=3)
+        first = aggregate_ablation(evidence, bootstrap_repetitions=500, seed=23)
+        second = aggregate_ablation(evidence, bootstrap_repetitions=500, seed=23)
+        self.assertEqual(first, second)
+        self.assertEqual(first["bootstrap_unit"], "whole_repetition_pair")
+        interval = first["paired_cells"][0]["common_latency_overhead_pct"]
+        self.assertLessEqual(interval["lower"], interval["estimate"])
+        self.assertLessEqual(interval["estimate"], interval["upper"])
+
+    def test_variant_and_paired_bootstrap_are_input_order_invariant(self):
+        evidence = self._evidence(repetitions=4)
+        elapsed_by_repetition = [100, 1_000, 100_000, 10_000_000]
+        latency_by_repetition = [1, 9, 200, 50_000]
+        for row in evidence["repetitions"]:
+            row["elapsed_ns"] = elapsed_by_repetition[row["repetition"]] * (
+                2 if row["variant"] == "TxnMem" else 1
+            )
+        for row in evidence["samples"]:
+            if row["operation"] != "traverse":
+                row["latency_ns"] = latency_by_repetition[row["repetition"]] * (
+                    2 if row["variant"] == "TxnMem" else 1
+                )
+        canonical = aggregate_ablation(
+            evidence, bootstrap_repetitions=37, seed=24
+        )
+        reversed_evidence = {
+            "samples": list(reversed(evidence["samples"])),
+            "repetitions": list(reversed(evidence["repetitions"])),
+        }
+        shuffled_evidence = {
+            "samples": sorted(
+                evidence["samples"],
+                key=lambda row: (
+                    row["operation_id"],
+                    -row["repetition"],
+                    row["variant"],
+                ),
+            ),
+            "repetitions": sorted(
+                evidence["repetitions"],
+                key=lambda row: (-row["repetition"], row["variant"]),
+            ),
+        }
+
+        for permuted in (reversed_evidence, shuffled_evidence):
+            result = aggregate_ablation(
+                permuted, bootstrap_repetitions=37, seed=24
+            )
+            self.assertEqual(result["variant_cells"], canonical["variant_cells"])
+            self.assertEqual(result["paired_cells"], canonical["paired_cells"])
+            self.assertEqual(result, canonical)
+
+    def test_variant_cell_reports_operation_and_wall_clock_distributions(self):
+        result = aggregate_ablation(
+            self._evidence(repetitions=3), bootstrap_repetitions=100, seed=29
+        )
+        full = next(
+            row for row in result["variant_cells"] if row["variant"] == "TxnMem"
+        )
+        self.assertEqual(
+            [row["operation"] for row in full["operations"]],
+            ["derive", "propagate", "read", "traverse", "write"],
+        )
+        self.assertEqual(full["operations"][0]["successful_count"], 3)
+        self.assertIn("p99", full["operations"][0]["latency_ns"])
+        wall_clock = full["mechanism_package_wall_clock_95ci_ns"]
+        self.assertEqual(wall_clock["estimate"], 2_000_000_000.0)
+        self.assertLessEqual(wall_clock["lower"], wall_clock["estimate"])
+        self.assertLessEqual(wall_clock["estimate"], wall_clock["upper"])
+        self.assertIsInstance(
+            full["successful_throughput_ops_per_second"], float
+        )
+        self.assertEqual(
+            full["successful_throughput_ops_per_second"],
+            full["successful_throughput_95ci"]["estimate"],
+        )
+
+    def test_seed_mismatch_is_not_paired_by_repetition_number_alone(self):
+        evidence = self._evidence(repetitions=1)
+        control = next(
+            row
+            for row in evidence["repetitions"]
+            if row["variant"] == "MemoryOnly-NoProvenance"
+        )
+        control["repetition_seed"] = 999
+        for sample in evidence["samples"]:
+            if sample["variant"] == "MemoryOnly-NoProvenance":
+                sample["repetition_seed"] = 999
+
+        paired = aggregate_ablation(
+            evidence, bootstrap_repetitions=10, seed=29
+        )["paired_cells"][0]
+        self.assertEqual(paired["eligible_pair_count"], 0)
+        self.assertEqual(paired["missing_pair_count"], 2)
+        self.assertIsNone(paired["common_latency_overhead_pct"])
+
+    def test_estimate_is_mean_of_pair_percentages_not_ratio_of_means(self):
+        evidence = self._evidence(repetitions=2)
+        for sample in evidence["samples"]:
+            if sample["operation"] == "traverse":
+                continue
+            if sample["repetition"] == 0:
+                sample["latency_ns"] = 2 if sample["variant"] == "TxnMem" else 1
+            else:
+                sample["latency_ns"] = 101 if sample["variant"] == "TxnMem" else 100
+        for row in evidence["repetitions"]:
+            if row["repetition"] == 0:
+                row["elapsed_ns"] = (
+                    2_500_000_000 if row["variant"] == "TxnMem" else 4_000_000_000
+                )
+            else:
+                row["elapsed_ns"] = (
+                    49_504_950 if row["variant"] == "TxnMem" else 40_000_000
+                )
+
+        paired = aggregate_ablation(
+            evidence, bootstrap_repetitions=100, seed=31
+        )["paired_cells"][0]
+        self.assertAlmostEqual(
+            paired["common_latency_overhead_pct"]["estimate"], 50.5
+        )
+        self.assertAlmostEqual(
+            paired["throughput_change_pct"]["estimate"], 50.5, places=5
+        )
+
+    def test_common_operation_identity_or_mix_drift_excludes_pair(self):
+        for mutation in ("identity", "mix"):
+            with self.subTest(mutation=mutation):
+                evidence = self._evidence(repetitions=1)
+                control = [
+                    row
+                    for row in evidence["samples"]
+                    if row["variant"] == "MemoryOnly-NoProvenance"
+                ]
+                if mutation == "identity":
+                    control[0]["operation_id"] = "read:different-input"
+                else:
+                    control[0]["operation"] = "write"
+                paired = aggregate_ablation(
+                    evidence, bootstrap_repetitions=10, seed=37
+                )["paired_cells"][0]
+                self.assertEqual(paired["eligible_pair_count"], 0)
+                self.assertEqual(paired["incomparable_pair_count"], 1)
+
+    def test_pair_requires_all_defined_common_operation_types(self):
+        evidence = self._evidence(repetitions=1)
+        evidence["samples"] = [
+            row for row in evidence["samples"] if row["operation"] != "propagate"
+        ]
+        for repetition in evidence["repetitions"]:
+            repetition["success_count"] -= 1
+        paired = aggregate_ablation(
+            evidence, bootstrap_repetitions=10, seed=39
+        )["paired_cells"][0]
+        self.assertEqual(paired["eligible_pair_count"], 0)
+        self.assertEqual(paired["incomparable_pair_count"], 1)
+
+    def test_cell_metadata_drift_is_rejected(self):
+        evidence = self._evidence(repetitions=1)
+        next(
+            row
+            for row in evidence["repetitions"]
+            if row["variant"] == "MemoryOnly-NoProvenance"
+        )["concurrency"] = 4
+        with self.assertRaisesRegex(ProvenancePerformanceError, "cell metadata"):
+            aggregate_ablation(evidence, bootstrap_repetitions=10, seed=41)
+
+    def test_outcomes_separate_timeouts_errors_and_reject_contradictions(self):
+        evidence = self._evidence(repetitions=1)
+        control_rep = next(
+            row
+            for row in evidence["repetitions"]
+            if row["variant"] == "MemoryOnly-NoProvenance"
+        )
+        control_samples = [
+            row
+            for row in evidence["samples"]
+            if row["variant"] == "MemoryOnly-NoProvenance"
+        ]
+        control_samples[0].update(
+            {"success": False, "timeout": True, "error_category": "timeout"}
+        )
+        control_samples[1].update(
+            {"success": False, "timeout": False, "error_category": "backend_error"}
+        )
+        control_rep.update(
+            {
+                "eligible_for_formal": False,
+                "success_count": 2,
+                "failure_count": 2,
+                "timeout_count": 1,
+                "error_count": 1,
+            }
+        )
+        result = aggregate_ablation(evidence, bootstrap_repetitions=10, seed=43)
+        control = next(
+            row
+            for row in result["variant_cells"]
+            if row["variant"] == "MemoryOnly-NoProvenance"
+        )
+        self.assertEqual(control["timeout_count"], 1)
+        self.assertEqual(control["error_count"], 1)
+        self.assertEqual(control["error_category_counts"], {"backend_error": 1})
+
+        contradictory = self._evidence(repetitions=1)
+        bad = contradictory["samples"][0]
+        bad.update({"success": True, "timeout": True, "error_category": "timeout"})
+        contradictory["repetitions"][0].update(
+            {"timeout_count": 1}
+        )
+        with self.assertRaisesRegex(ProvenancePerformanceError, "outcome"):
+            aggregate_ablation(contradictory, bootstrap_repetitions=10, seed=43)
+
+    def test_eligible_repetition_with_failure_is_rejected(self):
+        evidence = self._evidence(repetitions=1)
+        sample = evidence["samples"][0]
+        sample.update(
+            {"success": False, "timeout": False, "error_category": "backend_error"}
+        )
+        repetition = evidence["repetitions"][0]
+        repetition.update({"success_count": 4, "failure_count": 1, "error_count": 1})
+        with self.assertRaisesRegex(ProvenancePerformanceError, "eligible"):
+            aggregate_ablation(evidence, bootstrap_repetitions=10, seed=47)
+
+    def test_formal_contract_accepts_exact_180_and_rejects_incomplete(self):
+        repetitions = []
+        samples = []
+        for cell in provenance_module.FORMAL_ABLATION_CONFIG["cells"]:
+            cell_id = f"n{cell['graph_node_count']}-c{cell['concurrency']}"
+            for repetition, repetition_seed in enumerate(
+                provenance_module.FORMAL_ABLATION_CONFIG["repetition_seeds"]
+            ):
+                for variant in provenance_module.PROVENANCE_ABLATION_VARIANTS:
+                    operations = ["read", "write", "derive", "propagate"]
+                    if variant == "TxnMem":
+                        operations.append("traverse")
+                    planned_operations = [
+                        (operation, operation_index)
+                        for operation in operations
+                        for operation_index in range(
+                            provenance_module.FORMAL_ABLATION_CONFIG[
+                                "operations_per_type"
+                            ]
+                        )
+                    ]
+                    repetitions.append(
+                        {
+                            "cell_id": cell_id,
+                            "variant": variant,
+                            "repetition": repetition,
+                            "repetition_seed": repetition_seed,
+                            "graph_node_count": cell["graph_node_count"],
+                            "concurrency": cell["concurrency"],
+                            "eligible_for_formal": True,
+                            "elapsed_ns": 100,
+                            "success_count": len(planned_operations),
+                            "failure_count": 0,
+                            "timeout_count": 0,
+                            "error_count": 0,
+                        }
+                    )
+                    samples.extend(
+                        {
+                            "cell_id": cell_id,
+                            "variant": variant,
+                            "repetition": repetition,
+                            "repetition_seed": repetition_seed,
+                            "operation": operation,
+                            "operation_id": f"{operation}:{operation_index}",
+                            "latency_ns": 10,
+                            "success": True,
+                            "timeout": False,
+                            "error_category": None,
+                        }
+                        for operation, operation_index in planned_operations
+                    )
+        evidence = {"samples": samples, "repetitions": repetitions}
+        result = aggregate_ablation(
+            evidence,
+            bootstrap_repetitions=10,
+            seed=53,
+            require_formal_contract=True,
+        )
+        self.assertEqual(result["attempted_repetition_count"], 180)
+        self.assertEqual(result["operation_sample_count"], 6_480)
+        self.assertEqual(result["eligible_pair_count"], 90)
+        self.assertTrue(result["formal_contract_complete"])
+        incomplete = copy.deepcopy(evidence)
+        removed = incomplete["repetitions"].pop()
+        incomplete["samples"] = [
+            row
+            for row in incomplete["samples"]
+            if not all(row[field] == removed[field] for field in (
+                "cell_id", "variant", "repetition", "repetition_seed"
+            ))
+        ]
+        with self.assertRaisesRegex(ProvenancePerformanceError, "formal.*180"):
+            aggregate_ablation(
+                incomplete,
+                bootstrap_repetitions=10,
+                seed=53,
+                require_formal_contract=True,
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

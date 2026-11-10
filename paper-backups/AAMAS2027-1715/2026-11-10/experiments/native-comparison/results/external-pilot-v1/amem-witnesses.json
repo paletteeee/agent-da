@@ -1,0 +1,704 @@
+{
+  "aborted_task_residue": {
+    "case": {
+      "application_contract": "multi_record_task_visibility",
+      "case_id": "interleaved_atomicity-0-random-perturbed",
+      "control": false,
+      "edges": [],
+      "expected_ids": [
+        "b0",
+        "b1",
+        "unrelated",
+        "w0",
+        "w1"
+      ],
+      "expected_removed": [],
+      "expected_values": {
+        "b0": "Fact b0 instance 0",
+        "b1": "Fact b1 instance 0",
+        "unrelated": "Independent fact remains valid",
+        "w0": "Fact w0 instance 0",
+        "w1": "Fact w1 instance 0"
+      },
+      "family": "interleaved_atomicity",
+      "fault": {
+        "actor": "A",
+        "after": "A2",
+        "kind": "interrupt"
+      },
+      "fault_model": "operation_boundary_interruption_not_process_crash",
+      "initial": [
+        {
+          "key": "unrelated",
+          "scope": "shared",
+          "value": "Independent fact remains valid"
+        }
+      ],
+      "input_sha256": "0b4a2e19074b344dab32a53a36b96aac436957e3be75c05b1c98cc7e3ed61f0c",
+      "mapping_version": "external-compare-v1",
+      "operations": [
+        {
+          "actor": "B",
+          "actor_step": 1,
+          "id": "B1",
+          "kind": "begin",
+          "txn": "B"
+        },
+        {
+          "actor": "B",
+          "actor_step": 2,
+          "id": "B2",
+          "key": "b0",
+          "kind": "put",
+          "scope": "shared",
+          "txn": "B",
+          "value": "Fact b0 instance 0"
+        },
+        {
+          "actor": "B",
+          "actor_step": 3,
+          "id": "B3",
+          "key": "b1",
+          "kind": "put",
+          "scope": "shared",
+          "txn": "B",
+          "value": "Fact b1 instance 0"
+        },
+        {
+          "actor": "A",
+          "actor_step": 1,
+          "id": "A1",
+          "kind": "begin",
+          "txn": "A"
+        },
+        {
+          "actor": "B",
+          "actor_step": 4,
+          "id": "B4",
+          "key": "w0",
+          "kind": "read",
+          "scope": "shared",
+          "txn": "B"
+        },
+        {
+          "actor": "A",
+          "actor_step": 2,
+          "id": "A2",
+          "key": "w0",
+          "kind": "put",
+          "scope": "shared",
+          "txn": "A",
+          "value": "Fact w0 instance 0"
+        },
+        {
+          "actor": "A",
+          "actor_step": 3,
+          "id": "A3",
+          "key": "w1",
+          "kind": "put",
+          "scope": "shared",
+          "txn": "A",
+          "value": "Fact w1 instance 0"
+        },
+        {
+          "actor": "B",
+          "actor_step": 5,
+          "id": "B5",
+          "key": "w1",
+          "kind": "read",
+          "scope": "shared",
+          "txn": "B"
+        },
+        {
+          "actor": "A",
+          "actor_step": 4,
+          "id": "A4",
+          "kind": "commit",
+          "txn": "A"
+        },
+        {
+          "actor": "B",
+          "actor_step": 6,
+          "id": "B6",
+          "kind": "commit",
+          "txn": "B"
+        }
+      ],
+      "producers": {
+        "b0": "B",
+        "b1": "B",
+        "w0": "A",
+        "w1": "A"
+      },
+      "sampled_parameters": {
+        "crash_phase": "before_linearize",
+        "crash_victim": "agent_1",
+        "txn_size_a": 1,
+        "txn_size_b": 1
+      },
+      "seed": 0,
+      "source_instance_id": "interleaved_atomicity_seed_0",
+      "source_structure_signature": "10a686487f4e1c99e1b89d27ce460add2fab04fe58b6e2f925930f1f7412ebe7",
+      "strategy": "random",
+      "write_sets": {
+        "A": [
+          "w0",
+          "w1"
+        ],
+        "B": [
+          "b0",
+          "b1"
+        ]
+      }
+    },
+    "minimality": "not claimed; full recorded execution",
+    "observation_sha256": "9794cdf5dd9967fab7d018dff99c0fa66a33bc74a7b9aee7b2bd4a094f87af41",
+    "replay_attempts": 1,
+    "replay_successes": 1,
+    "violation": "aborted_task_residue"
+  },
+  "conflicting_versions": {
+    "case": {
+      "application_contract": "multi_record_task_visibility",
+      "case_id": "concurrent_supersession-0-random-perturbed",
+      "control": false,
+      "edges": [],
+      "expected_ids": [
+        "newA",
+        "newB",
+        "unrelated"
+      ],
+      "expected_removed": [
+        "old"
+      ],
+      "expected_values": {
+        "newA": "Fact newA instance 0",
+        "newB": "Fact newB instance 0",
+        "unrelated": "Independent fact remains valid"
+      },
+      "family": "concurrent_supersession",
+      "fault": null,
+      "fault_model": "operation_boundary_interruption_not_process_crash",
+      "initial": [
+        {
+          "key": "unrelated",
+          "scope": "shared",
+          "value": "Independent fact remains valid"
+        },
+        {
+          "key": "old",
+          "scope": "shared",
+          "value": "Version one"
+        }
+      ],
+      "input_sha256": "211a95b9cb2973cda9ffe17e409e6f31ea0fb8ee391729538f0b94a3bbfea839",
+      "mapping_version": "external-compare-v1",
+      "operations": [
+        {
+          "actor": "B",
+          "actor_step": 1,
+          "id": "B1",
+          "kind": "begin",
+          "txn": "B"
+        },
+        {
+          "actor": "B",
+          "actor_step": 2,
+          "id": "B2",
+          "key": "old",
+          "kind": "read",
+          "scope": "shared",
+          "txn": "B"
+        },
+        {
+          "actor": "B",
+          "actor_step": 3,
+          "id": "B3",
+          "key": "newB",
+          "kind": "put",
+          "scope": "shared",
+          "supersedes": "old",
+          "txn": "B",
+          "value": "Fact newB instance 0"
+        },
+        {
+          "actor": "A",
+          "actor_step": 1,
+          "id": "A1",
+          "kind": "begin",
+          "txn": "A"
+        },
+        {
+          "actor": "B",
+          "actor_step": 4,
+          "id": "B4",
+          "key": "old",
+          "kind": "delete",
+          "txn": "B"
+        },
+        {
+          "actor": "A",
+          "actor_step": 2,
+          "id": "A2",
+          "key": "old",
+          "kind": "read",
+          "scope": "shared",
+          "txn": "A"
+        },
+        {
+          "actor": "A",
+          "actor_step": 3,
+          "id": "A3",
+          "key": "newA",
+          "kind": "put",
+          "scope": "shared",
+          "supersedes": "old",
+          "txn": "A",
+          "value": "Fact newA instance 0"
+        },
+        {
+          "actor": "B",
+          "actor_step": 5,
+          "id": "B5",
+          "kind": "commit",
+          "txn": "B"
+        },
+        {
+          "actor": "A",
+          "actor_step": 4,
+          "id": "A4",
+          "key": "old",
+          "kind": "delete",
+          "txn": "A"
+        },
+        {
+          "actor": "A",
+          "actor_step": 5,
+          "id": "A5",
+          "kind": "commit",
+          "txn": "A"
+        }
+      ],
+      "producers": {
+        "newA": "A",
+        "newB": "B"
+      },
+      "sampled_parameters": {
+        "first_committer": "agent_1",
+        "new_value_count": 1,
+        "precommit_reads": 1
+      },
+      "seed": 0,
+      "source_instance_id": "concurrent_supersession_seed_0",
+      "source_structure_signature": "454474123258ce47376edd9c4d393cb46332189d90404ef75bb5303117fad16b",
+      "strategy": "random",
+      "write_sets": {
+        "A": [
+          "newA"
+        ],
+        "B": [
+          "newB"
+        ]
+      }
+    },
+    "minimality": "not claimed; full recorded execution",
+    "observation_sha256": "4600cf3dfceb6e5b9b9eb8fb6ce609fdffa8d0597b26f0afd69bc1a0b36fa8fa",
+    "replay_attempts": 1,
+    "replay_successes": 1,
+    "violation": "conflicting_versions"
+  },
+  "dirty_read": {
+    "case": {
+      "application_contract": "multi_record_task_visibility",
+      "case_id": "multi_agent_visibility-0-directed-perturbed",
+      "control": false,
+      "edges": [],
+      "expected_ids": [
+        "unrelated",
+        "w0",
+        "w1"
+      ],
+      "expected_removed": [],
+      "expected_values": {
+        "unrelated": "Independent fact remains valid",
+        "w0": "Fact w0 instance 0",
+        "w1": "Fact w1 instance 0"
+      },
+      "family": "multi_agent_visibility",
+      "fault": null,
+      "fault_model": "operation_boundary_interruption_not_process_crash",
+      "initial": [
+        {
+          "key": "unrelated",
+          "scope": "shared",
+          "value": "Independent fact remains valid"
+        }
+      ],
+      "input_sha256": "d3ba6a330b1b34269c1902a2a1852ebaca64f0056dc3342796fb6f7cb5212613",
+      "mapping_version": "external-compare-v1",
+      "operations": [
+        {
+          "actor": "A",
+          "actor_step": 1,
+          "id": "A1",
+          "kind": "begin",
+          "txn": "A"
+        },
+        {
+          "actor": "A",
+          "actor_step": 2,
+          "id": "A2",
+          "key": "w0",
+          "kind": "put",
+          "scope": "shared",
+          "txn": "A",
+          "value": "Fact w0 instance 0"
+        },
+        {
+          "actor": "A",
+          "actor_step": 3,
+          "id": "A3",
+          "key": "w1",
+          "kind": "put",
+          "scope": "shared",
+          "txn": "A",
+          "value": "Fact w1 instance 0"
+        },
+        {
+          "actor": "B",
+          "actor_step": 1,
+          "id": "B1",
+          "kind": "begin",
+          "txn": "B"
+        },
+        {
+          "actor": "B",
+          "actor_step": 2,
+          "id": "B2",
+          "key": "w0",
+          "kind": "read",
+          "scope": "shared",
+          "txn": "B"
+        },
+        {
+          "actor": "B",
+          "actor_step": 3,
+          "id": "B3",
+          "kind": "commit",
+          "txn": "B"
+        },
+        {
+          "actor": "A",
+          "actor_step": 4,
+          "id": "A4",
+          "kind": "commit",
+          "txn": "A"
+        }
+      ],
+      "producers": {
+        "w0": "A",
+        "w1": "A"
+      },
+      "sampled_parameters": {
+        "reader_probe_count": 1,
+        "txn_size": 1,
+        "writer": "agent_1"
+      },
+      "seed": 0,
+      "source_instance_id": "multi_agent_visibility_seed_0",
+      "source_structure_signature": "11f4f598d9685eda6f0a6cd635fe1a8e1fd4407169825d04afdd145f5a4c487e",
+      "strategy": "directed",
+      "write_sets": {
+        "A": [
+          "w0",
+          "w1"
+        ],
+        "B": []
+      }
+    },
+    "minimality": "not claimed; full recorded execution",
+    "observation_sha256": "07bc5ad97e999b13ac5d4d2201fe5c835d0e9d3ccd69a1bca1a28fbaa6dd1eda",
+    "replay_attempts": 1,
+    "replay_successes": 1,
+    "violation": "dirty_read"
+  },
+  "partial_update": {
+    "case": {
+      "application_contract": "multi_record_task_visibility",
+      "case_id": "interleaved_atomicity-0-random-perturbed",
+      "control": false,
+      "edges": [],
+      "expected_ids": [
+        "b0",
+        "b1",
+        "unrelated",
+        "w0",
+        "w1"
+      ],
+      "expected_removed": [],
+      "expected_values": {
+        "b0": "Fact b0 instance 0",
+        "b1": "Fact b1 instance 0",
+        "unrelated": "Independent fact remains valid",
+        "w0": "Fact w0 instance 0",
+        "w1": "Fact w1 instance 0"
+      },
+      "family": "interleaved_atomicity",
+      "fault": {
+        "actor": "A",
+        "after": "A2",
+        "kind": "interrupt"
+      },
+      "fault_model": "operation_boundary_interruption_not_process_crash",
+      "initial": [
+        {
+          "key": "unrelated",
+          "scope": "shared",
+          "value": "Independent fact remains valid"
+        }
+      ],
+      "input_sha256": "0b4a2e19074b344dab32a53a36b96aac436957e3be75c05b1c98cc7e3ed61f0c",
+      "mapping_version": "external-compare-v1",
+      "operations": [
+        {
+          "actor": "B",
+          "actor_step": 1,
+          "id": "B1",
+          "kind": "begin",
+          "txn": "B"
+        },
+        {
+          "actor": "B",
+          "actor_step": 2,
+          "id": "B2",
+          "key": "b0",
+          "kind": "put",
+          "scope": "shared",
+          "txn": "B",
+          "value": "Fact b0 instance 0"
+        },
+        {
+          "actor": "B",
+          "actor_step": 3,
+          "id": "B3",
+          "key": "b1",
+          "kind": "put",
+          "scope": "shared",
+          "txn": "B",
+          "value": "Fact b1 instance 0"
+        },
+        {
+          "actor": "A",
+          "actor_step": 1,
+          "id": "A1",
+          "kind": "begin",
+          "txn": "A"
+        },
+        {
+          "actor": "B",
+          "actor_step": 4,
+          "id": "B4",
+          "key": "w0",
+          "kind": "read",
+          "scope": "shared",
+          "txn": "B"
+        },
+        {
+          "actor": "A",
+          "actor_step": 2,
+          "id": "A2",
+          "key": "w0",
+          "kind": "put",
+          "scope": "shared",
+          "txn": "A",
+          "value": "Fact w0 instance 0"
+        },
+        {
+          "actor": "A",
+          "actor_step": 3,
+          "id": "A3",
+          "key": "w1",
+          "kind": "put",
+          "scope": "shared",
+          "txn": "A",
+          "value": "Fact w1 instance 0"
+        },
+        {
+          "actor": "B",
+          "actor_step": 5,
+          "id": "B5",
+          "key": "w1",
+          "kind": "read",
+          "scope": "shared",
+          "txn": "B"
+        },
+        {
+          "actor": "A",
+          "actor_step": 4,
+          "id": "A4",
+          "kind": "commit",
+          "txn": "A"
+        },
+        {
+          "actor": "B",
+          "actor_step": 6,
+          "id": "B6",
+          "kind": "commit",
+          "txn": "B"
+        }
+      ],
+      "producers": {
+        "b0": "B",
+        "b1": "B",
+        "w0": "A",
+        "w1": "A"
+      },
+      "sampled_parameters": {
+        "crash_phase": "before_linearize",
+        "crash_victim": "agent_1",
+        "txn_size_a": 1,
+        "txn_size_b": 1
+      },
+      "seed": 0,
+      "source_instance_id": "interleaved_atomicity_seed_0",
+      "source_structure_signature": "10a686487f4e1c99e1b89d27ce460add2fab04fe58b6e2f925930f1f7412ebe7",
+      "strategy": "random",
+      "write_sets": {
+        "A": [
+          "w0",
+          "w1"
+        ],
+        "B": [
+          "b0",
+          "b1"
+        ]
+      }
+    },
+    "minimality": "not claimed; full recorded execution",
+    "observation_sha256": "9794cdf5dd9967fab7d018dff99c0fa66a33bc74a7b9aee7b2bd4a094f87af41",
+    "replay_attempts": 1,
+    "replay_successes": 1,
+    "violation": "partial_update"
+  },
+  "stale_descendant": {
+    "case": {
+      "application_contract": "multi_record_task_visibility",
+      "case_id": "cross_agent_provenance-0-random-perturbed",
+      "control": false,
+      "edges": [
+        [
+          "root",
+          "d0_0"
+        ]
+      ],
+      "expected_ids": [
+        "d0_0",
+        "root",
+        "unrelated"
+      ],
+      "expected_removed": [],
+      "expected_values": {
+        "d0_0": "Fact d0_0 instance 0",
+        "root": "Source fact",
+        "unrelated": "Independent fact remains valid"
+      },
+      "family": "cross_agent_provenance",
+      "fault": {
+        "after": "B1",
+        "key": "root",
+        "kind": "invalidate"
+      },
+      "fault_model": "operation_boundary_interruption_not_process_crash",
+      "initial": [
+        {
+          "key": "unrelated",
+          "scope": "shared",
+          "value": "Independent fact remains valid"
+        },
+        {
+          "key": "root",
+          "scope": "shared",
+          "value": "Source fact"
+        }
+      ],
+      "input_sha256": "42cc315ee9c16db9bbbe6a3a5df5f31d053b09cee21caf26c93fa9e79cd9e29e",
+      "mapping_version": "external-compare-v1",
+      "operations": [
+        {
+          "actor": "B",
+          "actor_step": 1,
+          "id": "B1",
+          "kind": "begin",
+          "txn": "B"
+        },
+        {
+          "actor": "B",
+          "actor_step": 2,
+          "id": "B2",
+          "key": "d0_0",
+          "kind": "put",
+          "scope": "shared",
+          "sources": [
+            "root"
+          ],
+          "txn": "B",
+          "value": "Fact d0_0 instance 0"
+        },
+        {
+          "actor": "B",
+          "actor_step": 3,
+          "id": "B3",
+          "kind": "commit",
+          "txn": "B"
+        },
+        {
+          "actor": "A",
+          "actor_step": 1,
+          "id": "A1",
+          "kind": "begin",
+          "txn": "A"
+        },
+        {
+          "actor": "A",
+          "actor_step": 2,
+          "id": "A2",
+          "key": "root",
+          "kind": "read",
+          "scope": "shared",
+          "txn": "A"
+        },
+        {
+          "actor": "A",
+          "actor_step": 3,
+          "id": "A3",
+          "kind": "commit",
+          "txn": "A"
+        }
+      ],
+      "producers": {
+        "d0_0": "B"
+      },
+      "sampled_parameters": {
+        "branch_factor": 1,
+        "depth": 1,
+        "invalidation_phase": "before_derived_commit",
+        "source_agent": "agent_1"
+      },
+      "seed": 0,
+      "source_instance_id": "cross_agent_provenance_seed_0",
+      "source_structure_signature": "b678cff63dd99359da8a10e648c302bd228ccf46c770fed81e676e9d1cfa5039",
+      "strategy": "random",
+      "write_sets": {
+        "A": [],
+        "B": [
+          "d0_0"
+        ]
+      }
+    },
+    "minimality": "not claimed; full recorded execution",
+    "observation_sha256": "8be4e0d3dccb93db64aee4e5e681adaec91affe66c3c5be984228d6225d35dcd",
+    "replay_attempts": 1,
+    "replay_successes": 1,
+    "violation": "stale_descendant"
+  }
+}

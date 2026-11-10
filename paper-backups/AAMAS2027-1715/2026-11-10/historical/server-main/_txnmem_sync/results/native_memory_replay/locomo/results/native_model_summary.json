@@ -1,0 +1,34 @@
+{
+  "benchmark": "locomo",
+  "completed_task_count": 1,
+  "evaluation_error_count": 1,
+  "manifest_sha256": "75f2ab5fc4a97640a3eedcb626ef0ed9100393c90e21752b780086b14617b5b9",
+  "memory_backend": "sqlite",
+  "model_execution_mode": "remote_endpoint",
+  "model_id": "qwen2.5-7b-instruct",
+  "native_event_count": 3,
+  "production_latency_claim": false,
+  "raw_trace_path": "results/native_memory_replay/locomo/data/native_model_traces.jsonl",
+  "task_count": 1,
+  "task_summaries": [
+    {
+      "evaluation_error": {
+        "message": "unknown operation memory reference: txnmem_context",
+        "type": "ValueError"
+      },
+      "evaluation_status": "error",
+      "official": {
+        "official_evaluator": "locomo_qa_not_available_offline"
+      },
+      "status": "completed",
+      "steps": 4,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "locomo-memory-conv-26"
+    }
+  ],
+  "trace_ground_truth_native": true,
+  "variants": {}
+}

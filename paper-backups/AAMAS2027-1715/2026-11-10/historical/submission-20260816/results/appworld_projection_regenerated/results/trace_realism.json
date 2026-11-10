@@ -1,0 +1,378 @@
+{
+  "bootstrap_repetitions": 2000,
+  "bootstrap_seed": 17,
+  "calibration": {
+    "agent_count": 1,
+    "branch_factor": 1,
+    "concurrency": 1,
+    "policy_churn": 0,
+    "provenance_depth": 1,
+    "source_instance_count": 3,
+    "txn_size": 4
+  },
+  "comparison_method": "feature-wise bootstrap intervals plus a joint RBF-RFF MMD permutation test",
+  "comparison_split": "holdout_only",
+  "evidence": {
+    "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+    "instance_count": 5,
+    "oracle_match_by_variant": {
+      "Naive": {
+        "matched": 0,
+        "rate": 0.0,
+        "total": 5
+      },
+      "TxnMem": {
+        "matched": 5,
+        "rate": 1.0,
+        "total": 5
+      },
+      "TxnMem-NoPolicyCommit": {
+        "matched": 5,
+        "rate": 1.0,
+        "total": 5
+      },
+      "TxnMem-NoRepair": {
+        "matched": 5,
+        "rate": 1.0,
+        "total": 5
+      },
+      "TxnMem-NoTxn": {
+        "matched": 0,
+        "rate": 0.0,
+        "total": 5
+      }
+    },
+    "production_latency_claim": false,
+    "replay_envelope_operation_count": 10,
+    "replay_operation_count": 390,
+    "source_operation_count": 380,
+    "trace_ground_truth_native": false
+  },
+  "features": {
+    "agent_count": {
+      "mean_abs_diff": 0.0,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count_left": 400,
+        "sample_count_right": 2,
+        "seed": 5064,
+        "upper": 0.0
+      },
+      "relative_mean_abs_diff": 0.0,
+      "synthetic_mean": 1.0,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.0,
+        "lower": 1.0,
+        "sample_count": 400,
+        "seed": 5062,
+        "upper": 1.0
+      },
+      "synthetic_std": 0.0,
+      "trace_mean": 1.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.0,
+        "lower": 1.0,
+        "sample_count": 2,
+        "seed": 5063,
+        "upper": 1.0
+      },
+      "trace_std": 0.0
+    },
+    "branch_factor": {
+      "mean_abs_diff": 0.25,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.25,
+        "lower": 0.21,
+        "sample_count_left": 400,
+        "sample_count_right": 2,
+        "seed": 4055,
+        "upper": 0.2925
+      },
+      "relative_mean_abs_diff": 0.25,
+      "synthetic_mean": 0.25,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.25,
+        "lower": 0.21,
+        "sample_count": 400,
+        "seed": 4053,
+        "upper": 0.2925
+      },
+      "synthetic_std": 0.4330127018922193,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 2,
+        "seed": 4054,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "operation_count": {
+      "mean_abs_diff": 105.75,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 105.75,
+        "lower": 68.635,
+        "sample_count_left": 400,
+        "sample_count_right": 2,
+        "seed": 19,
+        "upper": 142.85
+      },
+      "relative_mean_abs_diff": 0.9613636363636363,
+      "synthetic_mean": 4.25,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 4.25,
+        "lower": 4.085,
+        "sample_count": 400,
+        "seed": 17,
+        "upper": 4.42
+      },
+      "synthetic_std": 1.713913650100261,
+      "trace_mean": 110.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 110.0,
+        "lower": 73.0,
+        "sample_count": 2,
+        "seed": 18,
+        "upper": 147.0
+      },
+      "trace_std": 37.0
+    },
+    "policy_change_rate": {
+      "mean_abs_diff": 0.07291666666666666,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.07291666666666666,
+        "lower": 0.06,
+        "sample_count_left": 400,
+        "sample_count_right": 2,
+        "seed": 2037,
+        "upper": 0.08604166666666667
+      },
+      "relative_mean_abs_diff": 0.07291666666666666,
+      "synthetic_mean": 0.07291666666666666,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.07291666666666666,
+        "lower": 0.060625,
+        "sample_count": 400,
+        "seed": 2035,
+        "upper": 0.08562499999999999
+      },
+      "synthetic_std": 0.1280021429942136,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 2,
+        "seed": 2036,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "provenance_depth": {
+      "mean_abs_diff": 0.5,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.5,
+        "lower": 0.42,
+        "sample_count_left": 400,
+        "sample_count_right": 2,
+        "seed": 3046,
+        "upper": 0.585
+      },
+      "relative_mean_abs_diff": 0.5,
+      "synthetic_mean": 0.5,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.5,
+        "lower": 0.42,
+        "sample_count": 400,
+        "seed": 3044,
+        "upper": 0.585
+      },
+      "synthetic_std": 0.8660254037844386,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 2,
+        "seed": 3045,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "transaction_size": {
+      "mean_abs_diff": 6.0,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 6.0,
+        "lower": 0.45500000000000007,
+        "sample_count_left": 400,
+        "sample_count_right": 2,
+        "seed": 1028,
+        "upper": 11.5425
+      },
+      "relative_mean_abs_diff": 0.8,
+      "synthetic_mean": 1.5,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.5,
+        "lower": 1.43,
+        "sample_count": 400,
+        "seed": 1026,
+        "upper": 1.57
+      },
+      "synthetic_std": 0.7071067811865476,
+      "trace_mean": 7.5,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 7.5,
+        "lower": 2.0,
+        "sample_count": 2,
+        "seed": 1027,
+        "upper": 13.0
+      },
+      "trace_std": 5.5
+    }
+  },
+  "holdout_evidence": {
+    "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+    "instance_count": 2,
+    "oracle_match_by_variant": {
+      "Naive": {
+        "matched": 0,
+        "rate": 0.0,
+        "total": 2
+      },
+      "TxnMem": {
+        "matched": 2,
+        "rate": 1.0,
+        "total": 2
+      },
+      "TxnMem-NoPolicyCommit": {
+        "matched": 2,
+        "rate": 1.0,
+        "total": 2
+      },
+      "TxnMem-NoRepair": {
+        "matched": 2,
+        "rate": 1.0,
+        "total": 2
+      },
+      "TxnMem-NoTxn": {
+        "matched": 0,
+        "rate": 0.0,
+        "total": 2
+      }
+    },
+    "production_latency_claim": false,
+    "replay_envelope_operation_count": 4,
+    "replay_operation_count": 220,
+    "source_operation_count": 216,
+    "trace_ground_truth_native": false
+  },
+  "holdout_trace_inventory": {
+    "adapters": [
+      "appworld"
+    ],
+    "event_count": 216,
+    "instance_count": 2,
+    "sources": [
+      "appworld-official-reference-api-calls-redacted-regenerated"
+    ],
+    "status": "trace_supplied"
+  },
+  "joint_feature_comparison": true,
+  "mean_feature_relative_abs_diff": 0.4307133838383838,
+  "multivariate_test": {
+    "bandwidth": 2.954694310502645,
+    "claim_boundary": "a non-significant result is not evidence of distributional equivalence",
+    "feature_names": [
+      "operation_count",
+      "transaction_size",
+      "policy_change_rate",
+      "provenance_depth",
+      "branch_factor",
+      "agent_count"
+    ],
+    "method": "standardized_rbf_random_fourier_mmd_permutation",
+    "null_hypothesis": "synthetic and trace-grounded joint feature distributions are equal",
+    "p_value": 0.0005,
+    "permutations": 1999,
+    "rff_dimensions": 128,
+    "seed": 10024,
+    "small_sample_warning": "joint-test inference is low-power and unstable when either sample has fewer than 20 instances",
+    "statistic": 1.2209670111356792,
+    "status": "available",
+    "synthetic_count": 400,
+    "trace_count": 2
+  },
+  "split": {
+    "calibration_instance_count": 3,
+    "holdout_fraction": 0.4,
+    "holdout_instance_count": 2,
+    "holdout_record_count": 216,
+    "seed": 17,
+    "test_instance_count": 2,
+    "train_instance_count": 3,
+    "train_record_count": 164,
+    "unit": "episode"
+  },
+  "synthetic_count": 400,
+  "synthetic_source": "results/final_controlled/data/generated_instances.jsonl",
+  "trace_count": 2,
+  "trace_grounded_status": "trace_supplied",
+  "trace_inventory": {
+    "adapters": [
+      "appworld"
+    ],
+    "event_count": 380,
+    "instance_count": 5,
+    "sources": [
+      "appworld-official-reference-api-calls-redacted-regenerated"
+    ],
+    "status": "trace_supplied"
+  },
+  "train_trace_inventory": {
+    "adapters": [
+      "appworld"
+    ],
+    "event_count": 164,
+    "instance_count": 3,
+    "sources": [
+      "appworld-official-reference-api-calls-redacted-regenerated"
+    ],
+    "status": "trace_supplied"
+  }
+}

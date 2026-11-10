@@ -1,0 +1,5 @@
+{
+  "production_latency_claim": false,
+  "reason": "toxiproxy_management_unavailable",
+  "status": "blocked"
+}

@@ -1,0 +1,31 @@
+{
+  "all_hashes_identical": true,
+  "replication_count": 3,
+  "replications": [
+    {
+      "exhaustive_input_sha256": "49314f595fe4756bdfcea1793065dbe13321bdc6c62b95e5031f0093bcdbb8e3",
+      "exhaustive_results_sha256": "59cd3e3324e035fde3f10b072c4374179e31763ffb390eb0479f2b834d1530b3",
+      "replication": 1,
+      "seeded_input_sha256": "03b5bcd9d836531495e7f338101b240226f62087e16c6f252b80b0a923dd7281",
+      "seeded_oracle_sha256": "bdbfa929ba2b4949942506f721dcfd244ad83e493e97fba4203089abb42f9c62",
+      "seeded_results_sha256": "b640ef5d0d98b33f5a802da0d7ebb50a14580f46c29af1a81b41d23ab455001d"
+    },
+    {
+      "exhaustive_input_sha256": "49314f595fe4756bdfcea1793065dbe13321bdc6c62b95e5031f0093bcdbb8e3",
+      "exhaustive_results_sha256": "59cd3e3324e035fde3f10b072c4374179e31763ffb390eb0479f2b834d1530b3",
+      "replication": 2,
+      "seeded_input_sha256": "03b5bcd9d836531495e7f338101b240226f62087e16c6f252b80b0a923dd7281",
+      "seeded_oracle_sha256": "bdbfa929ba2b4949942506f721dcfd244ad83e493e97fba4203089abb42f9c62",
+      "seeded_results_sha256": "b640ef5d0d98b33f5a802da0d7ebb50a14580f46c29af1a81b41d23ab455001d"
+    },
+    {
+      "exhaustive_input_sha256": "49314f595fe4756bdfcea1793065dbe13321bdc6c62b95e5031f0093bcdbb8e3",
+      "exhaustive_results_sha256": "59cd3e3324e035fde3f10b072c4374179e31763ffb390eb0479f2b834d1530b3",
+      "replication": 3,
+      "seeded_input_sha256": "03b5bcd9d836531495e7f338101b240226f62087e16c6f252b80b0a923dd7281",
+      "seeded_oracle_sha256": "bdbfa929ba2b4949942506f721dcfd244ad83e493e97fba4203089abb42f9c62",
+      "seeded_results_sha256": "b640ef5d0d98b33f5a802da0d7ebb50a14580f46c29af1a81b41d23ab455001d"
+    }
+  ],
+  "schema_version": 1
+}

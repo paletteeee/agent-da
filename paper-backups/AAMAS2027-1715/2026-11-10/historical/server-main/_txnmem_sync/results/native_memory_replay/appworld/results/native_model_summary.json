@@ -1,0 +1,29 @@
+{
+  "benchmark": "appworld",
+  "completed_task_count": 0,
+  "evaluation_error_count": 0,
+  "manifest_sha256": "e018774499c017e8bff630b4aa2195fee801f8887e239f9d3121931097d10319",
+  "memory_backend": "sqlite",
+  "model_execution_mode": "remote_endpoint",
+  "model_id": "qwen2.5-7b-instruct",
+  "native_event_count": 0,
+  "production_latency_claim": false,
+  "raw_trace_path": "results/native_memory_replay/appworld/data/native_model_traces.jsonl",
+  "task_count": 1,
+  "task_summaries": [
+    {
+      "failure_code": "model_http_error",
+      "status": "failed",
+      "steps": 1,
+      "task_evaluator": {
+        "reasons": [
+          "run_not_completed"
+        ],
+        "success": false
+      },
+      "task_id": "appworld-memory-024c982_1"
+    }
+  ],
+  "trace_ground_truth_native": true,
+  "variants": {}
+}

@@ -1,0 +1,16 @@
+{
+  "split": "train",
+  "task_ids": [
+    "native_chain_001",
+    "native_crash_after_write_001",
+    "native_derive_001",
+    "native_policy_read_001",
+    "native_propagate_001",
+    "native_revoke_before_write_001",
+    "native_supersede_001",
+    "native_write_001"
+  ],
+  "source_manifest_sha256": "500086121b0faa140060880bc40fbddac8aa9388e2599da5250c3649ef19b92b",
+  "split_seed": 17,
+  "holdout_fraction": 0.2
+}

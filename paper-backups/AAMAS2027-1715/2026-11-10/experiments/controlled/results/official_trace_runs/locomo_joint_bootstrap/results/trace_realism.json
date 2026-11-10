@@ -1,0 +1,290 @@
+{
+  "bootstrap_repetitions": 2000,
+  "bootstrap_seed": 17,
+  "calibration": {
+    "agent_count": 1,
+    "branch_factor": 1,
+    "concurrency": 1,
+    "policy_churn": 0,
+    "provenance_depth": 1,
+    "txn_size": 27
+  },
+  "comparison_method": "feature-wise bootstrap mean intervals; no high-dimensional joint-test claim",
+  "evidence": {
+    "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+    "instance_count": 10,
+    "oracle_match_by_variant": {
+      "Naive": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      },
+      "TxnMem": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      },
+      "TxnMem-NoPolicyCommit": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      },
+      "TxnMem-NoRepair": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      },
+      "TxnMem-NoTxn": {
+        "matched": 10,
+        "rate": 1.0,
+        "total": 10
+      }
+    },
+    "production_latency_claim": false,
+    "replay_envelope_operation_count": 20,
+    "replay_operation_count": 292,
+    "source_operation_count": 272,
+    "trace_ground_truth_native": false
+  },
+  "features": {
+    "agent_count": {
+      "mean_abs_diff": 0.0,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count_left": 400,
+        "sample_count_right": 10,
+        "seed": 5064,
+        "upper": 0.0
+      },
+      "relative_mean_abs_diff": 0.0,
+      "synthetic_mean": 1.0,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.0,
+        "lower": 1.0,
+        "sample_count": 400,
+        "seed": 5062,
+        "upper": 1.0
+      },
+      "synthetic_std": 0.0,
+      "trace_mean": 1.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.0,
+        "lower": 1.0,
+        "sample_count": 10,
+        "seed": 5063,
+        "upper": 1.0
+      },
+      "trace_std": 0.0
+    },
+    "branch_factor": {
+      "mean_abs_diff": 0.25,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.25,
+        "lower": 0.21,
+        "sample_count_left": 400,
+        "sample_count_right": 10,
+        "seed": 4055,
+        "upper": 0.2925
+      },
+      "relative_mean_abs_diff": 0.25,
+      "synthetic_mean": 0.25,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.25,
+        "lower": 0.21,
+        "sample_count": 400,
+        "seed": 4053,
+        "upper": 0.2925
+      },
+      "synthetic_std": 0.4330127018922193,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 10,
+        "seed": 4054,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "operation_count": {
+      "mean_abs_diff": 24.95,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 24.95,
+        "lower": 21.9275,
+        "sample_count_left": 400,
+        "sample_count_right": 10,
+        "seed": 19,
+        "upper": 27.4925
+      },
+      "relative_mean_abs_diff": 0.8544520547945206,
+      "synthetic_mean": 4.25,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 4.25,
+        "lower": 4.085,
+        "sample_count": 400,
+        "seed": 17,
+        "upper": 4.42
+      },
+      "synthetic_std": 1.713913650100261,
+      "trace_mean": 29.2,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 29.2,
+        "lower": 26.3,
+        "sample_count": 10,
+        "seed": 18,
+        "upper": 31.7
+      },
+      "trace_std": 4.467661580737736
+    },
+    "policy_change_rate": {
+      "mean_abs_diff": 0.07291666666666666,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.07291666666666666,
+        "lower": 0.06083333333333333,
+        "sample_count_left": 400,
+        "sample_count_right": 10,
+        "seed": 2037,
+        "upper": 0.08604166666666667
+      },
+      "relative_mean_abs_diff": 0.07291666666666666,
+      "synthetic_mean": 0.07291666666666666,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.07291666666666666,
+        "lower": 0.060625,
+        "sample_count": 400,
+        "seed": 2035,
+        "upper": 0.08562499999999999
+      },
+      "synthetic_std": 0.1280021429942136,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 10,
+        "seed": 2036,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "provenance_depth": {
+      "mean_abs_diff": 0.5,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.5,
+        "lower": 0.415,
+        "sample_count_left": 400,
+        "sample_count_right": 10,
+        "seed": 3046,
+        "upper": 0.58
+      },
+      "relative_mean_abs_diff": 0.5,
+      "synthetic_mean": 0.5,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.5,
+        "lower": 0.42,
+        "sample_count": 400,
+        "seed": 3044,
+        "upper": 0.585
+      },
+      "synthetic_std": 0.8660254037844386,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 10,
+        "seed": 3045,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "transaction_size": {
+      "mean_abs_diff": 25.7,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 25.7,
+        "lower": 22.7425,
+        "sample_count_left": 400,
+        "sample_count_right": 10,
+        "seed": 1028,
+        "upper": 28.224999999999998
+      },
+      "relative_mean_abs_diff": 0.9448529411764706,
+      "synthetic_mean": 1.5,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.5,
+        "lower": 1.43,
+        "sample_count": 400,
+        "seed": 1026,
+        "upper": 1.57
+      },
+      "synthetic_std": 0.7071067811865476,
+      "trace_mean": 27.2,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 27.2,
+        "lower": 24.2,
+        "sample_count": 10,
+        "seed": 1027,
+        "upper": 29.8
+      },
+      "trace_std": 4.467661580737736
+    }
+  },
+  "joint_feature_comparison": true,
+  "mean_feature_relative_abs_diff": 0.43703694377294294,
+  "split": {
+    "holdout_fraction": 0.2,
+    "holdout_record_count": 2,
+    "seed": 17,
+    "train_record_count": 8
+  },
+  "synthetic_count": 400,
+  "synthetic_source": "results/formal_bootstrap_stats/data/generated_instances.jsonl",
+  "trace_count": 10,
+  "trace_grounded_status": "trace_supplied",
+  "trace_inventory": {
+    "adapters": [
+      "locomo"
+    ],
+    "event_count": 272,
+    "instance_count": 10,
+    "sources": [
+      "locomo-official-trace-grounded"
+    ],
+    "status": "trace_supplied"
+  }
+}

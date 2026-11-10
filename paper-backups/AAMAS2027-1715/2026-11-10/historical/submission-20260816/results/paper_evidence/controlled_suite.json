@@ -1,0 +1,50 @@
+{
+  "derivation": "generated_instances.jsonl × observed CSV variants",
+  "evidence_id": "controlled_suite",
+  "instance_count": 400,
+  "production_latency_claim": false,
+  "schema_version": 1,
+  "seed_count": 50,
+  "sources": {
+    "instances": {
+      "line_count": 400,
+      "path": "results/final_controlled/data/generated_instances.jsonl",
+      "sha256": "d2fb1041989f4d42de6527c67c49e38c23af965bf21dc0a3d3064514f73a12ee"
+    },
+    "results": {
+      "path": "results/final_controlled/results/experiment_results.csv",
+      "row_count": 2000,
+      "sha256": "f33c0960fe073fc6ce99b14587cb17be0c7789ff98ed5a060e5b62d5ba5e62d4"
+    }
+  },
+  "variant_count": 5,
+  "variant_row_count": 2000,
+  "variants": {
+    "Naive": {
+      "oracle_match_count": 50,
+      "row_count": 400,
+      "violation_count": 350
+    },
+    "TxnMem": {
+      "oracle_match_count": 400,
+      "row_count": 400,
+      "violation_count": 0
+    },
+    "TxnMem-NoPolicyCommit": {
+      "oracle_match_count": 350,
+      "row_count": 400,
+      "violation_count": 50
+    },
+    "TxnMem-NoRepair": {
+      "oracle_match_count": 300,
+      "row_count": 400,
+      "violation_count": 100
+    },
+    "TxnMem-NoTxn": {
+      "oracle_match_count": 200,
+      "row_count": 400,
+      "violation_count": 200
+    }
+  },
+  "workload_family_count": 8
+}

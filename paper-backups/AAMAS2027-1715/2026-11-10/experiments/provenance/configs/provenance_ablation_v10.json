@@ -1,0 +1,23 @@
+{
+  "schema": "txnmem-provenance-ablation-v1",
+  "run_identity": "provenance-ablation-v10",
+  "cells": [
+    {"graph_node_count": 100, "concurrency": 1},
+    {"graph_node_count": 1000, "concurrency": 4},
+    {"graph_node_count": 10000, "concurrency": 16}
+  ],
+  "variants": ["TxnMem", "MemoryOnly-NoProvenance"],
+  "repetitions": 30,
+  "repetition_seeds": [
+    17, 1017, 2017, 3017, 4017, 5017, 6017, 7017, 8017, 9017,
+    10017, 11017, 12017, 13017, 14017, 15017, 16017, 17017, 18017, 19017,
+    20017, 21017, 22017, 23017, 24017, 25017, 26017, 27017, 28017, 29017
+  ],
+  "graph_seed": 17,
+  "operations_per_type": 8,
+  "bootstrap_repetitions": 10000,
+  "bootstrap_seed": 1701,
+  "variant_order_seed": 1702,
+  "request_timeout_seconds": 30.0,
+  "cell_stall_timeout_seconds": 3600.0
+}

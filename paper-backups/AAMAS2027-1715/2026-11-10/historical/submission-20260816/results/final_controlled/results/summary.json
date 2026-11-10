@@ -1,0 +1,2448 @@
+{
+  "group_keys": [
+    "workload",
+    "variant"
+  ],
+  "groups": {
+    "atomic_multi_write/Naive": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Naive",
+      "workload": "atomic_multi_write"
+    },
+    "atomic_multi_write/TxnMem": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem",
+      "workload": "atomic_multi_write"
+    },
+    "atomic_multi_write/TxnMem-NoPolicyCommit": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "workload": "atomic_multi_write"
+    },
+    "atomic_multi_write/TxnMem-NoRepair": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoRepair",
+      "workload": "atomic_multi_write"
+    },
+    "atomic_multi_write/TxnMem-NoTxn": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 3.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoTxn",
+      "workload": "atomic_multi_write"
+    },
+    "crash_during_commit/Naive": {
+      "allowed_outcome_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Naive",
+      "workload": "crash_during_commit"
+    },
+    "crash_during_commit/TxnMem": {
+      "allowed_outcome_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem",
+      "workload": "crash_during_commit"
+    },
+    "crash_during_commit/TxnMem-NoPolicyCommit": {
+      "allowed_outcome_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "workload": "crash_during_commit"
+    },
+    "crash_during_commit/TxnMem-NoRepair": {
+      "allowed_outcome_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoRepair",
+      "workload": "crash_during_commit"
+    },
+    "crash_during_commit/TxnMem-NoTxn": {
+      "allowed_outcome_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoTxn",
+      "workload": "crash_during_commit"
+    },
+    "mixed_stress/Naive": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Naive",
+      "workload": "mixed_stress"
+    },
+    "mixed_stress/TxnMem": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem",
+      "workload": "mixed_stress"
+    },
+    "mixed_stress/TxnMem-NoPolicyCommit": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "workload": "mixed_stress"
+    },
+    "mixed_stress/TxnMem-NoRepair": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoRepair",
+      "workload": "mixed_stress"
+    },
+    "mixed_stress/TxnMem-NoTxn": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 6.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoTxn",
+      "workload": "mixed_stress"
+    },
+    "provenance_branch_repair/Naive": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 9.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 9.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Naive",
+      "workload": "provenance_branch_repair"
+    },
+    "provenance_branch_repair/TxnMem": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 8.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 8.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem",
+      "workload": "provenance_branch_repair"
+    },
+    "provenance_branch_repair/TxnMem-NoPolicyCommit": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 8.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 8.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "workload": "provenance_branch_repair"
+    },
+    "provenance_branch_repair/TxnMem-NoRepair": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 8.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 8.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoRepair",
+      "workload": "provenance_branch_repair"
+    },
+    "provenance_branch_repair/TxnMem-NoTxn": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 9.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 9.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoTxn",
+      "workload": "provenance_branch_repair"
+    },
+    "provenance_chain_repair/Naive": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 9.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 9.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Naive",
+      "workload": "provenance_chain_repair"
+    },
+    "provenance_chain_repair/TxnMem": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 8.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 8.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem",
+      "workload": "provenance_chain_repair"
+    },
+    "provenance_chain_repair/TxnMem-NoPolicyCommit": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 8.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 8.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "workload": "provenance_chain_repair"
+    },
+    "provenance_chain_repair/TxnMem-NoRepair": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 8.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 8.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoRepair",
+      "workload": "provenance_chain_repair"
+    },
+    "provenance_chain_repair/TxnMem-NoTxn": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 9.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 9.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 2.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoTxn",
+      "workload": "provenance_chain_repair"
+    },
+    "revoke_before_commit/Naive": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Naive",
+      "workload": "revoke_before_commit"
+    },
+    "revoke_before_commit/TxnMem": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem",
+      "workload": "revoke_before_commit"
+    },
+    "revoke_before_commit/TxnMem-NoPolicyCommit": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "workload": "revoke_before_commit"
+    },
+    "revoke_before_commit/TxnMem-NoRepair": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoRepair",
+      "workload": "revoke_before_commit"
+    },
+    "revoke_before_commit/TxnMem-NoTxn": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoTxn",
+      "workload": "revoke_before_commit"
+    },
+    "scope_bypass/Naive": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Naive",
+      "workload": "scope_bypass"
+    },
+    "scope_bypass/TxnMem": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem",
+      "workload": "scope_bypass"
+    },
+    "scope_bypass/TxnMem-NoPolicyCommit": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "workload": "scope_bypass"
+    },
+    "scope_bypass/TxnMem-NoRepair": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoRepair",
+      "workload": "scope_bypass"
+    },
+    "scope_bypass/TxnMem-NoTxn": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoTxn",
+      "workload": "scope_bypass"
+    },
+    "supersession_consistency/Naive": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "Naive",
+      "workload": "supersession_consistency"
+    },
+    "supersession_consistency/TxnMem": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem",
+      "workload": "supersession_consistency"
+    },
+    "supersession_consistency/TxnMem-NoPolicyCommit": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoPolicyCommit",
+      "workload": "supersession_consistency"
+    },
+    "supersession_consistency/TxnMem-NoRepair": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoRepair",
+      "workload": "supersession_consistency"
+    },
+    "supersession_consistency/TxnMem-NoTxn": {
+      "allowed_outcome_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "any_violation": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "committed_count": {
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "count": 50,
+      "invalid_commit_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "latency": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "leak_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "operation_count": {
+        "mean": 4.0,
+        "std": 0.0
+      },
+      "oracle_match": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "partial_update_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_count": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "repair_recall": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "scope_bypass_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "stale_write_rate": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "supersession_consistency": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "variant": "TxnMem-NoTxn",
+      "workload": "supersession_consistency"
+    }
+  }
+}

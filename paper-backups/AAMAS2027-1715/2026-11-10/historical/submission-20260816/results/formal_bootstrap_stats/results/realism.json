@@ -1,0 +1,227 @@
+{
+  "bootstrap_repetitions": 2000,
+  "bootstrap_seed": 17,
+  "comparison_method": "feature-wise bootstrap mean intervals; no high-dimensional joint-test claim",
+  "features": {
+    "agent_count": {
+      "mean_abs_diff": 1.0,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.0,
+        "lower": 1.0,
+        "sample_count_left": 400,
+        "sample_count_right": 0,
+        "seed": 5064,
+        "upper": 1.0
+      },
+      "relative_mean_abs_diff": 1.0,
+      "synthetic_mean": 1.0,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.0,
+        "lower": 1.0,
+        "sample_count": 400,
+        "seed": 5062,
+        "upper": 1.0
+      },
+      "synthetic_std": 0.0,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 0,
+        "seed": 5063,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "branch_factor": {
+      "mean_abs_diff": 0.25,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.25,
+        "lower": 0.25,
+        "sample_count_left": 400,
+        "sample_count_right": 0,
+        "seed": 4055,
+        "upper": 0.25
+      },
+      "relative_mean_abs_diff": 0.25,
+      "synthetic_mean": 0.25,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.25,
+        "lower": 0.21,
+        "sample_count": 400,
+        "seed": 4053,
+        "upper": 0.2925
+      },
+      "synthetic_std": 0.4330127018922193,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 0,
+        "seed": 4054,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "operation_count": {
+      "mean_abs_diff": 4.25,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 4.25,
+        "lower": 4.25,
+        "sample_count_left": 400,
+        "sample_count_right": 0,
+        "seed": 19,
+        "upper": 4.25
+      },
+      "relative_mean_abs_diff": 1.0,
+      "synthetic_mean": 4.25,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 4.25,
+        "lower": 4.085,
+        "sample_count": 400,
+        "seed": 17,
+        "upper": 4.42
+      },
+      "synthetic_std": 1.713913650100261,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 0,
+        "seed": 18,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "policy_change_rate": {
+      "mean_abs_diff": 0.07291666666666666,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.07291666666666666,
+        "lower": 0.07291666666666666,
+        "sample_count_left": 400,
+        "sample_count_right": 0,
+        "seed": 2037,
+        "upper": 0.07291666666666666
+      },
+      "relative_mean_abs_diff": 0.07291666666666666,
+      "synthetic_mean": 0.07291666666666666,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.07291666666666666,
+        "lower": 0.060625,
+        "sample_count": 400,
+        "seed": 2035,
+        "upper": 0.08562499999999999
+      },
+      "synthetic_std": 0.1280021429942136,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 0,
+        "seed": 2036,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "provenance_depth": {
+      "mean_abs_diff": 0.5,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.5,
+        "lower": 0.5,
+        "sample_count_left": 400,
+        "sample_count_right": 0,
+        "seed": 3046,
+        "upper": 0.5
+      },
+      "relative_mean_abs_diff": 0.5,
+      "synthetic_mean": 0.5,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.5,
+        "lower": 0.42,
+        "sample_count": 400,
+        "seed": 3044,
+        "upper": 0.585
+      },
+      "synthetic_std": 0.8660254037844386,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 0,
+        "seed": 3045,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    },
+    "transaction_size": {
+      "mean_abs_diff": 1.5,
+      "mean_abs_diff_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.5,
+        "lower": 1.5,
+        "sample_count_left": 400,
+        "sample_count_right": 0,
+        "seed": 1028,
+        "upper": 1.5
+      },
+      "relative_mean_abs_diff": 1.0,
+      "synthetic_mean": 1.5,
+      "synthetic_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 1.5,
+        "lower": 1.43,
+        "sample_count": 400,
+        "seed": 1026,
+        "upper": 1.57
+      },
+      "synthetic_std": 0.7071067811865476,
+      "trace_mean": 0.0,
+      "trace_mean_interval": {
+        "bootstrap_repetitions": 2000,
+        "confidence": 0.95,
+        "estimate": 0.0,
+        "lower": 0.0,
+        "sample_count": 0,
+        "seed": 1027,
+        "upper": 0.0
+      },
+      "trace_std": 0.0
+    }
+  },
+  "mean_feature_relative_abs_diff": 0.6371527777777778,
+  "synthetic_count": 400,
+  "trace_count": 0,
+  "trace_grounded_status": "not_supplied"
+}

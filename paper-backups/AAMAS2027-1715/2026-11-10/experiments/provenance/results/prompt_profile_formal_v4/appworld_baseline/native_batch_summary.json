@@ -1,0 +1,1308 @@
+{
+  "benchmark": "appworld",
+  "condition": {
+    "appworld_model_tool_strategy": "instruction_inferred",
+    "benchmark": "appworld",
+    "generation_parameters": "seed_temperature_and_max_steps_from_fixed_manifest",
+    "manifest_sha256": "df292af96d911a8264f3dc4f59ed15a4eff12632ab01b9d49ea51ecf7c3591e9",
+    "max_tokens": 1024,
+    "memory_backend": "sqlite",
+    "model_execution_mode": "remote_endpoint",
+    "model_id": "qwen2.5-7b-instruct",
+    "model_revision": "7b44fc9c62f21ea990dc4290f251f127c53a06eb1b9f170f75a20f1cd29f26b4",
+    "model_revision_status": "sha256",
+    "model_server_build": "vllm:0.8.5.post1",
+    "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+    "repetitions": 1,
+    "runner_evaluator_source_identity": {
+      "component_sha256": {
+        "appworld_common_evaluation": "6edb5d01459427bc6f7f1ab427349009ee20a6e0895e8036fdbaad394db1061a",
+        "appworld_environment": "6f01aa53fbb29c1aac751c766c55af438ce5a612048c36671dbb8e877ee955ac",
+        "appworld_evaluator": "bde9deb3b1e6ac0fa9819013729c0e817a97c90f579108fa032a90bba0ca51cb",
+        "txnmem_benchmark_bridge": "e8a94d6f1e1352f165f6fa0328c2d40277578388ab2d815e21d19ec131a68991",
+        "txnmem_experiment": "c49a03d8539adc5d1e1033e54eeee8b0bf9b77ff53cf222547d4e10ef3264859",
+        "txnmem_model_protocol": "373fe221a2b26b670418b5066585234ead25e045d854b5ce6ef5f4adbcbf4385",
+        "txnmem_real_experiment": "2f90d36926b0b85a8b30af688be6fb0093beaf4373e13ed8ca48610441ece51a"
+      },
+      "fingerprint": "4b7ab65cce46da47bdce231eeadc5f671a9e45adb7a92a187cf11679e251023d"
+    },
+    "runtime_version": "0.2.0.dev0",
+    "timeout_seconds": 300.0
+  },
+  "condition_fingerprint": "04118daf23c2e9c1db62cede3c896b89b09b240c8f639808e6bc8670f3df1950",
+  "dataset": "appworld",
+  "evaluation_error_count": 0,
+  "manifest_sha256": "df292af96d911a8264f3dc4f59ed15a4eff12632ab01b9d49ea51ecf7c3591e9",
+  "memory_backend": "sqlite",
+  "model_execution_mode": "remote_endpoint",
+  "model_id": "qwen2.5-7b-instruct",
+  "model_usage": {
+    "completion_tokens": 4622,
+    "prompt_tokens": 512942,
+    "request_count": 40,
+    "responses_with_usage": 40,
+    "total_tokens": 517564
+  },
+  "native_event_count": 3,
+  "official": {
+    "blocked_task_count": 0,
+    "dataset": "appworld",
+    "error_task_count": 0,
+    "evaluator_available_task_count": 20,
+    "event_count": 3,
+    "official_evaluator_status": "available",
+    "pass_count": 17,
+    "success_interval": {
+      "confidence": 0.95,
+      "estimate": 0.0,
+      "lower": 0.0,
+      "successes": 0,
+      "trials": 20,
+      "upper": 0.16112515805281938
+    },
+    "successes": 0,
+    "task_count": 20,
+    "total_count": 112,
+    "trials": 20
+  },
+  "production_latency_claim": false,
+  "prompt_profile": "baseline",
+  "prompt_profiles": [
+    "baseline"
+  ],
+  "raw_reports_committed": false,
+  "raw_reports_location": "results/native_model_summary.json",
+  "repetitions": 1,
+  "task_count": 20,
+  "task_summaries": [
+    {
+      "authorized_benchmark_tool_count": 88,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "access_token",
+            "amount",
+            "description",
+            "user_email"
+          ],
+          "name": "venmo__create_payment_request",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "venmo__login",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        }
+      ],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 173,
+        "prompt_tokens": 42151,
+        "request_count": 3,
+        "responses_with_usage": 3,
+        "total_tokens": 42324
+      },
+      "model_visible_benchmark_tool_count": 88,
+      "model_visible_benchmark_tool_names_sha256": "62c59428ad64b3550f73315f30040ff55caac7e9b1da89dfe80d25c96f046a97",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 0,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 7
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-024c982_1",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 88,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "access_token",
+            "amount",
+            "description",
+            "private",
+            "receiver_email"
+          ],
+          "name": "venmo__create_transaction",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "venmo__login",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        }
+      ],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 177,
+        "prompt_tokens": 42159,
+        "request_count": 3,
+        "responses_with_usage": 3,
+        "total_tokens": 42336
+      },
+      "model_visible_benchmark_tool_count": 88,
+      "model_visible_benchmark_tool_names_sha256": "62c59428ad64b3550f73315f30040ff55caac7e9b1da89dfe80d25c96f046a97",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 0,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 7
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-024c982_2",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 88,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "access_token",
+            "amount",
+            "description",
+            "user_email"
+          ],
+          "name": "venmo__create_payment_request",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "venmo__login",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        }
+      ],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 173,
+        "prompt_tokens": 42151,
+        "request_count": 3,
+        "responses_with_usage": 3,
+        "total_tokens": 42324
+      },
+      "model_visible_benchmark_tool_count": 88,
+      "model_visible_benchmark_tool_names_sha256": "62c59428ad64b3550f73315f30040ff55caac7e9b1da89dfe80d25c96f046a97",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 0,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 7
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-024c982_3",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 126,
+      "benchmark_tool_trace": [],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 113,
+        "prompt_tokens": 20287,
+        "request_count": 1,
+        "responses_with_usage": 1,
+        "total_tokens": 20400
+      },
+      "model_visible_benchmark_tool_count": 126,
+      "model_visible_benchmark_tool_names_sha256": "277de6decec4f5c3607272252f98283abba59f58fbaaffa3edfbf101117c7c2d",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 0,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 5
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 1,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-042a9fc_1",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 126,
+      "benchmark_tool_trace": [],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 77,
+        "prompt_tokens": 20286,
+        "request_count": 1,
+        "responses_with_usage": 1,
+        "total_tokens": 20363
+      },
+      "model_visible_benchmark_tool_count": 126,
+      "model_visible_benchmark_tool_names_sha256": "277de6decec4f5c3607272252f98283abba59f58fbaaffa3edfbf101117c7c2d",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 0,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 5
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 1,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-042a9fc_2",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 126,
+      "benchmark_tool_trace": [],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 113,
+        "prompt_tokens": 20287,
+        "request_count": 1,
+        "responses_with_usage": 1,
+        "total_tokens": 20400
+      },
+      "model_visible_benchmark_tool_count": 126,
+      "model_visible_benchmark_tool_names_sha256": "277de6decec4f5c3607272252f98283abba59f58fbaaffa3edfbf101117c7c2d",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 0,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 5
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 1,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-042a9fc_3",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "min_follower_count",
+            "query",
+            "sort_by"
+          ],
+          "name": "spotify__search_artists",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "artist_id"
+          ],
+          "name": "spotify__follow_artist",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "artist_id"
+          ],
+          "name": "spotify__follow_artist",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "artist_id"
+          ],
+          "name": "spotify__follow_artist",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "spotify__login",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 3,
+        "source_operation_count": 1,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 363,
+        "prompt_tokens": 46935,
+        "request_count": 3,
+        "responses_with_usage": 3,
+        "total_tokens": 47298
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "15be8d563db54a668a090fa4ae5285042775f0ffbf865264d7ad410d2e4fbecc",
+      "native_event_count": 1,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 1,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 5
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-07b42fd_1",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "access_token",
+            "min_follower_count",
+            "query"
+          ],
+          "name": "spotify__search_artists",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "min_follower_count",
+            "query"
+          ],
+          "name": "spotify__search_artists",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 3,
+        "source_operation_count": 1,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 277,
+        "prompt_tokens": 46193,
+        "request_count": 3,
+        "responses_with_usage": 3,
+        "total_tokens": 46470
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "15be8d563db54a668a090fa4ae5285042775f0ffbf865264d7ad410d2e4fbecc",
+      "native_event_count": 1,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 1,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 5
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-07b42fd_2",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "min_follower_count",
+            "query",
+            "sort_by"
+          ],
+          "name": "spotify__search_artists",
+          "observation_status": "ok",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        }
+      ],
+      "evidence": {
+        "holdout_grouping": "episode/task_id+trial/conversation_id/trajectory_id/sample_id",
+        "instance_count": 1,
+        "oracle_match_by_variant": {
+          "Naive": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoPolicyCommit": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoRepair": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          },
+          "TxnMem-NoTxn": {
+            "matched": 1,
+            "rate": 1.0,
+            "total": 1
+          }
+        },
+        "production_latency_claim": false,
+        "replay_envelope_operation_count": 2,
+        "replay_operation_count": 3,
+        "source_operation_count": 1,
+        "trace_ground_truth_native": true
+      },
+      "model_usage": {
+        "completion_tokens": 160,
+        "prompt_tokens": 30768,
+        "request_count": 2,
+        "responses_with_usage": 2,
+        "total_tokens": 30928
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "15be8d563db54a668a090fa4ae5285042775f0ffbf865264d7ad410d2e4fbecc",
+      "native_event_count": 1,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 1,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 5
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-07b42fd_3",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0,
+      "variant_summary": {
+        "Naive": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoPolicyCommit": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoRepair": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        },
+        "TxnMem-NoTxn": {
+          "count": 1,
+          "oracle_matched": 1,
+          "violating": 0
+        }
+      }
+    },
+    {
+      "authorized_benchmark_tool_count": 7,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "access_token"
+          ],
+          "name": "amazon__show_cart",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        }
+      ],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 160,
+        "prompt_tokens": 3837,
+        "request_count": 2,
+        "responses_with_usage": 2,
+        "total_tokens": 3997
+      },
+      "model_visible_benchmark_tool_count": 7,
+      "model_visible_benchmark_tool_names_sha256": "4f2707c1b0c86407bfdd8d53d8386b5fc980df174e20f485d4de2c282dab999f",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 0,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 6
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-07bb666_1",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 7,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "access_token"
+          ],
+          "name": "amazon__show_wish_list",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        }
+      ],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 192,
+        "prompt_tokens": 3880,
+        "request_count": 2,
+        "responses_with_usage": 2,
+        "total_tokens": 4072
+      },
+      "model_visible_benchmark_tool_count": 7,
+      "model_visible_benchmark_tool_names_sha256": "4f2707c1b0c86407bfdd8d53d8386b5fc980df174e20f485d4de2c282dab999f",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 0,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 6
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-07bb666_2",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 7,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "access_token"
+          ],
+          "name": "amazon__show_cart",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        }
+      ],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 152,
+        "prompt_tokens": 3829,
+        "request_count": 2,
+        "responses_with_usage": 2,
+        "total_tokens": 3981
+      },
+      "model_visible_benchmark_tool_count": 7,
+      "model_visible_benchmark_tool_names_sha256": "4f2707c1b0c86407bfdd8d53d8386b5fc980df174e20f485d4de2c282dab999f",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 0,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 6
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-07bb666_3",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 115,
+        "prompt_tokens": 14174,
+        "request_count": 1,
+        "responses_with_usage": 1,
+        "total_tokens": 14289
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "e917e43d5e554e31280e01804859bbb0a249e8d7790b8c7f4c6e29e8893aaf4b",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 1,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 7
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 1,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-099174d_1",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 115,
+        "prompt_tokens": 14174,
+        "request_count": 1,
+        "responses_with_usage": 1,
+        "total_tokens": 14289
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "e917e43d5e554e31280e01804859bbb0a249e8d7790b8c7f4c6e29e8893aaf4b",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 1,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 7
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 1,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-099174d_2",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 115,
+        "prompt_tokens": 14174,
+        "request_count": 1,
+        "responses_with_usage": 1,
+        "total_tokens": 14289
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "e917e43d5e554e31280e01804859bbb0a249e8d7790b8c7f4c6e29e8893aaf4b",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 1,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 7
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 1,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-099174d_3",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 52,
+      "benchmark_tool_trace": [],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 1024,
+        "prompt_tokens": 10977,
+        "request_count": 1,
+        "responses_with_usage": 1,
+        "total_tokens": 12001
+      },
+      "model_visible_benchmark_tool_count": 52,
+      "model_visible_benchmark_tool_names_sha256": "b1ea40db4a9901541952ac96fa31a085025a99fb24bbada66daae8d370064d8d",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 3,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 6
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 1,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-09ac073_1",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 52,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "access_token",
+            "query",
+            "read"
+          ],
+          "name": "gmail__show_inbox_threads",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        }
+      ],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 246,
+        "prompt_tokens": 22176,
+        "request_count": 2,
+        "responses_with_usage": 2,
+        "total_tokens": 22422
+      },
+      "model_visible_benchmark_tool_count": 52,
+      "model_visible_benchmark_tool_names_sha256": "b1ea40db4a9901541952ac96fa31a085025a99fb24bbada66daae8d370064d8d",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 3,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 6
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-09ac073_2",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 52,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "access_token",
+            "read"
+          ],
+          "name": "gmail__show_inbox_threads",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "access_token",
+            "read"
+          ],
+          "name": "gmail__show_outbox_threads",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        }
+      ],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 408,
+        "prompt_tokens": 22234,
+        "request_count": 2,
+        "responses_with_usage": 2,
+        "total_tokens": 22642
+      },
+      "model_visible_benchmark_tool_count": 52,
+      "model_visible_benchmark_tool_names_sha256": "b1ea40db4a9901541952ac96fa31a085025a99fb24bbada66daae8d370064d8d",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 3,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 6
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 2,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-09ac073_3",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "access_token",
+            "page_index",
+            "page_limit"
+          ],
+          "name": "spotify__show_playlist_library",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "spotify__login",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        }
+      ],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 232,
+        "prompt_tokens": 46133,
+        "request_count": 3,
+        "responses_with_usage": 3,
+        "total_tokens": 46365
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "15be8d563db54a668a090fa4ae5285042775f0ffbf865264d7ad410d2e4fbecc",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 1,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 2
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-09b0ee6_1",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    },
+    {
+      "authorized_benchmark_tool_count": 96,
+      "benchmark_tool_trace": [
+        {
+          "argument_keys": [
+            "access_token",
+            "page_index",
+            "page_limit"
+          ],
+          "name": "spotify__show_playlist_library",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 1
+        },
+        {
+          "argument_keys": [
+            "password",
+            "username"
+          ],
+          "name": "spotify__login",
+          "observation_status": "error",
+          "origin": "model_or_agent_tool",
+          "step": 2
+        }
+      ],
+      "failure_code": "no_events",
+      "model_usage": {
+        "completion_tokens": 237,
+        "prompt_tokens": 46137,
+        "request_count": 3,
+        "responses_with_usage": 3,
+        "total_tokens": 46374
+      },
+      "model_visible_benchmark_tool_count": 96,
+      "model_visible_benchmark_tool_names_sha256": "15be8d563db54a668a090fa4ae5285042775f0ffbf865264d7ad410d2e4fbecc",
+      "native_event_count": 0,
+      "official": {
+        "official_evaluator": "appworld.TestTracker.success_and_task_completed",
+        "official_evaluator_success": false,
+        "pass_count": 1,
+        "status": "available",
+        "success": false,
+        "task_completed": false,
+        "total_count": 2
+      },
+      "preflight_contact_lookup_count": 0,
+      "preflight_login_count": 0,
+      "preflight_tool_count": 0,
+      "prompt_profile": "baseline",
+      "status": "completed",
+      "steps": 3,
+      "task_evaluator": {
+        "reasons": [],
+        "success": true
+      },
+      "task_id": "appworld-09b0ee6_2",
+      "trusted_preflight_enabled": false,
+      "unauthorized_tool_attempt_count": 0
+    }
+  ],
+  "token_usage_complete": true,
+  "trace_ground_truth_native": true,
+  "treatment": {
+    "app_tool_strategy": "instruction_inferred",
+    "prompt_profile": "baseline",
+    "trusted_preflight_enabled": false
+  },
+  "unique_task_count": 20,
+  "variants": {
+    "Naive": {
+      "count": 3,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 3,
+      "violating": 0
+    },
+    "TxnMem": {
+      "count": 3,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 3,
+      "violating": 0
+    },
+    "TxnMem-NoPolicyCommit": {
+      "count": 3,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 3,
+      "violating": 0
+    },
+    "TxnMem-NoRepair": {
+      "count": 3,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 3,
+      "violating": 0
+    },
+    "TxnMem-NoTxn": {
+      "count": 3,
+      "oracle_match_rate": 1.0,
+      "oracle_matched": 3,
+      "violating": 0
+    }
+  }
+}

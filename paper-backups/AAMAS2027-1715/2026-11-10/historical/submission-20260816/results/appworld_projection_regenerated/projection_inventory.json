@@ -1,0 +1,38 @@
+{
+  "event_count": 380,
+  "method_counts": {
+    "get": 352,
+    "patch": 5,
+    "post": 23
+  },
+  "output_sha256": "1b189c4a06e2794ff918141836f11b67d67faebfe62d3e31983861267dba763a",
+  "per_task_event_counts": {
+    "692c77d_1": 145,
+    "692c77d_2": 101,
+    "82e2fac_1": 71,
+    "82e2fac_2": 33,
+    "82e2fac_3": 30
+  },
+  "production_latency_claim": false,
+  "projection": "method_url_only_redacted_source_records",
+  "raw_official_request_values_committed": false,
+  "request_data_values_retained": false,
+  "source": "AppWorld official ground_truth/api_calls.json",
+  "source_sha256_by_task": {
+    "692c77d_1": "54ab3c6dc8b0a19c76bd2c11b92424c1557817b067fb97aac513407e60056cf2",
+    "692c77d_2": "3dc6287711c4d45f37f0668c135d5cbf1be431355ba69e7ed32a7d9a5e312bdc",
+    "82e2fac_1": "e301feae8d17bac098251924eddc5459c6c0e62ad0f9ee7bd1e3bbe58e337622",
+    "82e2fac_2": "c3430d9cd63935b8ae119c9c6e7cb3517204d9fc498194e488decf3f057b3c1a",
+    "82e2fac_3": "a63779fbf0aadc4f37b63332e364c0ba158cc26a2005df35133fd7d731f7f99b"
+  },
+  "status": "regenerated",
+  "task_count": 5,
+  "task_ids": [
+    "692c77d_1",
+    "692c77d_2",
+    "82e2fac_1",
+    "82e2fac_2",
+    "82e2fac_3"
+  ],
+  "trace_ground_truth_native": false
+}

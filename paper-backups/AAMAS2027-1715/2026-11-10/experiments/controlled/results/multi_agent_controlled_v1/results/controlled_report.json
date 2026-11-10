@@ -1,0 +1,31 @@
+{
+  "controlled_gates": {
+    "all_multi_agent_mutants_have_witnesses": true,
+    "full_txnmem_exhaustive_oracle_match": true,
+    "full_txnmem_exhaustive_zero_violations": true,
+    "full_txnmem_seeded_oracle_match": true,
+    "full_txnmem_seeded_zero_violations": true,
+    "replication_hashes_identical": true,
+    "seeded_exact_count": true,
+    "seeded_unique_signatures": true
+  },
+  "controlled_gates_passed": true,
+  "exhaustive_instance_count": 207,
+  "exhaustive_observation_count": 1035,
+  "full_txnmem_exhaustive_oracle_mismatches": 0,
+  "full_txnmem_exhaustive_violations": 0,
+  "full_txnmem_seeded_oracle_mismatches": 0,
+  "full_txnmem_seeded_violations": 0,
+  "replication_count": 3,
+  "schema_version": 1,
+  "seeded_instance_count": 300,
+  "seeded_observation_count": 1500,
+  "variant_count": 5,
+  "variants": [
+    "Naive",
+    "TxnMem-NoTxn",
+    "TxnMem-NoPolicyCommit",
+    "TxnMem-NoRepair",
+    "TxnMem"
+  ]
+}

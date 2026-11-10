@@ -1,0 +1,19 @@
+Traceback (most recent call last):
+  File "/data/txnmem/_txnmem_sync/src/txnmem_experiment.py", line 568, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/data/txnmem/_txnmem_sync/src/txnmem_experiment.py", line 529, in main
+    report = run_benchmark_experiment_manifest(manifest, model, adapter_factory, args.out_dir)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/_txnmem_sync/src/txnmem_real_experiment.py", line 289, in run_benchmark_experiment_manifest
+    run_report = run_benchmark_agent(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/_txnmem_sync/src/txnmem_benchmark_bridge.py", line 391, in run_benchmark_agent
+    "events": backend.validated_events(),
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/_txnmem_sync/src/txnmem_backend.py", line 109, in validated_events
+    return validate_events(self.events)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/txnmem/_txnmem_sync/src/txnmem_event_contract.py", line 102, in validate_events
+    raise EventContractError("non_monotonic_step", "event steps must increase strictly")
+txnmem_event_contract.EventContractError: event steps must increase strictly

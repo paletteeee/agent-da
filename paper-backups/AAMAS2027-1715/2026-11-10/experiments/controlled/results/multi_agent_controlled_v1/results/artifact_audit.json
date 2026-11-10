@@ -1,0 +1,29 @@
+{
+  "all_multi_agent_mutants_have_witnesses": true,
+  "exhaustive_instance_count": 207,
+  "exhaustive_observation_count": 1035,
+  "expected_seeds": 50,
+  "file_sha256": {
+    "data/exhaustive_interleavings.jsonl": "e7d5e43051c144c1620adbc47a360843ac6dbed547ef6b6a7f791be375d5b56f",
+    "data/exhaustive_reference_oracles.jsonl": "0e6069388e8451fabb03d172c721718c36fb546f7ada245235da56a0d06af22a",
+    "data/generated_instances.jsonl": "5dd38101029f43f23cef145772a560d8f30af448698a7f5653a4ea6fb2ba0cdc",
+    "data/reference_oracles.jsonl": "71e8a4a47ef6a582f301291afafba0f3f9acc3de17dea8baafaa2647cff27fb9",
+    "results/controlled_report.json": "72d016ca7b2f1ea416e032ba7af5ff3df8661269691da328209496464ce374ae",
+    "results/coverage.json": "9f9a3caa2b8117c3b03defd1753b9d691602a579ad2e6426bbc80dd1ef7cbe84",
+    "results/exhaustive_results.csv": "63ccae4faee9626a5e43ccb8a021e3907d30d3f469a766ec872848d88e400e04",
+    "results/experiment_results.csv": "6b8c7ef3bfd25f61a93176a60b5f1516c1d7d0b5d6d0c605831f1e77d5f5ef94",
+    "results/minimal_witnesses.json": "aaf3a02f7914b27fa6d660451e59ecb74e1836dff6d1ae931b186971cfb73895",
+    "results/mutation_report.json": "be5f4affd8622d6a04bf4ffb5e7b724947ed1d9744e8b953177d1c8112200f3f",
+    "results/reproducibility.json": "93e98b26b710cde8e855a6ca0ce7f914aaa27b9cf705de3913d25ac6931d0deb",
+    "results/summary.json": "63ad514e823fa64e516d9149db092fd53df4823a6a507c4984e1e92d66c8ec6d"
+  },
+  "full_txnmem_exhaustive_oracle_mismatches": 0,
+  "full_txnmem_exhaustive_violations": 0,
+  "full_txnmem_seeded_oracle_mismatches": 0,
+  "full_txnmem_seeded_violations": 0,
+  "replication_count": 3,
+  "schema_version": 1,
+  "seeded_instance_count": 300,
+  "seeded_observation_count": 1500,
+  "status": "passed"
+}

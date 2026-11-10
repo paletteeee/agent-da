@@ -1,0 +1,164 @@
+{
+  "agent_worker_host_count": 1,
+  "aggregator_source_sha256": "3db983ec5525ff07b4271e9a273f30facdaaa343e31c6718e53f602079214e46",
+  "all_repetitions_duration_target_met": true,
+  "all_repetitions_topology_attested": true,
+  "analysis": "attested_cross_host_model_load_repetitions",
+  "claim_boundary": "3 independently attested client-to-model-server repetitions; not one continuous SSH tunnel and not multi-host Agent workers",
+  "condition": {
+    "agent_worker_host_count": 1,
+    "configured_concurrency": 4,
+    "dataset": "txnmem-native-real-model-recommended-train",
+    "execution_identity.model_revision": "7b44fc9c62f21ea990dc4290f251f127c53a06eb1b9f170f75a20f1cd29f26b4",
+    "execution_identity.model_server_build": "vllm:0.8.5.post1",
+    "execution_identity.runner_source_identity.fingerprint": "e5f6aeb85d0500c61315b89799f066f6ee4d369b42c95d06edef6a898fba8c30",
+    "execution_scope": "cross_host_client_server",
+    "generation_parameters.max_steps": 12,
+    "generation_parameters.max_tokens": 512,
+    "generation_parameters.timeout_seconds": 300.0,
+    "host_count": 2,
+    "manifest_sha256": "ddb81e70222b2c95b96a573d7569e55acdf8987df19b4d8e2e2cc7ede50d4c0c",
+    "minimum_cycles": 1,
+    "minimum_duration_seconds": 600.0,
+    "model_id": "qwen2.5-7b-instruct",
+    "model_server_host_count": 1,
+    "network_transport": "ssh_local_port_forward",
+    "task_count_per_cycle": 8,
+    "topology_attestation.agent_host_identity_sha256": "42956cde350d41e19a66664252c2e370cfe9158047a97327de0867155b531316",
+    "topology_attestation.controlmaster_pid_matches_tunnel": true,
+    "topology_attestation.controlmaster_session_verified": true,
+    "topology_attestation.host_identities_distinct": true,
+    "topology_attestation.local_forward_matches_model_endpoint": true,
+    "topology_attestation.model_host_identity_sha256": "0d2d42025b2e4a40004a5c1d8ab6511f8c387323eec5d74d2ef481e9729312a2",
+    "topology_attestation.model_host_identity_source": "ssh_controlmaster_bound_remote_hostname_sha256",
+    "topology_attestation.process_command_sha256": "8459dd5f252bb16d8a0b14c487c858264bbc78a3a43e9813e449d5e9a0cbea16",
+    "topology_attestation.ssh_target_identity_sha256": "e83b5d826067954e75c10db7d614609b456f91c26f24af55530dd15f0468ef08"
+  },
+  "configured_concurrency": 4,
+  "cross_host_multi_agent_workers_claim": false,
+  "cross_host_network_claim": true,
+  "duration_design": "3_independent_repetitions_x_600_seconds",
+  "failure_counts": {
+    "injected_crash": 204,
+    "policy_denied": 204
+  },
+  "independence_attestation": {
+    "distinct_summary_count": 3,
+    "distinct_tunnel_process_count": 3,
+    "non_overlapping_utc_intervals": true
+  },
+  "model_server_host_count": 1,
+  "model_usage": {
+    "completion_tokens": 315828,
+    "prompt_tokens": 2935706,
+    "request_count": 3672,
+    "responses_with_usage": 3672,
+    "total_tokens": 3251534
+  },
+  "monetary_cost_status": "not_computed_without_an_explicit_pricing_rate",
+  "observed_peak_in_flight": 4,
+  "production_latency_claim": false,
+  "raw_traces_committed": false,
+  "repetition_count": 3,
+  "repetitions": [
+    {
+      "attempt_count": 544,
+      "completed_attempt_count": 408,
+      "completed_cycles": 68,
+      "contract_success_count": 544,
+      "elapsed_seconds": 605.798544333,
+      "ended_at_utc": "2026-08-09T19:46:47.838504+00:00",
+      "failed_attempt_count": 136,
+      "latency_ms": {
+        "max": 9819.833375,
+        "p50": 3043.986249999989,
+        "p95": 8882.983959000001,
+        "p99": 9674.851167
+      },
+      "model_usage": {
+        "completion_tokens": 105250,
+        "prompt_tokens": 978572,
+        "request_count": 1224,
+        "responses_with_usage": 1224,
+        "total_tokens": 1083822
+      },
+      "observed_peak_in_flight": 4,
+      "repetition": 1,
+      "started_at_utc": "2026-08-09T19:36:42.040623+00:00",
+      "summary_content_sha256": "46d1ac6807db1d1380617959455a38c2d31a07b8141e676ba48283eb87eff8c8",
+      "topology_status": "process_observed",
+      "tunnel_process_id": 39340
+    },
+    {
+      "attempt_count": 544,
+      "completed_attempt_count": 408,
+      "completed_cycles": 68,
+      "contract_success_count": 544,
+      "elapsed_seconds": 604.3625633749999,
+      "ended_at_utc": "2026-08-09T19:58:19.443030+00:00",
+      "failed_attempt_count": 136,
+      "latency_ms": {
+        "max": 9834.929666,
+        "p50": 3070.319582999957,
+        "p95": 8861.414292000007,
+        "p99": 9696.467374999997
+      },
+      "model_usage": {
+        "completion_tokens": 105369,
+        "prompt_tokens": 978570,
+        "request_count": 1224,
+        "responses_with_usage": 1224,
+        "total_tokens": 1083939
+      },
+      "observed_peak_in_flight": 4,
+      "repetition": 2,
+      "started_at_utc": "2026-08-09T19:48:15.080108+00:00",
+      "summary_content_sha256": "6522b9615efb5b046129d63abf8ab968fed99cc38cf27aa85b5cbd0d622d565c",
+      "topology_status": "process_observed",
+      "tunnel_process_id": 40174
+    },
+    {
+      "attempt_count": 544,
+      "completed_attempt_count": 408,
+      "completed_cycles": 68,
+      "contract_success_count": 544,
+      "elapsed_seconds": 605.420804708,
+      "ended_at_utc": "2026-08-09T20:10:41.633243+00:00",
+      "failed_attempt_count": 136,
+      "latency_ms": {
+        "max": 10104.40575,
+        "p50": 3063.1043749999944,
+        "p95": 8864.764958999984,
+        "p99": 9727.109832999986
+      },
+      "model_usage": {
+        "completion_tokens": 105209,
+        "prompt_tokens": 978564,
+        "request_count": 1224,
+        "responses_with_usage": 1224,
+        "total_tokens": 1083773
+      },
+      "observed_peak_in_flight": 4,
+      "repetition": 3,
+      "started_at_utc": "2026-08-09T20:00:36.204727+00:00",
+      "summary_content_sha256": "1c22b5af0f16554eadb3b54f6766aebeb00621b026988ac484f59efe37045bd8",
+      "topology_status": "process_observed",
+      "tunnel_process_id": 41010
+    }
+  ],
+  "single_continuous_tunnel_claim": false,
+  "source_summary_sha256": [
+    "1ab404dc361ff55a196c6bdd7e8ec66af1c925d865f717fb1e9421275ed225b2",
+    "80919b509a14d68ede50661f870a6f22b3e8aa554402efd8dffe0248cd5a6fa7",
+    "22b76d643df9f51c5d33ddbf2724aecfa571f7122943042abcb423695be6c1b7"
+  ],
+  "throughput_attempts_per_second": 0.8988853594759011,
+  "token_usage_complete": true,
+  "tokens_per_second": 1790.9046007586487,
+  "total_attempt_count": 1632,
+  "total_completed_attempt_count": 1224,
+  "total_completed_cycles": 204,
+  "total_contract_success_count": 1632,
+  "total_elapsed_seconds": 1815.5819124159998,
+  "total_failed_attempt_count": 408
+}

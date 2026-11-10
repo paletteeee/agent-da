@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "attested_at_utc": "2026-08-10T17:37:32Z",
+  "remote_host_id": "1d988bbc65f3",
+  "server_pid": 92862,
+  "server_process_start_utc": "2026-08-04T15:24:17Z",
+  "primary_artifact_completed_utc": "2026-08-05T22:49:51.366502497Z",
+  "server_continuity": true,
+  "continuity_basis": "The same live PID and vLLM command began before the primary and retry-merged artifacts were completed and remained live during the submission audit.",
+  "endpoint": "http://127.0.0.1:8000/v1",
+  "endpoint_model_id": "qwen2.5-7b-instruct",
+  "model_path": "/data/models/Qwen/Qwen2___5-7B-Instruct",
+  "model_revision": "7b44fc9c62f21ea990dc4290f251f127c53a06eb1b9f170f75a20f1cd29f26b4",
+  "model_server_build": "vllm:0.8.5.post1",
+  "source_artifact_sha256": "520123a0fd0918eee4dde33b76a145045d9bf26bf40fa8f41c97d134bc592c17",
+  "inference_boundary": "PID continuity attests the serving process; the model revision is the previously verified local weight fingerprint used by that process."
+}

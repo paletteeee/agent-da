@@ -1,0 +1,467 @@
+{
+  "agent_count": 2,
+  "all_fault_evidence_valid": true,
+  "all_state_readbacks_complete": true,
+  "condition_count": 2,
+  "conditions": [
+    "TxnMem",
+    "Naive"
+  ],
+  "observation_count": 8,
+  "observations": [
+    {
+      "actual_commit_order": [
+        {
+          "agent_id": "agent_2",
+          "classification": "aborted_clean",
+          "linearization_index": 1,
+          "txn_id": "txn_agent_2"
+        },
+        {
+          "agent_id": "agent_1",
+          "classification": "committed_complete",
+          "linearization_index": 2,
+          "txn_id": "txn_agent_1"
+        }
+      ],
+      "agent_count": 2,
+      "classification": "committed_complete",
+      "condition": "TxnMem",
+      "fault_evidence": {
+        "events": [
+          {
+            "action": "connection_drop",
+            "fault_observed": true,
+            "observed_exception": "RemoteDisconnected",
+            "operation": "write",
+            "operation_elapsed_ms": 4.060689359903336,
+            "proxy_name": "txnmem-qdrant",
+            "proxy_path_verified": true,
+            "recovery_action": "abort",
+            "request_key_sha256": "234ebc32bc5fe38cdc1d66e30216d765710e9f55cb679b4566b7ad1646e3c1e4",
+            "request_ordinal": 2,
+            "scenario": "concurrent_atomic_backend_failure_rep_01",
+            "seed": 1,
+            "service": "qdrant",
+            "toxic_cleared": true,
+            "toxic_installed": true,
+            "toxic_name": "txnmem_concurrent_atomic_backend_failure_rep_01",
+            "toxic_type": "reset_peer"
+          }
+        ],
+        "evidence_valid": true,
+        "fault_observed": true,
+        "proxy_path_verified": true,
+        "request_ordinals": {
+          "neo4j:commit": 3,
+          "neo4j:delete": 2,
+          "qdrant:delete": 2,
+          "qdrant:write": 4
+        },
+        "retry_count": 0,
+        "retry_success_count": 0,
+        "scenario": "concurrent_atomic_backend_failure_rep_01",
+        "toxic_cleared": true,
+        "toxic_installed": true,
+        "trigger_fired": true
+      },
+      "repetition": 1,
+      "scenario": "concurrent_atomic_backend_failure",
+      "state_readback": {
+        "atomic_a1_1": "active",
+        "atomic_a1_2": "active"
+      }
+    },
+    {
+      "actual_commit_order": [
+        {
+          "agent_id": "agent_2",
+          "classification": "committed_complete",
+          "linearization_index": 1,
+          "txn_id": "txn_agent_2"
+        },
+        {
+          "agent_id": "agent_1",
+          "classification": "partial_visible",
+          "linearization_index": 2,
+          "txn_id": "txn_agent_1"
+        }
+      ],
+      "agent_count": 2,
+      "classification": "partial_visible",
+      "condition": "Naive",
+      "fault_evidence": {
+        "events": [
+          {
+            "action": "connection_drop",
+            "fault_observed": true,
+            "observed_exception": "RemoteDisconnected",
+            "operation": "write",
+            "operation_elapsed_ms": 3.167599905282259,
+            "proxy_name": "txnmem-qdrant",
+            "proxy_path_verified": true,
+            "recovery_action": "abort",
+            "request_key_sha256": "103442a713182ea0541357ddc776b4cc24455581ae8795f55bdee895d0b722f1",
+            "request_ordinal": 2,
+            "scenario": "concurrent_atomic_backend_failure_rep_01",
+            "seed": 1,
+            "service": "qdrant",
+            "toxic_cleared": true,
+            "toxic_installed": true,
+            "toxic_name": "txnmem_concurrent_atomic_backend_failure_rep_01",
+            "toxic_type": "reset_peer"
+          }
+        ],
+        "evidence_valid": true,
+        "fault_observed": true,
+        "proxy_path_verified": true,
+        "request_ordinals": {
+          "neo4j:commit": 3,
+          "qdrant:write": 4
+        },
+        "retry_count": 0,
+        "retry_success_count": 0,
+        "scenario": "concurrent_atomic_backend_failure_rep_01",
+        "toxic_cleared": true,
+        "toxic_installed": true,
+        "trigger_fired": true
+      },
+      "repetition": 1,
+      "scenario": "concurrent_atomic_backend_failure",
+      "state_readback": {
+        "atomic_a1_1": "active",
+        "atomic_a2_1": "active",
+        "atomic_a2_2": "active"
+      }
+    },
+    {
+      "actual_commit_order": [
+        {
+          "agent_id": "agent_2",
+          "classification": "committed_complete",
+          "linearization_index": 1,
+          "txn_id": "txn_agent_2"
+        },
+        {
+          "agent_id": "agent_1",
+          "classification": "aborted_clean",
+          "linearization_index": 2,
+          "txn_id": "txn_agent_1"
+        }
+      ],
+      "agent_count": 2,
+      "classification": "committed_complete",
+      "condition": "TxnMem",
+      "fault_evidence": {
+        "events": [],
+        "evidence_valid": true,
+        "fault_observed": false,
+        "proxy_path_verified": true,
+        "request_ordinals": {
+          "neo4j:commit": 1,
+          "qdrant:write": 1
+        },
+        "retry_count": 0,
+        "retry_success_count": 0,
+        "scenario": "selective_actor_revocation_rep_01",
+        "toxic_cleared": false,
+        "toxic_installed": false,
+        "trigger_fired": false
+      },
+      "repetition": 1,
+      "scenario": "selective_actor_revocation",
+      "state_readback": {
+        "policy_a2_1": "active"
+      }
+    },
+    {
+      "actual_commit_order": [
+        {
+          "agent_id": "agent_2",
+          "classification": "committed_complete",
+          "linearization_index": 1,
+          "txn_id": "txn_agent_2"
+        },
+        {
+          "agent_id": "agent_1",
+          "classification": "committed_complete",
+          "linearization_index": 2,
+          "txn_id": "txn_agent_1"
+        }
+      ],
+      "agent_count": 2,
+      "classification": "policy_violation",
+      "condition": "Naive",
+      "fault_evidence": {
+        "events": [],
+        "evidence_valid": true,
+        "fault_observed": false,
+        "proxy_path_verified": true,
+        "request_ordinals": {
+          "neo4j:commit": 2,
+          "qdrant:write": 2
+        },
+        "retry_count": 0,
+        "retry_success_count": 0,
+        "scenario": "selective_actor_revocation_rep_01",
+        "toxic_cleared": false,
+        "toxic_installed": false,
+        "trigger_fired": false
+      },
+      "repetition": 1,
+      "scenario": "selective_actor_revocation",
+      "state_readback": {
+        "policy_a1_1": "active",
+        "policy_a2_1": "active"
+      }
+    },
+    {
+      "actual_commit_order": [
+        {
+          "agent_id": "agent_1",
+          "classification": "committed_complete",
+          "linearization_index": 1,
+          "txn_id": "txn_agent_1"
+        },
+        {
+          "agent_id": "agent_2",
+          "classification": "committed_complete",
+          "linearization_index": 2,
+          "txn_id": "txn_agent_2"
+        }
+      ],
+      "agent_count": 2,
+      "classification": "committed_complete",
+      "condition": "TxnMem",
+      "fault_evidence": {
+        "events": [],
+        "evidence_valid": true,
+        "fault_observed": false,
+        "proxy_path_verified": true,
+        "request_ordinals": {
+          "neo4j:commit": 2,
+          "neo4j:update_status": 2,
+          "qdrant:invalidate": 2,
+          "qdrant:write": 2
+        },
+        "retry_count": 0,
+        "retry_success_count": 0,
+        "scenario": "cross_agent_provenance_invalidation_rep_01",
+        "toxic_cleared": false,
+        "toxic_installed": false,
+        "trigger_fired": false
+      },
+      "repetition": 1,
+      "scenario": "cross_agent_provenance_invalidation",
+      "state_readback": {
+        "provenance_child": "invalid",
+        "provenance_root": "invalid"
+      }
+    },
+    {
+      "actual_commit_order": [
+        {
+          "agent_id": "agent_1",
+          "classification": "committed_complete",
+          "linearization_index": 1,
+          "txn_id": "txn_agent_1"
+        },
+        {
+          "agent_id": "agent_2",
+          "classification": "committed_complete",
+          "linearization_index": 2,
+          "txn_id": "txn_agent_2"
+        }
+      ],
+      "agent_count": 2,
+      "classification": "provenance_violation",
+      "condition": "Naive",
+      "fault_evidence": {
+        "events": [],
+        "evidence_valid": true,
+        "fault_observed": false,
+        "proxy_path_verified": true,
+        "request_ordinals": {
+          "neo4j:commit": 2,
+          "neo4j:update_status": 1,
+          "qdrant:invalidate": 1,
+          "qdrant:write": 2
+        },
+        "retry_count": 0,
+        "retry_success_count": 0,
+        "scenario": "cross_agent_provenance_invalidation_rep_01",
+        "toxic_cleared": false,
+        "toxic_installed": false,
+        "trigger_fired": false
+      },
+      "repetition": 1,
+      "scenario": "cross_agent_provenance_invalidation",
+      "state_readback": {
+        "provenance_child": "active",
+        "provenance_root": "invalid"
+      }
+    },
+    {
+      "actual_commit_order": [
+        {
+          "agent_id": "agent_2",
+          "classification": "aborted_clean",
+          "linearization_index": 1,
+          "txn_id": "txn_agent_2"
+        },
+        {
+          "agent_id": "agent_1",
+          "classification": "aborted_clean",
+          "linearization_index": 2,
+          "txn_id": "txn_agent_1"
+        }
+      ],
+      "agent_count": 2,
+      "classification": "aborted_clean",
+      "condition": "TxnMem",
+      "fault_evidence": {
+        "events": [
+          {
+            "action": "connection_drop",
+            "fault_observed": true,
+            "observed_exception": "RemoteDisconnected",
+            "operation": "write",
+            "operation_elapsed_ms": 2.9391529969871044,
+            "proxy_name": "txnmem-qdrant",
+            "proxy_path_verified": true,
+            "recovery_action": "abort",
+            "request_key_sha256": "77604093b33a86e46895dc2fe62b57bef6b48745e51411af17ea8ade2e77e432",
+            "request_ordinal": 2,
+            "scenario": "concurrent_mixed_failure_rep_01",
+            "seed": 1,
+            "service": "qdrant",
+            "toxic_cleared": true,
+            "toxic_installed": true,
+            "toxic_name": "txnmem_concurrent_mixed_failure_rep_01",
+            "toxic_type": "reset_peer"
+          }
+        ],
+        "evidence_valid": true,
+        "fault_observed": true,
+        "proxy_path_verified": true,
+        "request_ordinals": {
+          "neo4j:commit": 1,
+          "neo4j:delete": 1,
+          "neo4j:update_status": 1,
+          "qdrant:delete": 1,
+          "qdrant:invalidate": 1,
+          "qdrant:write": 2
+        },
+        "retry_count": 0,
+        "retry_success_count": 0,
+        "scenario": "concurrent_mixed_failure_rep_01",
+        "toxic_cleared": true,
+        "toxic_installed": true,
+        "trigger_fired": true
+      },
+      "repetition": 1,
+      "scenario": "concurrent_mixed_failure",
+      "state_readback": {
+        "mixed_root": "invalid"
+      }
+    },
+    {
+      "actual_commit_order": [
+        {
+          "agent_id": "agent_2",
+          "classification": "committed_complete",
+          "linearization_index": 1,
+          "txn_id": "txn_agent_2"
+        },
+        {
+          "agent_id": "agent_1",
+          "classification": "partial_visible",
+          "linearization_index": 2,
+          "txn_id": "txn_agent_1"
+        }
+      ],
+      "agent_count": 2,
+      "classification": "partial_visible",
+      "condition": "Naive",
+      "fault_evidence": {
+        "events": [
+          {
+            "action": "connection_drop",
+            "fault_observed": true,
+            "observed_exception": "RemoteDisconnected",
+            "operation": "write",
+            "operation_elapsed_ms": 3.9218743331730366,
+            "proxy_name": "txnmem-qdrant",
+            "proxy_path_verified": true,
+            "recovery_action": "abort",
+            "request_key_sha256": "2c829872d0a8bac7d3ac7ddb38b29ed5f4acb1640105141a003b3a2f1a57a71b",
+            "request_ordinal": 2,
+            "scenario": "concurrent_mixed_failure_rep_01",
+            "seed": 1,
+            "service": "qdrant",
+            "toxic_cleared": true,
+            "toxic_installed": true,
+            "toxic_name": "txnmem_concurrent_mixed_failure_rep_01",
+            "toxic_type": "reset_peer"
+          }
+        ],
+        "evidence_valid": true,
+        "fault_observed": true,
+        "proxy_path_verified": true,
+        "request_ordinals": {
+          "neo4j:commit": 4,
+          "neo4j:update_status": 1,
+          "qdrant:invalidate": 1,
+          "qdrant:write": 5
+        },
+        "retry_count": 0,
+        "retry_success_count": 0,
+        "scenario": "concurrent_mixed_failure_rep_01",
+        "toxic_cleared": true,
+        "toxic_installed": true,
+        "trigger_fired": true
+      },
+      "repetition": 1,
+      "scenario": "concurrent_mixed_failure",
+      "state_readback": {
+        "mixed_child_2": "active",
+        "mixed_root": "invalid",
+        "mixed_write_1": "active",
+        "mixed_write_2": "active"
+      }
+    }
+  ],
+  "partial_visible_count": 0,
+  "policy_violation_count": 0,
+  "provenance_violation_count": 0,
+  "real_service_evidence": true,
+  "repetition_count": 1,
+  "scenario_count": 4,
+  "scenarios": [
+    "concurrent_atomic_backend_failure",
+    "selective_actor_revocation",
+    "cross_agent_provenance_invalidation",
+    "concurrent_mixed_failure"
+  ],
+  "schema_version": 1,
+  "service_versions": {
+    "namespace": "healthcheck",
+    "neo4j": {
+      "available": true,
+      "version": "5.22.0"
+    },
+    "qdrant": {
+      "available": true,
+      "version": "1.11.5"
+    }
+  },
+  "status": "passed",
+  "txnmem_counts": {
+    "observation_count": 4,
+    "partial_visible_count": 0,
+    "policy_violation_count": 0,
+    "provenance_violation_count": 0,
+    "unknown_count": 0
+  },
+  "unknown_count": 0
+}

@@ -1,0 +1,21 @@
+{
+  "model_id": "qwen2.5-7b-instruct",
+  "repetitions": 3,
+  "tasks_per_replication": 10,
+  "total_tasks": 30,
+  "native_event_count": 66,
+  "evaluation_error_count": 0,
+  "task_contract_success_count": 30,
+  "task_contract_success_rate": 1.0,
+  "txnmem_oracle_match_count": 30,
+  "txnmem_oracle_match_rate": 1.0,
+  "per_replication": [
+    {"replication": 1, "contract_success_count": 10, "oracle_match_count": 10},
+    {"replication": 2, "contract_success_count": 10, "oracle_match_count": 10},
+    {"replication": 3, "contract_success_count": 10, "oracle_match_count": 10}
+  ],
+  "expected_failure_counts": {
+    "injected_crash": 3,
+    "policy_denied": 3
+  }
+}
