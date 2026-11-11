@@ -1,9 +1,0 @@
-{
-  "count": 3240,
-  "expected": 3240,
-  "verified": true,
-  "verified_records": 3240,
-  "complete": true,
-  "elapsed_seconds": 3238.4398290170357,
-  "peak_allocated_GiB": 4.873358249664307
-}

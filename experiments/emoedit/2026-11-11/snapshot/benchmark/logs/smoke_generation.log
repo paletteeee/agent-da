@@ -1,5 +1,0 @@
-Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]Loading pipeline components...:  17%|█▋        | 1/6 [00:00<00:00,  6.81it/s]/data/emoedit-baseline/.venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py:1601: FutureWarning: `clean_up_tokenization_spaces` was not set. It will be set to `True` by default. This behavior will be depracted in transformers v4.45, and will be then set to `False` by default. For more details check this issue: https://github.com/huggingface/transformers/issues/31884
-  warnings.warn(
-Loading pipeline components...:  83%|████████▎ | 5/6 [00:00<00:00, 22.62it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00, 21.99it/s]
-{"status": "generating", "completed": 8, "total": 8, "generated_this_run": 8, "elapsed_seconds": 8.850182921625674, "last_output": "1_sadness_step-4000_seed-48000.jpg", "peak_allocated_GiB": 4.869482517242432}
-GENERATION_COMPLETE {"count": 8, "expected": 8, "verified": true}

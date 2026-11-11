@@ -1,17 +1,0 @@
-Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]Loading pipeline components...:  50%|█████     | 3/6 [00:00<00:00, 14.00it/s]/data/emoedit-baseline/.venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py:1601: FutureWarning: `clean_up_tokenization_spaces` was not set. It will be set to `True` by default. This behavior will be depracted in transformers v4.45, and will be then set to `False` by default. For more details check this issue: https://github.com/huggingface/transformers/issues/31884
-  warnings.warn(
-Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00, 21.02it/s]
-  0%|          | 0/100 [00:00<?, ?it/s]  1%|          | 1/100 [00:00<00:16,  5.83it/s]  6%|▌         | 6/100 [00:00<00:03, 24.50it/s] 11%|█         | 11/100 [00:00<00:02, 32.42it/s] 16%|█▌        | 16/100 [00:00<00:02, 35.61it/s] 21%|██        | 21/100 [00:00<00:02, 38.23it/s] 26%|██▌       | 26/100 [00:00<00:01, 39.45it/s] 31%|███       | 31/100 [00:00<00:01, 40.24it/s] 36%|███▌      | 36/100 [00:00<00:01, 40.76it/s] 41%|████      | 41/100 [00:01<00:01, 41.11it/s] 46%|████▌     | 46/100 [00:01<00:01, 41.31it/s] 51%|█████     | 51/100 [00:01<00:01, 41.45it/s] 56%|█████▌    | 56/100 [00:01<00:01, 41.54it/s] 61%|██████    | 61/100 [00:01<00:00, 41.61it/s] 66%|██████▌   | 66/100 [00:01<00:00, 41.65it/s] 71%|███████   | 71/100 [00:01<00:00, 41.69it/s] 76%|███████▌  | 76/100 [00:01<00:00, 41.72it/s] 81%|████████  | 81/100 [00:02<00:00, 41.73it/s] 86%|████████▌ | 86/100 [00:02<00:00, 41.73it/s] 91%|█████████ | 91/100 [00:02<00:00, 41.74it/s] 96%|█████████▌| 96/100 [00:02<00:00, 41.74it/s]100%|██████████| 100/100 [00:02<00:00, 39.56it/s]
-{
-  "seed": 42,
-  "emotion": "amusement",
-  "steps": 100,
-  "guidance_scale": 7.5,
-  "image_guidance_scale": 1.5,
-  "elapsed_seconds": 8.795010236091912,
-  "peak_allocated_GiB": 4.865227222442627,
-  "peak_reserved_GiB": 5.322265625,
-  "torch": "2.13.0+cu130",
-  "gpu": "NVIDIA GeForce RTX 5090",
-  "output": "/data/emoedit-baseline/EmoEdit/examples/result/test-amusement.jpg"
-}

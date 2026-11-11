@@ -1,9 +1,0 @@
-EmoEdit official example smoke test, 2026-11-10
-Server: root+vm-jQO80X6g9pvcTndz@39.145.28.59:32222
-Remote directory: /data/emoedit-baseline
-Repeat default demo: cd /data/emoedit-baseline && .venv/bin/python run_demo.py
-Repeat other 7 emotions: cd /data/emoedit-baseline && .venv/bin/python run_other_emotions.py
-Seed: 42; steps: 100; text guidance: 7.5; image guidance: 1.5
-Input: official examples/test.jpg resized to 512 x 512
-This is a smoke test of eight emotion conditions on one image, not the paper benchmark.
-Weights and full Python environment remain on the server.

@@ -1,7 +1,0 @@
-./data/emoedit-baseline/.venv/lib/python3.12/site-packages/skimage/metrics/simple_metrics.py:168: RuntimeWarning: divide by zero encountered in scalar divide
-  return 10 * np.log10((data_range**2) / err)
-...........
-----------------------------------------------------------------------
-Ran 12 tests in 0.299s
-
-OK
