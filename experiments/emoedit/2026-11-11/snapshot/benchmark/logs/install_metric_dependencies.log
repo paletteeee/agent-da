@@ -1,0 +1,17 @@
+Looking in indexes: https://mirrors.aliyun.com/pypi/simple/
+Collecting scipy==1.14.1
+  Downloading https://mirrors.aliyun.com/pypi/packages/8e/ee/8a26858ca517e9c64f84b4c7734b89bda8e63bec85c3d2f432d225bb1886/scipy-1.14.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (40.8 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 40.8/40.8 MB 1.6 MB/s eta 0:00:00
+Collecting imageio==2.36.1
+  Downloading https://mirrors.aliyun.com/pypi/packages/5c/f9/f78e7f5ac8077c481bf6b43b8bc736605363034b3d5eb3ce8eb79f53f5f1/imageio-2.36.1-py3-none-any.whl (315 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 315.4/315.4 kB 4.3 MB/s eta 0:00:00
+Collecting tifffile==2024.9.20
+  Downloading https://mirrors.aliyun.com/pypi/packages/50/0a/435d5d7ec64d1c8b422ac9ebe42d2f3b2ac0b3f8a56f5c04dd0f3b7ba83c/tifffile-2024.9.20-py3-none-any.whl (228 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 228.2/228.2 kB 3.1 MB/s eta 0:00:00
+Collecting lazy-loader==0.4
+  Downloading https://mirrors.aliyun.com/pypi/packages/83/60/d497a310bde3f01cb805196ac61b7ad6dc5dcf8dce66634dc34364b20b4f/lazy_loader-0.4-py3-none-any.whl (12 kB)
+Requirement already satisfied: numpy<2.3,>=1.23.5 in ./.venv/lib/python3.12/site-packages (from scipy==1.14.1) (1.26.4)
+Requirement already satisfied: pillow>=8.3.2 in /usr/local/lib/python3.12/dist-packages (from imageio==2.36.1) (13.0.0)
+Requirement already satisfied: packaging in /usr/local/lib/python3.12/dist-packages (from lazy-loader==0.4) (26.3)
+Installing collected packages: tifffile, scipy, lazy-loader, imageio
+Successfully installed imageio-2.36.1 lazy-loader-0.4 scipy-1.14.1 tifffile-2024.9.20

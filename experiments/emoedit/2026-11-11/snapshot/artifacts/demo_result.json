@@ -1,0 +1,13 @@
+{
+  "seed": 42,
+  "emotion": "amusement",
+  "steps": 100,
+  "guidance_scale": 7.5,
+  "image_guidance_scale": 1.5,
+  "elapsed_seconds": 8.795010236091912,
+  "peak_allocated_GiB": 4.865227222442627,
+  "peak_reserved_GiB": 5.322265625,
+  "torch": "2.13.0+cu130",
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "output": "/data/emoedit-baseline/EmoEdit/examples/result/test-amusement.jpg"
+}

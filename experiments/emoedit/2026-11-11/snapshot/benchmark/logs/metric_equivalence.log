@@ -1,0 +1,17 @@
+/data/emoedit-baseline/benchmark/upstream/metrics/Metric_args.py:69: FutureWarning: Decorating classes is deprecated and will be disabled in future versions. You should only decorate functions or methods. To preserve the current behavior of class decoration, you can directly decorate the `__init__` method and nothing else.
+  @torch.no_grad()
+/data/emoedit-baseline/benchmark/upstream/metrics/Metric_args.py:110: FutureWarning: Decorating classes is deprecated and will be disabled in future versions. You should only decorate functions or methods. To preserve the current behavior of class decoration, you can directly decorate the `__init__` method and nothing else.
+  @torch.no_grad()
+/data/emoedit-baseline/.venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py:1601: FutureWarning: `clean_up_tokenization_spaces` was not set. It will be set to `True` by default. This behavior will be depracted in transformers v4.45, and will be then set to `False` by default. For more details check this issue: https://github.com/huggingface/transformers/issues/31884
+  warnings.warn(
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:207: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:222: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=AlexNet_Weights.IMAGENET1K_V1`. You can also use `weights=AlexNet_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+Loading model from: /data/emoedit-baseline/.venv/lib/python3.12/site-packages/lpips/weights/v0.1/alex.pth
+Traceback (most recent call last):
+  File "/data/emoedit-baseline/benchmark/check_metric_equivalence.py", line 18, in <module>
+    errors={k:abs(float(row[k])-float(v)) for k,v in scalar.items()};assert all(v<1e-5 for v in errors.values()),errors;checks.append({'output':p['output'],'absolute_errors':errors})
+                                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: {'SSIM': 0.0, 'PSNR': 0.0, 'LPIPS': 1.9788742065429688e-05, 'CLIP-I': 2.384185791015625e-07, 'Emo-A': 0.0, 'Emo-S': 2.9802322387695312e-08}

@@ -1,0 +1,8 @@
+2026-11-10: User authorized complete benchmark. Existing GPU environment and released checkpoint verified.
+Ruling: Evaluation scope is full EmoEdit test set for the installed model; retraining eight comparison methods and user studies are not included in an automated benchmark request.
+Ruling: Use official validation settings (30 steps, seed 48000), not demo settings (100 steps, seed 42).
+Ruling: Preserve upstream metric conventions and report corrected LPIPS as an additional named metric to avoid silently changing comparability.
+Ruling: This directory has no git repository; benchmark/ is an isolated experiment directory. No git integration is needed.
+Task 1 complete: 5 protocol tests failed before implementation, then passed; official manifest built.
+Final integrity fix: verify unique generation records, exact pair metadata and SHA256 before resume, before metrics, and at final audit. Tests cover valid JPEG replacement, duplicate records, wrong targets and missing records.
+TF32 disabled for metric models after batch-vs-scalar LPIPS showed 1.98e-5 error; all eight scalar-reference comparisons now pass absolute 1e-5 tolerance without relaxing it. This does not alter generation.

@@ -1,0 +1,10 @@
+/data/emoedit-baseline/.venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py:1601: FutureWarning: `clean_up_tokenization_spaces` was not set. It will be set to `True` by default. This behavior will be depracted in transformers v4.45, and will be then set to `False` by default. For more details check this issue: https://github.com/huggingface/transformers/issues/31884
+  warnings.warn(
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:207: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:222: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=AlexNet_Weights.IMAGENET1K_V1`. You can also use `weights=AlexNet_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+Loading model from: /data/emoedit-baseline/.venv/lib/python3.12/site-packages/lpips/weights/v0.1/alex.pth
+METRICS_PROGRESS 8 8
+METRICS_COMPLETE {"PSNR": 19.75917813845476, "SSIM": 0.6922214862137479, "LPIPS": 0.18239173758774996, "CLIP-I": 0.9002966806292534, "Emo-A": 25.0, "Emo-S": 0.1935396580483939, "LPIPS_standard": 0.21775943133980036, "PSNR_fixed255": 19.75917813845476}

@@ -1,0 +1,22 @@
+{
+  "generation_protocol_sha256": "6a45bc6bbedf0842b33ad37c86f73b53e194fa5aaba70f7c3bd4c349a780597e",
+  "metric_code_sha256": "69d2895dbc71385477b5f3153b60acababe1762f8e10384534b468577dd79921",
+  "clip": "openai/clip-vit-base-patch32",
+  "clip_revision": "3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268",
+  "classifier_sha256": "a7aea168d7e36f5c245dfa26d62cb4a6a9486ff1f661876e9ad40d586ef1e8b9",
+  "LPIPS": "alex v0.1; upstream [0,1], standard additional [-1,1]",
+  "PSNR": "upstream original max-min; fixed255 additional",
+  "class_order": [
+    "amusement",
+    "awe",
+    "contentment",
+    "excitement",
+    "anger",
+    "disgust",
+    "fear",
+    "sadness"
+  ],
+  "expected_count": 3240,
+  "batch_size": 16,
+  "TF32": false
+}

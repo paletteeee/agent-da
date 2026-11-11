@@ -1,0 +1,15 @@
+{
+  "EmoEdit/scripts/model.py": "a5bae8a258bc969ce60ca0069d29d25a110e18413d60c8ade1feb23859838892",
+  "EmoEdit/scripts/sampler.py": "29f29ad5cba25dfe59c6acfccdb014e7ce4ecd4191a87e6feb839928864ddb00",
+  "benchmark/check_metric_equivalence.py": "79383b0befd5b73e8f7c192f6fc18d89885cf64569570bbeecf3a9eebfcd4f57",
+  "benchmark/check_upstream_generation.py": "7d990357252eb14a8b48d4296d012627213f3a78a7747d9e4ef74e4bf34bbaf7",
+  "benchmark/download_metric_models.py": "fe9e076441b31c45c540e16000b90aec15ebf986f1298d7c4ed04228eb9dd447",
+  "benchmark/evaluate.py": "69d2895dbc71385477b5f3153b60acababe1762f8e10384534b468577dd79921",
+  "benchmark/finalize.py": "5927b9b3f42e78dd319c1b9f95e1a7e10f25bf39eabb1cf1227f3fd306518bee",
+  "benchmark/generate.py": "da27ff3db8537e0b1c5563fac37c077f579298390db8731209b0e7b686a3fc5d",
+  "benchmark/protocol.py": "24836cdea5da770b48aaaac75096275562aa6b207d0b92005052b0523769492e",
+  "benchmark/run_full.sh": "a267abf28612901b5260740bcc31b40093e0b5b47c987a033e587481a8c46bf1",
+  "benchmark/test_metric_protocol.py": "0b8e8dc95bc47bcab6e16a58651f5e4a026b19ab0afdc7b07710a4dee976ab18",
+  "benchmark/test_protocol.py": "dbdf96818a9bcbe68d9e3d69e26da82e6b782282fb9e74540e9bc37508780b93",
+  "benchmark/test_provenance.py": "99dd51ce1129163a52b8fb7e3f46e11198a8fd407608bebaf343373993a00707"
+}

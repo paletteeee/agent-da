@@ -1,0 +1,35 @@
+{
+  "repository": "https://github.com/JingyuanYY/EmoEdit",
+  "commit": "88f622cdb5c7afdc8954eef899064296fe4a4273",
+  "source_scope": [
+    "Readme.md",
+    "test.py",
+    "scripts/model.py",
+    "scripts/sampler.py",
+    "examples/test.jpg"
+  ],
+  "checkpoint_source": "https://www.dropbox.com/scl/fo/7tggp1e6n4zczq2yxgcz0/AIKY00uZZS6blatU7uUcaxw/Q-Former/Q-Former_4000.pth?rlkey=3b9bhojqhyqd4tao84rwo2p3b&dl=1",
+  "checkpoint_sha256": "24b91803c39691c4bd60a88c1df86f857a1e520645fdb9b039da4e7bde5436bc",
+  "checkpoint_bytes": 397305617,
+  "models": {
+    "instruct-pix2pix": {
+      "id": "timbrooks/instruct-pix2pix",
+      "revision": "31519b5cb02a7fd89b906d88731cd4d6a7bbf88d",
+      "download_endpoint": "https://hf-mirror.com"
+    },
+    "clip-vit-large-patch14": {
+      "id": "openai/clip-vit-large-patch14",
+      "revision": "32bd64288804d66eefd0ccbe215aa642df71cc41",
+      "download_endpoint": "https://hf-mirror.com"
+    }
+  },
+  "test_scope": "Official example, one emotion; not full benchmark evaluation",
+  "changes": [
+    "Local model and adapter paths",
+    "Use official fp16 base weights",
+    "Disable gradient tracking for inference",
+    "Load adapter on CPU with weights_only=True",
+    "Enable inference progress display"
+  ],
+  "command": "cd /data/emoedit-baseline && .venv/bin/python run_demo.py"
+}

@@ -1,0 +1,45 @@
+Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]Loading pipeline components...:  17%|█▋        | 1/6 [00:00<00:00,  6.87it/s]/data/emoedit-baseline/.venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py:1601: FutureWarning: `clean_up_tokenization_spaces` was not set. It will be set to `True` by default. This behavior will be depracted in transformers v4.45, and will be then set to `False` by default. For more details check this issue: https://github.com/huggingface/transformers/issues/31884
+  warnings.warn(
+Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00, 24.64it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00, 21.80it/s]
+{"status": "generating", "completed": 8, "total": 8, "generated_this_run": 8, "elapsed_seconds": 9.003965500742197, "last_output": "1_sadness_step-4000_seed-48000.jpg", "peak_allocated_GiB": 4.874426364898682}
+GENERATION_COMPLETE {"count": 8, "expected": 8, "verified": true, "verified_records": 8, "complete": true}
+Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]Loading pipeline components...:  50%|█████     | 3/6 [00:00<00:00, 12.87it/s]/data/emoedit-baseline/.venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py:1601: FutureWarning: `clean_up_tokenization_spaces` was not set. It will be set to `True` by default. This behavior will be depracted in transformers v4.45, and will be then set to `False` by default. For more details check this issue: https://github.com/huggingface/transformers/issues/31884
+  warnings.warn(
+Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00, 19.96it/s]
+  0%|          | 0/1 [00:00<?, ?it/s]100%|██████████| 1/1 [00:00<00:00,  5.06it/s]100%|██████████| 1/1 [00:00<00:00,  5.06it/s]
+{
+  "1_sadness_step-4000_seed-48000.jpg": true,
+  "1_amusement_step-4000_seed-48000.jpg": true,
+  "1_fear_step-4000_seed-48000.jpg": true,
+  "1_excitement_step-4000_seed-48000.jpg": true,
+  "1_awe_step-4000_seed-48000.jpg": true,
+  "1_disgust_step-4000_seed-48000.jpg": true,
+  "1_anger_step-4000_seed-48000.jpg": true,
+  "1_contentment_step-4000_seed-48000.jpg": true
+}
+OFFICIAL_OUTPUT_EQUIVALENCE_PASS
+/data/emoedit-baseline/benchmark/upstream/metrics/Metric_args.py:69: FutureWarning: Decorating classes is deprecated and will be disabled in future versions. You should only decorate functions or methods. To preserve the current behavior of class decoration, you can directly decorate the `__init__` method and nothing else.
+  @torch.no_grad()
+/data/emoedit-baseline/benchmark/upstream/metrics/Metric_args.py:110: FutureWarning: Decorating classes is deprecated and will be disabled in future versions. You should only decorate functions or methods. To preserve the current behavior of class decoration, you can directly decorate the `__init__` method and nothing else.
+  @torch.no_grad()
+/data/emoedit-baseline/.venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py:1601: FutureWarning: `clean_up_tokenization_spaces` was not set. It will be set to `True` by default. This behavior will be depracted in transformers v4.45, and will be then set to `False` by default. For more details check this issue: https://github.com/huggingface/transformers/issues/31884
+  warnings.warn(
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:207: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:222: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=AlexNet_Weights.IMAGENET1K_V1`. You can also use `weights=AlexNet_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+Loading model from: /data/emoedit-baseline/.venv/lib/python3.12/site-packages/lpips/weights/v0.1/alex.pth
+/data/emoedit-baseline/.venv/lib/python3.12/site-packages/skimage/metrics/simple_metrics.py:168: RuntimeWarning: divide by zero encountered in scalar divide
+  return 10 * np.log10((data_range**2) / err)
+OFFICIAL_METRIC_EQUIVALENCE_PASS
+/data/emoedit-baseline/.venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py:1601: FutureWarning: `clean_up_tokenization_spaces` was not set. It will be set to `True` by default. This behavior will be depracted in transformers v4.45, and will be then set to `False` by default. For more details check this issue: https://github.com/huggingface/transformers/issues/31884
+  warnings.warn(
+Setting up [LPIPS] perceptual loss: trunk [alex], v[0.1], spatial [off]
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:207: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/usr/local/lib/python3.12/dist-packages/torchvision/models/_utils.py:222: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=AlexNet_Weights.IMAGENET1K_V1`. You can also use `weights=AlexNet_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+Loading model from: /data/emoedit-baseline/.venv/lib/python3.12/site-packages/lpips/weights/v0.1/alex.pth
+METRICS_PROGRESS 8 8
+METRICS_COMPLETE {"PSNR": 19.75917813845476, "SSIM": 0.6922214862137479, "LPIPS": 0.1823772550560534, "CLIP-I": 0.9002966806292534, "Emo-A": 25.0, "Emo-S": 0.1935396580483939, "LPIPS_standard": 0.217760244384408, "PSNR_fixed255": 19.75917813845476}

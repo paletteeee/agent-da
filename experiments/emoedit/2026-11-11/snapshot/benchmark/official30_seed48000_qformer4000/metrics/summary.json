@@ -1,0 +1,214 @@
+{
+  "scope": "full_official_test_set",
+  "pairs": 3240,
+  "inputs": 405,
+  "overall": {
+    "PSNR": 16.165161888222727,
+    "SSIM": 0.5624237205966413,
+    "LPIPS": 0.30133544023056735,
+    "CLIP-I": 0.8238971738259734,
+    "Emo-A": 50.83333333333333,
+    "Emo-S": 0.3450692082208735,
+    "LPIPS_standard": 0.3701139239099934,
+    "PSNR_fixed255": 16.427055308209745
+  },
+  "per_emotion": {
+    "amusement": {
+      "PSNR": 15.407695401612116,
+      "SSIM": 0.5819162230056139,
+      "LPIPS": 0.33329444620528337,
+      "CLIP-I": 0.8210743989473508,
+      "Emo-A": 69.1358024691358,
+      "Emo-S": 0.49304001808373465,
+      "LPIPS_standard": 0.3926242474788501,
+      "PSNR_fixed255": 15.669588821599133
+    },
+    "awe": {
+      "PSNR": 20.41219977271755,
+      "SSIM": 0.6741622259723873,
+      "LPIPS": 0.17299533918224,
+      "CLIP-I": 0.9100854864826908,
+      "Emo-A": 51.60493827160494,
+      "Emo-S": 0.06923911223363384,
+      "LPIPS_standard": 0.22608219220498463,
+      "PSNR_fixed255": 20.674093192704568
+    },
+    "contentment": {
+      "PSNR": 18.515620140635008,
+      "SSIM": 0.6558075418162064,
+      "LPIPS": 0.20442641679151557,
+      "CLIP-I": 0.9013205744602062,
+      "Emo-A": 34.5679012345679,
+      "Emo-S": 0.04589461042706705,
+      "LPIPS_standard": 0.25553081583829573,
+      "PSNR_fixed255": 18.777513560622022
+    },
+    "excitement": {
+      "PSNR": 18.699381709542813,
+      "SSIM": 0.667156954367355,
+      "LPIPS": 0.20557541968645873,
+      "CLIP-I": 0.8350870806493876,
+      "Emo-A": 33.086419753086425,
+      "Emo-S": 0.27632976719537833,
+      "LPIPS_standard": 0.25591569621989757,
+      "PSNR_fixed255": 18.961275129529824
+    },
+    "anger": {
+      "PSNR": 10.727404883735032,
+      "SSIM": 0.377568923080208,
+      "LPIPS": 0.4483119464950797,
+      "CLIP-I": 0.7277846089851709,
+      "Emo-A": 76.04938271604938,
+      "Emo-S": 0.7083303174782576,
+      "LPIPS_standard": 0.5679953933038093,
+      "PSNR_fixed255": 10.98929830372205
+    },
+    "disgust": {
+      "PSNR": 14.47603044648191,
+      "SSIM": 0.4803102883375828,
+      "LPIPS": 0.40713677984880814,
+      "CLIP-I": 0.75943521320084,
+      "Emo-A": 51.358024691358025,
+      "Emo-S": 0.4634225384578993,
+      "LPIPS_standard": 0.4818372675758085,
+      "PSNR_fixed255": 14.737923866468929
+    },
+    "fear": {
+      "PSNR": 16.337545799977597,
+      "SSIM": 0.5829163452568137,
+      "LPIPS": 0.25832091831130743,
+      "CLIP-I": 0.8628997857188001,
+      "Emo-A": 35.30864197530864,
+      "Emo-S": 0.26508993942266607,
+      "LPIPS_standard": 0.3262548874557754,
+      "PSNR_fixed255": 16.599439219964616
+    },
+    "sadness": {
+      "PSNR": 14.745416951079804,
+      "SSIM": 0.4795512629369625,
+      "LPIPS": 0.38062225532384564,
+      "CLIP-I": 0.7734902421633403,
+      "Emo-A": 55.55555555555556,
+      "Emo-S": 0.439207362468351,
+      "LPIPS_standard": 0.45467089120252635,
+      "PSNR_fixed255": 15.007310371066822
+    }
+  },
+  "count_per_emotion": {
+    "amusement": 405,
+    "awe": 405,
+    "contentment": 405,
+    "excitement": 405,
+    "anger": 405,
+    "disgust": 405,
+    "fear": 405,
+    "sadness": 405
+  },
+  "confusion_target_rows_prediction_columns": [
+    [
+      280,
+      56,
+      40,
+      12,
+      1,
+      2,
+      7,
+      7
+    ],
+    [
+      33,
+      209,
+      101,
+      12,
+      5,
+      5,
+      14,
+      26
+    ],
+    [
+      73,
+      145,
+      140,
+      8,
+      3,
+      3,
+      8,
+      25
+    ],
+    [
+      61,
+      116,
+      64,
+      134,
+      2,
+      1,
+      16,
+      11
+    ],
+    [
+      20,
+      28,
+      15,
+      3,
+      308,
+      0,
+      21,
+      10
+    ],
+    [
+      33,
+      38,
+      36,
+      1,
+      1,
+      208,
+      32,
+      56
+    ],
+    [
+      25,
+      99,
+      77,
+      6,
+      4,
+      5,
+      143,
+      46
+    ],
+    [
+      28,
+      41,
+      57,
+      3,
+      5,
+      8,
+      38,
+      225
+    ]
+  ],
+  "class_order": [
+    "amusement",
+    "awe",
+    "contentment",
+    "excitement",
+    "anger",
+    "disgust",
+    "fear",
+    "sadness"
+  ],
+  "elapsed_seconds": 282.8162956563756,
+  "paper_table1_reference": {
+    "PSNR": 16.62,
+    "SSIM": 0.571,
+    "LPIPS": 0.289,
+    "CLIP-I": 0.828,
+    "Emo-A": 50.09,
+    "Emo-S": 0.335
+  },
+  "notes": [
+    "Emo-A is percentage; Emo-S is probability increment.",
+    "LPIPS follows published repository [0,1] input convention; LPIPS_standard uses recommended [-1,1].",
+    "Evaluation uses released Q-Former_4000 checkpoint; original paper training checkpoint identity is not established.",
+    "Original paper table numbers are reference values, not measurements from this run."
+  ]
+}

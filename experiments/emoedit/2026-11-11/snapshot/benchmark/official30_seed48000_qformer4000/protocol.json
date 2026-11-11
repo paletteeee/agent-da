@@ -1,0 +1,26 @@
+{
+  "source_commit": "88f622cdb5c7afdc8954eef899064296fe4a4273",
+  "adapter_sha256": "24b91803c39691c4bd60a88c1df86f857a1e520645fdb9b039da4e7bde5436bc",
+  "seed": 48000,
+  "steps": 30,
+  "guidance_scale": 7.5,
+  "image_guidance_scale": 1.5,
+  "batch_size": 1,
+  "manifest_sha256": "f2ee2ed16d2b8ea8abd59d54be831da0098cb0cbb293ef73d20fe9aba598a77c",
+  "dtype": "float16 base pipeline / float32 adapter and CLIP",
+  "generation_preprocess": "official shorter side 512 Lanczos; preserve aspect ratio",
+  "output_format": "JPEG Pillow default",
+  "torch": "2.13.0+cu130",
+  "transformers": "4.44.2",
+  "diffusers": "0.30.3",
+  "models": {
+    "instruct-pix2pix": {
+      "id": "timbrooks/instruct-pix2pix",
+      "revision": "31519b5cb02a7fd89b906d88731cd4d6a7bbf88d"
+    },
+    "clip-vit-large-patch14": {
+      "id": "openai/clip-vit-large-patch14",
+      "revision": "32bd64288804d66eefd0ccbe215aa642df71cc41"
+    }
+  }
+}

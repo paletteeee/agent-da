@@ -1,0 +1,6 @@
+CLIP 3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]Fetching 8 files:  50%|█████     | 4/8 [00:03<00:03,  1.07it/s]Fetching 8 files:  88%|████████▊ | 7/8 [00:20<00:02,  2.86s/it]Fetching 8 files: 100%|██████████| 8/8 [00:54<00:00,  6.80s/it]Fetching 8 files: 100%|██████████| 8/8 [00:54<00:00,  6.80s/it]
+CLIP_COMPLETE
+ALEXNET https://download.pytorch.org/models/alexnet-owt-7be5be79.pth
+Downloading: "https://download.pytorch.org/models/alexnet-owt-7be5be79.pth" to /data/emoedit-baseline/models/torch/hub/checkpoints/alexnet-owt-7be5be79.pth
+ALL_METRIC_MODELS_COMPLETE

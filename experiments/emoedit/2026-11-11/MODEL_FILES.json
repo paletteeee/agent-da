@@ -1,0 +1,172 @@
+[
+  {
+    "path": "models/Q-Former_4000.pth",
+    "bytes": 397305617,
+    "sha256": "24b91803c39691c4bd60a88c1df86f857a1e520645fdb9b039da4e7bde5436bc"
+  },
+  {
+    "path": "models/clip-vit-base-patch32/config.json",
+    "bytes": 4186,
+    "sha256": "b575ef3c36f2a057fa19e221650105052d61cc9c1a972ec15019c6261ec98770"
+  },
+  {
+    "path": "models/clip-vit-base-patch32/merges.txt",
+    "bytes": 524657,
+    "sha256": "f526393189112391ce6f9795d4695f704121ce452c3aad1f5335cc41337eba85"
+  },
+  {
+    "path": "models/clip-vit-base-patch32/preprocessor_config.json",
+    "bytes": 316,
+    "sha256": "910e70b3956ac9879ebc90b22fb3bc8a75b6a0677814500101a4c072bd7857bd"
+  },
+  {
+    "path": "models/clip-vit-base-patch32/pytorch_model.bin",
+    "bytes": 605247071,
+    "sha256": "a63082132ba4f97a80bea76823f544493bffa8082296d62d71581a4feff1576f"
+  },
+  {
+    "path": "models/clip-vit-base-patch32/special_tokens_map.json",
+    "bytes": 389,
+    "sha256": "f8c0d6c39aee3f8431078ef6646567b0aba7f2246e9c54b8b99d55c22b707cbf"
+  },
+  {
+    "path": "models/clip-vit-base-patch32/tokenizer.json",
+    "bytes": 2224041,
+    "sha256": "b556ac8c99757ffb677208af34bc8c6721572114111a6e0aaf5fa69ff0b8d842"
+  },
+  {
+    "path": "models/clip-vit-base-patch32/tokenizer_config.json",
+    "bytes": 592,
+    "sha256": "34b7336e4bee12e0a9730eaf5189f582ef3c3eea5027f65730e5717256755aad"
+  },
+  {
+    "path": "models/clip-vit-base-patch32/vocab.json",
+    "bytes": 862328,
+    "sha256": "5047b556ce86ccaf6aa22b3ffccfc52d391ea4accdab9c2f2407da5b742d4363"
+  },
+  {
+    "path": "models/clip-vit-base-patch32_metadata.json",
+    "bytes": 4928,
+    "sha256": "2d7d17c440dc042af2e59f27c55d430f75c981ac02caf6a6b5fea8f76551e277"
+  },
+  {
+    "path": "models/clip-vit-large-patch14/config.json",
+    "bytes": 4519,
+    "sha256": "8a09b467700c58138c29d53c605b34ebc69beaadd13274a8a2af8ad2c2f4032a"
+  },
+  {
+    "path": "models/clip-vit-large-patch14/merges.txt",
+    "bytes": 524619,
+    "sha256": "9fd691f7c8039210e0fced15865466c65820d09b63988b0174bfe25de299051a"
+  },
+  {
+    "path": "models/clip-vit-large-patch14/model.safetensors",
+    "bytes": 1710540580,
+    "sha256": "a2bf730a0c7debf160f7a6b50b3aaf3703e7e88ac73de7a314903141db026dcb"
+  },
+  {
+    "path": "models/clip-vit-large-patch14/preprocessor_config.json",
+    "bytes": 316,
+    "sha256": "910e70b3956ac9879ebc90b22fb3bc8a75b6a0677814500101a4c072bd7857bd"
+  },
+  {
+    "path": "models/clip-vit-large-patch14/special_tokens_map.json",
+    "bytes": 389,
+    "sha256": "f8c0d6c39aee3f8431078ef6646567b0aba7f2246e9c54b8b99d55c22b707cbf"
+  },
+  {
+    "path": "models/clip-vit-large-patch14/tokenizer.json",
+    "bytes": 2224003,
+    "sha256": "a83e0809aa4c3af7208b2df632a7a69668c6d48775b3c3fe4e1b1199d1f8b8f4"
+  },
+  {
+    "path": "models/clip-vit-large-patch14/tokenizer_config.json",
+    "bytes": 905,
+    "sha256": "deef455e52fa5e8151e339add0582e4235f066009601360999d3a9cda83b1129"
+  },
+  {
+    "path": "models/clip-vit-large-patch14/vocab.json",
+    "bytes": 961143,
+    "sha256": "3f0c4f7d2086b61b38487075278ea9ed04edb53a03cbb045b86c27190fa8fb69"
+  },
+  {
+    "path": "models/clip-vit-large-patch14_metadata.json",
+    "bytes": 4851,
+    "sha256": "c5404f79ae485158270ddad749951b52f6a7b10810a683f66043f3cc92ffce8e"
+  },
+  {
+    "path": "models/instruct-pix2pix/feature_extractor/preprocessor_config.json",
+    "bytes": 518,
+    "sha256": "4db495644e3e5bd8fcac52f70e7fc0b413c911086021acf73ac30e5911166e95"
+  },
+  {
+    "path": "models/instruct-pix2pix/model_index.json",
+    "bytes": 616,
+    "sha256": "4ccaf9b31f00937caf1c61578c497b53d63131a830fc08f812b2b55d86c9855e"
+  },
+  {
+    "path": "models/instruct-pix2pix/scheduler/scheduler_config.json",
+    "bytes": 569,
+    "sha256": "81fe3f35ef35556fed140f94a61fbefcb3982cbd771686014c9be00435c3bbcc"
+  },
+  {
+    "path": "models/instruct-pix2pix/text_encoder/config.json",
+    "bytes": 617,
+    "sha256": "c90121fab17b226c98ae813c1778add7edbdcbdcf7ceaff7aa197fdf8c8a6b3a"
+  },
+  {
+    "path": "models/instruct-pix2pix/text_encoder/model.fp16.safetensors",
+    "bytes": 246144864,
+    "sha256": "77795e2023adcf39bc29a884661950380bd093cf0750a966d473d1718dc9ef4e"
+  },
+  {
+    "path": "models/instruct-pix2pix/tokenizer/merges.txt",
+    "bytes": 524619,
+    "sha256": "9fd691f7c8039210e0fced15865466c65820d09b63988b0174bfe25de299051a"
+  },
+  {
+    "path": "models/instruct-pix2pix/tokenizer/special_tokens_map.json",
+    "bytes": 472,
+    "sha256": "c4864a9376a8401918425bed71fc14fc0e81f9b59ec45c1cf96cccb2df508eac"
+  },
+  {
+    "path": "models/instruct-pix2pix/tokenizer/tokenizer_config.json",
+    "bytes": 806,
+    "sha256": "00439066fcba73de57644cf41e4e3b9f2dbb09d7f3fc2005898ba52399045882"
+  },
+  {
+    "path": "models/instruct-pix2pix/tokenizer/vocab.json",
+    "bytes": 1059962,
+    "sha256": "e089ad92ba36837a0d31433e555c8f45fe601ab5c221d4f607ded32d9f7a4349"
+  },
+  {
+    "path": "models/instruct-pix2pix/unet/config.json",
+    "bytes": 1021,
+    "sha256": "f6c4ea486da4d813c389de1fc405fcb64139ca18f0729733dc177dad17854347"
+  },
+  {
+    "path": "models/instruct-pix2pix/unet/diffusion_pytorch_model.fp16.safetensors",
+    "bytes": 1719148344,
+    "sha256": "0d6bbc0a95dd125196d327a660b43d24c56f433eb30d2776f1327fb86bd38f78"
+  },
+  {
+    "path": "models/instruct-pix2pix/vae/config.json",
+    "bytes": 553,
+    "sha256": "46621c584ebe6666853057a58a4a60047f18f8b83a16cf4603e8359a91e485f6"
+  },
+  {
+    "path": "models/instruct-pix2pix/vae/diffusion_pytorch_model.fp16.safetensors",
+    "bytes": 167335342,
+    "sha256": "4fbcf0ebe55a0984f5a5e00d8c4521d52359af7229bb4d81890039d2aa16dd7c"
+  },
+  {
+    "path": "models/instruct-pix2pix_metadata.json",
+    "bytes": 5138,
+    "sha256": "bc6964c1ac883f1330e5a5c43d892b02e279963e9c094ae3ad21518f3f74a1f8"
+  },
+  {
+    "path": "models/torch/hub/checkpoints/alexnet-owt-7be5be79.pth",
+    "bytes": 244408911,
+    "sha256": "7be5be791159472b1fbf3c69796f7cb30dca7ad8466c2df70058c37116cdee02"
+  }
+]
